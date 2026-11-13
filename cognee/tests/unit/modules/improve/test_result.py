@@ -8,7 +8,6 @@ from pydantic import ValidationError
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.modules.improve import (
     REASON_BUDGET_EXHAUSTED,
-    REASON_LOCK_HELD,
     ImproveResult,
     StageResult,
 )
@@ -140,34 +139,19 @@ def test_improve_result_status_summary():
     running = ImproveResult(background=True, finished=False)
     assert running.status == "running"
 
-    all_skipped = ImproveResult.all_skipped(["a", "b"], REASON_LOCK_HELD, session_ids=["s"])
-    assert all_skipped.status == "skipped"
-    assert all(stage.reason == REASON_LOCK_HELD for stage in all_skipped.stages)
-    assert all_skipped.session_ids == ["s"]
-    assert all_skipped.memify_run == {}
-
-
-def test_lock_held_decodes_only_the_lost_claim_shape():
-    """The one decoder of the all-skipped-with-lock_held shape; the remember()
-    bridge reads this instead of re-deriving the pattern."""
-    assert ImproveResult.all_skipped(["a", "b"], REASON_LOCK_HELD).lock_held is True
-
-    assert ImproveResult().lock_held is False  # no stages: nothing was claimed
-    assert ImproveResult.all_skipped(["a"], "no_session_ids").lock_held is False
-    mixed = ImproveResult(
-        stages=[StageResult.skipped("a", REASON_LOCK_HELD), StageResult.completed("b")]
+    all_skipped = ImproveResult(
+        stages=[StageResult.skipped("a", "x"), StageResult.skipped("b", "y")]
     )
-    assert mixed.lock_held is False  # something ran, so the lock was won
-    running = ImproveResult(background=True, finished=False)
-    assert running.lock_held is False
+    assert all_skipped.status == "skipped"
+    with pytest.warns(FutureWarning, match="memify_run is deprecated"):
+        assert all_skipped.memify_run == {}
 
 
 def test_model_dump_includes_status_and_serializes_run_info():
     info = _info(PipelineRunCompleted)
     result = ImproveResult(
         dataset_id=uuid4(),
-        stages=[StageResult.from_pipeline_run("triplet_enrichment", {info.dataset_id: info})],
-        memify_run={},
+        stages=[StageResult.from_pipeline_run("review_conflicts", {info.dataset_id: info})],
     )
     dumped = result.model_dump(mode="json")
     assert dumped["status"] == "completed"
@@ -179,3 +163,15 @@ def test_model_dump_includes_status_and_serializes_run_info():
 async def test_wait_is_a_noop_for_foreground_results():
     result = ImproveResult()
     assert await result.wait() is result
+
+
+def test_legacy_remote_payload_is_kept_on_the_deprecated_memify_run():
+    """An older server returns its memify run mapping, not stages; it is not dropped."""
+    legacy = {"dataset-id": {"status": "PipelineRunCompleted"}}
+
+    result = ImproveResult.from_remote_payload(legacy, ["s1"])
+
+    assert result.stages == []
+    assert result.session_ids == ["s1"]
+    with pytest.warns(FutureWarning, match="read ImproveResult.stages"):
+        assert result.memify_run == legacy

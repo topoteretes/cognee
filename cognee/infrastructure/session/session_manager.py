@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Any
 
 from cognee.context_global_variables import current_dataset_id, session_user
@@ -31,7 +32,10 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.session_lifecycle.metrics import record_session_activity
+from cognee.modules.session_lifecycle.metrics import (
+    DEFAULT_SESSION_ID,
+    record_session_activity,
+)
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 
@@ -74,7 +78,7 @@ class SessionManager:
         # TODO: this type should be 'CacheDBInterface', but the current code doesn't use this
         # interface and instead calls functions specific to its implementations.
         cache_engine: Any,
-        default_session_id: str = "default_session",
+        default_session_id: str = DEFAULT_SESSION_ID,
         session_history_last_n: int = 10,
         dataset_id: uuid.UUID | None = None,
     ) -> None:
@@ -82,7 +86,7 @@ class SessionManager:
         Initialize SessionManager with a cache engine.
 
         Args:
-            cache_engine: CacheDBInterface implementation (RedisAdapter or FsCacheAdapter).
+            cache_engine: CacheDBInterface implementation (RedisAdapter or SqlCacheAdapter).
                          Can be None if caching is disabled.
             default_session_id: Session ID to use when session_id is None. Defaults to
                                "default_session".
@@ -505,6 +509,8 @@ class SessionManager:
         formatted: bool = False,
         session_id: str | None = None,
         include_context: bool = True,
+        since: datetime | None = None,
+        lead_in: int = 0,
     ) -> list[SessionQAEntry] | str:
         """
         Get session QAs by (user_id, session_id).
@@ -512,6 +518,9 @@ class SessionManager:
         Args:
             user_id: User identifier.
             last_n: If set, return only the last N entries. Otherwise return all.
+            since: If set, return only the entries stored at or after this time,
+                plus the ``lead_in`` entries just before it. Exclusive with last_n.
+            lead_in: Entries before ``since`` to include. Only with ``since``.
             formatted: If True, return prompt-formatted string; if False, return list of entry dicts.
             session_id: Session identifier. Defaults to default_session_id if None.
             include_context: When formatted=True, include CONTEXT in each entry. Default True.
@@ -523,6 +532,10 @@ class SessionManager:
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
+        if since is not None and last_n is not None:
+            raise SessionParameterValidationError(message="since and last_n are exclusive")
+        if lead_in and since is None:
+            raise SessionParameterValidationError(message="lead_in needs since")
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty session")
             return "" if formatted else []
@@ -533,6 +546,10 @@ class SessionManager:
             if last_n is not None:
                 entries = await self._cache.get_latest_qa_entries(
                     user_id, session_id, last_n=last_n
+                )
+            elif since is not None:
+                entries = await self._cache.get_qa_entries_since(
+                    user_id, session_id, since, lead_in=lead_in
                 )
             else:
                 entries = await self._cache.get_all_qa_entries(user_id, session_id)
@@ -814,13 +831,17 @@ class SessionManager:
         *,
         user_id: str,
         session_id: str | None = None,
+        raise_on_error: bool = False,
     ) -> list[dict]:
         """
         Return all stored session-context entries (both "context" and "feedback" kinds).
 
         Raises SessionParameterValidationError for invalid user_id/session_id.
         Fail-open on infrastructure errors: returns [] when the cache is
-        unavailable or the cache operation fails.
+        unavailable or the cache operation fails. ``raise_on_error=True`` keeps
+        the empty answer for an unavailable cache (nothing can be stored there)
+        but re-raises a failed read, for callers that must not mistake an
+        unreadable session for an empty one (the pinned ``node_set``).
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
@@ -833,6 +854,8 @@ class SessionManager:
             logger.warning(
                 "SessionManager: get_session_context_entries failed: %s", e, exc_info=True
             )
+            if raise_on_error:
+                raise
             return []
 
     async def update_session_context_entry(
@@ -923,44 +946,64 @@ class SessionManager:
         Returns True if deleted, False if session did not exist or cache unavailable.
         """
         session_id = self.resolve_session_id(session_id)
-        self._validate_session_params(user_id=user_id, session_id=session_id)
-        if not self.is_available:
-            logger.debug("SessionManager: cache unavailable, skipping delete_session")
-            return False
+        return (await self.delete_sessions([(user_id, session_id)]))[0]
 
-        # One-release cleanup for graph snapshots written by the removed
-        # graph-to-session sync feature.
-        graph_key = f"graph_knowledge:{user_id}:{session_id}"
+    async def delete_sessions(self, sessions: list[tuple[str, str]]) -> list[bool]:
+        """
+        Delete each (user id, session id) pair whole: cache content and Q&A vectors.
+
+        Returns one flag per pair, True if the session existed in the cache;
+        all False when the cache is unavailable. The Q&A vectors of every pair
+        go in one tag-removal call against the current vector store.
+        """
+        for user_id, session_id in sessions:
+            self._validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping delete_sessions")
+            return [False] * len(sessions)
+
+        existed = await self._cache.delete_sessions(sessions)
+        await self._delete_legacy_graph_snapshots(sessions)
+        # Unconditionally: cache entries expire (session TTL) while their Q&A
+        # vectors, which hold the question and answer text, do not.
+        await delete_session_qa_vectors(sessions)
+        return existed
+
+    async def _delete_legacy_graph_snapshots(self, sessions: list[tuple[str, str]]) -> None:
+        """One-release cleanup for graph snapshots written by the removed
+        graph-to-session sync feature; failures are ignored."""
+        keys = [f"graph_knowledge:{user_id}:{session_id}" for user_id, session_id in sessions]
         try:
-            await self._cache.delete_value(graph_key)
+            await self._cache.delete_values(keys)
         except (NotImplementedError, AttributeError, TypeError):
             # Adapter predates the KV interface (missing, non-async, or
             # different-signature delete_value), fall back to legacy duck-typing
-            try:
-                await self._cache.async_redis.delete(graph_key)
-            except AttributeError:
+            for key in keys:
                 try:
-                    del self._cache._cache[graph_key]
+                    await self._cache.async_redis.delete(key)
+                except AttributeError:
+                    try:
+                        del self._cache._cache[key]
+                    except Exception:
+                        logger.debug(
+                            "Ignoring exception in SessionManager.delete_sessions", exc_info=True
+                        )
                 except Exception:
                     logger.debug(
-                        "Ignoring exception in SessionManager.delete_session", exc_info=True
+                        "Ignoring exception in SessionManager.delete_sessions", exc_info=True
                     )
-            except Exception:
-                logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
         except Exception:
-            logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
+            logger.debug("Ignoring exception in SessionManager.delete_sessions", exc_info=True)
 
-        # Also clear the active session-context list (fail-open; adapter.delete_session may also
-        # clear it, but this guarantees no leak if the adapter does not).
-        try:
-            await self._cache.delete_session_context(user_id, session_id)
-        except Exception:
-            logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
+    async def list_session_ids(self, *, user_id: str) -> list[str]:
+        """
+        Every session id the user has content for in the cache.
 
-        deleted = await self._cache.delete_session(
-            user_id=user_id,
-            session_id=session_id,
-        )
-        if deleted:
-            await delete_session_qa_vectors(user_id=user_id, session_id=session_id)
-        return deleted
+        Reads the cache itself, not the ``session_records`` dashboard rows,
+        which are written best-effort. Raises on cache errors: a caller that
+        deletes what this lists must not read a failure as "no sessions".
+        """
+        self._validate_session_params(user_id=user_id)
+        if not self.is_available:
+            return []
+        return await self._cache.list_session_ids(user_id)

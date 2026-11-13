@@ -1,33 +1,56 @@
 import asyncio
+import hashlib
 import re
+import threading
 from typing import Any, get_type_hints
 from uuid import UUID
 
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
-from sqlalchemy import JSON, Column, MetaData, Table, delete, exc, func, select, text
+from pydantic import BaseModel
+from sqlalchemy import (
+    JSON,
+    Column,
+    MetaData,
+    Table,
+    TextClause,
+    cast,
+    delete,
+    exc,
+    func,
+    select,
+    text,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import DBAPIError, ProgrammingError
+from sqlalchemy.exc import DBAPIError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.infrastructure.databases.postgres.deadlock import is_deadlock
 from cognee.infrastructure.databases.relational import get_relational_config, get_relational_engine
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.shared.logging_utils import get_logger
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..embeddings.EmbeddingGateway import EmbeddingGateway
 from ..exceptions import CollectionNotFoundError, SharedDatabasePruneError
 from ..models.ScoredResult import ScoredResult
 from ..stored_vector_size import choose_stored_vector_size
-from ..vector_db_interface import VectorDBInterface
+from ..vector_db_interface import VectorDBInterface, validate_raw_vector_points
 from .serialize_data import serialize_data
 
 logger = get_logger("PGVectorAdapter")
@@ -38,6 +61,138 @@ QUERY_BATCH_SIZE = 1000
 # retained while idle); the large max_overflow keeps burst headroom, since overflow
 # connections close on release instead of idling.
 _ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 20}
+
+# pgvector builds HNSW indexes on vector up to 2,000 dimensions and on halfvec up to
+# 4,000; a larger embedding stays unindexed and is searched by a full scan.
+_HNSW_VECTOR_MAX_DIMENSIONS = 2000
+_HNSW_HALFVEC_MAX_DIMENSIONS = 4000
+# HNSW arrived in pgvector 0.5.0 and the halfvec type in 0.7.0. On an older server a
+# collection is left unindexed and searched by the exact scan, as before.
+_HNSW_MIN_PGVECTOR = (0, 5, 0)
+_HALFVEC_MIN_PGVECTOR = (0, 7, 0)
+# An HNSW scan returns at most hnsw.ef_search rows (default 40); pgvector caps the
+# setting at 1,000, so a larger limit keeps the exact full scan.
+_HNSW_DEFAULT_EF_SEARCH = 40
+_HNSW_MAX_EF_SEARCH = 1000
+# Postgres truncates identifiers to NAMEDATALEN - 1 bytes, with only a NOTICE.
+_PG_MAX_IDENTIFIER_BYTES = 63
+
+
+def _row_order(row_id: Any) -> str:
+    """The order rows are written in, so concurrent upserts never deadlock.
+
+    A multi-row ``INSERT ... ON CONFLICT DO UPDATE`` locks each conflicting row as it
+    reaches it, in ``VALUES`` order. Two statements that touch the same ids in
+    different orders can each hold a row the other waits for, and Postgres then
+    aborts one with a deadlock. Written in one global order (the uuid's canonical
+    text, which is also its btree order) every statement waits only for rows after
+    the ones it holds, so no cycle can form, and the per-collection lock that used to
+    serialize every insert of a collection is not needed: inserts into one
+    collection run concurrently, and pgvector's HNSW index takes them concurrently.
+    """
+    return str(row_id)
+
+
+PgvectorVersion = tuple[int, ...]
+
+# Collection tables in the engine's current schema (the dataset's own schema in
+# shared-database mode): a ``vector`` column of pgvector's ``vector`` type, whose
+# ``atttypmod`` is its declared dimension count (-1 when undeclared).
+_VECTOR_COLLECTIONS_SQL = """
+SELECT c.relname, a.atttypmod
+FROM pg_attribute a
+JOIN pg_class c ON c.oid = a.attrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_type t ON t.oid = a.atttypid
+WHERE n.nspname = current_schema()
+  AND c.relkind = 'r'
+  AND a.attname = 'vector'
+  AND t.typname = 'vector'
+  AND NOT a.attisdropped
+"""
+# An HNSW build is much slower once its graph outgrows maintenance_work_mem (12k
+# 3072-dimensional rows on a 1 CU Neon compute: 22.6 s at its 67 MB default, 12.4 s at
+# 256 MB). Raised for the build's own transaction only, and never lowered.
+_BUILD_MAINTENANCE_WORK_MEM_KB = 256 * 1024
+_RAISE_MAINTENANCE_WORK_MEM_SQL = """
+SELECT set_config('maintenance_work_mem', :target, true)
+FROM pg_settings
+WHERE name = 'maintenance_work_mem' AND setting::bigint < :target_kb
+"""
+# A parallel build keeps the graph in a dynamic shared memory segment of
+# maintenance_work_mem bytes, which Postgres backs with /dev/shm. Docker caps /dev/shm at
+# 64 MB by default (the shipped docker-compose.yml included), so at the raised setting a
+# parallel build fails with "could not resize shared memory segment ... No space left on
+# device" and the collection stays unindexed, searched by a full scan. A serial build
+# keeps the graph in the backend's own memory and needs no segment; it was not slower at
+# the sizes cognee collections reach (24k 3072-dimensional rows: 15.9 s serial, 17.4 s
+# with the default two workers). Set for the build's own transaction only.
+_SERIAL_BUILD_SQL = "SET LOCAL max_parallel_maintenance_workers = 0"
+
+
+def parse_pgvector_version(version: str | None) -> PgvectorVersion | None:
+    """``pg_extension.extversion`` ("0.8.0") as a comparable tuple, or None if unknown."""
+    if not version:
+        return None
+    parts = re.findall(r"\d+", version)
+    return tuple(int(part) for part in parts[:3]) if parts else None
+
+
+def hnsw_index_name(table_name: str) -> str:
+    """Index name for a collection, unique per schema even for long collection names.
+
+    A name past 63 bytes would be truncated by Postgres, and two collections sharing their
+    first bytes would get the same index name, so the second one would be silently skipped
+    by ``IF NOT EXISTS``. Long names get a hash of the full table name instead.
+    """
+    name = f"{table_name}_vector_hnsw"
+    if len(name.encode()) <= _PG_MAX_IDENTIFIER_BYTES:
+        return name
+    digest = hashlib.sha1(table_name.encode()).hexdigest()[:12]
+    prefix = table_name.encode()[:40].decode(errors="ignore")
+    return f"{prefix}_{digest}_hnsw"
+
+
+def _indexed_type(dimensions: int, pgvector_version: PgvectorVersion | None) -> str | None:
+    """``vector`` or ``halfvec`` when pgvector can index ``dimensions``, else None."""
+    if pgvector_version is None or pgvector_version < _HNSW_MIN_PGVECTOR or dimensions <= 0:
+        return None
+    if dimensions <= _HNSW_VECTOR_MAX_DIMENSIONS:
+        return "vector"
+    if dimensions <= _HNSW_HALFVEC_MAX_DIMENSIONS and pgvector_version >= _HALFVEC_MIN_PGVECTOR:
+        return "halfvec"
+    return None
+
+
+def hnsw_index_statement(
+    table_name: str, dimensions: int, pgvector_version: PgvectorVersion | None
+) -> str | None:
+    """CREATE INDEX for a collection's vector column, or None when pgvector cannot index it.
+
+    Without an index every search is a full scan that reads every stored vector; a
+    3072-dimensional collection of 12k rows is ~160 MB of TOAST pages per query, which
+    took 20 s on a Neon compute whose cache was empty.
+    """
+    indexed_type = _indexed_type(dimensions, pgvector_version)
+    if indexed_type == "vector":
+        indexed, operator_class = "vector", "vector_cosine_ops"
+    elif indexed_type == "halfvec":
+        indexed, operator_class = f"(vector::halfvec({dimensions}))", "halfvec_cosine_ops"
+    else:
+        return None
+    return (
+        f'CREATE INDEX IF NOT EXISTS "{hnsw_index_name(table_name)}" '
+        f'ON "{table_name}" USING hnsw ({indexed} {operator_class})'
+    )
+
+
+def _indexed_distance(vector_column, query_vector: list[float], indexed_type: str, dimensions: int):
+    """The distance expression the HNSW index orders by (see ``hnsw_index_statement``)."""
+    if indexed_type == "vector":
+        return vector_column.cosine_distance(query_vector)
+    from pgvector.sqlalchemy import HALFVEC
+
+    return cast(vector_column, HALFVEC(dimensions)).cosine_distance(query_vector)
 
 
 class IndexSchema(DataPoint):
@@ -76,7 +231,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self,
         connection_string: str,
         api_key: str | None,
-        embedding_engine: EmbeddingEngine,
+        embedding_engine: EmbeddingGateway,
         schema: str = "",
     ):
         """Initialize the adapter and, when possible, reuse the relational engine.
@@ -95,8 +250,17 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Postgres schema this adapter is pinned to ("" = default/public search path).
         # Read by schema-scoped overrides of get_table_names()/delete_database().
         self.schema: str = schema or ""
-        self.VECTOR_DB_LOCK = asyncio.Lock()
-        self._write_locks: dict[str, asyncio.Lock] = {}
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self.VECTOR_DB_LOCK = LoopAgnosticLock()
+        # pgvector's extversion, read on first use (see _pgvector_version).
+        self._pgvector_version_cache: PgvectorVersion | None = None
+        # Per-collection locks for the delete paths. Inserts do not take them: their
+        # rows are written in ``_row_order``, which rules out deadlocks between them.
+        self._write_locks: dict[str, LoopAgnosticLock] = {}
+        # Guards the check-then-insert in ``_get_write_lock``: callers on
+        # different threads/loops must get the same lock for a collection.
+        self._write_locks_guard = threading.Lock()
         self._metadata = MetaData()
         # True when this adapter created its own engine and must dispose it on close().
         # False when the engine is borrowed from the relational adapter.
@@ -238,10 +402,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if self._owns_engine:
             await self.engine.dispose(close=True)
 
-    def _get_write_lock(self, collection_name: str) -> asyncio.Lock:
-        if collection_name not in self._write_locks:
-            self._write_locks[collection_name] = asyncio.Lock()
-        return self._write_locks[collection_name]
+    def _get_write_lock(self, collection_name: str) -> LoopAgnosticLock:
+        with self._write_locks_guard:
+            lock = self._write_locks.get(collection_name)
+            if lock is None:
+                lock = LoopAgnosticLock()
+                self._write_locks[collection_name] = lock
+            return lock
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         """
@@ -291,6 +458,38 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 widths.append(int(match.group(1)))
         return choose_stored_vector_size(widths, self.name)
 
+    async def _pgvector_version(self, executor=None) -> PgvectorVersion | None:
+        """The installed pgvector version, which decides whether collections get an index.
+
+        Cached once known. None (the extension is not installed yet) is not cached, so
+        the first collection created after ``CREATE EXTENSION`` still sees the version.
+        """
+        if self._pgvector_version_cache is not None:
+            return self._pgvector_version_cache
+        statement = text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+        if executor is not None:  # an open connection or session: no extra checkout
+            raw = (await executor.execute(statement)).scalar_one_or_none()
+        else:
+            async with self.engine.connect() as own_connection:
+                raw = (await own_connection.execute(statement)).scalar_one_or_none()
+        self._pgvector_version_cache = parse_pgvector_version(raw)
+        return self._pgvector_version_cache
+
+    async def existing_collections(self, collection_names: list[str]) -> list[str]:
+        """Return the given collections that exist, read in one round trip.
+
+        A missing table is never cached by ``get_table``, so a search over many
+        collection names would otherwise reflect each missing one on its own
+        connection, every search. The list holds the tables visible on the
+        connection's ``search_path``, the same resolution ``get_table`` and the
+        unqualified search statements use.
+        """
+        async with self.engine.connect() as connection:
+            table_names = set(
+                await connection.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
+            )
+        return [name for name in collection_names if name in table_names]
+
     async def has_collection(self, collection_name: str) -> bool:
         """
         Check if a specified collection exists in the database.
@@ -315,6 +514,18 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             return False
 
         return collection_name in self._metadata.tables
+
+    async def delete_collection(self, collection_name: str) -> None:
+        """Drop the table for ``collection_name``; a missing table is not an error.
+
+        Resolved through the connection's ``search_path`` like every other
+        statement here, so a schema-pinned adapter drops its own schema's table.
+        """
+        async with self.engine.begin() as connection:
+            await connection.execute(text(f'DROP TABLE IF EXISTS "{collection_name}" CASCADE'))
+        table = self._metadata.tables.get(collection_name)
+        if table is not None:
+            self._metadata.remove(table)
 
     @retry(
         retry=retry_if_exception_type(
@@ -361,20 +572,91 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                             self.vector = vector
 
                     async with self.engine.begin() as connection:
+                        # The dataset handlers install the extension in the databases
+                        # they create; the deployment's default database (dataset
+                        # routing) has no handler, so the collection installs it.
+                        # A no-op where it is installed.
+                        await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
                         if len(Base.metadata.tables.keys()) > 0:
                             await connection.run_sync(
                                 Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
                             )
+                        # Same transaction as the table: if the index fails, the table
+                        # rolls back with it and the retry starts over, instead of the
+                        # retry finding the table and leaving it unindexed.
+                        index_statement = hnsw_index_statement(
+                            collection_name,
+                            vector_size,
+                            await self._pgvector_version(connection),
+                        )
+                        if index_statement is not None:
+                            await connection.execute(text(index_statement))
                     # Reflect AFTER the DDL transaction commits so
                     # _metadata is never populated for a table that
                     # might be rolled back.
                     async with self.engine.begin() as connection:
                         await connection.run_sync(self._metadata.reflect, only=[collection_name])
 
+    @staticmethod
+    def _merged_belongs_to_set_payload(collection_name: str):
+        """The ``ON CONFLICT`` payload column value (see ``_merged_payload_sql``)."""
+        return text(f"({PGVectorAdapter._merged_payload_sql(collection_name)})::json")
+
+    @staticmethod
+    def _merged_payload_sql(collection_name: str) -> str:
+        """The ``ON CONFLICT`` payload as jsonb SQL: the incoming one with ``belongs_to_set``
+        unioned with the stored row's, so an upsert never drops a tag the row already carries.
+
+        A side whose ``belongs_to_set`` is absent or JSON ``null`` (a DataPoint's default)
+        counts as empty: ``COALESCE`` alone leaves a JSON ``null`` in place, and
+        ``'null' || '["a"]'`` is ``[null, "a"]``.
+        """
+        quoted_table = f'"{collection_name}"'
+        stored_tags = f"NULLIF({quoted_table}.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
+        incoming_tags = "NULLIF(EXCLUDED.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
+        return f"""
+            jsonb_set(
+                EXCLUDED.payload::jsonb,
+                '{{belongs_to_set}}',
+                (
+                    SELECT COALESCE(jsonb_agg(DISTINCT val), '[]'::jsonb)
+                    FROM jsonb_array_elements_text(
+                        COALESCE({stored_tags}, '[]'::jsonb)
+                        || COALESCE({incoming_tags}, '[]'::jsonb)
+                    ) AS val
+                )
+            )
+            """
+
+    @staticmethod
+    def _vector_if_text_changed(collection_name: str):
+        """``ON CONFLICT`` vector: the new embedding when the row's text changed (a summary
+        keeps its id across re-extraction), else the stored one, so a metadata-only change
+        leaves the indexed column alone and can stay a HOT update.
+        """
+        table = f'"{collection_name}"'
+        return text(
+            f"CASE WHEN {table}.payload::jsonb->'text' IS DISTINCT FROM "
+            f"EXCLUDED.payload::jsonb->'text' THEN EXCLUDED.vector ELSE {table}.vector END"
+        )
+
+    @staticmethod
+    def _payload_changed(collection_name: str):
+        """``ON CONFLICT`` condition: the merged payload differs from the stored one.
+
+        The timestamps are stamped on every write and read by no one, so they are left
+        out: an unchanged re-upsert writes no new row version and no HNSW index entry.
+        """
+        volatile = "- 'created_at' - 'updated_at'"
+        merged = PGVectorAdapter._merged_payload_sql(collection_name)
+        stored = f'"{collection_name}".payload::jsonb'
+        return text(f"(({merged}) {volatile}) IS DISTINCT FROM ({stored} {volatile})")
+
     @retry(
-        retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
+        retry=retry_if_exception(is_deadlock),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
+        reraise=True,
     )
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict."""
@@ -440,7 +722,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # still emit same-UUID5 rows in one batch. Union the duplicates'
         # belongs_to_set arrays before collapsing so a tag that only
         # appears on one duplicate isn't dropped (mirrors the in-batch
-        # tag merge in Neo4jAdapter.add_nodes).
+        # tag merge in Neo4jAdapter.add_nodes). The rows are then written
+        # in ``_row_order`` so concurrent batches cannot deadlock.
         deduped_by_id: dict = {}
         for dp in pgvector_data_points:
             existing = deduped_by_id.get(dp.id)
@@ -455,33 +738,21 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
                 dp.payload = {**incoming_payload, "belongs_to_set": merged_tags}
             deduped_by_id[dp.id] = dp
-        pgvector_data_points = list(deduped_by_id.values())
+        pgvector_data_points = sorted(deduped_by_id.values(), key=lambda dp: _row_order(dp.id))
 
         point_dicts = [to_dict(data_point) for data_point in pgvector_data_points]
 
-        async with self._get_write_lock(collection_name), self.get_async_session() as session:
+        async with self.get_async_session() as session:
             for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
                 point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
                 insert_statement = insert(PGVectorDataPoint).values(point_batch)
-                quoted_table = f'"{collection_name}"'
-                merged_payload_expr = text(
-                    f"""
-                                    jsonb_set(
-                                        EXCLUDED.payload::jsonb,
-                                        '{{belongs_to_set}}',
-                                        (
-                                            SELECT COALESCE(jsonb_agg(DISTINCT val), '[]'::jsonb)
-                                            FROM jsonb_array_elements_text(
-                                                COALESCE({quoted_table}.payload::jsonb->'belongs_to_set', '[]'::jsonb)
-                                                || COALESCE(EXCLUDED.payload::jsonb->'belongs_to_set', '[]'::jsonb)
-                                            ) AS val
-                                        )
-                                    )::json
-                                    """
-                )
                 insert_statement = insert_statement.on_conflict_do_update(
                     index_elements=["id"],
-                    set_={"payload": merged_payload_expr},
+                    set_={
+                        "payload": self._merged_belongs_to_set_payload(collection_name),
+                        "vector": self._vector_if_text_changed(collection_name),
+                    },
+                    where=self._payload_changed(collection_name),
                 )
                 await session.execute(insert_statement)
             await session.commit()
@@ -582,8 +853,72 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 )
             await session.commit()
 
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        """Return rows from `collection_name` matching any of `data_point_ids`."""
+    @retry(
+        retry=retry_if_exception(is_deadlock),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=1, max=6),
+        reraise=True,
+    )
+    async def upsert_raw_vectors(
+        self,
+        collection_name: str,
+        points: list[dict],
+        payload_schema: type[BaseModel] | None = None,
+    ) -> None:
+        """Upsert caller-provided vectors without invoking the embedding engine.
+
+        Payloads are stored as given (the JSON column has no schema; ``payload_schema``
+        only names the collection's type for ``create_collection``), so a row read with
+        ``retrieve(..., include_vector=True)`` lands here unchanged. A conflicting id
+        takes the new payload and the new vector, except ``belongs_to_set``, which is
+        unioned with the stored row's as in ``create_data_points``. The same id twice
+        in one call is written once (one INSERT cannot touch a row twice), see
+        ``validate_raw_vector_points``. Rows are written in ``_row_order``, like
+        ``create_data_points``, so concurrent upserts of the same ids cannot deadlock.
+        """
+        if not points:
+            return
+
+        vector_size = self.embedding_engine.get_vector_size()
+        # Every check runs before the table exists, so a rejected call creates nothing.
+        row_list = sorted(
+            (
+                {
+                    "id": row["id"],
+                    "vector": row["vector"],
+                    "payload": sanitize_relational_payload(serialize_data(row["payload"])),
+                }
+                for row in validate_raw_vector_points(points, vector_size).values()
+            ),
+            key=lambda row: _row_order(row["id"]),
+        )
+
+        if not await self.has_collection(collection_name):
+            await self.create_collection(collection_name, payload_schema=payload_schema)
+        table = await self.get_table(collection_name)
+
+        async with self.get_async_session() as session:
+            for start_index in range(0, len(row_list), QUERY_BATCH_SIZE):
+                statement = insert(table).values(
+                    row_list[start_index : start_index + QUERY_BATCH_SIZE]
+                )
+                statement = statement.on_conflict_do_update(
+                    index_elements=["id"],
+                    set_={
+                        "payload": self._merged_belongs_to_set_payload(collection_name),
+                        "vector": statement.excluded.vector,
+                    },
+                )
+                await session.execute(statement)
+            await session.commit()
+
+    async def retrieve(
+        self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
+    ):
+        """Return rows from `collection_name` matching any of `data_point_ids`.
+
+        With ``include_vector`` the stored embedding rides along as ``payload["vector"]``.
+        """
         # Get PGVectorDataPoint Table from database
         try:
             PGVectorDataPoint = await self.get_table(collection_name)
@@ -609,7 +944,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 unique_results.append(result)
 
             return [
-                ScoredResult(id=parse_id(result.id), payload=result.payload, score=0)
+                ScoredResult(
+                    id=parse_id(result.id),
+                    # pgvector hands the column back as a numpy array; callers get floats.
+                    payload={**result.payload, "vector": [float(v) for v in result.vector]}
+                    if include_vector
+                    else result.payload,
+                    score=0,
+                )
                 for result in unique_results
             ]
 
@@ -635,6 +977,38 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 )
         return scores
 
+    async def score_by_ids_batch(
+        self, collection_name: str, data_point_ids: list[str], query_vectors: list[list[float]]
+    ) -> list[list[ScoredResult]]:
+        """One statement per id batch, with a distance column per query vector.
+
+        The rows are visited once and the distances are computed in Postgres, so no
+        vector leaves the database: fetching 3,000 vectors to score them locally costs
+        more than the per-query statements it would replace.
+        """
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids or not query_vectors:
+            return [[] for _ in query_vectors]
+        table = await self.get_table(collection_name)
+        distances = [
+            table.c.vector.cosine_distance(query_vector).label(f"distance_{index}")
+            for index, query_vector in enumerate(query_vectors)
+        ]
+        scores: list[list[ScoredResult]] = [[] for _ in query_vectors]
+        async with self.get_async_session() as session:
+            for start in range(0, len(ids), QUERY_BATCH_SIZE):
+                batch = ids[start : start + QUERY_BATCH_SIZE]
+                rows = await session.execute(
+                    select(table.c.id, *distances).where(table.c.id.in_(batch))
+                )
+                for row in rows.all():
+                    row_id = parse_id(str(row.id))
+                    for index, query_scores in enumerate(scores):
+                        query_scores.append(
+                            ScoredResult(id=row_id, score=float(row[index + 1]), payload=None)
+                        )
+        return scores
+
     async def search(
         self,
         collection_name: str,
@@ -656,6 +1030,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
 
+        # A search without a limit wants every row. The approximate index does not
+        # guarantee that, so it keeps the exact scan whatever the row count turns out to be.
+        exact_scan_required = limit is None
         if limit is None:
             async with self.get_async_session() as session:
                 query = select(func.count()).select_from(PGVectorDataPoint)
@@ -669,14 +1046,32 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # NOTE: This needs to be initialized in case search doesn't return a value
         closest_items = []
 
-        # Note: Exclude payload from returned columns if not needed to optimize performance
+        # Never select the vector column: results carry only id, payload and distance,
+        # and the distance is computed in the database. Fetching vectors made a
+        # limit=None search (node-set filtered retrieval reads whole collections)
+        # decode every stored embedding in Python - several GB for ~25k 3072-dim rows.
         select_columns = (
-            [PGVectorDataPoint]
+            [PGVectorDataPoint.c.id, PGVectorDataPoint.c.payload]
             if include_payload
-            else [PGVectorDataPoint.c.id, PGVectorDataPoint.c.vector]
+            else [PGVectorDataPoint.c.id]
         )
         # Use async session to connect to the database
         async with self.get_async_session() as session:
+            # The column was sized by this engine in create_collection.
+            dimensions = self.embedding_engine.get_vector_size()
+            indexed_type = _indexed_type(dimensions, await self._pgvector_version(session))
+            use_index = (
+                indexed_type is not None
+                and not node_name
+                and not exact_scan_required
+                and limit <= _HNSW_MAX_EF_SEARCH
+            )
+            if indexed_type == "vector" and not use_index:
+                # Up to 2,000 dimensions the index is on the column itself, so Postgres
+                # would also pick it for an exact ORDER BY and return at most
+                # hnsw.ef_search rows, before any node-set filter is applied. Searches
+                # that must be exact keep the full scan.
+                await session.execute(text("SET LOCAL enable_indexscan = off"))
             if node_name:
                 if node_name_filter_operator == "AND":
                     filter_operator = "?&"
@@ -705,7 +1100,24 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 query = select(
                     *select_columns,
                     PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
-                ).order_by("similarity")
+                )
+                if use_index:
+                    # Order by the indexed expression so the HNSW index serves the scan.
+                    # The planner underestimates a full scan of TOASTed vectors and picks
+                    # it even when the index exists, so it is steered off it here; the
+                    # returned similarity stays the exact cosine distance, and the rows are
+                    # re-sorted by it below.
+                    query = query.order_by(
+                        _indexed_distance(
+                            PGVectorDataPoint.c.vector, query_vector, indexed_type, dimensions
+                        )
+                    )
+                    await session.execute(text("SET LOCAL enable_seqscan = off"))
+                    await session.execute(
+                        text(f"SET LOCAL hnsw.ef_search = {max(limit, _HNSW_DEFAULT_EF_SEARCH)}")
+                    )
+                else:
+                    query = query.order_by("similarity")
 
             if limit > 0:
                 query = query.limit(limit)
@@ -727,6 +1139,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         if len(vector_list) == 0:
             return []
+
+        # An index scan returns rows in the index's order (half precision above 2,000
+        # dimensions); callers expect them sorted by the exact distance they carry.
+        vector_list.sort(key=lambda row: row["_distance"])
 
         # Return backend raw cosine distance as score (lower is better)
         for i in range(len(vector_list)):
@@ -768,8 +1184,19 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             ]
         )
 
+    @retry(
+        retry=retry_if_exception(is_deadlock),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=1, max=6),
+        reraise=True,
+    )
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
-        """Delete rows from `collection_name` whose id is in `data_point_ids`."""
+        """Delete rows from `collection_name` whose id is in `data_point_ids`.
+
+        Inserts no longer take the collection lock, so a delete can meet a concurrent
+        upsert of the same rows; Postgres aborts one side of such a deadlock and the
+        delete is retried.
+        """
         # Skip deletion if collection doesn't exist
         if not await self.has_collection(collection_name):
             return None
@@ -844,6 +1271,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if node_ids is not None:
             bind_params["node_ids"] = [str(nid) for nid in node_ids]
 
+        first_error: SQLAlchemyError | None = None
         for table_name in candidate_tables:
             quoted_table = f'"{table_name}"'
             # Can't use a data-modifying CTE (UPDATE … RETURNING then DELETE
@@ -892,33 +1320,69 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                   AND payload::jsonb->'belongs_to_set' = '[]'::jsonb
                 """
             )
-            # Run each table in its own transaction — a failure on one table
-            # (e.g. a PascalCase name that isn't a vector collection and has
-            # no `payload::jsonb` column) must not roll back updates already
-            # committed for other tables.
+            # Each table is its own transaction, so one table's failure never
+            # undoes or prevents another's. A PascalCase table that is not a
+            # vector collection has no `payload::jsonb` column (ProgrammingError)
+            # and is skipped. Any other database failure is logged with the
+            # table, the remaining tables are still swept, and the first failure
+            # is raised afterwards: the caller sees it, and the log names every
+            # table that kept the tag.
             try:
-                async with self._get_write_lock(table_name), self.get_async_session() as session:
-                    target_rows = await session.execute(select_targets_sql, bind_params)
-                    target_ids = [row[0] for row in target_rows.all()]
-                    if not target_ids:
-                        await session.commit()
-                        continue
-
-                    scoped_params: dict[str, Any] = {
-                        "tags": list(tags),
-                        "target_ids": target_ids,
-                    }
-                    await session.execute(update_sql, scoped_params)
-                    await session.execute(delete_empties_sql, {"target_ids": target_ids})
-                    await session.commit()
-            except exc.SQLAlchemyError as e:
+                await self._remove_tags_from_table(
+                    table_name, select_targets_sql, update_sql, delete_empties_sql, bind_params
+                )
+            except ProgrammingError as e:
                 logger.debug(
                     "remove_belongs_to_set_tags skipped '%s': %s",
                     table_name,
                     e,
                 )
+            except SQLAlchemyError as e:
+                logger.warning(
+                    "remove_belongs_to_set_tags failed on '%s', its rows keep the tags: %s",
+                    table_name,
+                    e,
+                )
+                if first_error is None:
+                    first_error = e
 
-        return
+        if first_error is not None:
+            raise first_error
+
+    @retry(
+        retry=retry_if_exception(is_deadlock),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=1, max=6),
+        reraise=True,
+    )
+    async def _remove_tags_from_table(
+        self,
+        table_name: str,
+        select_targets_sql: TextClause,
+        update_sql: TextClause,
+        delete_empties_sql: TextClause,
+        bind_params: dict[str, Any],
+    ) -> None:
+        """One table's detag in one transaction.
+
+        Inserts do not take the collection lock, so the UPDATE can meet a concurrent
+        upsert of the same rows in another order; Postgres aborts one side of that
+        deadlock and the sweep is retried from the target selection.
+        """
+        async with self._get_write_lock(table_name), self.get_async_session() as session:
+            target_rows = await session.execute(select_targets_sql, bind_params)
+            target_ids = [row[0] for row in target_rows.all()]
+            if not target_ids:
+                await session.commit()
+                return
+
+            scoped_params: dict[str, Any] = {
+                "tags": bind_params["tags"],
+                "target_ids": target_ids,
+            }
+            await session.execute(update_sql, scoped_params)
+            await session.execute(delete_empties_sql, {"target_ids": target_ids})
+            await session.commit()
 
     async def prune(self):
         """Drop all vector collection tables and reset cached reflection metadata."""
@@ -934,5 +1398,44 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         await self.delete_database()
 
     async def run_migrations(self):
-        """Run PGVector adapter migrations (currently no-op)."""
-        return
+        """Build the HNSW index of any collection that is missing it.
+
+        The runner calls this on every cognee version change. The
+        ``pgvector_hnsw_indexes`` migration builds the indexes once, and logs and skips
+        a table whose build fails (a ``statement_timeout``, a full disk), so this is
+        where such a table is retried. ``IF NOT EXISTS`` makes an indexed table a
+        catalog lookup. A failed build is logged and skipped here too: the runner
+        blocks writes to the dataset when this raises, and an unindexed collection is
+        still searched correctly, by a full scan.
+        """
+        async with self.engine.connect() as connection:
+            collections = (await connection.execute(text(_VECTOR_COLLECTIONS_SQL))).all()
+            pgvector_version = await self._pgvector_version(connection)
+
+        indexed, failed = [], []
+        for table_name, dimensions in collections:
+            statement = hnsw_index_statement(table_name, dimensions, pgvector_version)
+            if statement is None:
+                continue
+            try:
+                async with self.engine.begin() as connection:
+                    await connection.execute(
+                        text(_RAISE_MAINTENANCE_WORK_MEM_SQL),
+                        {
+                            "target": f"{_BUILD_MAINTENANCE_WORK_MEM_KB}kB",
+                            "target_kb": _BUILD_MAINTENANCE_WORK_MEM_KB,
+                        },
+                    )
+                    await connection.execute(text(_SERIAL_BUILD_SQL))
+                    await connection.execute(text(statement))
+                indexed.append(table_name)
+            except SQLAlchemyError as error:
+                failed.append(table_name)
+                logger.warning(
+                    "Could not build the HNSW index on %s (%s); it stays searchable by a "
+                    "full scan and is retried on the next cognee version change: %s",
+                    table_name,
+                    type(error).__name__,
+                    error,
+                )
+        return {"hnsw_index_checked": indexed, "hnsw_index_failed": failed}

@@ -313,6 +313,53 @@ class TestSkillContract(unittest.TestCase):
         assert run.belongs_to_set[0].name == "skills"
         assert mock_add.await_args.kwargs["ctx"].dataset is dataset
 
+    def test_remember_skill_run_entry_resolves_explicit_dataset_id_over_name(self):
+        from cognee.memory import SkillRunEntry
+        from cognee.modules.engine.models import Skill
+        from cognee.modules.tools.skill_runs import remember_skill_run_entry
+
+        dataset = SimpleNamespace(id=uuid4(), name="project")
+        user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+        skill = Skill(
+            name="code-review",
+            description="Review code.",
+            procedure="step 1",
+            skill_text="code-review\n\nReview code.\n\nstep 1",
+            search_text="code-review\n\nReview code.\n\nstep 1",
+            dataset_scope=[str(dataset.id)],
+        )
+        entry = SkillRunEntry(run_id="run-1", selected_skill_id="code-review", task_text="t")
+
+        async def run_entry():
+            with (
+                patch("cognee.modules.tools.skill_runs.setup", new_callable=AsyncMock),
+                patch(
+                    "cognee.modules.tools.skill_runs.resolve_authorized_user_datasets",
+                    new_callable=AsyncMock,
+                    return_value=(user, [dataset]),
+                ) as mock_resolve,
+                patch(
+                    "cognee.modules.tools.skill_runs.resolve_skills",
+                    new_callable=AsyncMock,
+                    return_value=[skill],
+                ),
+                patch("cognee.modules.tools.skill_runs.add_data_points", new_callable=AsyncMock),
+            ):
+                run, resolved_dataset = await remember_skill_run_entry(
+                    entry,
+                    dataset_name="main_dataset",
+                    dataset_id=dataset.id,
+                    session_id="session-1",
+                    user=user,
+                )
+                return run, resolved_dataset, mock_resolve
+
+        run, resolved_dataset, mock_resolve = _run(run_entry())
+        # The id is what gets authorized; the default name never reaches resolution.
+        assert mock_resolve.await_args.args[0] == dataset.id
+        assert resolved_dataset is dataset
+        assert run.dataset_scope == [str(dataset.id)]
+
     def test_skill_improvement_proposal_does_not_mutate_skill(self):
         from cognee.modules.engine.models import Skill, SkillRun
         from cognee.modules.memify.skill_improvement import (

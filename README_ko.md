@@ -112,7 +112,7 @@ uv pip install cognee
 ```python
 import os
 
-os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
+os.environ["LLM_API_KEY"] = "YOUR_OPENAI_API_KEY"
 ```
 또는 [템플릿](https://github.com/topoteretes/cognee/blob/main/.env.template)을 사용하여 `.env` 파일을 생성하세요.
 
@@ -136,9 +136,6 @@ async def main():
 
     # 지식 그래프 생성
     await cognee.cognify()
-
-    # 그래프에 메모리 알고리즘 추가
-    await cognee.memify()
 
     # 지식 그래프 쿼리
     results = await cognee.search("What does Cognee do?")

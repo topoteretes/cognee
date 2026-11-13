@@ -1,13 +1,13 @@
 from .Entity import Entity
 from .EntityType import EntityType
+from .FactConflict import FactConflict
 from .TableRow import TableRow
 from .TableType import TableType
 from .node_set import NodeSet
+from .StructureContainer import CHILD_OF, StructureContainer
 from .ColumnValue import ColumnValue
 from .DltColumn import DltColumn
 from .Timestamp import Timestamp
-from .Interval import Interval
-from .Event import Event
 from .Triplet import Triplet
 from .Skill import Skill
 from .SkillImprovementProposal import SkillImprovementProposal

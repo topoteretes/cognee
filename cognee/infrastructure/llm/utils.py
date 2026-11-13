@@ -1,9 +1,8 @@
 import asyncio
 import os
 
-import litellm
-
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -31,30 +30,14 @@ async def get_max_chunk_tokens() -> int:
     from cognee.infrastructure.databases.vector.embeddings.input_limit import (
         resolve_input_limit,
     )
-    from cognee.infrastructure.llm.config import get_llm_context_config
 
     # Calculate max chunk size based on the following formula
     embedding_engine = (await get_vector_engine_async()).embedding_engine
     await resolve_input_limit(embedding_engine)
 
-    # Resolve the LLM token ceiling from configuration alone — building an LLM
-    # client here would eagerly instantiate the legacy framework's adapter
-    # even when the litellm_native framework is active. Mirrors the resolution
-    # in get_llm_client()/get_native_client(): the lower of the model's hard
-    # limit and the user's configured ceiling, with the Ollama context-size
-    # special case.
-    llm_config = get_llm_context_config()
-    model_max = get_model_max_completion_tokens(llm_config.llm_model)
-    if model_max is not None:
-        llm_max_completion_tokens = min(model_max, llm_config.llm_max_completion_tokens)
-    elif llm_config.llm_provider == "ollama":
-        llm_max_completion_tokens = llm_config.ollama_num_ctx
-    else:
-        llm_max_completion_tokens = llm_config.llm_max_completion_tokens
-
     # We need to make sure chunk size won't take more than half of LLM max context token size
     # but it also can't be bigger than the embedding engine max token size
-    llm_cutoff_point = llm_max_completion_tokens // 2  # Round down the division
+    llm_cutoff_point = get_llm_token_ceiling() // 2
     max_chunk_tokens = min(embedding_engine.max_completion_tokens, llm_cutoff_point)
 
     return max_chunk_tokens
@@ -135,6 +118,10 @@ def get_model_max_completion_tokens(model_name: str) -> int | None:
 
         Number of max tokens of model, or None if model is unknown
     """
+    # Imported here, not at module scope: this module is on the ``import cognee``
+    # path and litellm (with the OpenAI SDK behind it) is half of that import.
+    import litellm
+
     max_completion_tokens: int | None = None
 
     if model_name in litellm.model_cost:
@@ -151,10 +138,46 @@ def get_model_max_completion_tokens(model_name: str) -> int | None:
     return max_completion_tokens
 
 
+def get_llm_token_ceiling() -> int:
+    """The LLM token ceiling, resolved from configuration alone.
+
+    Building an LLM client here would eagerly instantiate the legacy framework's
+    adapter even when the litellm_native framework is active. Mirrors the
+    resolution in get_llm_client()/get_native_client(): the lower of the model's
+    hard limit and the user's configured ceiling, with the Ollama context-size
+    special case.
+    """
+    # NOTE: Import must be done in function to avoid circular import issue
+    from cognee.infrastructure.llm.config import get_llm_context_config
+
+    config = get_llm_context_config()
+    model_max = get_model_max_completion_tokens(config.llm_model)
+    if model_max is not None:
+        return min(model_max, config.llm_max_completion_tokens)
+    if config.llm_provider == "ollama":
+        return config.ollama_num_ctx
+    return config.llm_max_completion_tokens
+
+
+def get_llm_tokenizer() -> TikTokenTokenizer:
+    """Use the model's encoding, or the default for models unknown to tiktoken."""
+    # NOTE: Import must be done in function to avoid circular import issue
+    from cognee.infrastructure.llm.config import get_llm_config
+
+    model = get_llm_config().llm_model.split("/", 1)[-1]
+    try:
+        return TikTokenTokenizer(model=model)
+    except Exception:
+        logger.debug("Falling back to the default LLM tokenizer", exc_info=True)
+        return TikTokenTokenizer(model=None)
+
+
 async def test_llm_connection() -> None:
     """
     Test connectivity to the LLM endpoint using a simple completion call.
     """
+    from litellm.exceptions import AuthenticationError
+
     try:
         logger.info("Testing connection to LLM endpoint...")
         await asyncio.wait_for(
@@ -173,7 +196,7 @@ async def test_llm_connection() -> None:
         )
         logger.error(msg)
         raise TimeoutError(msg)
-    except litellm.exceptions.AuthenticationError:
+    except AuthenticationError:
         msg = (
             "LLM authentication failed. Check your LLM_API_KEY configuration. "
             "Set COGNEE_SKIP_CONNECTION_TEST=true to bypass this check."
@@ -247,6 +270,14 @@ async def determine_embedding_dimensions(detected_dimensions: int) -> None:
     from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
 
     embedding_config = get_embedding_config()
+    if embedding_config.embedding_dimensions is None:
+        embedding_engine = (await get_vector_engine_async()).embedding_engine
+        if hasattr(embedding_engine, "configured_dimensions"):
+            # The engine learns its vector size itself (embedding_worker) and
+            # already holds it. Writing it into the config would make the next
+            # get_embedding_engine() build a second engine (it is cached by its
+            # arguments) that takes the learned size for EMBEDDING_DIMENSIONS.
+            return
     if embedding_config.embedding_dimensions != detected_dimensions:
         embedding_config.embedding_dimensions = detected_dimensions
 

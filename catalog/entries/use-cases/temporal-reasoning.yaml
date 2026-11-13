@@ -1,5 +1,5 @@
 id: temporal-reasoning
-title: Temporal reasoning over time-stamped events
+title: Temporal reasoning over dated text
 kind: use-case
 stack: use-case
 tags:
@@ -7,8 +7,8 @@ tags:
   - events
   - time-aware
   - graph-completion
-summary: Recall against a knowledge graph where every node knows when it was true, so questions about ordering and duration return coherent answers.
-what_youll_build: A recall pipeline that ingests time-stamped events, builds a temporal knowledge graph, and answers questions like "what happened first" or "what was true on date X".
+summary: Recall over a knowledge graph that stores the dates in your text as Timestamp nodes, so questions scoped to a date or period bring the passages and facts from that time forward.
+what_youll_build: A recall pipeline that ingests dated text, stores its dates as Timestamp nodes in the knowledge graph, and answers questions like "what happened before 1950" or "what happened between 1940 and 1945".
 quickstart: |
   git clone https://github.com/topoteretes/cognee.git
   cd cognee
@@ -16,8 +16,8 @@ quickstart: |
   export LLM_API_KEY=your_openai_key
   python examples/guides/temporal_recall.py
 expected_output: |
-  Answers to time-relative questions grounded in the ingested events, with
-  recall order matching the true event ordering rather than embedding-similarity
-  order alone.
+  Answers to before / after / between questions, grounded in the passages and
+  facts dated inside the question's time window rather than ranked by embedding
+  similarity alone.
 difficulty: medium
 example_path: examples/guides/temporal_recall.py

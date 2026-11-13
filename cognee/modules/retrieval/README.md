@@ -9,7 +9,8 @@ together.
 
 | SearchType | Retriever | Module | LLM answer? | Notes |
 |---|---|---|---|---|
-| `HYBRID_COMPLETION` | `HybridRetriever` | `hybrid_retriever.py` | yes | Default. Chunk + entity (+ global-context) lanes. Defers to `GRAPH_COMPLETION` for a custom `node_type`, `node_name` with `node_type=None`, `neighborhood_depth`, `feedback_influence > 0`, or a missing chunk collection (`search/methods/hybrid_deferral.py`) |
+| `HYBRID_COMPLETION` | `HybridRetriever` | `hybrid_retriever.py` | yes | Default. Chunk + entity (+ global-context) lanes. Defers to `GRAPH_COMPLETION` for a custom `node_type`, `neighborhood_depth`, `feedback_influence > 0`, or a missing chunk collection (`search/methods/hybrid_deferral.py`); `node_name` with `node_type=None` raises `QueryValidationError` like on every type (`search/methods/node_name_scope.py`) |
+| `HYBRID_COMPLETION_DECOMPOSITION` | `HybridDecompositionRetriever` | `hybrid_decomposition_retriever.py` | yes | Hybrid pass for the full question, then LLM decomposition of question + that context into up to `max_subqueries` subqueries (default 7, at most 20), each retrieved through the hybrid lanes and unioned by id. Single query only. A missing decomposition prompt or a failed planning call fails the search. **Cost:** the union is not capped, so each lane can hold `1 + max_subqueries` times its top-k (8 times by default) and an entity keeps the edges of every retrieval, beyond `max_edges_per_entity`; the pass-1 context is sent to the model twice (planner, then answer); one search makes two LLM calls and up to `1 + max_subqueries` embedding calls. In a session it always runs sequentially. Never defers: on the conditions that defer `HYBRID_COMPLETION` (a custom `node_type`, `neighborhood_depth`, `feedback_influence > 0`, or a missing chunk collection) it raises `QueryValidationError` naming the reason and pointing at `GRAPH_COMPLETION_DECOMPOSITION`; `node_name` is applied as node-set tags only. A plan with no usable subquery logs a warning and searches with the original question. `retriever_specific_config`: `max_subqueries`, `decomposition_system_prompt`, `decomposition_system_prompt_path`, plus every hybrid key |
 | `GRAPH_COMPLETION` | `GraphCompletionRetriever` | `graph_completion_retriever.py` | yes | Triplet search + neighbourhood expansion; base for the variants below |
 | `GRAPH_COMPLETION_COT` | `GraphCompletionCotRetriever` | `graph_completion_cot_retriever.py` | yes | Chain-of-thought rounds |
 | `GRAPH_COMPLETION_CONTEXT_EXTENSION` | `GraphCompletionContextExtensionRetriever` | `graph_completion_context_extension_retriever.py` | yes | Iteratively widens context |
@@ -17,7 +18,8 @@ together.
 | `GRAPH_SUMMARY_COMPLETION` | `GraphSummaryCompletionRetriever` | `graph_summary_completion_retriever.py` | yes | Graph context built from summaries |
 | `TEMPORAL` | `TemporalHybridRetriever` | `temporal_hybrid_retriever.py` | yes | Hybrid retrieval reranked by time: the adapter returns the `Timestamp` nodes overlapping the window the LLM extracts from the question (`GraphDBInterface.get_timestamps_in_range`), the chunks and entities anchored to them move to the front of the candidate set, nothing is dropped; plain hybrid when the question carries no time or nothing overlaps (`temporal_hybrid/matching.py`) |
 | `RAG_COMPLETION` | `CompletionRetriever` | `completion_retriever.py` | yes | Chunk vector search + completion |
-| `TRIPLET_COMPLETION` | `TripletRetriever` | `triplet_retriever.py` | yes | Triplet-embedding search + completion |
+| `BROAD` | `BroadRetriever` | `broad_retriever.py` | yes | Questions over a whole dataset (counts, totals, lists, lookups): a small dataset is shown whole; a large one is loaded into SQLite (`broad_store.py`) and answered by one model-written query |
+| `TRIPLET_COMPLETION` | `GraphCompletionRetriever` | `graph_completion_retriever.py` | yes | Deprecated, removed in the next release: triplet embeddings were removed, so `search()` / `recall()` resolve it to `GRAPH_COMPLETION` with a `FutureWarning` (`DEPRECATED_SEARCH_TYPES`) |
 | `AGENTIC_COMPLETION` | `AgenticRetriever` | `agentic_retriever.py` | yes | Special-cased in the factory (not in the dict): tool loop with `skills`, `tools`, `max_iter` |
 | `CHUNKS` | `ChunksRetriever` | `chunks_retriever.py` | no | Vector search over `DocumentChunk_text` |
 | `CHUNKS_LEXICAL` | `BM25ChunksRetriever` | `bm25_retriever.py` | no | BM25 over chunks (`LexicalRetriever` subclass) |
@@ -25,7 +27,7 @@ together.
 | `SKILLS` | `SkillsRetriever` | `skills_retriever.py` | no | Metadata-only skill discovery; exactly one dataset |
 | `CODE` | `CodeRetriever` | `code_retriever.py` | no | Deterministic code-graph operations via `code_query` |
 | `CODING_RULES` | `CodingRulesRetriever` | `coding_rules_retriever.py` | no | Returns stored coding rules |
-| `CYPHER` | `CypherSearchRetriever` | `cypher_search_retriever.py` | no | Raw Cypher; enabled by default, disabled by `ALLOW_CYPHER_QUERY=false` |
+| `CYPHER` | `CypherSearchRetriever` | `cypher_search_retriever.py` | no | Raw Cypher; disabled by default, enabled by `ALLOW_CYPHER_QUERY=true` |
 | `NATURAL_LANGUAGE` | `NaturalLanguageRetriever` | `natural_language_retriever.py` | yes | LLM writes Cypher, then runs it; same `ALLOW_CYPHER_QUERY` gate |
 | `GRAPH_REPORT` | `GraphReportRetriever` | `graph_report_retriever.py` | partly | Hubs, cross-node-set edges, provenance split, LLM-suggested questions |
 | `FEELING_LUCKY` | — | `search/operations/select_search_type.py` | — | An LLM picks one of the types above, then that retriever runs |
@@ -48,6 +50,35 @@ Optional hooks: `extract_context_object_ids` (which nodes/edges fed a session an
 `merge_retrieved_objects` (combine the raw-query and rewritten-query lanes of a session
 turn), `append_references` / `get_context_evidence` (`include_references=True`), and the
 class flags `supports_session_turn_preparation` / `supports_prompt_preview`.
+
+### Explicit typed graph scopes
+
+For `GRAPH_COMPLETION` with an explicit non-`NodeSet` `node_type` and `node_name`,
+triplet retrieval projects that graph scope before scoring vectors. On LanceDB
+(including subprocess mode), PGVector, Turso and Neptune Analytics, `score_by_ids`
+scores only its node and edge-type vectors, without an additional candidate cutoff;
+a query batch is scored with one `score_by_ids_batch` call per collection: LanceDB
+fetches the scoped vectors once and takes every query's distances locally, PGVector and
+Turso run one statement with a distance column per query, so a batch costs about one
+query.
+Unembedded graph members keep the usual missing-distance penalty. Neptune uses
+exact `CosineDistance` through `neptune.algo.vectors.distance.byEmbedding`, rather
+than its ANN top-k search. NodeSet, unscoped, vector-seeded neighbourhood searches
+and supplied memory fragments retain their existing paths. A vector adapter
+without `score_by_ids` scans its collections unfiltered for such a scope and maps
+the distances onto the projected scope, so it ranks the same triplets, only slower;
+the vector `node_name` filter means NodeSet membership and is never applied to a
+typed scope, because it would match nothing and penalise every scoped node.
+
+`CHUNKS` and `RAG_COMPLETION` take the same two steps for a typed scope
+(`cognee/modules/retrieval/utils/scoped_chunk_search.py`): the graph projects the
+named nodes and their one-hop neighbours, the `DocumentChunk` nodes among them are
+the scope (a document's chunks, an entity's mentions), and `score_by_ids` scores
+exactly those chunk ids; an adapter without it scans the chunk collection
+unfiltered and the scope is kept in Python. A search type that cannot apply a
+`node_name` filter raises `QueryValidationError` instead of answering unscoped
+(`cognee/modules/search/methods/node_name_scope.py` lists which type honours which
+scope), and `FEELING_LUCKY` picks only among the types that can.
 
 ## Adding a retriever
 

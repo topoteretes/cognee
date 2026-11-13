@@ -210,8 +210,16 @@ async def integrate_chunk_graphs(
 
     if constructed_data_points:
         if pipeline_name or task_name:
+            # This walk is the only stamp these DataPoints get: the runner's own pass
+            # (run_tasks_base._stamp_provenance) skips the chunks they hang off, which it
+            # already visited at the chunking stage, so it never descends into them.
+            # One visited set for the whole batch: attach_new_edges_to_data_points has
+            # cross-linked the DataPoints, so a fresh set per DataPoint re-walked the
+            # whole reachable graph every time (quadratic, GH #6498). The set is local on
+            # purpose: ids added to ctx._provenance_visited would be skipped by the runner.
+            visited: set[int] = set()
             for data_point in constructed_data_points:
-                _stamp_provenance_deep(data_point, pipeline_name, task_name)
+                _stamp_provenance_deep(data_point, pipeline_name, task_name, visited)
 
         cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
         if callable(cache_entity_embeddings):

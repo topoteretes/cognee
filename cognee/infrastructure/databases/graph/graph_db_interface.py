@@ -1029,7 +1029,7 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def get_filtered_graph_data(
-        self, attribute_filters: list[dict[str, list[str | int]]]
+        self, attribute_filters: list[dict[str, list[str | int]]], *, include_edges: bool = True
     ) -> tuple[list[Node], list[EdgeData]]:
         """
         Retrieve nodes and edges filtered by the provided attribute criteria.
@@ -1039,6 +1039,7 @@ class GraphDBInterface(ABC):
 
             - attribute_filters: A list of dictionaries where keys are attribute names and values
               are lists of attribute values to filter by.
+            - include_edges: False reads only nodes; no edge query is performed.
         """
         raise NotImplementedError
 
@@ -1077,8 +1078,8 @@ class GraphDBInterface(ABC):
     async def update_node(self, node_id: str, values: dict[str, Any]) -> bool:
         """
         Merge *values* into an existing node's properties, leaving every field not
-        named in *values* untouched. Used to patch a single scalar (e.g. stamping
-        ``valid_to`` when a fact is superseded) without rewriting the whole node.
+        named in *values* untouched. Used to patch user preferences without
+        rewriting the whole node.
 
         Optional extension — implemented by LadybugAdapter (the default backend).
         Other adapters may not support partial node updates yet and raise here.

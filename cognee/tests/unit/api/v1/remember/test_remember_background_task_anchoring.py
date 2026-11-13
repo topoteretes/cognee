@@ -18,6 +18,11 @@ from uuid import uuid4
 
 import pytest
 
+# Datasets in this module are stand-ins that exist in no database; entering their
+# database context and resolving a session's dataset (which remember's session
+# writes now do) are stubbed.
+pytestmark = pytest.mark.usefixtures("stub_dataset_context", "stub_session_dataset")
+
 remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 
 
@@ -76,7 +81,7 @@ async def test_background_remember_task_is_anchored_until_done(monkeypatch):
 async def test_session_bridge_task_is_anchored_until_done(monkeypatch):
     release = asyncio.Event()
 
-    async def fake_add_to_session(session_id, data, user):
+    async def fake_add_to_session(session_id, data, user, node_set=None, dataset_id=None):
         return None
 
     async def fake_improve(*args, **kwargs):

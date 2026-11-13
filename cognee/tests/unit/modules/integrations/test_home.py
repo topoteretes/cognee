@@ -14,6 +14,7 @@ from cognee.modules.integrations.slack.home import publish_home_view
 
 class _FakeResponse:
     def __init__(self, payload):
+        self.status = 200  # Slack answers ``ok: false`` with 200 too
         self._payload = payload
 
     async def __aenter__(self):

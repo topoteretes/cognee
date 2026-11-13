@@ -1,5 +1,9 @@
 from typing import Any
 
+# Resolver lookup categories, the values of ``AttachedOntologyNode.category``.
+ONTOLOGY_CLASS_CATEGORY = "classes"
+ONTOLOGY_INDIVIDUAL_CATEGORY = "individuals"
+
 
 class AttachedOntologyNode:
     """Lightweight wrapper to be able to parse any ontology solution and generalize cognee interface."""

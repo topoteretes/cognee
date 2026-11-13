@@ -29,7 +29,9 @@ from cognee.modules.observability import (
 )
 from cognee.modules.operations import record_operation
 from cognee.modules.search.methods import search as search_function
+from cognee.modules.search.methods.node_name_scope import node_name_scope
 from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types.SearchType import resolve_deprecated_search_type
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -88,9 +90,9 @@ async def search(
 
         **HYBRID_COMPLETION** (Default):
             Document passages plus entity neighbourhoods, then LLM completion.
-            Defers to GRAPH_COMPLETION for a custom node_type, node_name with
-            node_type=None, neighborhood_depth, feedback_influence > 0, or a
-            missing chunk collection.
+            Defers to GRAPH_COMPLETION for a custom node_type, neighborhood_depth,
+            feedback_influence > 0, or a missing chunk collection. node_name with
+            node_type=None raises QueryValidationError, as on every type.
 
         **GRAPH_COMPLETION**:
             Natural language Q&A using full graph context and LLM reasoning.
@@ -122,6 +124,8 @@ async def search(
             Direct graph database queries using Cypher syntax.
             Best for: Advanced users, specific graph traversals, debugging.
             Returns: Raw graph query results.
+            Disabled by default; set ALLOW_CYPHER_QUERY=true to enable it
+            (also covers NATURAL_LANGUAGE).
 
         **FEELING_LUCKY**:
             Intelligently selects and runs the most appropriate search type.
@@ -158,12 +162,22 @@ async def search(
         top_k: Maximum number of results to return (1-N)
               Higher values provide more comprehensive but potentially noisy results.
 
-        node_type: Filter results to specific entity types (for advanced filtering).
+        node_type: What the names in node_name are. NodeSet (the default) means node-set
+                   tags; any other graph node type (TextDocument, Entity, ...) means the
+                   named nodes of that type and their one-hop neighbours.
 
-        node_name: Filter results to specific named entities (for targeted search).
+        node_name: Names to scope the search to, read according to node_type. Node-set
+                   tags are honoured by CHUNKS, RAG_COMPLETION, HYBRID_COMPLETION, TEMPORAL,
+                   CODING_RULES and the graph-completion family. A graph scope is honoured
+                   by the graph-completion family (it ranks the projected nodes), by CHUNKS
+                   and RAG_COMPLETION (they score the chunks in the projection: a document's
+                   chunks, an entity's mentions) and by HYBRID_COMPLETION (defers to
+                   GRAPH_COMPLETION). A search type that cannot apply the filter raises
+                   QueryValidationError, node_name without a node_type raises too, and
+                   FEELING_LUCKY picks only among the types that can apply it.
 
         node_name_filter_operator: Operator determining how to filter based on node names.
-                                    Possible values: AND, OR (default is OR, i.e. disjunction)
+                                    Possible values: AND, OR (default is OR, i.e. disjunction).
 
         session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
 
@@ -174,11 +188,22 @@ async def search(
                     operations are query_facts, explore, traverse, find_path,
                     impact_analysis, insights (enola explainer findings with their
                     evidence facts, filterable by source/min_confidence), architecture
-                    (module-level overview with symbol edges rolled up to modules), and
-                    delta (what the last ingestion changed, plus the snapshot receipt).
-                    Add ``"diagram": "mermaid"`` (or ``"dot"``) to any operation to get
-                    the result rendered as diagram source under ``result["diagram"]``;
-                    architecture includes a Mermaid diagram unless ``"diagram": False``.
+                    (module-level overview with symbol edges rolled up to modules),
+                    delta (what the last ingestion changed, plus the snapshot receipt),
+                    and the agent navigation operations: capabilities (what the graph
+                    and server support), search (rank symbols, routes and flows by
+                    name, docstring and path), neighbors (every edge of one node),
+                    subgraph (the graph around up to 20 seeds, with truncation
+                    reported), flows (enola's entry points: list, show, through), hubs
+                    (the most connected nodes) and ask (seeds, flows, a one-hop
+                    neighbourhood, file:line citations and coverage notes for a
+                    natural-language question). Add ``"diagram": "mermaid"`` (or
+                    ``"dot"``) to get the result rendered as diagram source under
+                    ``result["diagram"]`` (search, ask, flows, hubs and capabilities
+                    have no graph to draw); architecture includes a Mermaid diagram
+                    unless ``"diagram": False``. Rejections raise
+                    ``CodeSearchValidationError`` with a stable ``error_code`` and
+                    ``error_param``.
         skills: Explicit skill names or Skill objects to load into the agentic retriever.
         tools: Optional whitelist of tool names available to the agentic retriever.
         max_iter: Maximum number of agentic tool-call iterations before forcing a final answer.
@@ -234,6 +259,7 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
+    query_type = resolve_deprecated_search_type(query_type)
     if neighborhood_depth is not None and (
         not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
     ):
@@ -269,6 +295,9 @@ async def search(
 
     client = get_remote_client()
     if client is not None:
+        # The wire carries the class name and cannot tell node_type=None from an
+        # omitted one, so the local rule for names without a type applies here.
+        node_name_scope(node_type, node_name)
         return await client.search(
             query_text,
             search_type=query_type,
@@ -276,6 +305,7 @@ async def search(
             dataset_ids=dataset_ids,
             system_prompt=system_prompt,
             top_k=top_k,
+            node_type=node_type,
             node_name=node_name,
             only_context=only_context,
             verbose=verbose,
@@ -331,7 +361,7 @@ async def search(
                     ) from error
 
             operation_context.set_user(user)
-            operation_context.set_session_id(session_id)
+            operation_context.set_session_ids([session_id])
 
             await set_session_user_context_variable(user)
 

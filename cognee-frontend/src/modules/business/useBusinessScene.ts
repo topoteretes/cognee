@@ -59,9 +59,20 @@ function mergeLayers(payloads: VisualizationPayload[]): {
 // anything that lists "every layer" sees it), and one explicit `useData`
 // call below — React's rules-of-hooks forbid calling hooks from a loop over
 // a dynamic-length array, so the registry alone can't drive this call.
-export function useBusinessScene(cogniInstance: CogneeInstance): BusinessScene {
+export interface BusinessSceneOptions {
+  // Passed straight through to the content layer's graph query. Owned by the
+  // caller rather than read here, because the hook that knows it
+  // (useBusinessLiveUpdates) needs this scene's activeDatasetId first - see
+  // BusinessView, which holds the flag between the two.
+  graphPushActive: boolean;
+}
+
+export function useBusinessScene(
+  cogniInstance: CogneeInstance,
+  { graphPushActive }: BusinessSceneOptions,
+): BusinessScene {
   const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
-  const ctx: BusinessLayerContext = { cogniInstance, activeDatasetId };
+  const ctx: BusinessLayerContext = { cogniInstance, activeDatasetId, graphPushActive };
 
   const governance: BusinessLayerResult = governanceLayer.useData(ctx);
   const content: BusinessLayerResult = contentLayer.useData(ctx);

@@ -49,7 +49,7 @@ async def test_apply_feedback_weights_pipeline_wires_memify_tasks():
             new=AsyncMock(return_value=[authorized_dataset]),
         ) as get_authorized_dataset,
         patch(
-            "cognee.memify_pipelines.apply_feedback_weights.memify",
+            "cognee.memify_pipelines.apply_feedback_weights.run_memify_tasks",
             new=AsyncMock(return_value={"status": "ok"}),
         ) as memify_mock,
     ):

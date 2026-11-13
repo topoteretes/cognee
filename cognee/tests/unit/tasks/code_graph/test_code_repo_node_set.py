@@ -18,6 +18,7 @@ import pytest
 from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model
 from cognee.tasks.code_graph.extract_code_graph import (
+    CODE_GRAPH_MAPPING_VERSION,
     add_code_graph_data_points,
     add_code_graph_edges,
     extract_code_graph,
@@ -203,12 +204,59 @@ async def test_a_tagged_repo_always_reloads_an_unchanged_snapshot(
 async def test_unchanged_untagged_repo_still_skips(tmp_path, monkeypatch):
     """No node_set given, none stored: skip behaviour is exactly as before."""
     _write_snapshot(tmp_path, FACTS)
-    engine = _mock_engine(monkeypatch, get_node_return={"last_snapshot_id": SNAPSHOT_ID})
+    engine = _mock_engine(
+        monkeypatch,
+        get_node_return={
+            "last_snapshot_id": SNAPSHOT_ID,
+            "last_mapping_version": CODE_GRAPH_MAPPING_VERSION,
+        },
+    )
 
     data_points = await extract_code_graph(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
 
     assert data_points == []
     engine.get_node.assert_awaited_once_with(REPO_NODE_ID)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stored_version",
+    [None, CODE_GRAPH_MAPPING_VERSION - 1],
+    ids=["stamped-before-mapping-versions", "older-mapping"],
+)
+async def test_unchanged_snapshot_reloads_when_the_mapping_changed(
+    tmp_path, monkeypatch, stored_version
+):
+    """Same enola snapshot, but mapped by an older cognee: load it again, so docs,
+    flows and declaration-view edges reach repositories whose code did not change."""
+    _write_snapshot(tmp_path, FACTS)
+    stored = {"last_snapshot_id": SNAPSHOT_ID}
+    if stored_version is not None:
+        stored["last_mapping_version"] = stored_version
+    _mock_engine(monkeypatch, get_node_return=stored)
+
+    data_points = await extract_code_graph(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+
+    assert len(data_points) == 3
+
+
+@pytest.mark.asyncio
+async def test_mapping_version_stored_as_text_still_skips(tmp_path, monkeypatch):
+    """An adapter that hands the version back as text must not force a reload every run."""
+    _write_snapshot(tmp_path, FACTS)
+    _mock_engine(
+        monkeypatch,
+        get_node_return={
+            "properties": json.dumps(
+                {
+                    "last_snapshot_id": SNAPSHOT_ID,
+                    "last_mapping_version": str(CODE_GRAPH_MAPPING_VERSION),
+                }
+            )
+        },
+    )
+
+    assert await extract_code_graph(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path) == []
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +278,7 @@ async def test_coderepository_keeps_its_tag_after_the_snapshot_stamp(tmp_path, m
     assert len(stamped) == 1
     repository = stamped[0]
     assert repository.last_snapshot_id == SNAPSHOT_ID
+    assert repository.last_mapping_version == CODE_GRAPH_MAPPING_VERSION
     assert repository.source_node_set == "team-x"
     # The stamp writes through add_nodes directly (no get_graph_from_model in
     # the way), so belongs_to_set must already be the stored shape: tag names,

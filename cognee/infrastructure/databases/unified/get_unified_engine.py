@@ -39,7 +39,10 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
             NEPTUNE_ANALYTICS_ENDPOINT_URL,
             NeptuneAnalyticsAdapter,
         )
-        from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
+        from cognee.infrastructure.databases.vector.embeddings import (
+            EmbeddingGateway,
+            get_embedding_engine,
+        )
 
         graph_url = graph_config.get("graph_database_url", "")
         if not graph_url:
@@ -52,7 +55,7 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
             )
 
         graph_identifier = graph_url.replace(NEPTUNE_ANALYTICS_ENDPOINT_URL, "")
-        embedding_engine = get_embedding_engine()
+        embedding_engine = EmbeddingGateway(get_embedding_engine())
 
         return NeptuneAnalyticsAdapter(
             graph_id=graph_identifier,

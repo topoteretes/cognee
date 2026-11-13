@@ -1,0 +1,30 @@
+You are auditing the gold answers of a question-answering benchmark built on a long conversation between two people. Your job is to check the GOLD answer against the conversation. You are not answering the question yourself and you are not grading any system.
+
+Question type: {question_type}
+Question: {question}
+Gold answer: {gold}
+Cited evidence turns: {evidence}
+
+Conversation excerpt ({scope}; cited turns are marked with >>):
+{context}
+
+Decide whether the gold answer is supported by the conversation. Use the session timestamps to resolve relative time expressions ("last week", "yesterday", "next month") said in a turn.
+
+Labels (pick exactly one):
+- OK: the conversation supports the gold answer. A gold that is less precise than the text (e.g. "May 2023" when the text gives 7 May 2023) is still OK. Typos and formatting differences are OK.
+- IMPRECISE: the gold is in the right ballpark but states more precision than the text supports (e.g. "end of October" when the text only says "last month"), or rounds a computed span in a way the text does not support ("nearly four months" for a span of 3 months and 10 days). A system answering correctly from the text could not be expected to match it exactly.
+- INFERRED: the gold is not stated in the conversation but is a plausible inference from it (e.g. "Tokyo" when the text only says "my Japanese house").
+- AMBIGUOUS: the conversation supports two or more different answers (conflicting or equally valid statements) and the gold picks one of them, or the question can be read in two ways that lead to different answers.
+- WRONG: the conversation contradicts the gold (wrong date, year, number, person or event, or the fact belongs to the other speaker).
+- UNSUPPORTED: nothing in the conversation supports the gold, and nothing contradicts it either.
+- MALFORMED: the gold does not answer the question as asked, or the question cannot be asked of this conversation at all.
+
+Rules:
+- Judge the GOLD, not the difficulty of the question. Do not penalize a gold for being short or informal.
+- Compute dates yourself from the session timestamps when the text is relative, and state the computed date in the reason.
+- If the cited turns do not support the gold but another part of the excerpt does, the gold is OK (say where in the reason).
+- Be strict only on facts: a gold is WRONG only when the conversation actually says otherwise.
+- open_domain questions ask for an inference beyond the text, so their gold is expected to go beyond what is said. For them use only OK, WRONG (the conversation contradicts the gold), AMBIGUOUS or MALFORMED; never INFERRED, IMPRECISE or UNSUPPORTED. A gold that elaborates on something the conversation does say (e.g. naming a field of study consistent with a stated interest) is OK.
+
+Reply with JSON only:
+{"label": "<one of the labels above>", "supported_answer": "<the answer the conversation supports, as precisely as the text allows, or null>", "reason": "<one or two sentences>", "confidence": "high" | "medium" | "low"}

@@ -44,7 +44,9 @@ class StagedContent(BaseModel):
 
     Content-addressed storage writes are safe to make before anything is
     decided: until ``publish_updated_data`` flips the row, readers keep
-    resolving the old file, and an abandoned staged file is inert garbage.
+    resolving the old file. Once the update is over, the files no row points
+    at are removed: the old version's after a publish, the staged ones when
+    the update did not publish.
     """
 
     name: str
@@ -171,8 +173,10 @@ async def reset_data_pipeline_status(
         await session.commit()
 
 
-async def is_data_processed(data_id: UUID, dataset_id: UUID) -> bool:
-    """Whether the cognify-completion stamp is already on the row."""
+async def is_data_processed(
+    data_id: UUID, dataset_id: UUID, pipeline_name: str = COGNIFY_PIPELINE_NAME
+) -> bool:
+    """Whether ``pipeline_name``'s completion stamp (cognify's by default) is on the row."""
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         data_point = (
@@ -183,5 +187,5 @@ async def is_data_processed(data_id: UUID, dataset_id: UUID) -> bool:
         # Same deferred import as _completed_status, same cycle reason.
         from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
 
-        status = (data_point.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME) or {}
+        status = (data_point.pipeline_status or {}).get(pipeline_name) or {}
         return is_data_item_completed(status.get(str(dataset_id)))

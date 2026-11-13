@@ -403,6 +403,7 @@ class TestImproveDispatch:
             "feedback_alpha": 0.2,
             "build_global_context_index": True,
             "build_truth_subspace": True,
+            "review_conflicts": True,
         }
         base.update(overrides)
         return argparse.Namespace(**base)
@@ -424,11 +425,11 @@ class TestImproveDispatch:
         client.improve.assert_called_once_with(
             dataset_name="docs",
             dataset_id=None,
-            node_name=None,
             session_ids=["s1"],
             run_in_background=False,
             build_global_context_index=True,
             build_truth_subspace=True,
+            review_conflicts=True,
             feedback_alpha=0.2,
         )
 
@@ -441,7 +442,7 @@ class TestImproveDispatch:
                 "status": "completed",
                 "stages": [
                     {"stage": "feedback_weights", "status": "skipped", "reason": "no_session_ids"},
-                    {"stage": "triplet_enrichment", "status": "completed", "counts": {"n": 2}},
+                    {"stage": "global_context_index", "status": "completed", "counts": {"n": 2}},
                 ],
             },
         )
@@ -452,7 +453,7 @@ class TestImproveDispatch:
         command_fmt.success.assert_called_once_with("Knowledge graph improved successfully!")
         printed = [call.args[0] for call in command_fmt.echo.call_args_list]
         assert any("feedback_weights" in line and "no_session_ids" in line for line in printed)
-        assert any("triplet_enrichment" in line and "n=2" in line for line in printed)
+        assert any("global_context_index" in line and "n=2" in line for line in printed)
 
     @patch("cognee.cli.api_dispatch.fmt")
     @patch("cognee.cli.api_dispatch.CogneeApiClient")

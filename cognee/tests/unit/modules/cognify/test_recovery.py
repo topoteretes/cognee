@@ -2,19 +2,38 @@
 rollback) and closed as ERRORED with the STARTED row's own metadata; nothing else is touched."""
 
 import asyncio
+import importlib
+import inspect
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 
+from cognee.infrastructure.databases.relational import Base
+from cognee.infrastructure.databases.relational.create_relational_engine import (
+    create_relational_engine,
+)
 from cognee.modules.cognify import recovery as recovery_module
+from cognee.modules.improve.watermarks import (
+    IMPROVE_OPERATION_NAME,
+    REVIEW_WATERMARK_KEY,
+    has_dataset_changed_since_last_improve,
+    watermark_stamp,
+)
+from cognee.modules.pipelines import run_ownership
 from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
-from cognee.modules.pipelines.models import PipelineRunStatus
+from cognee.modules.pipelines.methods import get_unterminated_pipeline_runs
+from cognee.modules.pipelines.methods.get_pipeline_run import get_latest_pipeline_run
+from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
+from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
 
 TWO_HOURS_AGO = datetime.now(timezone.utc) - timedelta(hours=2)
+ONE_HOUR_AGO = datetime.now(timezone.utc) - timedelta(hours=1)
 
 
 class _FakeSession:
@@ -46,6 +65,7 @@ async def _no_op_context(*_args, **_kwargs):
 
 def _run(pipeline_name, status=PipelineRunStatus.DATASET_PROCESSING_STARTED, **overrides):
     fields = {
+        "id": uuid4(),  # the STARTED row's own id, whose sessions recovery copies
         "pipeline_name": pipeline_name,
         "pipeline_id": uuid4(),
         "dataset_id": uuid4(),
@@ -55,7 +75,7 @@ def _run(pipeline_name, status=PipelineRunStatus.DATASET_PROCESSING_STARTED, **o
         "started_at": TWO_HOURS_AGO,
         "user_id": uuid4(),
         "tenant_id": uuid4(),
-        "run_info": {"data": ["doc-1", "doc-2"]},
+        "run_info": {},
         "origin": "api",
         "parent_operation_id": uuid4(),
     }
@@ -63,9 +83,27 @@ def _run(pipeline_name, status=PipelineRunStatus.DATASET_PROCESSING_STARTED, **o
     return SimpleNamespace(**fields)
 
 
-def _wire(monkeypatch, runs, datasets, *, rollback_fails=False):
-    """Patch the module's collaborators and return the ordered list of calls made."""
+def _wire(monkeypatch, runs, datasets, *, rollback_fails=False, users=None, newest_rows=None):
+    """Patch the module's collaborators and return the ordered list of calls made.
+
+    ``users`` maps a run's ``user_id`` to the model recovery loads for its
+    telemetry; any other id is "not found", so the stored id is sent.
+    ``newest_rows`` maps a dataset id to the newest row of the pipeline on it;
+    a dataset not in it has its candidate run's own row as its newest.
+    """
     calls = []
+    users = users or {}
+    newest_rows = newest_rows or {}
+
+    async def _newest_row(dataset_id, _pipeline_name):
+        if dataset_id in newest_rows:
+            return newest_rows[dataset_id]
+        return next((run for run in runs if run.dataset_id == dataset_id), None)
+
+    async def _get_user(user_id):
+        if user_id not in users:
+            raise LookupError(f"Could not find user: {user_id}")
+        return users[user_id]
 
     async def _rollback(**kwargs):
         if rollback_fails:
@@ -73,16 +111,24 @@ def _wire(monkeypatch, runs, datasets, *, rollback_fails=False):
         calls.append(("rollback", kwargs))
 
     async def _log_error(**kwargs):
+        # A stale kwarg would be swallowed by recovery's broad except and retried on every startup.
+        inspect.signature(log_pipeline_run_error).bind(**kwargs)
         calls.append(("error", kwargs))
 
     async def _latest_runs():
         return runs
 
+    async def _no_sessions(row_ids):
+        return {}
+
     monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: _FakeEngine(datasets))
     monkeypatch.setattr(recovery_module, "get_unterminated_pipeline_runs", _latest_runs)
+    monkeypatch.setattr(recovery_module, "get_pipeline_run_by_dataset", _newest_row)
     monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
     monkeypatch.setattr(recovery_module, "ROLLBACK_HANDLERS", {"cognify_pipeline": _rollback})
     monkeypatch.setattr(recovery_module, "log_pipeline_run_error", _log_error)
+    monkeypatch.setattr(recovery_module, "get_run_session_ids", _no_sessions)
+    monkeypatch.setattr(recovery_module, "get_user", _get_user)
     monkeypatch.setattr(recovery_module, "STALE_RUN_MIN_AGE_SECONDS", 3600)
 
     @contextmanager
@@ -114,7 +160,7 @@ async def test_cognify_run_is_rolled_back_then_closed_with_its_own_metadata(monk
     rollback = calls[0][1]
     assert rollback["pipeline_run_id"] == run.pipeline_run_id
     assert rollback["dataset"] == dataset
-    assert rollback["keep_completed_data"] is True
+    assert rollback["pipeline_name"] == "cognify_pipeline"
 
     error = calls[1][1]
     assert isinstance(error["e"], AbandonedPipelineRunError)
@@ -127,9 +173,10 @@ async def test_cognify_run_is_rolled_back_then_closed_with_its_own_metadata(monk
     assert error["tenant_id"] == run.tenant_id
     assert "user" not in error
     assert error["started_at"] == run.started_at
-    assert error["data_info"] == ["doc-1", "doc-2"]
     assert error["origin"] == "api"
     assert error["parent_operation_id"] == run.parent_operation_id
+    # The run is its dataset's newest: its closing row is dated now.
+    assert error["created_at"] is None
 
 
 @pytest.mark.asyncio
@@ -155,6 +202,31 @@ async def test_every_pipeline_with_a_stale_started_run_is_closed(monkeypatch):
     closed = sorted(kw["pipeline_name"] for name, kw in calls if name == "error")
     assert closed == ["add_pipeline", "cognify_pipeline", "memify_pipeline"]
     assert sum(1 for name, _ in calls if name == "rollback") == 1
+
+
+@pytest.mark.asyncio
+async def test_sessions_are_read_once_per_pass_and_each_closed_run_gets_its_own(monkeypatch):
+    """One pipeline_run_sessions lookup for every candidate, not one per closed run."""
+    runs = [_run("memify_pipeline"), _run("add_pipeline"), _run("cognify_pipeline")]
+    calls = _wire(monkeypatch, runs, {r.dataset_id: _dataset_for(r) for r in runs})
+    lookups = []
+    sessions = {runs[0].id: ["chat_1", "chat_2"], runs[1].id: ["chat_1"]}
+
+    async def _sessions(row_ids):
+        lookups.append(sorted(row_ids, key=str))
+        return sessions
+
+    monkeypatch.setattr(recovery_module, "get_run_session_ids", _sessions)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert lookups == [sorted((r.id for r in runs), key=str)]
+    by_name = {kw["pipeline_name"]: kw["session_ids"] for name, kw in calls if name == "error"}
+    assert by_name == {
+        "memify_pipeline": ("chat_1", "chat_2"),
+        "add_pipeline": ("chat_1",),
+        "cognify_pipeline": (),
+    }
 
 
 @pytest.mark.asyncio
@@ -297,15 +369,13 @@ async def test_recovery_emits_stored_identity_through_the_real_payload_builder(
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "test-anonymous")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "test-persistent")
     monkeypatch.setattr(utils, "_get_api_key_tracking_id", lambda: "")
-    request = AsyncMock()
-    monkeypatch.setattr(utils, "_send_telemetry_request", request)
-    pending_before = set(utils._TELEMETRY_TASKS)
+    enqueue = Mock()
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", enqueue)
 
     await recovery_module.recover_stale_pipeline_runs_on_startup()
-    await asyncio.gather(*(utils._TELEMETRY_TASKS - pending_before))
 
-    request.assert_awaited_once()
-    payload = request.await_args.args[0]
+    enqueue.assert_called_once()
+    payload = enqueue.call_args.args[0]
     assert payload["event_name"] == "Pipeline Run Errored"
     for properties in (payload["properties"], payload["user_properties"]):
         assert properties["user_id"] == str(run.user_id)
@@ -398,3 +468,365 @@ async def test_recovery_service_revisits_young_runs_and_stops_on_exit(monkeypatc
     assert len(calls) == 1
     await asyncio.sleep(0.03)
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_recovering_an_agents_run_attributes_the_agent(monkeypatch):
+    """The stored id alone cannot be recognised as an agent; the loaded model can."""
+    from cognee.shared import utils
+
+    run = _run("add_pipeline")
+    parent_id = uuid4()
+    agent = SimpleNamespace(
+        id=run.user_id,
+        tenant_id=run.tenant_id,
+        parent_user_id=parent_id,
+        email=f"codex+{parent_id}@cognee.agent",
+    )
+    _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)}, users={run.user_id: agent})
+    monkeypatch.setenv("ENV", "local")
+    monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
+    monkeypatch.setattr(utils, "get_anonymous_id", lambda: "test-anonymous")
+    monkeypatch.setattr(utils, "get_persistent_id", lambda: "test-persistent")
+    monkeypatch.setattr(utils, "_get_api_key_tracking_id", lambda: "")
+    enqueue = Mock()
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", enqueue)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    properties = enqueue.call_args.args[0]["properties"]
+    assert properties["user_id"] == str(run.user_id)
+    assert properties["is_agent"] is True
+    assert properties["agent_owner_id"] == str(parent_id)
+    assert properties["agent_plugin"] == "codex"
+    assert properties["tenant_id"] == str(run.tenant_id)
+
+
+@pytest.mark.asyncio
+async def test_a_run_a_later_run_has_followed_is_rolled_back_and_closed_beneath_it(monkeypatch):
+    run = _run("cognify_pipeline")
+    later = _run("cognify_pipeline", dataset_id=run.dataset_id, created_at=ONE_HOUR_AGO)
+    calls = _wire(
+        monkeypatch,
+        [run],
+        {run.dataset_id: _dataset_for(run)},
+        newest_rows={run.dataset_id: later},
+    )
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert [name for name, _ in calls] == ["rollback", "error"]
+    assert calls[1][1]["created_at"] == TWO_HOURS_AGO + timedelta(microseconds=1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("apart", [timedelta(0), timedelta(microseconds=1)])
+async def test_a_run_with_no_room_beneath_the_later_run_stays_started(monkeypatch, apart):
+    """One microsecond apart is no room either: the closing row would carry the
+    later run's own time, and which of the two is then the newest is not defined."""
+    run = _run("cognify_pipeline")
+    later = _run("cognify_pipeline", dataset_id=run.dataset_id, created_at=run.created_at + apart)
+    calls = _wire(
+        monkeypatch,
+        [run],
+        {run.dataset_id: _dataset_for(run)},
+        newest_rows={run.dataset_id: later},
+    )
+    ownerships = []
+
+    @contextmanager
+    def claim(_run):
+        ownerships.append(SimpleNamespace(closed=False))
+        yield ownerships[-1]
+
+    monkeypatch.setattr(recovery_module, "claim_run_ownership", claim)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    # No ERRORED row and the ownership marker kept: the next pass sees the run again.
+    assert [name for name, _ in calls] == ["rollback"]
+    assert [ownership.closed for ownership in ownerships] == [False]
+
+
+@pytest.mark.asyncio
+async def test_two_microseconds_beneath_the_later_run_is_room_enough(monkeypatch):
+    run = _run("cognify_pipeline")
+    later = _run(
+        "cognify_pipeline",
+        dataset_id=run.dataset_id,
+        created_at=run.created_at + timedelta(microseconds=2),
+    )
+    calls = _wire(
+        monkeypatch,
+        [run],
+        {run.dataset_id: _dataset_for(run)},
+        newest_rows={run.dataset_id: later},
+    )
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert [name for name, _ in calls] == ["rollback", "error"]
+    assert calls[1][1]["created_at"] == run.created_at + timedelta(microseconds=1)
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_no_room_keeps_its_marker_and_is_seen_by_the_next_pass(
+    monkeypatch, tmp_path
+):
+    """The same with the real ownership claim: the marker a dead writer left is
+    still there after the pass, so the next one claims the run again."""
+    monkeypatch.setattr(
+        run_ownership,
+        "get_base_config",
+        lambda: SimpleNamespace(system_root_directory=str(tmp_path)),
+    )
+    with run_ownership.pipeline_run_ownership() as writer:
+        pass  # The writer is gone and its marker is left, as after a crash.
+    run = _run("cognify_pipeline", run_info={"recovery_lock": writer.token})
+    later = _run("cognify_pipeline", dataset_id=run.dataset_id, created_at=run.created_at)
+    calls = _wire(
+        monkeypatch,
+        [run],
+        {run.dataset_id: _dataset_for(run)},
+        newest_rows={run.dataset_id: later},
+    )
+    monkeypatch.setattr(recovery_module, "claim_run_ownership", run_ownership.claim_run_ownership)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert [name for name, _ in calls] == ["rollback"]
+    assert run_ownership._lock_path(writer.token).is_dir()
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    # Claimed and rolled back again, and still not closed.
+    assert [name for name, _ in calls] == ["rollback", "rollback"]
+    assert run_ownership._lock_path(writer.token).is_dir()
+
+
+_ENGINE_USERS = [
+    importlib.import_module(name)
+    for name in (
+        "cognee.modules.pipelines.operations.log_pipeline_run_error",
+        "cognee.modules.pipelines.methods.get_pipeline_run_by_dataset",
+        "cognee.modules.pipelines.methods.get_pipeline_run",
+        # The improve change check imports the engine from here when it is called.
+        "cognee.infrastructure.databases.relational",
+    )
+]
+
+
+@pytest_asyncio.fixture
+async def runs_engine(tmp_path, monkeypatch):
+    """A SQLite engine holding only ``pipeline_runs``, read and written by the real functions."""
+    engine = create_relational_engine(
+        db_path=str(tmp_path),
+        db_name="recovery_test.db",
+        db_host="",
+        db_port="",
+        db_username="",
+        db_password="",
+        db_provider="sqlite",
+    )
+    async with engine.engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all, tables=[PipelineRun.__table__])
+    for module in _ENGINE_USERS:
+        monkeypatch.setattr(module, "get_relational_engine", lambda: engine)
+    yield engine
+    await engine.engine.dispose()
+
+
+async def _store(engine, *rows):
+    async with engine.get_async_session() as session:
+        session.add_all(
+            [
+                PipelineRun(
+                    pipeline_run_id=run_id,
+                    pipeline_name="cognify_pipeline",
+                    pipeline_id=uuid4(),
+                    status=status,
+                    dataset_id=dataset_id,
+                    run_info={},
+                    created_at=created_at,
+                )
+                for run_id, dataset_id, status, created_at in rows
+            ]
+        )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_closing_a_run_a_later_run_has_followed_leaves_the_datasets_status(runs_engine):
+    dataset_id, abandoned, later = uuid4(), uuid4(), uuid4()
+    started, completed = (
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+    )
+    await _store(
+        runs_engine,
+        (abandoned, dataset_id, started, TWO_HOURS_AGO),
+        (later, dataset_id, started, ONE_HOUR_AGO),
+        (later, dataset_id, completed, ONE_HOUR_AGO + timedelta(minutes=10)),
+    )
+
+    await recovery_module._close_as_abandoned(
+        await get_latest_pipeline_run(abandoned), SimpleNamespace(id=dataset_id), []
+    )
+
+    # The abandoned run is closed, and the dataset still reads as the later run left it.
+    closed = await get_latest_pipeline_run(abandoned)
+    assert closed.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED
+    assert closed.error_class == "AbandonedPipelineRunError"
+    assert await get_unterminated_pipeline_runs() == []
+    assert await get_pipeline_status([dataset_id], "cognify_pipeline") == {
+        str(dataset_id): completed
+    }
+
+
+@pytest.mark.asyncio
+async def test_closing_the_datasets_newest_run_makes_it_the_datasets_status(runs_engine):
+    dataset_id, earlier, abandoned = uuid4(), uuid4(), uuid4()
+    started, completed = (
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+    )
+    await _store(
+        runs_engine,
+        (earlier, dataset_id, started, TWO_HOURS_AGO),
+        (earlier, dataset_id, completed, TWO_HOURS_AGO + timedelta(minutes=10)),
+        (abandoned, dataset_id, started, ONE_HOUR_AGO),
+    )
+    before = datetime.now(timezone.utc)
+
+    await recovery_module._close_as_abandoned(
+        await get_latest_pipeline_run(abandoned), SimpleNamespace(id=dataset_id), []
+    )
+
+    closed = await get_latest_pipeline_run(abandoned)
+    assert closed.created_at.replace(tzinfo=timezone.utc) >= before
+    assert await get_unterminated_pipeline_runs() == []
+    assert await get_pipeline_status([dataset_id], "cognify_pipeline") == {
+        str(dataset_id): PipelineRunStatus.DATASET_PROCESSING_ERRORED
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_no_room_beneath_the_later_run_gets_no_closing_row(runs_engine):
+    """On a real table: one microsecond apart, nothing is written and the run is
+    still listed as unterminated."""
+    dataset_id, abandoned, later = uuid4(), uuid4(), uuid4()
+    started, completed = (
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+    )
+    await _store(
+        runs_engine,
+        (abandoned, dataset_id, started, TWO_HOURS_AGO),
+        (later, dataset_id, completed, TWO_HOURS_AGO + timedelta(microseconds=1)),
+    )
+
+    with pytest.raises(RuntimeError, match="cannot be closed beneath"):
+        await recovery_module._close_as_abandoned(
+            await get_latest_pipeline_run(abandoned), SimpleNamespace(id=dataset_id), []
+        )
+
+    assert (await get_latest_pipeline_run(abandoned)).status == started
+    assert [run.pipeline_run_id for run in await get_unterminated_pipeline_runs()] == [abandoned]
+    assert await get_pipeline_status([dataset_id], "cognify_pipeline") == {
+        str(dataset_id): completed
+    }
+
+
+@pytest.mark.asyncio
+async def test_closing_an_abandoned_run_leaves_the_status_of_a_run_that_overlapped_it(
+    runs_engine,
+):
+    """The other run started before the abandoned one and finished after it. Its
+    closing row is still the dataset's newest, so the status stays what it left."""
+    dataset_id, overlapping, abandoned = uuid4(), uuid4(), uuid4()
+    started, completed = (
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+    )
+    await _store(
+        runs_engine,
+        (overlapping, dataset_id, started, TWO_HOURS_AGO - timedelta(hours=1)),
+        (abandoned, dataset_id, started, TWO_HOURS_AGO),
+        (overlapping, dataset_id, completed, ONE_HOUR_AGO),
+    )
+
+    await recovery_module._close_as_abandoned(
+        await get_latest_pipeline_run(abandoned), SimpleNamespace(id=dataset_id), []
+    )
+
+    closed = await get_latest_pipeline_run(abandoned)
+    assert closed.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED
+    assert closed.created_at.replace(tzinfo=timezone.utc) == TWO_HOURS_AGO + timedelta(
+        microseconds=1
+    )
+    assert await get_unterminated_pipeline_runs() == []
+    assert await get_pipeline_status([dataset_id], "cognify_pipeline") == {
+        str(dataset_id): completed
+    }
+
+
+async def _store_improve_stamp(engine, dataset_id, stage_started_at) -> None:
+    """The row a succeeded improve leaves, with one stage's stamp."""
+    async with engine.get_async_session() as session:
+        session.add(
+            PipelineRun(
+                pipeline_run_id=uuid4(),
+                operation_name=IMPROVE_OPERATION_NAME,
+                outcome="succeeded",
+                status=None,
+                dataset_id=dataset_id,
+                run_info=watermark_stamp(REVIEW_WATERMARK_KEY, "done", stage_started_at),
+                created_at=stage_started_at,
+                ended_at=stage_started_at + timedelta(minutes=1),
+            )
+        )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_improve_does_not_count_the_closing_row_dated_beneath_a_later_run(runs_engine):
+    """The improve change check counts run rows dated after its stamp. The row
+    closing a run that a later run has followed is dated before it, so closing
+    that run does not make improve run its stage again."""
+    dataset_id, abandoned, later = uuid4(), uuid4(), uuid4()
+    started, completed = (
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+    )
+    await _store(
+        runs_engine,
+        (abandoned, dataset_id, started, TWO_HOURS_AGO),
+        (later, dataset_id, started, ONE_HOUR_AGO),
+        (later, dataset_id, completed, ONE_HOUR_AGO + timedelta(minutes=10)),
+    )
+    await _store_improve_stamp(runs_engine, dataset_id, ONE_HOUR_AGO + timedelta(minutes=30))
+    assert not await has_dataset_changed_since_last_improve(dataset_id, REVIEW_WATERMARK_KEY)
+
+    await recovery_module._close_as_abandoned(
+        await get_latest_pipeline_run(abandoned), SimpleNamespace(id=dataset_id), []
+    )
+
+    assert not await has_dataset_changed_since_last_improve(dataset_id, REVIEW_WATERMARK_KEY)
+
+
+@pytest.mark.asyncio
+async def test_improve_counts_the_closing_row_of_the_datasets_newest_run(runs_engine):
+    """That row is dated now, after the stamp, as before."""
+    dataset_id, abandoned = uuid4(), uuid4()
+    await _store(
+        runs_engine,
+        (abandoned, dataset_id, PipelineRunStatus.DATASET_PROCESSING_STARTED, TWO_HOURS_AGO),
+    )
+    await _store_improve_stamp(runs_engine, dataset_id, ONE_HOUR_AGO)
+    assert not await has_dataset_changed_since_last_improve(dataset_id, REVIEW_WATERMARK_KEY)
+
+    await recovery_module._close_as_abandoned(
+        await get_latest_pipeline_run(abandoned), SimpleNamespace(id=dataset_id), []
+    )
+
+    assert await has_dataset_changed_since_last_improve(dataset_id, REVIEW_WATERMARK_KEY)

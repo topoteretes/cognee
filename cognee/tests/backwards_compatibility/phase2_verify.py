@@ -1,64 +1,37 @@
-"""
-Backwards Compatibility Test
+"""Verify upgrades from the v1.6.3 compatibility baseline.
 
-Phase 1 -  run with a legacy cognee version
+Phase 1 seeds real graph, vector and relational stores using v1.6.3. Phase 2
+runs current migrations, checks direct graph/ledger/vector access, re-cognifies,
+and verifies the data again. Completion searches are smoke checks; non-empty
+LLM answers alone do not establish that the old data remains accessible.
 
-Seeds the database with Lorem Ipsum data: add → cognify → search.
+The baseline already has dataset-scoped documents, DLT source manifests and
+session persistence watermarks. Verify those shapes survive the upgrade:
 
-Phase 2 - run with current Cognee branch
+* identical content in two datasets has separate IDs, each resolving only in
+  its own dataset and unambiguously without a dataset filter;
+* the DLT manifest and its row nodes survive, re-adding the same source
+  preserves the document and row IDs without duplicating records, and a source
+  first cognified on the current branch builds one row node per manifest row;
+* an unchanged session produces no new session document and preserves its
+  watermark; growing it persists only the new entry, with every fact stored in
+  exactly one session document;
+* deleting every document removes its solely-owned artifacts, preserves shared
+  artifacts until their last owner is gone, and leaves the graph empty.
 
-Runs startup migrations (relational + graph + vector), then verifies that the
-legacy-seeded graph, vector AND relational-ledger data is actually *accessible
-and correct* after migration, then re-cognifies and verifies again.
-
-Why these specific checks?
---------------------------
-A migration can leave the database query-able yet semantically broken — e.g.
-the node-ID change in PR #2515 (issue #2510) did not raise, it silently left
-old graphs with the pre-namespacing IDs, breaking projection/search and causing
-re-cognify to raise ``EntityAlreadyExistsError``.
-
-Gating on completion-style search (GRAPH_COMPLETION/RAG_COMPLETION) is NOT
-reliable: the LLM can return a non-empty "I don't know" answer even when graph
-retrieval is empty. So this test gates on signals that genuinely fail when data
-is inaccessible:
-
-* graph — read the dataset's graph directly and assert it has nodes AND that no
-  Entity/EntityType node is still on the pre-#2515 ID scheme (which would mean
-  the migration didn't run/complete);
-* ledger — read the relational ``nodes``/``edges`` tables and assert every id
-  the migration could have moved still resolves to a live graph node (a stale
-  ledger id silently orphans nodes on delete);
-* vector — a CHUNKS search (raw vector retrieval) must return results.
-* delete — hard-delete documents one by one; after each, only the nodes/edges
-  owned solely by that document disappear, shared ones survive until their last
-  owner goes, and the graph ends empty. Delete resolves nodes via the ledger
-  (``nodes.slug``), so this is the end-to-end proof of ledger/graph lockstep: a
-  stale ledger id makes delete silently orphan a migrated node, which the static
-  checks above can't catch. Fork rows are deleted through their PRE-FORK id.
-* fork — Phase 1 added identical content to two datasets (one shared legacy
-  row). The dataset-scoping backfill must split it into a keeper and a fork
-  row recording ``legacy_id``; the pre-fork id must resolve in both datasets
-  through ``get_data`` with dataset context, and the context-free lookup must
-  refuse with ``AmbiguousDataIdError`` naming both candidates.
-
-Completion searches are still exercised afterwards as a smoke check (must not
-raise), just not used as the accessibility gate.
-
-* sessions — the current branch must take over the legacy session cache that
-  Phase 1 seeded, without re-ingesting: improve() on the untouched session
-  ingests nothing new (the full window is byte-identical to the legacy
-  snapshot, content-hash dedup absorbs it) and writes the persist watermark;
-  after growing the session, the next improve() ingests exactly one document
-  containing ONLY the new entry; every session fact ends up stored exactly
-  once across both versions. A missing legacy session is a hard failure — the
-  CI pin never goes below v1.2.0 (the earliest release with the SQL session
-  cache), so absence means Phase 1's seeding broke.
+Graph checks also reject stale Entity/EntityType IDs and dangling edges.
+Ownership checks require every document to own graph nodes, read from its
+store's provenance mode (in-graph source refs or the relational ledger), and
+reject ledger references to missing graph nodes. Raw CHUNKS retrieval must
+return the seeded text. Together these checks catch semantically broken stores
+even when a completion search can still return an answer.
 """
 
 import asyncio
+import json
 import sys
 from collections import Counter
+from contextlib import asynccontextmanager
 
 from sqlalchemy import select
 
@@ -74,6 +47,7 @@ from cognee.modules.data.methods.get_dataset_databases import get_dataset_databa
 from cognee.modules.data.models import Data as _ScopedData
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.models import Edge, Node
+from cognee.modules.improve.constants import USER_SESSIONS_NODE_SET
 from cognee.modules.migrations.versions.namespace_entity_type_node_ids import build_id_remap
 from cognee.modules.users.methods import get_default_user
 
@@ -96,12 +70,14 @@ Loren Ipsum Dolor sit amet, Lorem ipsum.
 DATASET = "lorem_ipsum"
 SEARCH_QUERY = "What is Lorem Ipsum and where does it come from?"
 
-# Fork verification — dataset names must stay in sync with phase1_seed.py.
-FORK_DATASET_A = "fork_shared_a"
-FORK_DATASET_B = "fork_shared_b"
+# Dataset isolation — names must stay in sync with phase1_seed.py.
+ISOLATION_DATASET_A = "isolation_a"
+ISOLATION_DATASET_B = "isolation_b"
 
-# DLT takeover checks — markers must stay in sync with phase1_seed.py.
+# DLT compatibility checks — markers must stay in sync with phase1_seed.py.
 DLT_COMPAT_DATASET = "dlt_compat"
+# Ingested and cognified on the current branch only (not seeded).
+DLT_CURRENT_DATASET = "dlt_current"
 DLT_COMPAT_SOURCE = "compat_widgets"
 DLT_COMPAT_ROWS = [
     {"id": "1", "name": "anemometer", "shelf": "north"},
@@ -109,7 +85,7 @@ DLT_COMPAT_ROWS = [
     {"id": "3", "name": "hygrometer", "shelf": "south"},
 ]
 
-# Session takeover checks — markers must stay in sync with phase1_seed.py.
+# Session persistence checks — markers must stay in sync with phase1_seed.py.
 COMPAT_SESSION_ID = "compat_session"
 SESSION_FACT_1_MARKER = "Anton Zorman"
 SESSION_FACT_2_MARKER = "Ilka Matova"
@@ -120,6 +96,27 @@ SESSION_FACT_3_MARKER = "Pavle Rossi"
 def _fail(message: str) -> None:
     print(f"ERROR: {message}")
     sys.exit(1)
+
+
+def _parse_ref(stage: str, ref: str):
+    """Decompose a source ref, failing the check with the ref named when it cannot."""
+    from cognee.infrastructure.databases.provenance.source_refs import parse_source_ref_key
+
+    try:
+        return parse_source_ref_key(ref)
+    except ValueError:
+        _fail(f"[{stage}] graph carries a source ref that is not a document or chunk ref: {ref!r}")
+
+
+@asynccontextmanager
+async def _dataset_graph_engine(dataset_id, owner_by_dataset):
+    """The graph engine holding ``dataset_id``; ``owner_by_dataset`` is None with access
+    control off, when every dataset shares one graph."""
+    if owner_by_dataset is None:
+        yield await get_graph_engine()
+        return
+    async with set_database_global_context_variables(dataset_id, owner_by_dataset[dataset_id]):
+        yield await get_graph_engine()
 
 
 def _count_stale_ids(nodes: list) -> int:
@@ -216,12 +213,10 @@ async def _verify_graph_access(stage: str, nodes: list, edges: list) -> None:
 
 
 async def _verify_vector_access(stage: str) -> None:
-    """CHUNKS is raw vector retrieval (no LLM fallback); empty == inaccessible.
+    """Raw CHUNKS retrieval must still find the seeded text.
 
-    Scoped to the lorem dataset: the dlt_compat dataset legitimately lacks
-    chunk/summary collections (legacy DLT skipped summarization; the SQLite
-    seed cannot cognify at all), and a cross-dataset search currently raises
-    CollectionNotFoundError when any one dataset misses the collection.
+    Scope to the lorem dataset: DLT rows have their own vector collection and
+    do not populate DocumentChunk_text.
     """
     results = await cognee.search(
         query_type=SearchType.CHUNKS, query_text=SEARCH_QUERY, datasets=[DATASET]
@@ -231,28 +226,63 @@ async def _verify_vector_access(stage: str) -> None:
     print(f"  [vector] CHUNKS: {len(results)} result(s) — OK")
 
 
-async def _verify_ledger_access(stage: str, graph_node_ids: set) -> None:
-    """Read the relational delete-ledger (``nodes`` / ``edges``) and verify it
-    still points at the migrated graph.
+async def _verify_ownership(stage: str, graph_node_ids: set) -> None:
+    """Every document must still own graph nodes, read the way its store records it.
 
-    The delete system deletes graph nodes by ``nodes.slug`` and references edges
-    by ``edges.source_node_id`` / ``destination_node_id`` — all graph node ids.
-    If the id migration moved graph nodes but left these stale, a later delete
-    silently misses the migrated nodes (orphans). So this asserts every ledger
-    id that the migration could have moved (Entity/EntityType ``slug`` and every
-    edge endpoint) still resolves to a live graph node.
+    A graph marked for graph provenance keeps ownership in source-ref columns on
+    its nodes; any other graph keeps it in the relational ledger (``nodes`` /
+    ``edges``). Each document must own at least one node in its store's mode, so
+    ownership a migration dropped fails here rather than as orphans after a delete.
 
-    A legacy seed predating the ledger leaves the tables empty; that is not a
-    failure here (re-cognify on the current branch repopulates them and Step 3
-    re-checks), but reading them still proves the relational store is reachable.
+    Ledger rows must also resolve to live graph nodes: the delete system deletes
+    graph nodes by ``nodes.slug`` and references edges by ``edges.source_node_id``
+    / ``destination_node_id``. If the id migration moved graph nodes but left these
+    stale, a later delete silently misses the migrated nodes.
     """
+    from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
+
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         node_rows = (await session.scalars(select(Node))).all()
         edge_rows = (await session.scalars(select(Edge))).all()
+        documents = (
+            await session.execute(
+                select(_ScopedData.id, _ScopedData.dataset_id).where(
+                    _ScopedData.dataset_id.is_not(None)
+                )
+            )
+        ).all()
+    if not documents:
+        _fail(f"[{stage}] no dataset_data rows found — the seed is broken.")
+
+    dataset_rows = await get_dataset_databases()
+    owner_by_dataset = {row.dataset_id: row.owner_id for row in dataset_rows} or None
+    ledger_owners = {(row.dataset_id, row.data_id) for row in node_rows}
+    modes: Counter = Counter()
+    for dataset_id in {dataset_id for _, dataset_id in documents}:
+        async with _dataset_graph_engine(dataset_id, owner_by_dataset) as graph_engine:
+            in_graph = await stores_provenance_in_graph(graph_engine)
+            if in_graph:
+                refs = await graph_engine.find_node_source_refs_by_dataset(str(dataset_id))
+                graph_owners = {
+                    _parse_ref(stage, ref).data_id for keys in refs.values() for ref in keys
+                }
+        mode = "in-graph refs" if in_graph else "ledger"
+        for data_id, document_dataset_id in documents:
+            if document_dataset_id != dataset_id:
+                continue
+            modes[mode] += 1
+            owned = data_id in graph_owners if in_graph else (dataset_id, data_id) in ledger_owners
+            if not owned:
+                _fail(
+                    f"[{stage}] document {data_id} in dataset {dataset_id} owns no graph node "
+                    f"in its store's provenance mode ({mode}) — ownership was lost, so deleting "
+                    "it would leave its nodes behind."
+                )
+    print(f"  [ownership] {len(documents)} document(s) own graph nodes {dict(modes)} — OK")
 
     if not node_rows and not edge_rows:
-        print("  [ledger] empty (legacy seed predates the node/edge ledger) — read OK, skipped")
+        print("  [ledger] no ledger rows to resolve — OK")
         return
 
     stale_node_slugs = [
@@ -286,11 +316,11 @@ async def _verify_ledger_access(stage: str, graph_node_ids: set) -> None:
 
 
 async def _verify_access(stage: str) -> None:
-    print(f"\n[{stage}] Verifying graph + vector + ledger access")
+    print(f"\n[{stage}] Verifying graph + ownership + vector access")
     nodes, edges = await _collect_graph()
     graph_node_ids = {node_id for node_id, _ in nodes}
     await _verify_graph_access(stage, nodes, edges)
-    await _verify_ledger_access(stage, graph_node_ids)
+    await _verify_ownership(stage, graph_node_ids)
     await _verify_vector_access(stage)
 
     # Smoke-check the completion + summaries paths (must not raise). Not used
@@ -368,23 +398,24 @@ async def _ledger_expectations(data_id, dataset_id, scope_to_dataset: bool):
     return doc_nodes - other_nodes, doc_edges - other_edges
 
 
-async def _graph_provenance_expectations(graph_engine, dataset_id, data_id):
+async def _graph_provenance_expectations(stage, graph_engine, dataset_id, data_id):
     """Ownership expectations read from in-graph provenance columns.
 
     Graph-provenance datasets deliberately have no relational-ledger rows
     (no dual tracking), so the delete oracle must read the same columns the
     delete itself uses: a node/edge is expected to disappear only when this
-    document's source ref is its SOLE owner.
+    document owns ALL its source refs, including chunk-scoped refs. A ref that
+    is neither kind fails the check by name.
     """
-    from cognee.infrastructure.databases.provenance.source_refs import make_source_ref_key
 
-    key = make_source_ref_key(dataset_id, data_id)
-
-    def _refs(raw) -> set:
-        return {ref for ref in (raw or "").split("|") if ref}
+    def _solely_owned(raw) -> bool:
+        refs = [_parse_ref(stage, ref) for ref in (raw or "").split("|") if ref]
+        return bool(refs) and all(
+            ref.dataset_id == dataset_id and ref.data_id == data_id for ref in refs
+        )
 
     node_rows = await graph_engine.query("MATCH (n:Node) RETURN n.id, n.source_ref_keys")
-    solely_nodes = {str(node_id) for node_id, raw in node_rows if _refs(raw) == {key}}
+    solely_nodes = {str(node_id) for node_id, raw in node_rows if _solely_owned(raw)}
 
     edge_rows = await graph_engine.query(
         "MATCH (a:Node)-[r:EDGE]->(b:Node) "
@@ -393,30 +424,21 @@ async def _graph_provenance_expectations(graph_engine, dataset_id, data_id):
     solely_edges = {
         (str(source), str(target), str(rel))
         for source, target, rel, raw in edge_rows
-        if _refs(raw) == {key}
+        if _solely_owned(raw)
     }
     return solely_nodes, solely_edges
 
 
-async def _expectations_for(data_id, dataset_id, owner_by_dataset):
-    """Delete-ownership oracle matching the dataset's provenance mode.
+async def _expectations_for(stage, data_id, dataset_id, owner_by_dataset):
+    """Read ownership from each store's actual provenance mode.
 
-    The lorem dataset (non-empty legacy graph) stays on the relational
-    ledger; the dlt_compat dataset's graph was empty after the legacy sweep,
-    so the current branch marked it graph-provenance — its ownership lives
-    in the graph columns, not the ledger.
+    The v1.6.3 baseline supports relational-ledger and graph-provenance stores.
     """
     from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 
-    if owner_by_dataset is None:
-        graph_engine = await get_graph_engine()
+    async with _dataset_graph_engine(dataset_id, owner_by_dataset) as graph_engine:
         if await stores_provenance_in_graph(graph_engine):
-            return await _graph_provenance_expectations(graph_engine, dataset_id, data_id)
-    else:
-        async with set_database_global_context_variables(dataset_id, owner_by_dataset[dataset_id]):
-            graph_engine = await get_graph_engine()
-            if await stores_provenance_in_graph(graph_engine):
-                return await _graph_provenance_expectations(graph_engine, dataset_id, data_id)
+            return await _graph_provenance_expectations(stage, graph_engine, dataset_id, data_id)
 
     return await _ledger_expectations(
         data_id, dataset_id, scope_to_dataset=owner_by_dataset is not None
@@ -424,12 +446,19 @@ async def _expectations_for(data_id, dataset_id, owner_by_dataset):
 
 
 async def _session_data_items(user):
+    """The lorem dataset's persisted session Q&A documents.
+
+    improve() also runs its other stages over the dataset (distilled lessons, for
+    one, are stored as documents), so only rows in the session Q&A node set count.
+    """
     datasets = await get_datasets_by_name([DATASET], user.id)
     items = await get_dataset_data(datasets[0].id)
-    # Current improve() also publishes derived summaries. They may repeat session
-    # facts by design; this oracle checks exactly-once RAW transcript persistence.
-    summary_prefix = f"# Session summary ({COMPAT_SESSION_ID})\n\n"
-    return [item for item in items if not _read_raw_document(item).startswith(summary_prefix)]
+    return [item for item in items if USER_SESSIONS_NODE_SET in _node_set(item)]
+
+
+def _node_set(item) -> list:
+    node_set = item.node_set or []
+    return json.loads(node_set) if isinstance(node_set, str) else node_set
 
 
 def _read_raw_document(item) -> str:
@@ -437,19 +466,14 @@ def _read_raw_document(item) -> str:
         return f.read()
 
 
-async def _verify_session_takeover(stage: str) -> None:
-    """Verify the current branch takes over the legacy session cache incrementally.
+async def _verify_session_persistence(stage: str) -> None:
+    """Preserve the seeded session and persist only later entries.
 
-    A. improve() on the untouched legacy session must ingest NO new raw transcript — the
-       full window is byte-identical to the legacy whole-session snapshot, so
-       content-hash dedup absorbs it — and must write the persist watermark.
-    B. After the session grows by one entry, improve() must ingest exactly ONE
-       new raw document containing ONLY the new entry (legacy entries are never
-       re-ingested), and every session fact must be stored exactly once across
-       both versions. Derived summary documents are excluded from this raw-data
-       oracle; summary publication and retry dedup have separate unit coverage.
+    The v1.6.3 watermark must remain 2 after an unchanged improve(). After one
+    new entry, improve() must ingest exactly that entry, advance the watermark
+    to 3, and leave every session fact in exactly one session document.
     """
-    print(f"\n[{stage}] Verifying session persistence takeover")
+    print(f"\n[{stage}] Verifying session persistence")
 
     user = await get_default_user()
     user_id = str(user.id)
@@ -461,13 +485,16 @@ async def _verify_session_takeover(stage: str) -> None:
     if not entries:
         _fail(
             f"[{stage}] legacy session '{COMPAT_SESSION_ID}' not found — Phase 1's session "
-            "seeding broke (the CI pin never goes below v1.2.0, which has session memory)."
+            "seeding broke (v1.6.3 already has session memory)."
         )
 
     if len(entries) != 2:
         _fail(f"[{stage}] expected 2 legacy session entries, found {len(entries)}.")
 
-    # A: unchanged legacy session -> dedup no-op + watermark heals.
+    # A: preserve the existing watermark without replaying old entries.
+    watermark = await get_persisted_qa_count(session_manager, user_id, COMPAT_SESSION_ID)
+    if watermark != 2:
+        _fail(f"[{stage}] seeded persist watermark should be 2, got {watermark}.")
     before = await _session_data_items(user)
     await cognee.improve(DATASET, session_ids=[COMPAT_SESSION_ID])
     after_unchanged = await _session_data_items(user)
@@ -475,12 +502,13 @@ async def _verify_session_takeover(stage: str) -> None:
     if new_items:
         _fail(
             f"[{stage}] improve() re-ingested an unchanged legacy session "
-            f"({len(new_items)} new document(s)) — expected content-hash dedup no-op."
+            f"({len(new_items)} new session document(s)) — the persist watermark of 2 "
+            "should have skipped both entries."
         )
     watermark = await get_persisted_qa_count(session_manager, user_id, COMPAT_SESSION_ID)
     if watermark != 2:
-        _fail(f"[{stage}] persist watermark should heal to 2, got {watermark}.")
-    print("  [session] unchanged legacy session: 0 new documents, watermark healed to 2 — OK")
+        _fail(f"[{stage}] persist watermark should remain 2, got {watermark}.")
+    print("  [session] unchanged session: 0 new session documents, watermark preserved at 2 — OK")
 
     # B: grow the legacy session with the current branch -> only the new entry.
     await cognee.remember(SESSION_FACT_3, session_id=COMPAT_SESSION_ID, self_improvement=False)
@@ -488,7 +516,9 @@ async def _verify_session_takeover(stage: str) -> None:
     after_grown = await _session_data_items(user)
     new_items = [item for item in after_grown if item.id not in {x.id for x in after_unchanged}]
     if len(new_items) != 1:
-        _fail(f"[{stage}] expected exactly 1 new document after growth, got {len(new_items)}.")
+        _fail(
+            f"[{stage}] expected exactly 1 new session document after growth, got {len(new_items)}."
+        )
     window_text = _read_raw_document(new_items[0])
     if SESSION_FACT_3_MARKER not in window_text:
         _fail(f"[{stage}] new session window is missing the new entry: {window_text!r}")
@@ -498,227 +528,145 @@ async def _verify_session_takeover(stage: str) -> None:
     if watermark != 3:
         _fail(f"[{stage}] persist watermark should advance to 3, got {watermark}.")
 
-    # Exactly-once across versions: each fact appears in exactly one document.
+    # Exactly-once across versions: each fact appears in exactly one session
+    # document. A distilled lesson may restate a fact, so lessons are not counted.
     all_texts = [_read_raw_document(item) for item in after_grown]
     for marker in (SESSION_FACT_1_MARKER, SESSION_FACT_2_MARKER, SESSION_FACT_3_MARKER):
         occurrences = sum(text.count(marker) for text in all_texts)
         if occurrences != 1:
             _fail(
-                f"[{stage}] session fact {marker!r} stored {occurrences} times — "
-                "must be exactly once across legacy + current ingestion."
+                f"[{stage}] session fact {marker!r} stored {occurrences} times in session "
+                "documents — must be exactly once across legacy + current ingestion."
             )
     print(
-        "  [session] grown session: 1 new document with ONLY the new entry, "
+        "  [session] grown session: 1 new session document with ONLY the new entry, "
         "watermark 3, all facts stored exactly once — OK"
     )
 
 
-async def _verify_fork_resolution(stage: str) -> None:
-    """The legacy shared row split correctly, and the pre-fork id keeps resolving.
-
-    Phase 1 added identical content to two datasets — one shared legacy Data
-    row. The backfill must split it: one dataset keeps the original id (the
-    keeper), the other gets a fresh row recording it as ``legacy_id``. The
-    contract verified here through API calls:
-
-    * ``get_data`` with dataset context resolves the PRE-FORK id in BOTH
-      datasets, each to its own dataset's row;
-    * ``get_data`` without dataset context refuses the now-ambiguous id with
-      ``AmbiguousDataIdError`` listing both candidates (never silently returns
-      the wrong dataset's document);
-    * deletion by the pre-fork id is exercised later by the delete sweep,
-      which deletes every fork row through its legacy id (see _verify_delete).
-    """
-    from cognee.modules.data.exceptions import AmbiguousDataIdError
+async def _verify_dataset_isolation(stage: str) -> None:
+    """Preserve independent IDs for identical content in separate datasets."""
     from cognee.modules.data.methods import get_data
 
-    print(f"\n[{stage}] Verifying fork split + pre-fork id resolution")
-
+    print(f"\n[{stage}] Verifying dataset-scoped document isolation")
     user = await get_default_user()
-    rows_by_dataset = {}
-    for dataset_name in (FORK_DATASET_A, FORK_DATASET_B):
-        datasets = await get_datasets_by_name([dataset_name], user.id)
+    seeded = []
+    for name in (ISOLATION_DATASET_A, ISOLATION_DATASET_B):
+        datasets = await get_datasets_by_name([name], user.id)
         if not datasets:
-            _fail(f"[{stage}] fork dataset '{dataset_name}' not found — Phase 1 seeding broke.")
-        rows = await get_dataset_data(datasets[0].id)
+            _fail(f"[{stage}] dataset '{name}' not found — Phase 1 seeding broke.")
+        dataset = datasets[0]
+        rows = await get_dataset_data(dataset.id)
         if len(rows) != 1:
-            _fail(f"[{stage}] expected 1 document in '{dataset_name}', found {len(rows)}.")
-        rows_by_dataset[dataset_name] = (datasets[0], rows[0])
+            _fail(f"[{stage}] expected 1 document in '{name}', found {len(rows)}.")
+        row = rows[0]
+        if row.dataset_id != dataset.id or row.legacy_id is not None:
+            _fail(f"[{stage}] v1.6.3 document in '{name}' lost its dataset-scoped identity.")
+        seeded.append((dataset, row))
 
-    (dataset_a, row_a), (dataset_b, row_b) = (
-        rows_by_dataset[FORK_DATASET_A],
-        rows_by_dataset[FORK_DATASET_B],
-    )
-
+    (dataset_a, row_a), (dataset_b, row_b) = seeded
     if row_a.id == row_b.id:
-        _fail(
-            f"[{stage}] both datasets still share one row ({row_a.id}) — the backfill "
-            "did not split the shared legacy row."
-        )
+        _fail(f"[{stage}] identical content in two datasets shares one document ID.")
+    if row_a.content_hash != row_b.content_hash:
+        _fail(f"[{stage}] isolation fixtures no longer contain identical content.")
 
-    keepers = [row for row in (row_a, row_b) if row.legacy_id is None]
-    forks = [row for row in (row_a, row_b) if row.legacy_id is not None]
-    if len(keepers) != 1 or len(forks) != 1:
-        _fail(
-            f"[{stage}] expected exactly one keeper and one fork, got "
-            f"legacy_ids ({row_a.legacy_id}, {row_b.legacy_id})."
-        )
-    if str(forks[0].legacy_id) != str(keepers[0].id):
-        _fail(
-            f"[{stage}] fork legacy_id {forks[0].legacy_id} does not record the keeper id "
-            f"{keepers[0].id} — pre-fork lineage lost."
-        )
-    pre_fork_id = keepers[0].id
+    for dataset, row, other_dataset in (
+        (dataset_a, row_a, dataset_b),
+        (dataset_b, row_b, dataset_a),
+    ):
+        for scope in (dataset.id, None):
+            resolved = await get_data(user.id, row.id, scope)
+            if resolved is None or resolved.id != row.id:
+                _fail(f"[{stage}] document {row.id} does not resolve with scope {scope}.")
+        if await get_data(user.id, row.id, other_dataset.id) is not None:
+            _fail(f"[{stage}] document {row.id} resolves in the other dataset.")
 
-    # Scoped resolution: the pre-fork id finds each dataset's OWN row.
-    for dataset, row in ((dataset_a, row_a), (dataset_b, row_b)):
-        resolved = await get_data(user.id, pre_fork_id, dataset.id)
-        if resolved is None or resolved.id != row.id:
-            _fail(
-                f"[{stage}] pre-fork id {pre_fork_id} resolved to "
-                f"{resolved.id if resolved else None} in dataset '{dataset.name}', "
-                f"expected {row.id}."
-            )
-
-    # Context-free lookup must refuse loudly, naming both candidates.
-    try:
-        await get_data(user.id, pre_fork_id)
-    except AmbiguousDataIdError as error:
-        candidate_datasets = {str(candidate["dataset_id"]) for candidate in error.candidates}
-        if not {str(dataset_a.id), str(dataset_b.id)} <= candidate_datasets:
-            _fail(
-                f"[{stage}] AmbiguousDataIdError candidates {candidate_datasets} do not "
-                f"cover both fork datasets."
-            )
-    else:
-        _fail(
-            f"[{stage}] context-free get_data({pre_fork_id}) returned silently — expected "
-            "AmbiguousDataIdError for a forked id."
-        )
-
-    print(
-        f"  [fork] shared row split (keeper {keepers[0].id}, fork {forks[0].id}); pre-fork id "
-        "resolves in both datasets; context-free lookup refuses with both candidates — OK"
-    )
+    print("  [isolation] separate IDs, scoped and unscoped lookup, no cross-dataset access — OK")
 
 
-async def _verify_dlt_takeover(stage: str) -> None:
-    """Verify the documented upgrade path for legacy per-row DLT data.
+async def _verify_dlt_manifest(stage: str) -> None:
+    """Preserve a v1.6.3 DLT manifest and its row identities through re-add, and
+    cognify a new source on the current branch.
 
-    Phase 1 (legacy tag) ingested a dlt source as one Data record per row with
-    a ``source == "dlt"`` stamp. The current branch must:
-
-    A. have MIGRATED the stamp: it lives in system_metadata now, and the
-       user-owned external_metadata no longer carries it;
-    B. refuse to cognify the legacy rows — the tombstone fails loudly instead
-       of silently LLM-processing structured rows;
-    C. convert on re-add: adding the same-named source ingests it as ONE
-       manifest record, and the orphan sweep retires every legacy per-row
-       record ("legacy records are always migrated away");
-    D. cognify the manifest cleanly, leaving one DltRow node per row in the
-       dataset's graph.
+    Re-adding the seeded source is a no-op by design (its record is complete), so
+    it proves idempotency only; the new source is what exercises the current
+    branch's DLT cognify.
     """
-    print(f"\n[{stage}] Verifying legacy DLT data takeover")
-
     import dlt
 
-    from cognee.tasks.ingestion.dlt_utils import is_dlt_source_manifest, is_dlt_sourced
+    from cognee.tasks.ingestion.dlt_utils import is_dlt_source_manifest, load_dlt_manifest
 
+    print(f"\n[{stage}] Verifying DLT manifest compatibility")
     user = await get_default_user()
-    datasets = await get_datasets_by_name([DLT_COMPAT_DATASET], user.id)
-    if not datasets:
-        _fail(f"[{stage}] dataset '{DLT_COMPAT_DATASET}' not found — Phase 1 DLT seeding broke.")
-    dataset = datasets[0]
 
-    # A: stamps migrated into system_metadata, out of external_metadata.
-    records = await get_dataset_data(dataset.id)
-    legacy = [r for r in records if is_dlt_sourced(r)]
-    if len(legacy) < len(DLT_COMPAT_ROWS):
-        _fail(
-            f"[{stage}] expected >= {len(DLT_COMPAT_ROWS)} legacy DLT records with "
-            f"system_metadata.source == 'dlt', found {len(legacy)} — the "
-            "system_metadata migration did not move the stamps."
-        )
-    still_stamped = [
-        r
-        for r in legacy
-        if isinstance(r.external_metadata, dict) and r.external_metadata.get("source") == "dlt"
-    ]
-    if still_stamped:
-        _fail(
-            f"[{stage}] {len(still_stamped)} record(s) still carry the DLT stamp in "
-            "external_metadata — the migration must move it, not copy it."
-        )
-    print(f"  [dlt] {len(legacy)} legacy per-row record(s), stamps in system_metadata — OK")
+    async def find_dataset(name):
+        datasets = await get_datasets_by_name([name], user.id)
+        if not datasets:
+            _fail(f"[{stage}] dataset '{name}' not found.")
+        return datasets[0]
 
-    # B: classification must reject legacy rows loudly (the tombstone). Pinned
-    # via document_class_for directly rather than a cognify run: where the
-    # legacy version managed to cognify these rows (Postgres), their completed
-    # per-item status makes a new cognify SKIP them — routing is only consulted
-    # for records that need processing, and that is exactly what this pins.
-    from cognee.tasks.documents.classify_documents import document_class_for
+    async def read_manifest(dataset):
+        records = await get_dataset_data(dataset.id)
+        if len(records) != 1 or not is_dlt_source_manifest(records[0]):
+            _fail(
+                f"[{stage}] expected exactly one DLT source manifest in '{dataset.name}', "
+                f"got {len(records)} records."
+            )
+        record = records[0]
+        meta = record.system_metadata
+        if meta.get("source_name") != DLT_COMPAT_SOURCE or meta.get("row_count") != len(
+            DLT_COMPAT_ROWS
+        ):
+            _fail(f"[{stage}] manifest system_metadata is wrong: {meta}")
+        manifest = await load_dlt_manifest(record.raw_data_location)
+        row_ids = {str(row["node_id"]) for row in manifest["rows"]}
+        if len(manifest["rows"]) != len(DLT_COMPAT_ROWS) or len(row_ids) != len(DLT_COMPAT_ROWS):
+            _fail(f"[{stage}] manifest does not contain the three distinct seeded rows.")
+        return record.id, row_ids
 
-    try:
-        document_class_for(legacy[0])
-        _fail(
-            f"[{stage}] classifying a legacy per-row DLT record did not raise — "
-            "the tombstone must fail loudly instead of routing it."
-        )
-    except ValueError as error:
-        if "no longer supported" not in str(error):
-            raise
-    print("  [dlt] legacy rows classify to a loud tombstone error — OK")
+    async def verify_graph(dataset, expected_row_ids):
+        dataset_rows = await get_dataset_databases()
+        owners = {row.dataset_id: row.owner_id for row in dataset_rows} or None
+        node_ids, props, _ = await _snapshot_dataset_graph(dataset.id, owners)
+        actual_row_ids = {node_id for node_id in node_ids if props[node_id].get("type") == "DltRow"}
+        if actual_row_ids != expected_row_ids:
+            _fail(
+                f"[{stage}] DltRow nodes in '{dataset.name}' differ from the manifest: "
+                f"expected {expected_row_ids}, got {actual_row_ids}."
+            )
 
-    # C: re-adding the same-named source converts to the manifest model and
-    # the orphan sweep retires the legacy rows.
+    seeded = await find_dataset(DLT_COMPAT_DATASET)
+    manifest_id, row_ids = await read_manifest(seeded)
+    await verify_graph(seeded, row_ids)
+    print("  [dlt] seeded manifest and all row nodes survived the upgrade — OK")
+
     @dlt.resource(name=DLT_COMPAT_SOURCE, primary_key="id", write_disposition="replace")
     def compat_widgets():
         yield from DLT_COMPAT_ROWS
 
     await cognee.add([compat_widgets()], dataset_name=DLT_COMPAT_DATASET)
-
-    records = await get_dataset_data(dataset.id)
-    manifests = [r for r in records if is_dlt_source_manifest(r)]
-    remaining_legacy = [r for r in records if is_dlt_sourced(r)]
-    if len(manifests) != 1:
-        _fail(f"[{stage}] expected exactly 1 manifest record after re-add, got {len(manifests)}.")
-    if remaining_legacy:
-        _fail(
-            f"[{stage}] {len(remaining_legacy)} legacy per-row record(s) survived the re-add — "
-            "the orphan sweep must retire them."
-        )
-    manifest_meta = manifests[0].system_metadata
-    if manifest_meta.get("source_name") != DLT_COMPAT_SOURCE or manifest_meta.get(
-        "row_count"
-    ) != len(DLT_COMPAT_ROWS):
-        _fail(f"[{stage}] manifest system_metadata is wrong: {manifest_meta}")
-    print("  [dlt] re-add converted to 1 manifest, legacy rows swept — OK")
-
-    # D: cognify runs cleanly now and emits one DltRow node per row.
+    after_id, after_row_ids = await read_manifest(seeded)
+    if after_id != manifest_id or after_row_ids != row_ids:
+        _fail(f"[{stage}] re-adding the same source changed its document or row identities.")
     await cognee.cognify(datasets=[DLT_COMPAT_DATASET])
-    dataset_rows = await get_dataset_databases()
-    owner_by_dataset = {row.dataset_id: row.owner_id for row in dataset_rows} or None
-    node_ids, props_by_id, _ = await _snapshot_dataset_graph(dataset.id, owner_by_dataset)
-    dlt_rows = [nid for nid in node_ids if props_by_id[nid].get("type") == "DltRow"]
-    if len(dlt_rows) != len(DLT_COMPAT_ROWS):
-        _fail(
-            f"[{stage}] expected {len(DLT_COMPAT_ROWS)} DltRow node(s) after manifest "
-            f"cognify, found {len(dlt_rows)}."
-        )
-    print(f"  [dlt] manifest cognified: {len(dlt_rows)} DltRow node(s) in the graph — OK")
+    await verify_graph(seeded, row_ids)
+    print("  [dlt] re-add and cognify preserved document/row IDs without duplicates — OK")
+
+    # The same source in a new dataset, ingested and cognified by the current branch.
+    await cognee.add([compat_widgets()], dataset_name=DLT_CURRENT_DATASET)
+    await cognee.cognify(datasets=[DLT_CURRENT_DATASET])
+    current = await find_dataset(DLT_CURRENT_DATASET)
+    _, current_row_ids = await read_manifest(current)
+    await verify_graph(current, current_row_ids)
+    print("  [dlt] current-branch cognify built one row node per manifest row — OK")
 
 
 async def _verify_delete(stage: str) -> None:
-    """Hard-delete documents one by one, checking the graph after each.
+    """Hard-delete every document, checking ownership after each deletion.
 
-    Delete resolves graph nodes by the ledger's ``nodes.slug``, so deleting
-    migrated data exercises ledger/graph lockstep — a stale slug makes delete
-    silently miss nodes rather than raise, so we gate on the resulting graph, not
-    the call. After each delete, diff before/after: nodes/edges owned only by
-    that document are gone (no orphans), shared ones survive until their last
-    owner goes (no collateral damage; EdgeType nodes are exempt — derived
-    bookkeeping GC'd with their last edge), and nothing new appears. After the
-    last document the graph must be empty.
+    Solely-owned nodes and edges must disappear; shared artifacts must survive
+    until their final owner is removed. EdgeType and global context bookkeeping
+    have their own cleanup rules. The final graph must be completely empty.
     """
     print(f"\n[{stage}] Hard-deleting documents one by one, verifying the graph after each")
 
@@ -740,16 +688,14 @@ async def _verify_delete(stage: str) -> None:
 
     for index, (data_id, dataset_id, legacy_id) in enumerate(pairs, start=1):
         expected_gone_nodes, expected_gone_edges = await _expectations_for(
-            data_id, dataset_id, owner_by_dataset
+            stage, data_id, dataset_id, owner_by_dataset
         )
         before_nodes, before_props, before_edges = await _snapshot_dataset_graph(
             dataset_id, owner_by_dataset
         )
 
-        # Fork rows are deleted through their PRE-FORK id on purpose: this is
-        # the end-to-end proof that every id ever issued keeps resolving in
-        # the public delete API. Ledger expectations above stay keyed to the
-        # canonical id, so a resolution failure shows up as missed nodes.
+        # Delete by the issued ID, including a legacy alias if a migration
+        # recorded one. Ownership expectations use the canonical ID.
         await cognee.delete(data_id=legacy_id or data_id, dataset_id=dataset_id, mode="hard")
 
         after_nodes, _, after_edges = await _snapshot_dataset_graph(dataset_id, owner_by_dataset)
@@ -762,9 +708,17 @@ async def _verify_delete(stage: str) -> None:
                 f"hard delete (e.g. {next(iter(missed_nodes))}) — delete missed migrated nodes."
             )
 
+        # Derived bookkeeping is exempt from the collateral check: an EdgeType
+        # node is GC'd with its last edge, and the global context index
+        # (GlobalContextSummary root and per-document buckets) carries the
+        # build's dataset-level ref, never a document's. A document delete
+        # removes that document's bucket and the root by their derived ids,
+        # then writes the root again from the documents that remain.
         disappeared_nodes = before_nodes - after_nodes
         allowed_gone = expected_gone_nodes | {
-            node_id for node_id in before_nodes if before_props[node_id].get("type") == "EdgeType"
+            node_id
+            for node_id in before_nodes
+            if before_props[node_id].get("type") in ("EdgeType", "GlobalContextSummary")
         }
         collateral_nodes = disappeared_nodes - allowed_gone
         if collateral_nodes:
@@ -855,9 +809,8 @@ async def main():
     # ── Step 1: legacy data must be accessible & correctly migrated ───────────
     await _verify_access("Step 1 — legacy data after migration")
 
-    # ── Step 1b: the shared legacy row split into keeper + fork, and the
-    # pre-fork id keeps resolving through the API (both datasets + ambiguity) ──
-    await _verify_fork_resolution("Step 1b — fork split + pre-fork id resolution")
+    # ── Step 1b: dataset-scoped document identities must survive ─────────────
+    await _verify_dataset_isolation("Step 1b — dataset-scoped document isolation")
 
     # ── Step 2: re-add + re-cognify with the current branch ───────────────────
     # Re-cognifying the same dataset is what surfaced #2510's EntityAlreadyExistsError.
@@ -868,15 +821,15 @@ async def main():
     # ── Step 3: data must still be accessible after re-cognify ────────────────
     await _verify_access("Step 3 — after re-cognify")
 
-    # ── Step 4: legacy session cache must be taken over incrementally ─────────
-    # A missing legacy session hard-fails: the pin never goes below v1.2.0.
-    await _verify_session_takeover("Step 4 — session persistence takeover")
+    # ── Step 4: the legacy session must keep persisting incrementally ─────────
+    # The seeded session and its persistence watermark must survive.
+    await _verify_session_persistence("Step 4 — session persistence")
 
-    # ── Step 5: legacy DLT data must migrate, tombstone, and convert ──────────
-    await _verify_dlt_takeover("Step 5 — legacy DLT takeover")
+    # ── Step 5: DLT manifests survive, re-add without duplicates, cognify ────
+    await _verify_dlt_manifest("Step 5 — DLT manifest compatibility")
 
-    # ── Step 6: migrated data must be deletable (ledger-driven hard delete) ───
-    # Destructive on purpose, so it runs last. Includes the DLT manifest from
+    # ── Step 6: migrated data must be deletable (hard delete by ownership) ────
+    # Destructive on purpose, so it runs last. Includes both DLT manifests from
     # Step 5 — the graph must end completely empty.
     await _verify_delete("Step 6 — delete migrated data")
 

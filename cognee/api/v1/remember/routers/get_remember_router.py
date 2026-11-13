@@ -123,10 +123,14 @@ def get_remember_router() -> APIRouter:
             examples=[[]],
             description=(
                 "Data given as strings instead of uploads, one entry each: raw text to "
-                "remember, a local file or directory path on the server's filesystem "
-                "(requires ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
-                "ALLOW_HTTP_REQUESTS), or a GitHub/GitLab repository URL, which is "
-                "shallow-cloned and indexed as a code graph. Combined with 'data': "
+                "remember, a local file or directory path on the server's filesystem or an "
+                "s3:// object read with the server's AWS credentials (both require "
+                "ACCEPT_LOCAL_FILE_PATH), a web URL to fetch, a GitHub/GitLab repository URL, "
+                "which is shallow-cloned and indexed as a code graph (both require "
+                "ALLOW_HTTP_REQUESTS=true on the server), or a database connection "
+                "string (postgresql://, mysql://, sqlite:///, ...), refused over the "
+                "API with 422 DatabaseIngestionDisabled unless the server sets "
+                "ALLOW_DATABASE_INGESTION=true. Combined with 'data': "
                 "uploads come first, then these entries; labels and external_metadata "
                 "pair with that combined order. Empty entries are ignored. With "
                 "content_type='code' every entry is a repository spec (git URL or "
@@ -312,9 +316,16 @@ def get_remember_router() -> APIRouter:
         ## Request Parameters
         - **data** (List[UploadFile]): Files to upload and process.
         - **raw_data** (Optional[List[str]]): String inputs, one entry each: raw text, a
-          local file or directory path on the server (requires ACCEPT_LOCAL_FILE_PATH), a
-          web URL fetched as a page (requires ALLOW_HTTP_REQUESTS), or a GitHub/GitLab
-          repository URL, shallow-cloned and indexed as a code graph. Uploads come first,
+          local file or directory path on the server or an s3:// object read with the
+          server's AWS credentials (both require ACCEPT_LOCAL_FILE_PATH), a web URL
+          fetched as a page, a GitHub/GitLab repository URL, shallow-cloned and indexed
+          as a code graph (both require ALLOW_HTTP_REQUESTS=true on the server), or a database
+          connection string (postgresql://, mysql://, sqlite:///, ...). Database
+          ingestion is disabled over the API by default: the request fails with
+          422 DatabaseIngestionDisabled unless the server sets
+          ALLOW_DATABASE_INGESTION=true (the SDK, CLI and MCP server ingest databases
+          without the setting); cognee's own databases are refused either way, and a
+          sqlite:/// path must be an existing file. Uploads come first,
           then raw_data entries; labels and external_metadata pair with that combined
           order. Normal ingestion only — rejected with content_type. At least one of data
           or raw_data is required for normal ingestion.
@@ -368,6 +379,11 @@ def get_remember_router() -> APIRouter:
           combination (no raw_data repository specs, file uploads or session_id with
           content_type="code", index_vectors without it, or local repo paths while
           ACCEPT_LOCAL_FILE_PATH=false)
+        - **422 Unprocessable Entity**: A database connection string in raw_data while
+          ALLOW_DATABASE_INGESTION is unset or false (DatabaseIngestionDisabled), or one
+          that names cognee's own storage (DatabaseSourceRefused, SqliteSourceRefused)
+        - **403 Forbidden**: A server-side path in raw_data while ACCEPT_LOCAL_FILE_PATH is
+          unset or false (IngestionError naming the setting)
         - **409 Conflict**: Error during processing
         """
         # Swagger UI submits an untouched file list as one blank part; treat it
@@ -512,21 +528,21 @@ def get_remember_router() -> APIRouter:
 
             from cognee.tasks.code_graph.resolve_repo import is_remote_repo
             from cognee.tasks.ingestion.save_data_item_to_storage import (
-                settings as save_data_settings,
+                local_file_paths_accepted,
             )
 
             # Local paths are read from the server's own filesystem. That is the
             # intended setup for a local server sharing the caller's checkout, but
             # a server that disables local file ingestion must not hand out a
             # read-any-directory primitive through this route either.
-            if not save_data_settings.accept_local_file_path and any(
+            if not local_file_paths_accepted() and any(
                 not is_remote_repo(spec) for spec in repo_specs
             ):
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        "Local repository paths are disabled on this server "
-                        "(ACCEPT_LOCAL_FILE_PATH=false) — pass a git URL instead."
+                        "Local repository paths are not accepted over HTTP on this server "
+                        "(set ACCEPT_LOCAL_FILE_PATH=true to allow them) — pass a git URL instead."
                     ),
                 )
 
@@ -577,16 +593,15 @@ def get_remember_router() -> APIRouter:
             ontology_keys = [key for key in (ontology_key or []) if key]
             if ontology_keys:
                 ontology_service = OntologyService()
-                ontology_contents = ontology_service.get_ontology_contents(ontology_keys, user)
-
-                from io import StringIO
+                # File objects keep the upload's filename and content type so the
+                # resolver can pick the right RDF parser (Turtle, JSON-LD, ...).
+                ontology_streams = await ontology_service.get_ontology_files(ontology_keys, user)
 
                 from cognee.modules.ontology.ontology_config import Config
                 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
                     RDFLibOntologyResolver,
                 )
 
-                ontology_streams = [StringIO(content) for content in ontology_contents]
                 config_to_use: Config = {
                     "ontology_config": {
                         "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_streams)
@@ -675,8 +690,8 @@ def get_remember_router() -> APIRouter:
         self_improvement: bool | None = Field(
             default=None,
             description=(
-                "Forwarded to remember for compatibility. Typed session entries do not "
-                "run automatic graph improvement, regardless of this value. "
+                "Accepted for compatibility and ignored: no typed entry, skill_run "
+                "included, runs automatic graph improvement. "
                 "This does not control explicit skill_improvement."
             ),
         )
@@ -710,6 +725,9 @@ def get_remember_router() -> APIRouter:
         - **dataset_name** (str): Name of the target dataset. Defaults to 'main_dataset'.
         - **entry** (Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry]): Typed memory
           entry (qa, trace, feedback, or skill_run) to store, dispatched by its type field.
+        - **self_improvement** (Optional[bool]): Accepted for compatibility and ignored: no typed
+          entry, skill_run included, runs automatic graph improvement. This does not control
+          explicit skill_improvement.
         - **session_id** (Optional[str]): Required for qa/trace/feedback entries; optional for
           skill_run entries.
         - **skill_improvement** (Optional[dict]): Skill improvement details forwarded to

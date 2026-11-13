@@ -9,6 +9,7 @@ from cognee.context_global_variables import session_user
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.ontology.query_grounding import with_grounding_block
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import (
     SessionPrompt,
@@ -16,6 +17,7 @@ from cognee.modules.retrieval.utils.completion import (
     generate_completion_batch,
 )
 from cognee.modules.retrieval.utils.query_state import QueryState
+from cognee.modules.retrieval.utils.resolved_context import user_resolution_scope
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.shared.logging_utils import get_logger
 
@@ -98,6 +100,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         self._cot_final_context = None
         self.max_iter = max_iter
 
+    @user_resolution_scope()
     async def get_retrieved_objects(
         self, query: str | None = None, query_batch: list[str] | None = None
     ) -> list[Edge] | list[list[Edge]]:
@@ -219,7 +222,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         )
         for q, triplets, context in zip(queries, triplets_batch, context_batch):
             states[q].triplets = triplets
-            states[q].context_text = context
+            states[q].context_text = await with_grounding_block(q, context)
 
     async def _generate_completions(self, states: dict, session: SessionPrompt | None):
         """Generate completions for all queries in parallel."""
@@ -293,7 +296,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             *[self.resolve_edges_to_text(states[q].triplets) for q in queries]
         )
         for q, context in zip(queries, context_batch):
-            states[q].context_text = context
+            states[q].context_text = await with_grounding_block(q, context)
 
     def _collect_results(
         self,

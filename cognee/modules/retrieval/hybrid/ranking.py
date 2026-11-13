@@ -1,4 +1,4 @@
-from cognee.modules.retrieval.hybrid.results import payload, result_id
+from cognee.modules.retrieval.utils.results import payload, result_id
 from cognee.modules.truth_subspace.align import truth_factor
 from cognee.modules.user_preferences import personal_factor
 

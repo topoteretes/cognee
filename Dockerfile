@@ -8,7 +8,7 @@
 # Pinned by digest so a compromised :latest tag cannot inject binaries into
 # the shipped image — same digest as scripts/fetch_ladybug_json_extension.sh,
 # which documents how to refresh both together on a ladybug bump.
-FROM ghcr.io/ladybugdb/extension-repo@sha256:180c83fb190e9d6ef8d324850b192db26794ab7cb866a38813a45365f14bd46d AS ladybug-extensions
+FROM ghcr.io/ladybugdb/extension-repo@sha256:2ab4c9473d4152ccd40effcc185cab699ab4c2716065854a9823ce3d61afc582 AS ladybug-extensions
 RUN mkdir -p /bundle && cd /usr/share/nginx/html && \
     for f in v*/linux_*/json/libjson.lbug_extension; do \
         d="/bundle/${f%/json/libjson.lbug_extension}"; \
@@ -63,7 +63,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     for extra in ${COGNEE_EXTRAS}; do \
         set -- "$@" --extra "$extra"; \
     done; \
-    uv sync "$@" --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra aws --extra dlt --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-install-project --no-dev --no-editable
+    uv sync "$@" --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra aws --extra dlt --extra ollama --extra mistral --extra groq --extra anthropic --extra instructor --frozen --no-install-project --no-dev --no-editable
 
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
@@ -83,7 +83,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     for extra in ${COGNEE_EXTRAS}; do \
         set -- "$@" --extra "$extra"; \
     done; \
-    uv sync "$@" --extra debug --extra aws --extra api --extra postgres --extra neo4j --extra llama-index --extra dlt --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
+    uv sync "$@" --extra debug --extra aws --extra api --extra postgres --extra neo4j --extra llama-index --extra dlt --extra ollama --extra mistral --extra groq --extra anthropic --extra instructor --frozen --no-dev --no-editable
 
 # The GLiNER runtime (keyless graph extraction): CPU-only torch from the PyTorch index
 # plus the gliner extra, baked in so a container never installs it at runtime. Runs
@@ -96,10 +96,14 @@ FROM python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145
 # git: the code-graph route shallow-clones GitHub/GitLab repository URLs at
 # runtime (cognee/tasks/code_graph/resolve_repo.py); without it every remote
 # repo passed to add()/remember() fails with CodeRepositoryError.
+# ca-certificates: the base is pinned by digest, so its CA bundle is frozen at
+# that image; installing it here pulls bookworm-security's current one (the
+# eMudhra revocation, ENG-28, shipped as 20250419~deb12u2).
 RUN apt-get update && apt-get install -y \
     libpq5 \
     curl \
     git \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

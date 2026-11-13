@@ -8,9 +8,10 @@ from fastapi.responses import JSONResponse
 from pydantic import Field
 
 from cognee import __version__ as cognee_version
-from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
+from cognee.api.DTO import ErrorResponse, InDTO, OutDTO, RetrieverSpecificConfig
 from cognee.exceptions import CogneeApiError
-from cognee.modules.search.operations import get_history
+from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.search.operations import delete_user_search_history, get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
@@ -57,12 +58,24 @@ class SearchPayloadDTO(InDTO):
     system_prompt: str | None = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
+    node_type: str | None = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "What the names in node_name are. Omitted: node-set tags (the node_set values"
+            " used during add/remember). Otherwise the class name of a graph node type,"
+            " such as 'SchemaColumn', 'TextDocument' or 'Entity': the search is scoped to"
+            " the named nodes of that type and their one-hop neighbours. Case-sensitive;"
+            " an unknown name is a 422."
+        ),
+    )
     node_name: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
-            "Restrict results to nodes in these node_sets"
-            " (the node_set values used during add/remember)."
+            "Names to scope the search to, read according to node_type: node-set tags"
+            " when node_type is omitted, else the names of nodes of that type"
+            " (for SchemaColumn, '<table>:<column>')."
         ),
     )
     top_k: int | None = Field(default=15)
@@ -125,12 +138,18 @@ class SearchPayloadDTO(InDTO):
         default=None,
         description=(
             "Structured arguments for search_type=CODE. Set operation to query_facts, "
-            "explore, traverse, find_path, impact_analysis, insights, architecture, or "
-            "delta. Add diagram='mermaid' (or 'dot', or true) to receive the result "
-            "rendered as diagram source under search_result[0].diagram; architecture "
-            "includes a Mermaid diagram unless diagram=false."
+            "explore, traverse, find_path, impact_analysis, insights, architecture, "
+            "delta, capabilities, search, neighbors, subgraph, flows, hubs, or ask "
+            "(ask answers a natural-language question with seeds, flows, a one-hop "
+            "neighbourhood and file:line citations). Add diagram='mermaid' (or 'dot', or "
+            "true) to receive the result rendered as diagram source under "
+            "search_result[0].diagram; architecture includes a Mermaid diagram unless "
+            "diagram=false. A rejected request answers 422 with a stable 'code' "
+            "(unknown_operation, invalid_argument, not_found, ambiguous, no_code_graph, "
+            "feature_unavailable) and, when one argument is at fault, its 'param'."
         ),
     )
+    retriever_specific_config: RetrieverSpecificConfig = None
 
 
 def get_search_router() -> APIRouter:
@@ -143,6 +162,42 @@ def get_search_router() -> APIRouter:
         created_at: datetime
         # Null when the search was not scoped to a single dataset.
         dataset_id: UUID | None = None
+
+    class SearchHistoryDeleted(OutDTO):
+        queries_deleted: int
+        results_deleted: int
+
+    @router.delete(
+        "/history",
+        summary="Delete the caller's own search history",
+        response_model=SearchHistoryDeleted,
+        responses={
+            403: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+        },
+    )
+    async def delete_search_history(user: User = Depends(get_authenticated_user)):
+        """
+        Delete the authenticated user's search and recall history.
+
+        Removes every query the caller ran and every result returned to them,
+        the rows GET /api/v1/search and GET /api/v1/recall list. Only the
+        caller's own history: the endpoint takes no user parameter, so no
+        user, admin or tenant owner can delete anyone else's.
+
+        ## Response
+        - **queries_deleted**: Query rows removed
+        - **results_deleted**: Result rows removed
+        """
+        send_telemetry(
+            "Search API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": "DELETE /v1/search/history",
+                "cognee_version": cognee_version,
+            },
+        )
+        return await delete_user_search_history(user.id)
 
     @router.get(
         "",
@@ -218,7 +273,8 @@ def get_search_router() -> APIRouter:
         - **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to search within
         - **query** (str): The search query string
         - **system_prompt** Optional[str]: System prompt to be used for Completion type searches in Cognee
-        - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
+        - **node_type** (Optional[str]): What node_name names. Omitted: node-set tags. Otherwise the class name of a graph node type ('SchemaColumn', 'TextDocument', 'Entity'): the named nodes of that type and their one-hop neighbours. An unknown name is a 422.
+        - **node_name** Optional[list[str]]: Names to scope the search to, read according to node_type (node-set tags by default).
         - **top_k** (Optional[int]): Maximum number of results to return (default: 15)
         - **only_context** bool: Return what the LLM would have received instead of its answer. For completion type searches the result is the user prompt (conversation history, then question plus retrieval context through the retriever's template, then the session guidance block); the system prompt (the retriever's task template) is `system_prompt_result` with verbose=true. Retrieval-only types return their context. No LLM call is made.
         - **session_id** (Optional[str]): Session whose history and guidance feed the completion or the only_context prompt; the default session when omitted.
@@ -228,6 +284,7 @@ def get_search_router() -> APIRouter:
         - **max_iter** (Optional[int]): Max agentic iterations, must be >= 1 (AGENTIC_COMPLETION only)
         - **include_references** (bool): Attach source references to completion-type results (default: true)
         - **code_query** (Optional[dict]): Structured operation arguments for CODE search
+        - **retriever_specific_config** (Optional[dict]): Options for the retriever behind search_type, as the SDK's `search(retriever_specific_config=...)` takes them; known keys are checked for type and upper bound, and an invalid value or `response_model` is rejected with 400
 
         ## Response
         Returns a list of search results containing relevant nodes from the graph.
@@ -243,6 +300,14 @@ def get_search_router() -> APIRouter:
         - To search datasets not owned by the request sender, dataset UUID is needed
         - If dataset_ids is provided, the datasets name list is ignored
         """
+        from cognee.modules.search.methods.node_type_resolution import resolve_node_type
+
+        # The wire carries the class name; the SDK takes the class. Resolved before
+        # telemetry so only a validated name is ever recorded: an unknown one is a
+        # 422 through the global handler and no event is sent, like a body that fails
+        # validation.
+        node_type = resolve_node_type(payload.node_type)
+
         send_telemetry(
             "Search API Endpoint Invoked",
             user,
@@ -255,6 +320,8 @@ def get_search_router() -> APIRouter:
                 # endpoint's convention (see recall.py telemetry).
                 "query": len(payload.query or ""),
                 "system_prompt": len(payload.system_prompt or ""),
+                # The resolved class name; None for the node-set default.
+                "node_type": node_type.__name__ if node_type is not NodeSet else None,
                 "node_name": len(payload.node_name or []),
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
@@ -265,6 +332,7 @@ def get_search_router() -> APIRouter:
                 "max_iter": payload.max_iter,
                 "include_references": payload.include_references,
                 "code_query": len(str(payload.code_query)) if payload.code_query else 0,
+                "retriever_specific_config": len(payload.retriever_specific_config or {}),
                 "cognee_version": cognee_version,
             },
         )
@@ -281,6 +349,7 @@ def get_search_router() -> APIRouter:
                 else None,  # If dataset_ids are provided, ignore datasets by name to avoid confusion and potential mismatches.
                 dataset_ids=payload.dataset_ids,
                 system_prompt=payload.system_prompt,
+                node_type=node_type,
                 node_name=payload.node_name,
                 top_k=payload.top_k,
                 verbose=payload.verbose,
@@ -291,6 +360,7 @@ def get_search_router() -> APIRouter:
                 max_iter=payload.max_iter,
                 include_references=payload.include_references,
                 code_query=payload.code_query,
+                retriever_specific_config=payload.retriever_specific_config,
             )
 
             return jsonable_encoder(results)

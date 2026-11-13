@@ -10,11 +10,10 @@ from cognee.infrastructure.databases.relational.ModelBase import Base
 class ToolWriteProposal(Base):
     """A proposed correction (UPDATE) to an authorized external database.
 
-    Write-back is approval-gated: proposals are drafted from evidence (a
-    detected contradiction, feedback, or an explicit instruction), stored
-    here with a dry-run affected-row estimate, and touch the source database
-    only when an explicit apply call executes them — mirroring the
-    skill-improvement proposal lifecycle.
+    Write-back is approval-gated: proposals are drafted from evidence (feedback
+    or an explicit instruction), stored here with a dry-run affected-row
+    estimate, and touch the source database only when an explicit apply call
+    executes them — mirroring the skill-improvement proposal lifecycle.
 
     Status flow: ``proposed`` → ``applied`` | ``rejected`` | ``failed``
     (failed = apply ran but rolled back: affected-row cap exceeded, estimate
@@ -32,8 +31,7 @@ class ToolWriteProposal(Base):
 
     # What the correction is meant to achieve, in natural language.
     instruction: Mapped[str] = mapped_column(Text, nullable=False)
-    # Where the inaccuracy signal came from (e.g. a contradicts edge's
-    # first_fact/second_fact/reason/confidence). Never secret material.
+    # Where the inaccuracy signal came from. Never secret material.
     evidence: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     sql: Mapped[str] = mapped_column(Text, nullable=False)

@@ -116,7 +116,8 @@ async def remember_capture(
             **{
                 k: v
                 for k, v in normalized.items()
-                if k not in {"type", "generate_feedback_with_llm"}
+                # node_set lives on the session pin, not on the cached entry.
+                if k not in {"type", "generate_feedback_with_llm", "node_set"}
             },
         )
 
@@ -162,6 +163,14 @@ async def remember_capture(
                 "capture_session_dataset_mismatch",
                 "Use a different session_id for a different dataset",
             )
+        if entry.node_set:
+            from cognee.infrastructure.session.session_node_set import pin_session_node_set
+
+            # The same rule as remember()'s entry path: pin the session's node_set
+            # before anything is written, or raise SessionNodeSetConflictError (409)
+            # / SessionNodeSetUnavailableError (503). improve() tags what it bridges
+            # from the pin; entries themselves carry no node_set.
+            await pin_session_node_set(SessionManager(adapter), user_id, session_id, entry.node_set)
         async with track_session_usage(session_id, user.id):
             # All network work precedes the short cache transaction. Ordinary
             # retries return above without generating feedback again.

@@ -31,6 +31,8 @@ class SearchResultKind(str, Enum):
 
     GRAPH_COMPLETION = "graph_completion"
     RAG_COMPLETION = "rag_completion"
+    # Deprecated (SDK-1115): nothing produces it, TRIPLET_COMPLETION runs as
+    # GRAPH_COMPLETION. Removed in the next release.
     TRIPLET_COMPLETION = "triplet_completion"
     CYPHER = "cypher"
     CHUNK = "chunk"

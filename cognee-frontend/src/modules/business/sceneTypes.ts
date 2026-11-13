@@ -1,4 +1,5 @@
 import type { BusinessGraphNode, BusinessGraphLink } from "./types";
+import type { ColorEncoding, ColorMode } from "./colorEncoding";
 
 // An entity node with the simulation fields d3-force reads/writes and the
 // canvas draw loop maintains. Cloned fresh per computeBrainState call (never
@@ -58,8 +59,13 @@ export interface BrainState {
   entities: BusinessEntity[];
   entityById: Record<string, BusinessEntity>;
   sourceNames: string[];
-  setColor: Record<string, string>;
-  isSessionSet: (name: string) => boolean;
+  // The agent session-memory sets present in this brain. The per-source color
+  // map is deliberately not exposed: every fill goes through `encoding`, so a
+  // new layer cannot read the map and quietly bypass it.
+  sessionSetNames: string[];
+  // How every layer, the minimap and the rails paint a node, a type or a
+  // source, once per color mode; the view picks one.
+  encodings: Record<ColorMode, ColorEncoding>;
   setEntityCount: Record<string, number>;
   setDocCount: Record<string, number>;
   // Every real node tagged with a set, any stage — not just entity/document.
@@ -68,11 +74,21 @@ export interface BrainState {
   // is what tells "genuinely still processing" apart from "has content, just
   // not entity/document-staged" (COG-6233).
   setMemberCount: Record<string, number>;
+  // All visible connections, including tabular structure, for drawing and navigation.
+  graphLinks: SemanticLink[];
+  // Business relationships only: excludes tabular structure from insights.
   semanticLinks: SemanticLink[];
   docLinks: SemanticLink[];
   anchors: Record<string, Anchor>;
+  // The point the simulation pulls each entity toward, by entity id: its
+  // sources' mean anchor shifted toward its group's sector of the territory.
+  entityAnchors: Record<string, Anchor>;
   typeNodes: TypeNode[];
   typeLinks: TypeLink[];
+  // entityId -> its business-model type name (same bucketing typeNodes uses),
+  // "other" when no is_a/instance_of edge resolved one — lets a type-keyed
+  // focus lens check a single entity without rescanning every TypeNode.
+  entityType: Record<string, string>;
   importanceMax: number;
   // The Records (plumbing) layer: every pipeline node the entity/type
   // layers never draw — chunks, documents, summaries, context — plus, for

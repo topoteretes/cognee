@@ -20,7 +20,7 @@ print(estimate)  # per-stage token counts and approximate cost; no LLM calls
 ```
 
 The estimate covers graph extraction and summarization only, not
-`improve()`, embeddings, or contradiction detection. Not available with
+`improve()` or embeddings. Not available with
 GLiNER or a remote instance.
 
 ### 2. Ingestion knobs
@@ -66,8 +66,8 @@ a local model does not get the local default of 10 requests; set
 
 | Env var | Default |
 |---|---|
-| `EMBEDDING_BATCH_SIZE` | 36 texts per request |
-| `EMBEDDING_MAX_CONCURRENT_DATA_POINTS` | 150 (so 150 / 36 = 4 concurrent requests) |
+| `EMBEDDING_BATCH_SIZE` | 32 texts per request |
+| `EMBEDDING_MAX_CONCURRENT_DATA_POINTS` | 150 (so 150 / 32 = 4 concurrent requests) |
 | `EMBEDDING_RATE_LIMIT_ENABLED` / `_REQUESTS` / `_INTERVAL` | off / 60 / 60 s |
 
 Embedding calls retry transient errors, rate-limit 429s included, with

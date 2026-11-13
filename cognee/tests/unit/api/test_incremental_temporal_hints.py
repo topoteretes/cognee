@@ -137,7 +137,6 @@ async def test_writer_retires_a_redated_chunk_before_re_extracting_it(monkeypatc
     config = SimpleNamespace(
         chunks_per_batch=10,
         triplet_embedding=False,
-        contradiction_detection=False,
         summary_method="llm",
     )
     publish = AsyncMock()
@@ -149,7 +148,12 @@ async def test_writer_retires_a_redated_chunk_before_re_extracting_it(monkeypatc
     monkeypatch.setattr(incremental, "publish_updated_data", publish)
 
     result = await incremental._write_and_publish(
-        {"staged": object(), "document": document, "stored_chunks": [first, second], "plan": plan},
+        {
+            "staged": SimpleNamespace(content_hash="staged-hash"),
+            "document": document,
+            "stored_chunks": [first, second],
+            "plan": plan,
+        },
         document.id,
         SimpleNamespace(id=uuid4()),
         SimpleNamespace(id=uuid4()),
@@ -194,7 +198,6 @@ async def test_writer_leaves_untouched_dates_alone(monkeypatch):
     config = SimpleNamespace(
         chunks_per_batch=10,
         triplet_embedding=False,
-        contradiction_detection=False,
         summary_method="llm",
     )
     monkeypatch.setattr(incremental, "get_cognify_config", lambda: config)
@@ -205,7 +208,12 @@ async def test_writer_leaves_untouched_dates_alone(monkeypatch):
     monkeypatch.setattr(incremental, "publish_updated_data", AsyncMock())
 
     result = await incremental._write_and_publish(
-        {"staged": object(), "document": document, "stored_chunks": [first, second], "plan": plan},
+        {
+            "staged": SimpleNamespace(content_hash="staged-hash"),
+            "document": document,
+            "stored_chunks": [first, second],
+            "plan": plan,
+        },
         document.id,
         SimpleNamespace(id=uuid4()),
         SimpleNamespace(id=uuid4()),
@@ -231,7 +239,6 @@ def _writer_stubs(monkeypatch, events):
     config = SimpleNamespace(
         chunks_per_batch=10,
         triplet_embedding=False,
-        contradiction_detection=False,
         summary_method="llm",
     )
     monkeypatch.setattr(incremental, "get_cognify_config", lambda: config)
@@ -288,7 +295,12 @@ async def test_gliner_extracts_fresh_chunks_without_the_llm_and_redates_nothing(
     monkeypatch.setattr(gliner_tasks, "extract_graph_and_summarize_with_gliner", extract)
 
     result = await incremental._write_and_publish(
-        {"staged": object(), "document": document, "stored_chunks": [first, second], "plan": plan},
+        {
+            "staged": SimpleNamespace(content_hash="staged-hash"),
+            "document": document,
+            "stored_chunks": [first, second],
+            "plan": plan,
+        },
         document.id,
         SimpleNamespace(id=uuid4()),
         SimpleNamespace(id=uuid4()),
@@ -322,7 +334,12 @@ async def test_an_unknown_extractor_is_refused_before_anything_is_written(monkey
 
     with pytest.raises(ValueError, match="Unknown extractor"):
         await incremental._write_and_publish(
-            {"staged": object(), "document": document, "stored_chunks": [first], "plan": plan},
+            {
+                "staged": SimpleNamespace(content_hash="staged-hash"),
+                "document": document,
+                "stored_chunks": [first],
+                "plan": plan,
+            },
             document.id,
             SimpleNamespace(id=uuid4()),
             SimpleNamespace(id=uuid4()),

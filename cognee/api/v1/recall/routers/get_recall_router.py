@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import Field
 
 from cognee import __version__ as cognee_version
-from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.DTO import InDTO, OutDTO, RetrieverSpecificConfig
 from cognee.api.sse import SSE_MEDIA_TYPE, sse_headers, wants_event_stream
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.api.v1.recall.recall_stream import begin_recall_stream
@@ -59,12 +59,25 @@ class RecallPayloadDTO(InDTO):
     system_prompt: str | None = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
+    node_type: str | None = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "What the names in node_name are. Omitted: node-set tags (the node_set values "
+            "passed to /v1/add or /v1/remember). Otherwise the class name of a graph node "
+            "type, such as 'SchemaColumn', 'TextDocument' or 'Entity': the graph search is "
+            "scoped to the named nodes of that type and their one-hop neighbours, and the "
+            "router picks only a search type that applies such a scope. Case-sensitive; "
+            "an unknown name is a 422."
+        ),
+    )
     node_name: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
-            "Restrict results to these node sets (the node_set values passed to "
-            "/v1/add or /v1/remember). Omit to search all nodes."
+            "Names to scope the graph search to, read according to node_type: node-set "
+            "tags when node_type is omitted, else the names of nodes of that type (for "
+            "SchemaColumn, '<table>:<column>'). Omit to search all nodes."
         ),
     )
     top_k: int | None = Field(default=15)
@@ -138,11 +151,14 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "'code' scope only: structured operation and arguments for the "
-            "deterministic code-graph query (same format as /v1/search code_query, "
-            'e.g. {"operation": "impact_analysis", "seeds": ["UserService"]}). '
+            "deterministic code-graph query (same format and operations as /v1/search "
+            'code_query, e.g. {"operation": "impact_analysis", "seeds": ["UserService"]} '
+            'or {"operation": "ask", "question": "where are tokens validated?"}). '
             "Omit to run the default 'explore' operation with the query text as seed. "
-            "A seed the code graph cannot resolve contributes no results rather than "
-            "failing the recall."
+            "A seed the code graph cannot resolve, a dataset without a code graph, or "
+            "flows on a graph without them contribute no results rather than failing "
+            "the recall; an unknown operation or invalid argument answers 422 with a "
+            "stable 'code' and 'param'."
         ),
     )
     record_context_usage: bool = Field(
@@ -169,6 +185,7 @@ class RecallPayloadDTO(InDTO):
             "server-side."
         ),
     )
+    retriever_specific_config: RetrieverSpecificConfig = None
 
 
 def get_recall_router() -> APIRouter:
@@ -237,7 +254,12 @@ def get_recall_router() -> APIRouter:
           take precedence over dataset names when both are provided
         - **query** (str): The search query string
         - **system_prompt** (Optional[str]): System prompt for completion searches
-        - **node_name** (Optional[List[str]]): Filter to specific node sets
+        - **node_type** (Optional[str]): What node_name names. Omitted: node-set
+          tags. Otherwise the class name of a graph node type ('SchemaColumn',
+          'TextDocument', 'Entity'): the named nodes of that type and their one-hop
+          neighbours. An unknown name is a 422.
+        - **node_name** (Optional[List[str]]): Names to scope the graph search to,
+          read according to node_type (node-set tags by default)
         - **top_k** (Optional[int]): Maximum results (default: 15)
         - **only_context** (bool): Return what the LLM would have received instead of
           its answer — for completion types each item's text is the user prompt
@@ -264,6 +286,10 @@ def get_recall_router() -> APIRouter:
         - **response_schema** (Optional[dict]): JSON Schema for structured
           completion output; validated results land in each result's
           ``structured`` field. 422 on schemas outside the supported subset.
+        - **retriever_specific_config** (Optional[dict]): Options for the retriever
+          behind search_type, as the SDK's ``recall(retriever_specific_config=...)``
+          takes them; known keys are checked for type and upper bound, and an invalid
+          value or ``response_model`` is rejected with 400 (send response_schema).
         - **contextProfile** (str): Profile to render for the 'session_context' scope: 'qa'
           (conversational) or 'agent' (tool/workflow). Ignored by other scopes. Defaults to 'qa'.
         - **toolConnections** (Optional[List[str]]): Names of authorized external database
@@ -290,12 +316,16 @@ def get_recall_router() -> APIRouter:
 
         from cognee.api.v1.recall import recall as cognee_recall
         from cognee.modules.recall.methods.model_from_json_schema import model_from_json_schema
+        from cognee.modules.search.methods.node_type_resolution import resolve_node_type
 
         response_model = (
             model_from_json_schema(payload.response_schema)
             if payload.response_schema is not None
             else None
         )
+        # The wire carries the class name; the SDK takes the class. Resolved before
+        # the recall so an unknown name is a 422 on both transports.
+        node_type = resolve_node_type(payload.node_type)
 
         # One call, two transports: the streaming path must not build its own
         # argument list, or the two drift the moment a parameter is added.
@@ -307,6 +337,7 @@ def get_recall_router() -> APIRouter:
                 datasets=payload.datasets,
                 dataset_ids=payload.dataset_ids,
                 system_prompt=payload.system_prompt,
+                node_type=node_type,
                 node_name=payload.node_name,
                 top_k=payload.top_k,
                 verbose=payload.verbose,
@@ -320,6 +351,7 @@ def get_recall_router() -> APIRouter:
                 tool_connections=payload.tool_connections,
                 tools_trigger=payload.tools_trigger,
                 code_query=payload.code_query,
+                retriever_specific_config=payload.retriever_specific_config,
             )
 
         streaming = wants_event_stream(request.headers.get("accept"), payload.stream)

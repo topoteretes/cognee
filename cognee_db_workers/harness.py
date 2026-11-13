@@ -744,6 +744,14 @@ class SubprocessSession:
         self._consecutive_timeouts_lock = threading.Lock()
         self._terminate_lock = threading.Lock()
         self._respawn_lock = threading.Lock()
+        # Set by ``shutdown()`` and never cleared: the owner tore the session
+        # down on purpose, so a late RPC (a background task that outlived the
+        # owner's ``close()``) is refused instead of recovered. Respawning
+        # here would start a worker nobody will ever shut down, since the
+        # owner has already dropped the session. ``_closed_event`` cannot
+        # carry this: a crash or a timeout sets it too, and those must still
+        # respawn.
+        self._shutdown_requested = False
         # Set by ``wait_for_ready`` after the worker emits its READY
         # sentinel. Used to gate registration in the global ``_all_sessions``
         # set: a session that's still waiting for its sentinel must not be
@@ -1211,7 +1219,7 @@ class SubprocessSession:
                 await loop.run_in_executor(None, self._respawn)
 
     def _can_respawn(self) -> bool:
-        return self._respawn_factory is not None
+        return self._respawn_factory is not None and not self._shutdown_requested
 
     def _apply_remap(self, req: Request) -> Request:
         """After a successful respawn, previously-allocated handle ids are
@@ -1289,6 +1297,13 @@ class SubprocessSession:
             )
 
         with self._respawn_lock:
+            # ``_can_respawn`` was checked before taking the lock; a
+            # ``shutdown()`` that got the lock in between is final.
+            if self._shutdown_requested:
+                raise SubprocessTransportError(
+                    "Subprocess session was shut down; not respawning the worker"
+                )
+
             # Another concurrent retry may have already respawned successfully
             # between the moment the current caller's RPC failed and us
             # acquiring the lock. If the process is alive again, bail out —
@@ -1448,11 +1463,18 @@ class SubprocessSession:
         """
         t = timeout if timeout is not None else self._shutdown_timeout
 
-        already_closed = self._closed_event.is_set()
-        # Set closed under the registry lock so any caller about to add a
-        # new entry sees the closed state and bails before inserting.
-        with self._pending_lock:
-            self._closed_event.set()
+        # Serialize with a retry that is respawning. Either it finishes first
+        # and ``self._proc`` below is the new worker, which is then torn down
+        # like any other, or the flag is set first and the respawn refuses.
+        # Without this a shutdown racing a respawn reaps the dead worker and
+        # leaves the fresh one running.
+        with self._respawn_lock:
+            self._shutdown_requested = True
+            already_closed = self._closed_event.is_set()
+            # Set closed under the registry lock so any caller about to add a
+            # new entry sees the closed state and bails before inserting.
+            with self._pending_lock:
+                self._closed_event.set()
 
         # Try to stop the reader cleanly. If it joins within ``t`` we
         # own ``_resp_q`` exclusively and can drain the SHUTDOWN ack

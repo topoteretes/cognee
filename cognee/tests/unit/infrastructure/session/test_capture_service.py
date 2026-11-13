@@ -248,6 +248,11 @@ async def test_account_deletion_hook_cleans_receipts(service, monkeypatch):
         "delete_agents_of_user",
         agents,
     )
+    monkeypatch.setattr(
+        import_module("cognee.modules.agents.delete_sync_policies"),
+        "delete_sync_policies",
+        AsyncMock(),
+    )
     manager = UserManager(SimpleNamespace(session=object()))
     await manager.on_before_delete(service.user)
     agents.assert_awaited_once()
@@ -274,3 +279,57 @@ async def test_real_dataset_resolver_does_not_create_unknown_names(service, monk
     with pytest.raises(PermissionDeniedError):
         await capture.remember_capture(**{**service.args, "dataset_id": service.dataset.id})
     denied.assert_awaited_once_with(service.user.id, "write", [service.dataset.id])
+
+
+async def _pinned_node_set(service):
+    from cognee.infrastructure.session.session_manager import SessionManager
+    from cognee.infrastructure.session.session_node_set import get_session_node_set
+
+    return await get_session_node_set(
+        SessionManager(service.adapter), str(service.user.id), service.args["session_id"]
+    )
+
+
+async def _receipt_count(service):
+    async with service.adapter.sessionmaker() as session:
+        return len((await session.execute(select(cache_capture_receipts))).all())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "entry",
+    [
+        QAEntry(question="q", answer="a", node_set=["proj"]),
+        TraceEntry(
+            origin_function="tool",
+            status="success",
+            generate_feedback_with_llm=False,
+            node_set=["proj"],
+        ),
+    ],
+    ids=["qa", "trace"],
+)
+async def test_capture_pins_the_session_node_set(service, entry):
+    receipt = await capture.remember_capture(**{**service.args, "entry": entry})
+
+    assert receipt["entry_id"]
+    assert await _pinned_node_set(service) == ("proj",)
+    # A retry of the same event repeats the same set and returns the same receipt.
+    assert await capture.remember_capture(**{**service.args, "entry": entry}) == receipt
+
+
+@pytest.mark.asyncio
+async def test_capture_refuses_a_different_node_set_before_writing(service):
+    from cognee.infrastructure.session.session_node_set import SessionNodeSetConflictError
+
+    first = QAEntry(question="q", answer="a", node_set=["proj"])
+    await capture.remember_capture(**{**service.args, "entry": first})
+
+    other = QAEntry(question="q2", answer="a2", node_set=["other"])
+    with pytest.raises(SessionNodeSetConflictError):
+        await capture.remember_capture(
+            **{**service.args, "entry": other, "client_event_id": uuid4()}
+        )
+
+    assert await _pinned_node_set(service) == ("proj",)
+    assert await _receipt_count(service) == 1

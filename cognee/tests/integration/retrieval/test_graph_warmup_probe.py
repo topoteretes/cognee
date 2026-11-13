@@ -11,6 +11,7 @@ staging) would lose their fail-safe warm fall-through.
 
 import pathlib
 import types
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -25,6 +26,7 @@ from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.modules.recall.methods.graph_warmup import (
     STATE_BUILD_FAILED,
     STATE_NEVER_BUILT,
+    STATE_PARTIAL,
     STATE_WARM,
     get_graph_build_status,
 )
@@ -72,7 +74,9 @@ async def _insert_run(
     status,
     error_class=None,
     error_message=None,
+    created_at=None,
 ):
+    extra = {"created_at": created_at} if created_at is not None else {}
     async with get_relational_engine().get_async_session() as session:
         session.add(
             PipelineRun(
@@ -84,6 +88,7 @@ async def _insert_run(
                 run_info={},
                 error_class=error_class,
                 error_message=error_message,
+                **extra,
             )
         )
         await session.commit()
@@ -122,7 +127,7 @@ async def test_operation_record_does_not_make_unbuilt_dataset_warm(
 
     # This is the row produced by remember(..., session_id=...): it carries
     # the dataset for attribution, but has no pipeline_name or status.
-    async with record_operation("remember", dataset_id=dataset_id, session_id="session-1"):
+    async with record_operation("remember", dataset_id=dataset_id, session_ids=["session-1"]):
         pass
 
     async with get_relational_engine().get_async_session() as session:
@@ -178,3 +183,65 @@ async def test_errored_graph_write_flags_build_failed_until_a_build_completes(
 
     probe = await get_graph_build_status(_USER, [dataset_id])
     assert probe.state == STATE_WARM
+
+
+@pytest.mark.asyncio
+async def test_indexed_chunks_read_as_partial_until_the_graph_is_built(
+    clean_test_environment, monkeypatch
+):
+    """cognify() opens its extraction run, then the indexing run stores the chunks
+    (SDK-397): from then on chunk searches answer, though no graph exists yet."""
+    dataset_id = uuid4()
+    _permit(monkeypatch, [dataset_id])
+    base = datetime(2026, 10, 23, tzinfo=timezone.utc)
+
+    def at(seconds):
+        return base + timedelta(seconds=seconds)
+
+    await _insert_run(
+        dataset_id, "add_pipeline", PipelineRunStatus.DATASET_PROCESSING_COMPLETED, created_at=at(0)
+    )
+    await _insert_run(
+        dataset_id,
+        "cognify_pipeline",
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=at(1),
+    )
+    await _insert_run(
+        dataset_id,
+        "indexing_pipeline",
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=at(2),
+    )
+    # A build on its way, nothing searchable yet: warming up, not the staged fail-safe.
+    assert (await get_graph_build_status(_USER, [dataset_id])).state == STATE_NEVER_BUILT
+
+    await _insert_run(
+        dataset_id,
+        "indexing_pipeline",
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+        created_at=at(3),
+    )
+    probe = await get_graph_build_status(_USER, [dataset_id])
+    assert (probe.state, probe.memory_state) == (STATE_PARTIAL, "extracting")
+    assert "chunk searches" in probe.message
+
+    await _insert_run(
+        dataset_id,
+        "cognify_pipeline",
+        PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+        error_class="AuthenticationError",
+        error_message="invalid api key",
+        created_at=at(4),
+    )
+    probe = await get_graph_build_status(_USER, [dataset_id])
+    assert (probe.state, probe.memory_state) == (STATE_PARTIAL, "extraction_failed")
+    assert probe.error_class == "AuthenticationError"
+
+    await _insert_run(
+        dataset_id,
+        "cognify_pipeline",
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+        created_at=at(5),
+    )
+    assert (await get_graph_build_status(_USER, [dataset_id])).state == STATE_WARM

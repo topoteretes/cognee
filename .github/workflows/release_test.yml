@@ -391,23 +391,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # TODO: re-enable the kuzu-lancedb scenario. Temporarily disabled so
-          # the release test exercises the postgres pair only; the entry below
-          # is unchanged and should be uncommented once it is brought back.
-          #
-          # kuzu-lancedb seeds the REGULAR mock: v1.2.0's ladybug adapter writes
-          # the whole graph as one UNWIND statement (chunking ships in v1.5.0),
-          # which cannot seed the 100k mock on a CI runner — measured >3h even
-          # with SUBPROCESS_CALL_TIMEOUT=0. Switch mock_file to the large mock
-          # once COGNEE_COMPATIBILITY_TEST_VERSION is a release containing
-          # COG-6112 (bf8ac13fb).
-          # - scenario: kuzu-lancedb
-          #   graph_provider: ladybug
-          #   vector_provider: lancedb
-          #   db_provider: sqlite
-          #   mock_file: mock_war_and_peace.json
-          #   min_nodes: "2000"
-          #   min_edges: "7000"
+          # kuzu-lancedb seeds the REGULAR mock: the seeding runs on the pinned
+          # LEGACY cognee, whose ladybug adapter writes the whole graph as one
+          # UNWIND statement (chunking ships in v1.5.0), which cannot seed the
+          # 100k mock on a CI runner — measured >3h even with
+          # SUBPROCESS_CALL_TIMEOUT=0. Switch mock_file to the large mock once
+          # COGNEE_COMPATIBILITY_TEST_VERSION is a release whose ladybug bulk
+          # writes are index seeks (#4530, #6210); the current branch's side
+          # already is.
+          - scenario: kuzu-lancedb
+            graph_provider: ladybug
+            vector_provider: lancedb
+            db_provider: sqlite
+            mock_file: mock_war_and_peace.json
+            min_nodes: "2000"
+            min_edges: "7000"
           - scenario: postgres-pgvector
             graph_provider: postgres
             vector_provider: pgvector
@@ -698,6 +696,65 @@ jobs:
           EMBEDDING_DIMENSIONS: "1024"
           EMBEDDING_MAX_TOKENS: "8191"
         run: uv run python ./examples/guides/simple_cognee_example.py
+
+  test-bedrock-base64-first-call:
+    name: Run Bedrock base64 First-Call Error Test
+    # Same fork guard as the other Bedrock jobs: provider secrets are not
+    # available to fork PRs.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "aws"
+
+      # One short Titan request and no LLM call: Bedrock cannot return base64
+      # vectors, and the engine must say so on the first reply instead of
+      # storing Titan's binary vectors or retrying.
+      - name: Run Bedrock base64 first-call check
+        env:
+          AWS_REGION_NAME: "eu-west-1"
+          EMBEDDING_PROVIDER: "bedrock"
+          EMBEDDING_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
+          EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
+          EMBEDDING_DIMENSIONS: "1024"
+          EMBEDDING_MAX_TOKENS: "8191"
+          EMBEDDING_ENCODING_FORMAT: "base64"
+        run: uv run python ./cognee/tests/e2e/embeddings/bedrock_base64_check.py
+
+  test-openrouter-base64-first-call:
+    name: Run OpenRouter base64 First-Call Test
+    # Same fork guard as the other provider jobs: secrets are not available
+    # to fork PRs.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      # One short embedding request and no LLM call: cognee's OpenRouter rule
+      # was float only, and the setting now overrides it. The check accepts
+      # each handled outcome (honoured, ignored, rejected) and fails on any
+      # other, so the job records what OpenRouter does with base64.
+      - name: Run OpenRouter base64 first-call check
+        env:
+          EMBEDDING_PROVIDER: "custom"
+          EMBEDDING_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          EMBEDDING_MODEL: "openrouter/openai/text-embedding-3-small"
+          EMBEDDING_DIMENSIONS: "1536"
+          EMBEDDING_MAX_TOKENS: "8191"
+          EMBEDDING_ENCODING_FORMAT: "base64"
+        run: uv run python ./cognee/tests/e2e/embeddings/openrouter_base64_check.py
 
   test-bedrock-aws-credentials:
     name: Run Bedrock AWS Credentials Test

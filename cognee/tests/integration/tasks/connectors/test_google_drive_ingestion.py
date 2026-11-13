@@ -32,7 +32,7 @@ class _FakeRequest:
         self._result = result
         self._error = error
 
-    def execute(self):
+    def execute(self, num_retries=0):
         if self._error is not None:
             raise self._error
         return self._result
@@ -59,6 +59,8 @@ class _FakeFilesResource:
         return _FakeRequest({"files": files})
 
     def get(self, fileId, fields, supportsAllDrives):
+        if fields == "id":  # resolving the scope folder, as Drive does for the "root" alias
+            return _FakeRequest({"id": fileId})
         meta = self._service.file_by_id.get(fileId)
         if meta is None:
             return _FakeRequest(error=_FakeHttpError())
@@ -88,6 +90,9 @@ class _FakeDriveService:
 
     def changes(self):
         return _FakeChangesResource(self)
+
+    def close(self):
+        pass
 
 
 def _file_meta(file_id, name=None):
@@ -150,7 +155,7 @@ async def clean_environment(tmp_path, monkeypatch):
 def _patch_drive(monkeypatch, service, content_by_id):
     monkeypatch.setattr(gd_source, "build_drive_service", lambda **kwargs: service)
 
-    def fake_extract(service, file_id, mime_type, name):
+    def fake_extract(service, file_id, mime_type, name, **_kwargs):
         return content_by_id[file_id]
 
     monkeypatch.setattr(gd_source, "extract_file_content", fake_extract)
@@ -281,6 +286,7 @@ async def test_incremental_resync_and_deletion_propagate(clean_environment, monk
         "newStartPageToken": "t1",
     }
     file_a["name"] = "fileA-renamed"  # still the same id/scope, just changed
+    file_a["modifiedTime"] = "2026-02-01T00:00:00Z"  # Drive bumps this on every edit
     del service.file_by_id["fileB"]  # simulate permanent deletion
 
     _patch_drive(

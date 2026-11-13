@@ -1,0 +1,12 @@
+The excerpt below comes from a conversation that took place on {weekday}, {date}.
+
+Right after every expression that refers to a time relative to that date ("yesterday", "last night", "last Saturday", "this weekend", "two weeks ago", "last month", "next week", "a few days ago", "last year", ...), insert in square brackets the date or period it refers to, computed from {weekday}, {date}:
+- a specific day: [= the Saturday before {date}, i.e. <day month year>], [= the day before {date}, i.e. <day month year>], [= the Friday after {date}, i.e. <day month year>]
+- a past or future period: [= the week before {date}], [= the weekend before {date}], [= the month before {date}, i.e. <month year>], [= the year before {date}, i.e. <year>], [= the month after {date}, i.e. <month year>]
+- the current period ("this week", "this month", "this year"): [= the week of {date}], [= the month of {date}, i.e. <month year>], [= the year of {date}, i.e. <year>]
+- an approximate distance ("a few days ago", "two weeks ago"): [= a few days before {date}], [= two weeks before {date}, i.e. around <day month year>]
+
+Do not annotate vague expressions with no definite time ("recently", "lately", "just", "for a while", "these days", "once"), expressions that are already absolute ("in 2019", "on 3 May"), or phrases that are not about a time ("last but not least"). Keep every other character exactly as it is: same words, punctuation, line breaks and speaker names, and do not touch the first line (the header). If nothing needs an annotation, return the excerpt unchanged.
+
+Excerpt:
+{text}

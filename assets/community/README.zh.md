@@ -75,7 +75,7 @@ pip install cognee
 
 ```
 import os
-os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
+os.environ["LLM_API_KEY"] = "YOUR_OPENAI_API_KEY"
 
 ```
 

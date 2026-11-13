@@ -1,56 +1,132 @@
-"""Opt-in cognify task writing the audit-grade provenance ledger.
+"""Opt-in writer of the audit ledger: one row per data item.
 
-Pipeline seam: spliced in by ``get_default_tasks`` right after
-``add_data_points`` (node ids are persisted and stable) and before the
-contradiction-detection spread, when the ``provenance_tracking`` CognifyConfig
-flag is on (env ``PROVENANCE_TRACKING``, default off).
+Storage seam: ``add_data_points`` calls ``record_provenance_at_storage`` after
+its graph/vector writes succeeded, when the ``provenance_tracking``
+CognifyConfig flag is on (env ``PROVENANCE_TRACKING``, default off). Hooking
+the one place every DataPoint batch passes through, not a cognify-only
+pipeline task, is what makes the ledger cover ``improve()`` enrichment, the
+code-graph routes, skills and custom pipelines alike.
 
-For every item this ingestion produced it appends document -> chunk -> entity
--> relationship lineage entries to the relational ``provenance_entries``
-ledger, joined to graph provenance by the existing source-ref key. All entries
-for one task invocation are committed as ONE chained transaction
-(``manager.batch()``), matching the pipeline's batching convention.
+What is recorded is the data item the batch was stored for, never the nodes
+and edges it produced: one row, ``"{dataset_id}:data_item:{data_id}"``, with
+the item's content hash, who stored it, in which pipeline run, and the
+existing source-ref key. Which node or edge came from which data item is
+already in the graph (its source refs), so the ledger does not repeat it, and
+a row per node and edge costs about ten times the source text in the
+always-shared relational database.
 
-Tenant/dataset scoping: cognee entity ids are globally deterministic
-(name-derived uuid5s), and the ledger lives in the always-shared relational
-DB — so every ledger key is prefixed with the dataset id from ctx
-(``"{dataset_id}:{raw_id}"``). Without this, two tenants mentioning the same
-entity name would share (and cross-overwrite) one version chain. Readers must
-join with the same prefixed key; entries written without ctx stay unprefixed.
+The row follows the item:
 
-Custom ``graph_model`` pipelines whose DataPoints lack the default
-made_from/is_part_of/contains shape are covered by a generic fallback that
-walks the model with ``get_graph_from_model`` (the same traversal
-``add_data_points`` uses) and records every node and edge.
+- a batch stored for an item whose row is live with the same content hash is
+  a no-op, so every batch may record it;
+- a different content hash versions the row (an update), once the new content
+  is published;
+- deleting the item tombstones it (``cognee/modules/provenance/tombstones.py``),
+  once its ``Data`` row is gone, and a later write brings it back; dropping
+  only its memory (``forget(memory_only=True)``) leaves the row as it is.
 
-Hard constraints, mirroring ``detect_contradictions``: the task returns its
-input unchanged and swallows all of its own errors — provenance can never
-break ingestion. Missing ctx, missing dataset/data ids, or raw items with no
-document degrade to entries with ``source_ref_key=None``, never a raise.
+``record_provenance`` is the same writer as a pipeline ``Task`` for custom
+pipelines that store data points some other way; it records unconditionally
+(the flag is the caller's call). A batch with no dataset or no data item in
+its ``ctx`` has nothing to record.
+
+The writer returns its input unchanged. It raises when the ledger cannot be
+written: a batch that is stored but not recorded leaves a gap nothing reports,
+so with tracking on the storing task fails and its run is rolled back.
 """
 
 from cognee.infrastructure.databases.provenance import data_item_id, make_source_ref_key
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.modules.provenance import get_provenance_manager
+from cognee.modules.provenance.tombstones import agent_id_for, ledger_data_item_key
+from cognee.modules.provenance.tracking import LEDGER_RUN_ID, provenance_tracking_enabled
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("record_provenance")
 
 
+async def record_provenance_at_storage(
+    data_points: list, ctx: PipelineContext | None = None
+) -> list:
+    """The storage-seam hook ``add_data_points`` calls after a successful write.
+
+    Records only when the flag is on; returns the input unchanged either way.
+    A ledger write that fails raises.
+    """
+    if not provenance_tracking_enabled():
+        return data_points
+    return await record_provenance(data_points, ctx=ctx)
+
+
+async def record_data_item_content(ctx: PipelineContext | None, content_hash: str | None) -> None:
+    """Record that the data item in ``ctx`` now has ``content_hash``, when the flag is on.
+
+    For a writer that changes an item's content outside ``add_data_points``:
+    the incremental update stores its new chunks under the old ``Data`` row
+    and only then publishes the new content. It records the new hash after
+    that publish, so the ledger never states content the document does not
+    hold; an update that finds the content unchanged records it too, which is
+    what completes an update whose ledger write failed after its publish.
+    """
+    if provenance_tracking_enabled():
+        await _write_data_item(ctx, content_hash)
+
+
+@task_summary("Recorded provenance for {n} item(s)")
+async def record_provenance(
+    data_points: list[DataPoint], ctx: PipelineContext | None = None
+) -> list[DataPoint]:
+    """Record the data item this batch was stored for.
+
+    Receives the batch ``add_data_points`` stored and returns it unchanged, so
+    it can also be appended to any pipeline as a ``Task``. The batch itself is
+    not walked: the ledger holds the data item, not what it produced.
+    """
+    if not isinstance(data_points, list) or not data_points:
+        return data_points
+    data_item = getattr(ctx, "data_item", None) if ctx is not None else None
+    await _write_data_item(ctx, getattr(data_item, "content_hash", None))
+    return data_points
+
+
+async def _write_data_item(ctx: PipelineContext | None, content_hash: str | None) -> None:
+    """Queue and commit the row of the data item ``ctx`` names; nothing without one."""
+    scope = _scope_from_ctx(ctx)
+    data_id = data_item_id(getattr(ctx, "data_item", None)) if ctx is not None else None
+    if not scope or not data_id:
+        logger.debug("Ledger recording skipped: batch names no dataset or no data item")
+        return
+
+    key = ledger_data_item_key(scope, data_id)
+    source_ref_key = _source_ref_key_from_ctx(ctx)
+    manager = get_provenance_manager()
+    # Every batch stored for an item comes through here, and all but the first
+    # find the row already live on this content. Those stop at a plain read,
+    # instead of queueing behind the lock all ledger writes share.
+    if await manager.data_item_is_recorded(key, content_hash, source_ref_key):
+        return
+
+    # The run that owns the write: a run storing on another run's behalf names
+    # that run (``LEDGER_RUN_ID``, cognify's indexing run), else its own.
+    owning_run = (getattr(ctx, "extras", None) or {}).get(LEDGER_RUN_ID) or ctx.pipeline_run_id
+    run_id = str(owning_run) if owning_run else None
+    batch = manager.batch()
+    batch.track_data_item(
+        key,
+        content_hash=content_hash,
+        activity_id=f"cognify:{run_id}" if run_id else "cognify",
+        agent_id=_agent_from_ctx(ctx),
+        bundle_id=run_id,
+        source_ref_key=source_ref_key,
+    )
+    await batch.commit()
+
+
 def _agent_from_ctx(ctx: PipelineContext | None) -> str:
-    """user.email > str(user.id) > "cognee" (mirrors source_user stamping rules)."""
-    user = getattr(ctx, "user", None)
-    if user is not None:
-        email = getattr(user, "email", None)
-        if email:
-            return str(email)
-        user_id = getattr(user, "id", None)
-        if user_id is not None:
-            return str(user_id)
-    return "cognee"
+    """The acting user's id, else ``"cognee"``."""
+    return agent_id_for(getattr(ctx, "user", None))
 
 
 def _source_ref_key_from_ctx(ctx: PipelineContext | None) -> str | None:
@@ -70,215 +146,3 @@ def _scope_from_ctx(ctx: PipelineContext | None) -> str | None:
     dataset = getattr(ctx, "dataset", None) if ctx is not None else None
     dataset_id = getattr(dataset, "id", None) if dataset is not None else None
     return str(dataset_id) if dataset_id else None
-
-
-def _entity_type_name(entity) -> str | None:
-    is_a = getattr(entity, "is_a", None)
-    if isinstance(is_a, tuple) and len(is_a) == 2:
-        # Entity.is_a may carry edge text as (Edge, EntityType); the type is
-        # the second element. Without this the name falls back to "Entity".
-        is_a = is_a[1]
-    name = getattr(is_a, "name", None) if is_a is not None else None
-    return name or type(entity).__name__
-
-
-def _relationship_name(edge, default: str) -> str:
-    return getattr(edge, "relationship_type", None) or default
-
-
-def _has_default_shape(item, chunk) -> bool:
-    """True when the item follows the default cognify schema walk."""
-    return (
-        getattr(item, "made_from", None) is not None
-        or getattr(chunk, "is_part_of", None) is not None
-        or getattr(chunk, "contains", None) is not None
-    )
-
-
-@task_summary("Recorded provenance for {n} item(s)")
-async def record_provenance(
-    data_points: list[DataPoint], ctx: PipelineContext | None = None
-) -> list[DataPoint]:
-    """Append ledger entries for everything this ingestion produced.
-
-    Receives the batch ``add_data_points`` returns: ``TextSummary`` items
-    wrapping chunks via ``made_from``, ``DocumentChunk`` objects directly, or
-    custom-schema DataPoints (generic traversal). Returns the input unchanged
-    so it can be appended to any pipeline.
-    """
-    if not isinstance(data_points, list) or not data_points:
-        return data_points
-
-    try:
-        manager = get_provenance_manager()
-
-        run_id = str(ctx.pipeline_run_id) if ctx and ctx.pipeline_run_id else None
-        common = {
-            "activity_id": f"cognify:{run_id}" if run_id else "cognify",
-            "agent_id": _agent_from_ctx(ctx),
-            "bundle_id": run_id,
-            "source_ref_key": _source_ref_key_from_ctx(ctx),
-        }
-        scope = _scope_from_ctx(ctx)
-
-        def scoped(raw_id: str) -> str:
-            return f"{scope}:{raw_id}" if scope else raw_id
-
-        batch = manager.batch()
-
-        # Dedup state is per invocation, but the task runs once per chunk
-        # batch — for documents spanning batches the ledger itself is
-        # consulted: an entry already carrying THIS run's bundle_id was
-        # written by an earlier batch of the same ingestion, so re-tracking
-        # (which would forge a spurious version) is skipped.
-        tracked_documents = set()
-
-        async def should_track_document(ledger_id: str) -> bool:
-            if ledger_id in tracked_documents:
-                return False
-            tracked_documents.add(ledger_id)
-            if common["bundle_id"]:
-                existing = await manager.get_provenance(ledger_id)
-                if existing and existing.get("bundle_id") == common["bundle_id"]:
-                    return False
-            return True
-
-        # Shared traversal state for the generic (custom-schema) path.
-        generic_added_nodes: dict = {}
-        generic_added_edges: dict = {}
-        generic_visited: dict = {}
-
-        for item in data_points:
-            chunk = getattr(item, "made_from", None) or item
-
-            if not _has_default_shape(item, chunk) and isinstance(item, DataPoint):
-                # Custom graph_model schema: no made_from/is_part_of/contains.
-                # Walk the model generically so the audit still covers every
-                # node and edge this ingestion produced.
-                nodes, edges = await get_graph_from_model(
-                    item,
-                    added_nodes=generic_added_nodes,
-                    added_edges=generic_added_edges,
-                    visited_properties=generic_visited,
-                )
-                root_id = str(item.id)
-                # The walk may legitimately return a node set that does not include
-                # ``item``. Attribute to it only when it was actually stored.
-                root_source = (
-                    scoped(root_id) if any(str(node.id) == root_id for node in nodes) else ""
-                )
-                for node in nodes:
-                    node_id = str(node.id)
-                    batch.track_entity(
-                        scoped(node_id),
-                        source="" if node_id == root_id else root_source,
-                        entity_type="entity",
-                        metadata={
-                            "name": getattr(node, "name", None),
-                            "type": getattr(node, "type", type(node).__name__),
-                        },
-                        **common,
-                    )
-                for edge_source_id, edge_target_id, relationship_name, _ in edges:
-                    source_id = scoped(str(edge_source_id))
-                    target_id = scoped(str(edge_target_id))
-                    batch.track_relationship(
-                        f"rel:{source_id}:{relationship_name}:{target_id}",
-                        source=root_source,
-                        used_entities=[source_id, target_id],
-                        metadata={"relationship_name": relationship_name},
-                        **common,
-                    )
-                continue
-
-            document = getattr(chunk, "is_part_of", None)
-
-            document_id = None
-            if document is not None and getattr(document, "id", None) is not None:
-                document_id = scoped(str(document.id))
-                if await should_track_document(document_id):
-                    batch.track_entity(
-                        document_id,
-                        source=getattr(document, "raw_data_location", None)
-                        or getattr(document, "name", None)
-                        or "",
-                        entity_type="document",
-                        **common,
-                    )
-
-            chunk_id = getattr(chunk, "id", None)
-            chunk_id = scoped(str(chunk_id)) if chunk_id is not None else None
-            if chunk_id is not None:
-                chunk_index = getattr(chunk, "chunk_index", 0) or 0
-                batch.track_chunk(
-                    chunk_id,
-                    source_document=(
-                        getattr(document, "raw_data_location", None) or "" if document else ""
-                    ),
-                    parent_chunk_id=document_id,
-                    start_index=chunk_index,
-                    end_index=chunk_index,
-                    chunk_size=getattr(chunk, "chunk_size", None),
-                    **common,
-                )
-
-            for entry in getattr(chunk, "contains", None) or []:
-                # ``contains`` entries are Entity/Event nodes or (Edge, node) tuples.
-                edge = entry[0] if isinstance(entry, tuple) else None
-                entity = entry[1] if isinstance(entry, tuple) else entry
-                entity_id = getattr(entity, "id", None)
-                if entity_id is None:
-                    continue
-                entity_id = scoped(str(entity_id))
-
-                # Re-mention across documents auto-versions: entity ids are
-                # name-derived uuid5s (deterministic within the dataset scope
-                # applied above), so the version chain is exactly the audit
-                # record of every mention within one dataset.
-                batch.track_entity(
-                    entity_id,
-                    source=chunk_id or "",
-                    entity_type="entity",
-                    metadata={
-                        "name": getattr(entity, "name", None),
-                        "type": _entity_type_name(entity),
-                    },
-                    **common,
-                )
-
-                relationship_pairs = []
-                if edge is not None and chunk_id is not None:
-                    relationship_pairs.append(
-                        (chunk_id, _relationship_name(edge, "contains"), entity_id)
-                    )
-                for relation in getattr(entity, "relations", None) or []:
-                    if not isinstance(relation, tuple) or len(relation) != 2:
-                        continue
-                    relation_edge, target = relation
-                    target_id = getattr(target, "id", None)
-                    if target_id is None:
-                        continue
-                    relationship_pairs.append(
-                        (
-                            entity_id,
-                            _relationship_name(relation_edge, "related_to"),
-                            scoped(str(target_id)),
-                        )
-                    )
-
-                for source_id, relationship_name, target_id in relationship_pairs:
-                    batch.track_relationship(
-                        f"rel:{source_id}:{relationship_name}:{target_id}",
-                        source=chunk_id or "",
-                        used_entities=[source_id, target_id],
-                        metadata={"relationship_name": relationship_name},
-                        **common,
-                    )
-
-        await batch.commit()
-    except Exception as error:
-        logger.warning(
-            "Provenance recording failed; ingestion unaffected: %s", error, exc_info=True
-        )
-
-    return data_points

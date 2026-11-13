@@ -63,6 +63,127 @@ async def _graph_snapshot(dataset_name, user):
     return {str(node_id) for node_id, _ in nodes}, len(real_edges)
 
 
+def _header_records(archive_dir) -> dict:
+    """The archive's typed records (entities, facts, documents), keyed by kind and id."""
+    from cognee.modules.migration.cogx import read_archive
+
+    return {
+        (record.kind, record.external_id): record
+        for record in read_archive(archive_dir)
+        if record.kind in ("entity", "fact", "document")
+    }
+
+
+def _assert_export_states_provenance(archive_dir, owner_email: str) -> None:
+    """A cognified dataset's export states every OMP header field cognee can
+    know, and leaves the ones it cannot unstated."""
+    records = _header_records(archive_dir)
+    for record in records.values():
+        _assert_common_header(record)
+        if record.kind == "entity":
+            _assert_entity_header(record, owner_email)
+        elif record.kind == "document":
+            _assert_document_header(record, owner_email)
+        else:
+            _assert_fact_header(record, owner_email)
+    assert any(
+        record.kind == "fact" and record.ai_involvement == "full" for record in records.values()
+    ), "No exported fact carries the evidence its extraction recorded."
+
+
+def _assert_common_header(record) -> None:
+    from cognee.modules.migration.cogx import COGXOrigin, content_hash_of, verify_checksum
+
+    key = (record.kind, record.external_id)
+    assert record.origin == COGXOrigin(system="cognee", id=record.external_id), key
+    assert verify_checksum(record) is True, f"{key} checksum does not verify"
+    body = record.body_text()
+    assert record.content_hash == (content_hash_of(body) if body else None), key
+    assert record.content_type == ("text/plain" if body else None), key
+    # Nothing in this dataset states a kind, validity, supersession or tags.
+    assert record.semantic_kind is None, key
+    assert record.valid_from is None and record.valid_to is None, key
+    assert record.invalidated_by is None, key
+    assert record.tags == [], key
+
+
+def _assert_entity_header(record, owner_email: str) -> None:
+    from cognee.modules.migration.cogx import COGXContributor
+
+    key = (record.kind, record.external_id)
+    assert isinstance(record.version, int), key
+    assert record.subject == [record.name], key
+    assert record.evidence and all(item.role == "derived" for item in record.evidence), key
+    assert record.ai_involvement == "full", key  # extracted by cognify
+    *initiators, system = record.contributors
+    assert system == COGXContributor(
+        role="system", actor="cognee:cognify_pipeline", kind="agent"
+    ), f"{key}: {record.contributors!r}"
+    # Extraction stamps entities without the user today; a user stamp, when
+    # present, must name the owner as the accountable human.
+    if initiators:
+        assert initiators == [COGXContributor(role="initiator", actor=owner_email, kind="human")], (
+            f"{key}: {record.contributors!r}"
+        )
+        assert record.accountable == owner_email, key
+    else:
+        assert record.accountable is None, key
+    assert record.confidence is None, key
+
+
+def _assert_document_header(record, owner_email: str) -> None:
+    from cognee.modules.migration.cogx import COGXContributor
+
+    key = (record.kind, record.external_id)
+    assert isinstance(record.version, int), key
+    assert record.subject, f"{key} names none of the entities it contains"
+    assert record.evidence == [], key  # source text, not derived from anything
+    assert record.ai_involvement == "none", key
+    initiator, system = record.contributors  # the indexing or the cognify pipeline
+    assert initiator == COGXContributor(role="initiator", actor=owner_email, kind="human"), key
+    assert system.role == "system" and system.actor.startswith("cognee:"), key
+    assert record.accountable == owner_email, key
+    assert record.confidence is None, key
+
+
+def _assert_fact_header(record, owner_email: str) -> None:
+    key = (record.kind, record.external_id)
+    assert len(record.subject) == 2, key
+    roles = {item.role for item in record.evidence}
+    assert roles <= {"inferred", "observed"}, key
+    expected_involvement = {
+        frozenset(): None,
+        frozenset({"inferred"}): "full",
+        frozenset({"observed"}): "none",
+        frozenset({"inferred", "observed"}): "mixed",
+    }[frozenset(roles)]
+    assert record.ai_involvement == expected_involvement, key
+    # Edges carry no version, user or pipeline stamps, and nothing reviewed them.
+    assert record.version is None, key
+    assert record.contributors == [] and record.accountable is None, key
+    assert record.confidence is None, key
+
+
+def _assert_headers_kept(first_archive, second_archive) -> None:
+    """Every OMP header field of every record survives import -> re-export.
+
+    Only the per-record ``checksum`` may differ: it also covers the record's
+    timestamps, which the import restamps.
+    """
+    from cognee.modules.migration.cogx import HEADER_FIELDS
+
+    first, second = _header_records(first_archive), _header_records(second_archive)
+    assert first.keys() == second.keys(), (
+        f"Re-export changed the record set: {len(first)} -> {len(second)} records."
+    )
+    for key, record in first.items():
+        for field in HEADER_FIELDS:
+            if field == "checksum":
+                continue
+            before, after = getattr(record, field), getattr(second[key], field)
+            assert before == after, f"{key} {field} changed on re-export: {before!r} -> {after!r}"
+
+
 async def _assert_revision_at_head():
     """The restored store's data-migration bookkeeping must be stamped at head.
 
@@ -173,6 +294,7 @@ async def main():
             f"Archive manifest carries migration revision {manifest.migration_revision!r}, "
             f"expected the source store's stamp {head_revision(MIGRATIONS)!r}."
         )
+        _assert_export_states_provenance(archive_dir, owner.email)
         logger.info(
             "Exported %d nodes, %d edges to %s",
             export_result.num_nodes,
@@ -260,6 +382,13 @@ async def main():
             "Chunk search on the restored instance returned nothing — imported "
             "DocumentChunk text was not vector-indexed."
         )
+
+        # --- Phase 3c: a re-export states the OMP header the archive carried.
+        reexport_dir = pathlib.Path(temporary_directory) / "hotel_cogx_reexport"
+        await cognee.export(
+            dataset_name, format="cogx", destination=reexport_dir, user=restored_owner
+        )
+        _assert_headers_kept(archive_dir, reexport_dir)
 
         # --- Phase 4: DEFAULT (knowledge-only) archive keeps the old contract.
         # No social layer: the importing user owns everything, no accounts are

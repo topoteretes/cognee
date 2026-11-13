@@ -1,4 +1,3 @@
-import os
 from collections.abc import Callable
 
 from cognee.base_config import get_base_config
@@ -7,6 +6,13 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
+from cognee.modules.retrieval.broad_retriever import (
+    BROAD_BATCH_MB,
+    BROAD_CONTEXT_TOKENS,
+    BROAD_READING_TOKENS,
+    BROAD_STORE_MB,
+    BroadRetriever,
+)
 
 # Retrievers
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
@@ -27,15 +33,43 @@ from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
+from cognee.modules.retrieval.hybrid_decomposition_retriever import (
+    DEFAULT_DECOMPOSITION_PROMPT_PATH,
+    DEFAULT_MAX_SUBQUERIES,
+    HybridDecompositionRetriever,
+)
 from cognee.modules.retrieval.hybrid_retriever import DEFAULT_HYBRID_LANE_TOP_K, HybridRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.retrieval.skills_retriever import SkillsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
-from cognee.modules.retrieval.triplet_retriever import TripletRetriever
-from cognee.modules.search.exceptions import UnsupportedSearchTypeError
+from cognee.modules.search.exceptions import SearchTypeDisabledError, UnsupportedSearchTypeError
+from cognee.modules.search.methods.node_name_scope import (
+    lucky_search_types,
+    reject_unsupported_node_name,
+)
 from cognee.modules.search.operations import select_search_type
+from cognee.modules.search.search_type_policy import CYPHER_SEARCH_TYPES, cypher_queries_allowed
 from cognee.modules.search.types import SearchType
+from cognee.modules.search.types.SearchType import DEPRECATED_SEARCH_TYPES
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
+# Returned to the caller: says what to change, without detailing the risk.
+CYPHER_DISABLED_MESSAGE = "{search_type} search is disabled by default for security reasons."
+CYPHER_DISABLED_REMEDIATION = (
+    "Set the environment variable ALLOW_CYPHER_QUERY=true, and only do so when every user "
+    "of this deployment is trusted."
+)
+
+# Logged on the server only.
+CYPHER_DISABLED_LOG_MESSAGE = (
+    "Rejected a {search_type} search because ALLOW_CYPHER_QUERY is not enabled. Raw Cypher "
+    "lets any user with read access to a dataset run arbitrary queries against the graph "
+    "database, up to remote code execution on the server. Set ALLOW_CYPHER_QUERY=true only "
+    "when every user of this deployment is trusted."
+)
 
 
 def _hybrid_lane_top_k(config: dict, key: str, search_top_k: int | None) -> int | None:
@@ -68,6 +102,9 @@ async def get_search_type_retriever_instance(
     Returns:
 
     """
+    # A deprecated type is resolved, with its warning, by search() / recall();
+    # this covers callers that reach the factory directly.
+    query_type = DEPRECATED_SEARCH_TYPES.get(query_type, query_type)
     # Transform retriever specific config if empty to avoid None checks later
     retriever_specific_config = kwargs.get("retriever_specific_config")
     if retriever_specific_config is None:
@@ -93,6 +130,33 @@ async def get_search_type_retriever_instance(
     include_references = kwargs.get("include_references", False)
     dataset = kwargs.get("dataset")
 
+    hybrid_kwargs = {
+        "chunks_top_k": _hybrid_lane_top_k(retriever_specific_config, "chunks_top_k", top_k),
+        "entities_top_k": _hybrid_lane_top_k(retriever_specific_config, "entities_top_k", top_k),
+        "max_edges_per_entity": retriever_specific_config.get("max_edges_per_entity", 10),
+        "node_name": node_name,
+        "node_name_filter_operator": node_name_filter_operator,
+        "system_prompt_path": system_prompt_path,
+        "system_prompt": system_prompt,
+        "session_id": session_id,
+        "response_model": retriever_specific_config.get("response_model", str),
+        "include_global_context_index": retriever_specific_config.get(
+            "include_global_context_index", False
+        ),
+        "global_context_index_top_k": retriever_specific_config.get(
+            "global_context_index_top_k", 3
+        ),
+        "text_summaries_top_k": retriever_specific_config.get("text_summaries_top_k"),
+        "use_importance_weight": retriever_specific_config.get("use_importance_weight", True),
+        "use_truth_weight": retriever_specific_config.get("use_truth_weight", False),
+        "facts_top_k": _hybrid_lane_top_k(retriever_specific_config, "facts_top_k", top_k),
+        "include_references": include_references,
+        "include_external_metadata": retriever_specific_config.get(
+            "include_external_metadata", False
+        ),
+        "external_metadata_keys": retriever_specific_config.get("external_metadata_keys"),
+    }
+
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, tuple[BaseRetriever, dict]] = {
         SearchType.CODE: (
@@ -114,8 +178,27 @@ async def get_search_type_retriever_instance(
             ChunksRetriever,
             {
                 "top_k": top_k,
+                "node_type": node_type,
                 "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
+            },
+        ),
+        # No top_k: BROAD reads the whole dataset (SDK-324).
+        SearchType.BROAD: (
+            BroadRetriever,
+            {
+                "system_prompt_path": "broad_answer.txt",
+                "system_prompt": system_prompt,
+                "session_id": session_id,
+                "response_model": retriever_specific_config.get("response_model", str),
+                "context_tokens": retriever_specific_config.get(
+                    "context_tokens", BROAD_CONTEXT_TOKENS
+                ),
+                "reading_tokens": retriever_specific_config.get(
+                    "reading_tokens", BROAD_READING_TOKENS
+                ),
+                "batch_mb": retriever_specific_config.get("batch_mb", BROAD_BATCH_MB),
+                "store_mb": retriever_specific_config.get("store_mb", BROAD_STORE_MB),
             },
         ),
         SearchType.RAG_COMPLETION: (
@@ -127,6 +210,7 @@ async def get_search_type_retriever_instance(
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
                 "include_references": include_references,
+                "node_type": node_type,
                 "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
                 "wide_search_top_k": wide_search_top_k,
@@ -134,50 +218,21 @@ async def get_search_type_retriever_instance(
         ),
         SearchType.HYBRID_COMPLETION: (
             HybridRetriever,
-            {
-                "chunks_top_k": _hybrid_lane_top_k(
-                    retriever_specific_config, "chunks_top_k", top_k
-                ),
-                "entities_top_k": _hybrid_lane_top_k(
-                    retriever_specific_config, "entities_top_k", top_k
-                ),
-                "max_edges_per_entity": retriever_specific_config.get("max_edges_per_entity", 10),
-                "node_name": node_name,
-                "node_name_filter_operator": node_name_filter_operator,
-                "system_prompt_path": system_prompt_path,
-                "system_prompt": system_prompt,
-                "session_id": session_id,
-                "response_model": retriever_specific_config.get("response_model", str),
-                "include_global_context_index": retriever_specific_config.get(
-                    "include_global_context_index", False
-                ),
-                "global_context_index_top_k": retriever_specific_config.get(
-                    "global_context_index_top_k", 3
-                ),
-                "text_summaries_top_k": retriever_specific_config.get("text_summaries_top_k"),
-                "use_importance_weight": retriever_specific_config.get(
-                    "use_importance_weight", True
-                ),
-                "use_truth_weight": retriever_specific_config.get("use_truth_weight", False),
-                "facts_top_k": _hybrid_lane_top_k(retriever_specific_config, "facts_top_k", top_k),
-                "include_references": include_references,
-                "include_external_metadata": retriever_specific_config.get(
-                    "include_external_metadata", False
-                ),
-                "external_metadata_keys": retriever_specific_config.get("external_metadata_keys"),
-            },
+            hybrid_kwargs,
         ),
-        SearchType.TRIPLET_COMPLETION: (
-            TripletRetriever,
+        SearchType.HYBRID_COMPLETION_DECOMPOSITION: (
+            HybridDecompositionRetriever,
             {
-                "system_prompt_path": system_prompt_path,
-                "top_k": top_k,
-                "system_prompt": system_prompt,
-                "session_id": session_id,
-                "response_model": retriever_specific_config.get("response_model", str),
-                "include_references": include_references,
-                "node_name": node_name,
-                "node_name_filter_operator": node_name_filter_operator,
+                **hybrid_kwargs,
+                "max_subqueries": retriever_specific_config.get(
+                    "max_subqueries", DEFAULT_MAX_SUBQUERIES
+                ),
+                "decomposition_system_prompt": retriever_specific_config.get(
+                    "decomposition_system_prompt"
+                ),
+                "decomposition_system_prompt_path": retriever_specific_config.get(
+                    "decomposition_system_prompt_path", DEFAULT_DECOMPOSITION_PROMPT_PATH
+                ),
             },
         ),
         SearchType.GRAPH_COMPLETION: (
@@ -405,15 +460,21 @@ async def get_search_type_retriever_instance(
             include_references=include_references,
         )
 
-    # If the query type is FEELING_LUCKY, select the search type intelligently
+    # If the query type is FEELING_LUCKY, select the search type intelligently,
+    # among the types that honour the node_name filter when one is set.
     if query_type is SearchType.FEELING_LUCKY:
-        query_type = await select_search_type(query_text)
+        query_type = await select_search_type(
+            query_text, allowed_search_types=lucky_search_types(node_type, node_name)
+        )
 
-    if (
-        query_type in [SearchType.CYPHER, SearchType.NATURAL_LANGUAGE]
-        and os.getenv("ALLOW_CYPHER_QUERY", "true").lower() == "false"
-    ):
-        raise UnsupportedSearchTypeError("Cypher query search types are disabled.")
+    if query_type in CYPHER_SEARCH_TYPES and not cypher_queries_allowed():
+        logger.warning(CYPHER_DISABLED_LOG_MESSAGE.format(search_type=query_type.value))
+        raise SearchTypeDisabledError(
+            query_type.value,
+            message=CYPHER_DISABLED_MESSAGE.format(search_type=query_type.value),
+            remediation=CYPHER_DISABLED_REMEDIATION,
+            log=False,
+        )
 
     from cognee.modules.retrieval.registered_community_retrievers import (
         registered_community_retrievers,
@@ -431,6 +492,10 @@ async def get_search_type_retriever_instance(
         # Check if retriever info is found for the given query type
         if not retriever_info:
             raise UnsupportedSearchTypeError(str(query_type))
+
+        # A filter the retriever would drop or mis-apply is an error, not a silent
+        # unscoped (or empty) result.
+        reject_unsupported_node_name(query_type, node_type, node_name)
 
         # If it exists unpack the retriever class and its initialization arguments
         retriever_cls, retriever_args = retriever_info

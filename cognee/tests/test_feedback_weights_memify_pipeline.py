@@ -114,6 +114,23 @@ async def main():
         abs(float(weight) - 0.5) > 1e-9 for weight in edge_weights.values()
     ), "Expected at least one non-default feedback_weight after pipeline run."
 
+    # A later ingest that mentions the same entities re-merges their nodes and
+    # edges; the learned weights must survive that upsert (they used to be
+    # reset to the DataPoint default on every re-add).
+    await cognee.add(
+        data="TechCorp hired more AI researchers. Cognee helps TechCorp manage its knowledge.",
+        dataset_name=dataset_name,
+    )
+    await cognee.cognify(datasets=[dataset_name])
+    node_weights_after = await graph_engine.get_node_feedback_weights(node_ids) if node_ids else {}
+    edge_weights_after = await graph_engine.get_edge_feedback_weights(edge_ids) if edge_ids else {}
+    assert node_weights_after == node_weights, (
+        f"Re-cognify reset node feedback weights: {node_weights} -> {node_weights_after}"
+    )
+    assert edge_weights_after == edge_weights, (
+        f"Re-cognify reset edge feedback weights: {edge_weights} -> {edge_weights_after}"
+    )
+
     secondary_email = "feedback.pipeline.noaccess@example.com"
     secondary_user = await get_user_by_email(secondary_email)
     if secondary_user is None:

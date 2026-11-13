@@ -1,6 +1,12 @@
 """Shared utilities for DLT ingestion."""
 
 import json
+import os
+import time
+from collections.abc import Callable
+from typing import TypeVar
+
+_T = TypeVar("_T")
 
 # A dlt source sets this attribute to opt into the "document" ingestion path:
 # each row becomes a text document that flows through normal cognify (LLM entity
@@ -14,13 +20,22 @@ DOCUMENT_SOURCE_ATTR = "cognee_document_source"
 # alternating destination datasets. Unrelated DLT sources keep their contract.
 PIPELINE_SCOPE_ATTR = "cognee_pipeline_scope"
 
+# The database a connection-string source reads (a SQLite file's name, a server
+# database's name), so its table nodes can say which database they belong to.
+SOURCE_LABEL_ATTR = "cognee_source_label"
+
+
+# The one pipeline every source without a scope (database and CSV sources) stages
+# through, whatever its dataset: its working directory is shared across datasets.
+UNSCOPED_PIPELINE_NAME = "ingest_dlt_source"
+
 
 def pipeline_name_for_source(source, dataset_name: str) -> str:
     from hashlib import sha256
 
     scope = getattr(source, PIPELINE_SCOPE_ATTR, None)
     if not isinstance(scope, str) or not scope:
-        return "ingest_dlt_source"
+        return UNSCOPED_PIPELINE_NAME
     digest = sha256(json.dumps([dataset_name, scope]).encode()).hexdigest()[:32]
     return f"ingest_dlt_{digest}"
 
@@ -28,7 +43,8 @@ def pipeline_name_for_source(source, dataset_name: str) -> str:
 # Community/cloud hosts can refuse unsafe older cores before ingestion starts.
 # Version 1 scopes cleanup by staging table and handles a confirmed empty table.
 # Version 2 reads the per-row node_set column (NODE_SET_COLUMN).
-DOCUMENT_SYNC_VERSION = 2
+# Version 3 reads the per-row structure column (STRUCTURE_COLUMN).
+DOCUMENT_SYNC_VERSION = 3
 
 # A document-mode row may carry its own node sets in this column, as a JSON
 # list of names (see resolve_dlt_sources._row_node_set). Every name is
@@ -37,6 +53,16 @@ DOCUMENT_SYNC_VERSION = 2
 # on the row as json instead of normalizing it into a child table.
 NODE_SET_COLUMN = "cognee_node_set"
 NODE_SET_COLUMN_HINT = {NODE_SET_COLUMN: {"data_type": "json", "nullable": True}}
+
+# A document-mode row may say where it sits in its source's tree in this column:
+# ``{"ancestors": [{"kind", "id", "name"?, "document"?}, ...]}``, nearest parent
+# first, empty for a row at the top. A ``"document": true`` entry is another row of
+# this source and table (its ``id`` column) and ends the list; any other entry is a
+# container with no row of its own (a database, a folder). Never hashed, so a move
+# keeps the row's data_id. Loaded as json for the same reason as the node set column.
+STRUCTURE_COLUMN = "cognee_structure"
+STRUCTURE_COLUMN_HINT = {STRUCTURE_COLUMN: {"data_type": "json", "nullable": True}}
+DOCUMENT_COLUMN_HINTS = {**NODE_SET_COLUMN_HINT, **STRUCTURE_COLUMN_HINT}
 
 
 def guarded_rows(rows, check_active=None):
@@ -60,10 +86,86 @@ def guarded_rows(rows, check_active=None):
         yield row
 
 
+def with_retries(
+    attempt: Callable[[], _T],
+    *,
+    retry_on: tuple[type[BaseException], ...],
+    delay: Callable[[BaseException, int], float | None],
+    attempts: int,
+    check_active: Callable[[], None] | None = None,
+    sleep: Callable[[float], None] | None = None,
+) -> _T:
+    """Run one provider request, retried by the connector's own policy.
+
+    ``attempt`` makes one request. An error of a ``retry_on`` class is retried after
+    ``delay(error, number)`` seconds unless it was the last of ``attempts`` or ``delay`` answers
+    ``None``; then it is raised as it is. ``check_active`` runs before every wait and every
+    retry, never before a first attempt, and what it raises propagates as it is.
+    """
+    for number in range(attempts):
+        if number and check_active is not None:
+            check_active()
+        try:
+            return attempt()
+        except retry_on as error:
+            if number == attempts - 1:
+                raise
+            wait = delay(error, number)
+            if wait is None:
+                raise
+        if check_active is not None:
+            check_active()
+        (sleep or time.sleep)(wait)
+    raise ValueError("with_retries needs at least one attempt")
+
+
 def document_source_tag(item) -> str | None:
     """Return the document-source tag a dlt source opted into, else ``None``."""
     tag = getattr(item, DOCUMENT_SOURCE_ATTR, None)
     return tag if isinstance(tag, str) and tag else None
+
+
+def document_write_disposition(source) -> str | None:
+    """The write disposition a document source runs under when the caller names none.
+
+    ``None``, each resource's own, when every selected resource declares
+    ``merge``; ``"replace"`` otherwise. dlt reports a resource that declares
+    nothing as ``append``, the same as one that declares it, so only a declared
+    ``merge`` can be told apart and kept; ``append`` needs the caller's argument.
+    """
+    selected = getattr(source, "selected_resources", None)
+    resources = list(selected.values()) if selected is not None else [source]
+    return None if resources and all(_declares_merge(r) for r in resources) else "replace"
+
+
+def _declares_merge(resource) -> bool:
+    disposition = getattr(resource, "write_disposition", None)
+    if isinstance(disposition, dict):  # merge with a strategy: {"disposition": "merge", ...}
+        disposition = disposition.get("disposition")
+    return disposition == "merge"
+
+
+def apply_dlt_runtime_defaults() -> None:
+    """Set cognee's defaults for dlt's own settings in the environment.
+
+    Called before cognee builds a dlt source or pipeline: dlt reads its telemetry
+    setting once, when its runtime first starts (``sql_database()`` starts it), and
+    ``dlt.config`` set afterwards does not reach it, so only the environment, set
+    first, does. A value already in the environment is kept; one set only in dlt's
+    ``config.toml`` is not seen (reading it would start the runtime) and is
+    overridden. A process that used dlt before cognee's first dlt call has already
+    started dlt's telemetry: set ``RUNTIME__DLTHUB_TELEMETRY=false`` yourself.
+
+    - ``RUNTIME__DLTHUB_TELEMETRY=false`` when ``TELEMETRY_DISABLED`` is set, so
+      cognee's switch also stops the events dlt posts to dltHub on every run.
+    - ``LOAD__DELETE_COMPLETED_JOBS=true``: dlt keeps every completed load package,
+      with the rendered text of every row, under its pipelines directory, outside
+      cognee's data root, so a forgotten or deleted record stays on disk. A failed
+      package is kept either way, for the retry.
+    """
+    if os.getenv("TELEMETRY_DISABLED"):
+        os.environ.setdefault("RUNTIME__DLTHUB_TELEMETRY", "false")
+    os.environ.setdefault("LOAD__DELETE_COMPLETED_JOBS", "true")
 
 
 def metadata_source(metadata) -> str | None:

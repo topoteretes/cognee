@@ -7,26 +7,39 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.exceptions import CogneeConfigurationError
 from cognee.shared.data_models import DefaultContentPrediction, SummarizedContent
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("cognify.config")
 
 
 class CognifyConfig(BaseSettings):
     classification_model: object = DefaultContentPrediction
     summarization_model: object = SummarizedContent
     # How each chunk's TextSummary is written (env: SUMMARY_METHOD, or
-    # cognify(summary_method=...)). "llm" (default): one LLM call per chunk.
-    # "from_extraction": one "Type: name, name" line per extracted type, then
-    # the chunk's relation texts, one per line, no LLM call.
-    summary_method: Literal["llm", "from_extraction"] = "llm"
-    triplet_embedding: bool = False
+    # cognify(summary_method=...)). "from_extraction" (default): one
+    # "Type: name, name" line per extracted type, then the chunk's relation
+    # texts, one per line, no LLM call. "llm": one LLM call per chunk.
+    summary_method: Literal["llm", "from_extraction"] = "from_extraction"
     chunks_per_batch: int | None = None
-    # Opt-in contradiction detection (issue #3699). Default OFF so the standard
-    # cognify pipeline is unchanged. Tunables gate the verdict and the LLM payload.
-    contradiction_detection: bool = False
-    contradiction_confidence_threshold: float = 0.5
-    contradiction_max_facts: int = 500
+    # Write chunks (and their documents) to the graph and vector stores right
+    # after chunking, before the LLM extraction (env: EARLY_CHUNK_INDEXING).
+    # On (default): chunk-based searches answer while entities are still being
+    # extracted; the final write skips re-embedding those chunks. Off: the
+    # dataset becomes searchable only when the whole pipeline has finished.
+    early_chunk_indexing: bool = True
     # Opt-in audit-grade provenance ledger (env: PROVENANCE_TRACKING). Default
     # OFF so the standard cognify pipeline is unchanged.
     provenance_tracking: bool = False
+    # External anchoring of the ledger's hash chain (env: PROVENANCE_ANCHOR_KEY,
+    # PROVENANCE_ANCHOR_PATH). With a key set, ``cognee-cli provenance anchor``
+    # / ``POST /api/v1/provenance/anchor`` sign the chain head with HMAC-SHA256
+    # and append the anchor to the anchor file (default
+    # ``{system_root}/provenance_anchors.jsonl``). A verify that includes the
+    # anchors then proves the ledger has not been rewritten *and re-chained*
+    # since the anchor — the one attack a self-contained hash chain cannot
+    # detect. Never serialized by ``to_dict``.
+    provenance_anchor_key: str | None = None
+    provenance_anchor_path: str | None = None
     # Which implementation fills the extract-and-summarize step of the default
     # cognify pipeline (env: GRAPH_EXTRACTOR). "auto" (default) runs the LLM
     # path when a usable LLM key is configured and the GLiNER demo otherwise;
@@ -51,11 +64,8 @@ class CognifyConfig(BaseSettings):
         return {
             "classification_model": self.classification_model,
             "summarization_model": self.summarization_model,
-            "triplet_embedding": self.triplet_embedding,
             "chunks_per_batch": self.chunks_per_batch,
-            "contradiction_detection": self.contradiction_detection,
-            "contradiction_confidence_threshold": self.contradiction_confidence_threshold,
-            "contradiction_max_facts": self.contradiction_max_facts,
+            "early_chunk_indexing": self.early_chunk_indexing,
             "provenance_tracking": self.provenance_tracking,
             "graph_extractor": self.graph_extractor,
             "gliner_auto_install": self.gliner_auto_install,
@@ -65,8 +75,36 @@ class CognifyConfig(BaseSettings):
         }
 
 
+def _warn_if_contradiction_detection_is_set() -> None:
+    """A stale CONTRADICTION_DETECTION would otherwise look like it still did something.
+
+    Called from the cached read so the warning fires once per process rather
+    than on every config lookup.
+    """
+    if os.getenv("CONTRADICTION_DETECTION") is not None:
+        logger.warning(
+            "CONTRADICTION_DETECTION is ignored; improve() reviews conflicts by default "
+            "(IMPROVE_REVIEW_CONFLICTS turns it off)."
+        )
+
+
+def _warn_if_triplet_embedding_is_set() -> None:
+    """A stale TRIPLET_EMBEDDING would otherwise look like it still wrote triplets.
+
+    Triplet embeddings and TRIPLET_COMPLETION were removed (SDK-1115). Called
+    from the cached read, so the warning fires once per process.
+    """
+    if os.getenv("TRIPLET_EMBEDDING") is not None:
+        logger.warning(
+            "TRIPLET_EMBEDDING is ignored: triplet embeddings and TRIPLET_COMPLETION "
+            "were removed. Cognify no longer writes the Triplet_text collection."
+        )
+
+
 @lru_cache
 def get_cognify_config():
+    _warn_if_contradiction_detection_is_set()
+    _warn_if_triplet_embedding_is_set()
     return CognifyConfig()
 
 
@@ -190,7 +228,9 @@ def _gliner_install_properties(config: CognifyConfig) -> dict:
 async def ensure_extractor_runtime(extractor: str, config: CognifyConfig) -> None:
     """Make the GLiNER runtime importable before a pipeline that uses it starts.
 
-    A no-op for the LLM extractor and when the runtime is present. Otherwise the
+    A no-op for the LLM extractor, when the runtime is present, and when a remote
+    GLiNER worker is configured (``COGNEE_GLINER_TRANSPORT``): then the model runs
+    there and this process needs neither torch nor gliner2. Otherwise the
     blocking install runs in a worker thread and is awaited, so the event loop keeps
     serving other work while this caller waits for it. Raises
     ``KeylessExtractorNotInstalledError`` when ``GLINER_AUTO_INSTALL`` is off and
@@ -205,8 +245,11 @@ async def ensure_extractor_runtime(extractor: str, config: CognifyConfig) -> Non
         gliner_runtime_installed,
         install_gliner_runtime,
     )
+    from cognee.tasks.graph.gliner_demo.remote.settings import remote_gliner_configured
 
     if extractor != GLINER_DEMO_EXTRACTOR or gliner_runtime_installed():
+        return
+    if remote_gliner_configured():
         return
     if not config.gliner_auto_install:
         raise KeylessExtractorNotInstalledError()
@@ -270,14 +313,13 @@ async def ensure_extractor_runtime(extractor: str, config: CognifyConfig) -> Non
     )
 
 
-def default_pipeline_needs_llm(extractor: str, config: CognifyConfig) -> bool:
+def default_pipeline_needs_llm(extractor: str) -> bool:
     """True when the default cognify task list contains an LLM task.
 
     Serves only the early provider preflight in ``add()``/``remember()``,
-    which runs before any task list exists: extraction on the ``llm``
-    extractor and the opt-in contradiction pass are the LLM tasks of the
-    default pipeline. The pipeline-level gate does not use this formula — it
-    derives the need from the tasks themselves (``Task.needs_llm`` union, see
+    which runs before any task list exists. The pipeline-level gate does not
+    use this formula — it derives the need from the tasks themselves
+    (``Task.needs_llm`` union, see
     ``pipeline_needs_llm``) and is the authority when the two disagree.
     """
-    return extractor == LLM_EXTRACTOR or config.contradiction_detection
+    return extractor == LLM_EXTRACTOR

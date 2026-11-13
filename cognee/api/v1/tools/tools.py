@@ -98,24 +98,6 @@ async def propose_sql_write(
     return await _propose(user_id, connection, instruction, evidence=evidence)
 
 
-async def propose_corrections(
-    connection: str,
-    *,
-    limit: int = 10,
-    user: object | None = None,
-) -> list[dict[str, Any]]:
-    """Draft correction proposals from contradictions cognee has detected.
-
-    Scans the graph's ``contradicts`` edges (recorded by the opt-in
-    contradiction-detection cognify task) and drafts one reviewable UPDATE
-    proposal per contradiction that is correctable in the given database.
-    """
-    from cognee.modules.tools.text_to_sql import propose_corrections_from_contradictions
-
-    user_id = await _resolve_user_id(user)
-    return await propose_corrections_from_contradictions(user_id, connection, limit=limit)
-
-
 async def list_write_proposals(
     status: str | None = None, user: object | None = None
 ) -> list[dict[str, Any]]:

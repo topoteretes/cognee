@@ -53,8 +53,9 @@ async def capture_graph_provenance(
 
     Coverage is deliberately narrow: evidence exists only for edges produced
     while storing document chunks (the cognify extraction path). Batches with
-    no reachable ``DocumentChunk`` — contradiction edges, ``improve()``
-    enrichment, the code-graph route, session bridging — record nothing.
+    no reachable ``DocumentChunk`` — ``improve()`` enrichment, the code-graph
+    route, session bridging, conflict links and reviewed Entity descriptions —
+    record nothing.
     ``evidence_kind`` on the row is the extension point for those producers.
     """
     config = get_provenance_config()

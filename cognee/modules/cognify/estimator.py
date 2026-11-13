@@ -33,6 +33,7 @@ from pydantic import BaseModel
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.infrastructure.llm.utils import get_llm_tokenizer
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import get_cognify_config
@@ -178,16 +179,6 @@ class DryRunEstimate:
         return "\n".join(lines)
 
 
-def _llm_tokenizer() -> TikTokenTokenizer:
-    model = get_llm_config().llm_model.split("/", 1)[-1]
-    try:
-        return TikTokenTokenizer(model=model)
-    except Exception:
-        # Model unknown to tiktoken — fall back to its default encoding.
-        logger.debug("Falling back after error in _llm_tokenizer", exc_info=True)
-        return TikTokenTokenizer(model=None)
-
-
 def _count_tokens(text: str, tokenizer: TikTokenTokenizer) -> int:
     return tokenizer.count_tokens(text) if text else 0
 
@@ -238,7 +229,7 @@ def estimate_chunks(
     before any document is read, and reports them via ``skipped_dlt_chunks``
     and ``skipped_code_items``.
     """
-    tokenizer = _llm_tokenizer()
+    tokenizer = get_llm_tokenizer()
     model = get_llm_config().llm_model
     cognify_config = get_cognify_config()
     summarization_model = cognify_config.summarization_model
@@ -344,9 +335,9 @@ def _require_text_like(name: str) -> None:
 
 def _accept_local_file_path() -> bool:
     """The same ACCEPT_LOCAL_FILE_PATH gate real ingestion applies."""
-    from cognee.tasks.ingestion.save_data_item_to_storage import settings
+    from cognee.tasks.ingestion.save_data_item_to_storage import local_file_paths_accepted
 
-    return settings.accept_local_file_path
+    return local_file_paths_accepted()
 
 
 def _path_candidate(value: str) -> Path | None:
@@ -382,19 +373,10 @@ def _path_candidate(value: str) -> Path | None:
         return None
 
     if exists:
+        # Mirror the ACCEPT_LOCAL_FILE_PATH gate: save_data_item_to_storage
+        # refuses any existing path, absolute or relative, when it is closed.
         if not _accept_local_file_path():
-            # Mirror the ACCEPT_LOCAL_FILE_PATH gate: an existing *absolute* file
-            # path is rejected, while an existing *relative* path falls through to
-            # raw text (save_data_item_to_storage has no reject branch for it).
-            # Absolute-path detection matches save_data_item_to_storage exactly,
-            # including Windows drive-letter paths (C:\...), which "/"-prefix
-            # checking alone misses.
-            is_absolute_path = (
-                value.startswith("/") or (os.name == "nt" and len(value) > 1 and value[1] == ":")
-            ) and Path(os.path.normpath(value)).is_absolute()
-            if is_absolute_path:
-                raise ValueError(f"Local files are not accepted, got {value!r}.")
-            return None
+            raise ValueError(f"Local files are not accepted, got {value!r}.")
         return path
 
     # A non-existent path — absolute or relative — is raw text. A real run no

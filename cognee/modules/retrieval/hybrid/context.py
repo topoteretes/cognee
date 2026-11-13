@@ -2,29 +2,34 @@ from typing import Any
 
 from cognee.modules.retrieval.hybrid.entities import format_entities
 from cognee.modules.retrieval.hybrid.facts import format_facts
-from cognee.modules.retrieval.hybrid.results import display_value, payload, result_id
+from cognee.modules.retrieval.utils.conflict_context import PASSAGE_HEADER_KEY, format_conflicts
+from cognee.modules.retrieval.utils.results import display_value, payload, result_id
+
+
+def _attached_conflict_texts(retrieved_objects: dict) -> set[str]:
+    """Conflict explanations the chunk and entity sections already carry.
+
+    They get one block of their own at the end, so the related-facts section
+    must not repeat them.
+    """
+    return {
+        text
+        for item in (*retrieved_objects.get("chunks", []), *retrieved_objects.get("entities", []))
+        for text in payload(item).get("conflicts", [])
+    }
 
 
 def format_hybrid_context(global_context: str, retrieved_objects: Any) -> str:
     retrieved_objects = retrieved_objects or {}
-    sections = []
-
-    if global_context:
-        sections.append(global_context)
-
-    passages = format_passages(retrieved_objects.get("chunks", []))
-    if passages:
-        sections.append(passages)
-
-    entities = format_entities(retrieved_objects.get("entities", []))
-    if entities:
-        sections.append(entities)
-
-    facts = format_facts(retrieved_objects.get("facts", []))
-    if facts:
-        sections.append(facts)
-
-    return "\n\n".join(sections)
+    conflict_texts = _attached_conflict_texts(retrieved_objects)
+    sections = (
+        global_context,
+        format_passages(retrieved_objects.get("chunks", [])),
+        format_entities(retrieved_objects.get("entities", [])),
+        format_facts(retrieved_objects.get("facts", []), exclude_texts=conflict_texts),
+        format_conflicts(conflict_texts),
+    )
+    return "\n\n".join(section for section in sections if section)
 
 
 def format_hybrid_context_batch(global_contexts, retrieved_objects_list) -> list[str]:
@@ -79,7 +84,9 @@ def format_passages(chunks: list[Any]) -> str:
         text = display_value(chunk_payload.get("text"))
         if not text:
             continue
-        passages.append(_metadata_lines(chunk_payload.get("external_metadata")) + text)
+        source = display_value(chunk_payload.get(PASSAGE_HEADER_KEY))
+        header = f"source: {source}\n" if source else ""
+        passages.append(header + _metadata_lines(chunk_payload.get("external_metadata")) + text)
     if not passages:
         return ""
     return "## Relevant passages\n" + "\n---\n".join(passages)

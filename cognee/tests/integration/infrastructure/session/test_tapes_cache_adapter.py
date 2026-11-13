@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -6,25 +7,20 @@ import pytest
 
 @pytest.fixture
 def tapes_adapter():
-    """TapesCacheAdapter rooted in a temp cache directory."""
-    with (
-        tempfile.TemporaryDirectory() as tmpdir,
-        patch(
-            "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-            return_value={"data_root_directory": tmpdir},
-        ),
-    ):
+    """TapesCacheAdapter on a temporary aiosqlite database."""
+    with tempfile.TemporaryDirectory() as tmpdir:
         from cognee.infrastructure.databases.cache.tapes.TapesCacheAdapter import (
             TapesCacheAdapter,
         )
 
         inst = TapesCacheAdapter(
+            f"sqlite+aiosqlite:///{tmpdir}/cache.db",
             tapes_ingest_url="http://tapes.test:8081",
             tapes_agent_name="cognee-unit",
             tapes_model="unit-model",
         )
         yield inst
-        inst.cache.close()
+        asyncio.run(inst.close())
 
 
 def _patched_post_returning(status_code: int = 202):
@@ -36,7 +32,7 @@ def _patched_post_returning(status_code: int = 202):
 
 
 @pytest.mark.asyncio
-async def test_create_qa_entry_writes_fs_and_mirrors_to_tapes(tapes_adapter):
+async def test_create_qa_entry_writes_sql_and_mirrors_to_tapes(tapes_adapter):
     mock_post = _patched_post_returning(202)
     with patch("httpx.AsyncClient.post", mock_post):
         await tapes_adapter.create_qa_entry(
@@ -69,7 +65,7 @@ async def test_create_qa_entry_writes_fs_and_mirrors_to_tapes(tapes_adapter):
 
 
 @pytest.mark.asyncio
-async def test_ingest_failure_does_not_break_fs_write(tapes_adapter):
+async def test_ingest_failure_does_not_break_sql_write(tapes_adapter):
     mock_post = AsyncMock(side_effect=RuntimeError("tapes unreachable"))
     with patch("httpx.AsyncClient.post", mock_post):
         await tapes_adapter.create_qa_entry(

@@ -8,6 +8,7 @@ from botocore.config import Config
 
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     EdgeData,
+    EdgeIdentity,
     GraphDBInterface,
     Node,
     NodeData,
@@ -649,6 +650,31 @@ class NeptuneGraphDB(GraphDBInterface):
             raise RuntimeError(
                 f"Failed to add {len(failed_edges)} of {len(edges)} edges after bulk fallback"
             ) from failed_edges[0][1]
+
+    async def delete_edge_triples(self, edges: list[EdgeIdentity]) -> None:
+        if not edges:
+            return
+        # DELETE r (not DETACH DELETE) removes only the matched relationships and
+        # preserves the endpoint nodes.
+        await self.query(
+            f"""
+            UNWIND $edges AS edge
+            MATCH (source:{self._GRAPH_NODE_LABEL})-[r]->(target:{self._GRAPH_NODE_LABEL})
+            WHERE id(source) = edge.source AND id(target) = edge.target
+                AND type(r) = edge.relationship
+            DELETE r
+            """,
+            {
+                "edges": [
+                    {
+                        "source": str(edge.source_id),
+                        "target": str(edge.target_id),
+                        "relationship": edge.relationship_name,
+                    }
+                    for edge in edges
+                ]
+            },
+        )
 
     async def delete_graph(self) -> None:
         """
@@ -1349,7 +1375,9 @@ class NeptuneGraphDB(GraphDBInterface):
         projection is not supported in Neptune Anlaytics.
         """
 
-    async def get_filtered_graph_data(self, attribute_filters: list[dict[str, list]]):
+    async def get_filtered_graph_data(
+        self, attribute_filters: list[dict[str, list]], *, include_edges: bool = True
+    ):
         """
         Fetch nodes and edges filtered by specific attribute criteria.
 
@@ -1391,6 +1419,9 @@ class NeptuneGraphDB(GraphDBInterface):
             )
             for record in result_nodes
         ]
+
+        if not include_edges:
+            return nodes, []
 
         query_edges = f"""
            MATCH (n :{self._GRAPH_NODE_LABEL})-[r]->(m :{self._GRAPH_NODE_LABEL})

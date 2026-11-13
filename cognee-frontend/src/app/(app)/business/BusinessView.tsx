@@ -1,18 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { notifications } from "@mantine/notifications";
 import type { CogneeInstance } from "@/modules/instances/types";
+import { useStructuredExplorer, type RowFilter } from "@/modules/business/useStructuredExplorer";
+import StructuredExplorerPanel from "@/modules/business/panels/StructuredExplorerPanel";
 import { useBusinessScene } from "@/modules/business/useBusinessScene";
-import { useBrains } from "@/modules/business/useBrains";
+import { useBusinessColorMode } from "@/modules/business/useBusinessColorMode";
+import { EMPTY_BRAIN_STATE } from "@/modules/business/canvas/businessCanvasHelpers";
+import { useBrainsSummary } from "@/modules/business/useBrainsSummary";
 import { useGovernanceIndex } from "@/modules/business/useGovernanceIndex";
 import { useBusinessLiveUpdates } from "@/modules/business/useBusinessLiveUpdates";
 import { computeViewingNarration } from "@/modules/business/viewingNarration";
-import BusinessCanvas, { type BusinessCanvasHandle } from "@/modules/business/canvas/BusinessCanvas";
+import type { BusinessCanvasHandle } from "@/modules/business/canvas/BusinessCanvas";
+import BusinessGraphCanvas from "@/modules/business/canvas/BusinessGraphCanvas";
 import type { Spotlight } from "@/modules/business/canvas/businessDraw";
 import type { BusinessEntity } from "@/modules/business/sceneTypes";
-import HoverTooltip from "@/modules/business/panels/HoverTooltip";
-import type { SceneHit } from "@/modules/business/canvas/businessHitTest";
 import NodePanel from "@/modules/business/panels/NodePanel";
 import SourceDetailCard from "@/modules/business/panels/SourceDetailCard";
 import { computeSourceDetail } from "@/modules/business/computeSourceDetail";
@@ -20,13 +23,15 @@ import { computeWhatIfRemoval } from "@/modules/business/computeWhatIfRemoval";
 import OperatorsRail from "@/modules/business/panels/OperatorsRail";
 import BrainSwitcher from "@/modules/business/panels/BrainSwitcher";
 import SourcesRail from "@/modules/business/panels/SourcesRail";
+import TypesRail from "@/modules/business/panels/TypesRail";
 import GraphConstructionLog, { type ConstructionLogEntry } from "@/modules/business/panels/GraphConstructionLog";
 import AnswerCard from "@/modules/business/panels/AnswerCard";
 import SessionMemoryCard from "@/modules/business/panels/SessionMemoryCard";
 import { GOVERNANCE_LAYER_ID } from "@/modules/business/layers/governanceLayer";
 import { CONTENT_LAYER_ID } from "@/modules/business/layers/contentLayer";
-import { accessibleDatasetIds } from "@/modules/business/useGovernanceIndex";
-import { setsOf, sourceLabel } from "@/modules/business/computeBrainState";
+import { accessibleDatasetIds, narrowToReadable } from "@/modules/business/useGovernanceIndex";
+import noDatasetStateLabel from "@/modules/business/noDatasetStateLabel";
+import { countLinksTouching, setsOf, sourceLabel } from "@/modules/business/computeBrainState";
 import { truncate } from "@/modules/business/textUtils";
 import { useBusinessQaSurface } from "@/modules/business/useBusinessQaSurface";
 import { useNarration } from "@/modules/business/useNarration";
@@ -38,7 +43,12 @@ import BusinessDock from "@/modules/business/panels/BusinessDock";
 import BusinessLoading from "@/modules/business/panels/BusinessLoading";
 import BusinessEmptyState from "@/modules/business/panels/BusinessEmptyState";
 import ScrollFadeContainer from "@/modules/business/panels/ScrollFadeContainer";
+import useSeedDatasetId from "@/modules/business/useSeedDatasetId";
+import { useFilter } from "@/ui/layout/FilterContext";
 import { useEntitySelection } from "@/modules/business/useEntitySelection";
+
+// Hidden for now: the explorer is built but not ready to ship in the Business view.
+const SHOW_STRUCTURED_EXPLORER = false;
 
 const WHAT_IF_SPOTLIGHT_MS = 12000;
 
@@ -51,16 +61,30 @@ interface BusinessViewProps {
 // before this ever mounts (see POD_DEPENDENT_PATHS), the same gate every
 // other pod-backed route uses.
 export default function BusinessView({ cogniInstance }: BusinessViewProps) {
-  const scene = useBusinessScene(cogniInstance);
-  const brainsQuery = useBrains(cogniInstance);
-  const governanceIndex = useGovernanceIndex(scene.layerData[GOVERNANCE_LAYER_ID]);
+  // Held here because the two hooks below need it in opposite directions:
+  // the scene's content layer decides whether to poll for graph growth from
+  // it, and the live-updates hook - which is what learns it - needs the
+  // scene's focused dataset to open its socket at all. One piece of state
+  // between them breaks that cycle; it starts false so the graph polls until
+  // a socket handshake actually completes.
+  const [graphPushActive, setGraphPushActive] = useState(false);
+  const scene = useBusinessScene(cogniInstance, { graphPushActive });
+  const [colorMode, setColorMode] = useBusinessColorMode();
+  const encoding = (scene.brainState ?? EMPTY_BRAIN_STATE).encodings[colorMode];
+  const brainsQuery = useBrainsSummary(cogniInstance);
+  // Tenant-wide, straight off the provenance payload. Nothing may RENDER from
+  // this one: it exists for the seed fallback below, which needs a dataset id
+  // to open when the read-scoped list could not be fetched at all, and an id
+  // the pod then refuses is a failed fetch rather than a disclosed name.
+  const tenantGovernanceIndex = useGovernanceIndex(scene.layerData[GOVERNANCE_LAYER_ID]);
   const { display: narration, narrate } = useNarration();
-  const live = useBusinessLiveUpdates(scene.activeDatasetId, cogniInstance);
+  const live = useBusinessLiveUpdates(scene.activeDatasetId, cogniInstance, {
+    onGraphPushChange: setGraphPushActive,
+  });
 
   const canvasRef = useRef<BusinessCanvasHandle>(null);
-  const selection = useEntitySelection(scene.brainState?.semanticLinks, scene.brainState?.entityById);
-  const [hoveredHit, setHoveredHit] = useState<SceneHit>(null);
-  const [hoverPos, setHoverPos] = useState({ x: 0, y: 0, containerWidth: 0 });
+  const structured = useStructuredExplorer(scene.brainState, scene.activeDatasetId, SHOW_STRUCTURED_EXPLORER);
+  const selection = useEntitySelection(structured.view?.graphLinks, structured.view?.entityById);
   const [hoveredPrincipalId, setHoveredPrincipalId] = useState<string | null>(null);
   // Kept apart from hoveredPrincipalId on purpose. The rail's hover is an
   // access question ("what can this principal read"), so it dims the sources
@@ -69,7 +93,16 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
   // under the user for pointing at a dot.
   const [hoveredMarkerAgentId, setHoveredMarkerAgentId] = useState<string | null>(null);
   const [focusSets, setFocusSets] = useState<Set<string> | null>(null);
+  const [focusTypes, setFocusTypes] = useState<Set<string> | null>(null);
+  const [railTab, setRailTab] = useState<"sources" | "types">("sources");
   const [spotlight, setSpotlight] = useState<Spotlight | null>(null);
+  const { setFilter: setRowFilter } = structured;
+  const { clearSelection } = selection;
+  const changeRowFilter = useCallback((filter: RowFilter) => {
+    setRowFilter(filter);
+    clearSelection();
+    setSpotlight(null);
+  }, [setRowFilter, clearSelection]);
   // UI-facing mirror of the canvas's ref-based level/plumbing (see
   // useBusinessCamera's onLevelChange) — only for highlighting the active
   // altimeter button, never read by the draw loop itself.
@@ -89,22 +122,54 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
   // Auto-focus the first readable brain once the list loads, so the canvas
   // never sits empty on first paint waiting for a manual pick.
   //
-  // Driven by the governance list, not by /visualize/brains: that endpoint
-  // returns every readable dataset's FULL graph in one response, so on a
-  // workspace with a dozen populated datasets it routinely exceeds the
-  // client's 10s GET budget and rejects. Hanging auto-select off it meant a
-  // slow-but-healthy workspace landed on "select a brain" with an empty
-  // canvas and no loader, while the governance panel beside it rendered
-  // fine (reported live on an 11-dataset workspace). Governance comes from
-  // its own light endpoint, already carries every dataset, and exposes them
-  // with bare ids precisely so they can be used as activeDatasetId (see
-  // useGovernanceIndex's bareDatasetId).
-  const firstGovernanceDatasetId = governanceIndex.datasets[0]?.id ?? null;
-  useEffect(() => {
-    if (scene.activeDatasetId || !firstGovernanceDatasetId) return;
-    scene.setActiveDatasetId(firstGovernanceDatasetId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [firstGovernanceDatasetId, scene.activeDatasetId]);
+  // Seeded from the dataset list, not from governance, for two reasons.
+  // Correctness: `/v1/schema/provenance/json` scopes datasets by tenant
+  // (Dataset.tenant_id), so its first entry can be one this caller holds no
+  // read grant on, and the graph fetch for it then fails; `/v1/datasets/`
+  // answers with exactly the readable set (get_all_user_permission_datasets)
+  // the graph endpoint will accept. Speed: that list is already in flight
+  // from the app layout's FilterProvider, which never remounts, so the graph
+  // fetch starts alongside governance instead of behind it — governance is a
+  // whole-tenant provenance graph the canvas does not need to pick a dataset.
+  const { selectedDataset, datasets, datasetsUnavailable, loading: datasetsLoading } = useFilter();
+  const readableDatasetIds = useMemo(() => datasets.map((d) => d.id), [datasets]);
+  const governanceDatasetIds = useMemo(
+    () => tenantGovernanceIndex.datasets.map((d) => d.id),
+    [tenantGovernanceIndex.datasets],
+  );
+  // What every panel below is allowed to see. Narrowed once, here, so no
+  // panel has to remember to filter — and narrowed to NOTHING while the
+  // readable list is still answering or has failed, because an unknown grant
+  // is not a grant (CLO-932 follow-up: the rails and the switcher were
+  // naming other members' datasets).
+  const governanceIndex = useMemo(
+    () => narrowToReadable(
+      tenantGovernanceIndex,
+      datasetsUnavailable || datasetsLoading ? null : readableDatasetIds,
+    ),
+    [tenantGovernanceIndex, datasetsUnavailable, datasetsLoading, readableDatasetIds],
+  );
+  const brainListState = datasetsLoading
+    ? "loading" as const
+    : datasetsUnavailable
+      ? "unavailable" as const
+      : "ready" as const;
+  const { unconfirmedSeedId } = useSeedDatasetId({
+    instanceId: cogniInstance.instanceId,
+    activeDatasetId: scene.activeDatasetId,
+    setActiveDatasetId: scene.setActiveDatasetId,
+    selectedDatasetId: selectedDataset?.id ?? null,
+    readableDatasetIds,
+    // `loading` is isLoading, which reads false for a DISABLED query - but
+    // that query is gated on exactly the three conditions CustomAppShell
+    // gates this route on (cogniInstance, !isInitializing, tenantReady;
+    // "/business" is in POD_DEPENDENT_PATHS and podPending renders the
+    // provisioning screen instead of children), so it is never disabled while
+    // this view is mounted.
+    readableLoading: datasetsLoading,
+    readableUnavailable: datasetsUnavailable,
+    governanceDatasetIds,
+  });
 
   // Ports the tab-activation gate's one-time narration (customer_tutorial
   // .html ~6188). Fitting the camera to the first dataset is BusinessCanvas's
@@ -126,7 +191,7 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
     hasNarratedFirstLoadRef.current = true;
     const brain = scene.brainState;
     narrate(
-      `this is your business — ${brain.typeNodes.length} kind${brain.typeNodes.length === 1 ? "" : "s"} of things across ${brain.sourceNames.length} source${brain.sourceNames.length === 1 ? "" : "s"}, one connected model`,
+      `this is your business — ${brain.typeNodes.length} kind${brain.typeNodes.length === 1 ? "" : "s"} of things across ${brain.sourceNames.length} source${brain.sourceNames.length === 1 ? "" : "s"} in this graph`,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene.brainState, scene.layerData]);
@@ -187,7 +252,7 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
   // focus lens on they'd spotlight and narrate entities the lens is currently
   // dimming — which reads as the graph showing content from outside the
   // selected source (COG-6233).
-  useBusinessAutoInsights(canvasRef, scene.brainState, narrate, setSpotlight, !tour.isPlaying && !focusSets);
+  useBusinessAutoInsights(canvasRef, scene.brainState, narrate, setSpotlight, !tour.isPlaying && !focusSets && !focusTypes && structured.rowIds === null);
 
   // Any pointer interaction ends the tour on the spot — waiting for the
   // script to finish (or hunting for the stop control through the blur)
@@ -217,12 +282,12 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
 
   const docCountFor = (entity: BusinessEntity | null): number => {
     if (!entity || !scene.brainState) return 0;
-    return scene.brainState.docLinks.filter((l) => l._sid === entity.id || l._tid === entity.id).length;
+    return countLinksTouching(scene.brainState.docLinks, entity.id);
   };
 
   const connectionCountFor = (entity: BusinessEntity | null): number => {
     if (!entity || !scene.brainState) return 0;
-    return scene.brainState.semanticLinks.filter((l) => l._sid === entity.id || l._tid === entity.id).length;
+    return countLinksTouching(scene.brainState.graphLinks, entity.id);
   };
 
   // Ports "the rendered dataset's sources dim too when this user can't read
@@ -236,18 +301,34 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
   // has a graph — a pending live-answer chip or the reasoning-trace/spotlight
   // it would trigger can't point at anything real when there are no
   // entities or links to point at (see BusinessEmptyState below).
-  const hasGraphContent = Boolean(scene.brainState?.entities.length || scene.brainState?.semanticLinks.length);
+  const hasGraphContent = Boolean(scene.brainState?.entities.length || scene.brainState?.graphLinks.length);
   // React Query keeps the last successful `data` through a failed background
   // refetch, so a single failed 8s poll tick sets this while a perfectly good
   // graph is still on screen — every consumer must pair it with "and there is
   // nothing to show", or the failure state covers a working canvas (BusinessEmptyState
   // is a full-bleed inset-0 overlay, so it also swallows hover/click/zoom).
-  const contentFailed = scene.contentError !== null && scene.contentError !== undefined;
+  // A fetch for the dataset we guessed from last visit is not evidence of
+  // anything until the readable list vouches for that guess: the id may
+  // simply have been deleted or unshared since. Reporting "check your
+  // connection" for those seconds blames the network for our own bet, so the
+  // failure only counts once the guess is confirmed (or replaced).
+  const seedGuessUnconfirmed = unconfirmedSeedId !== null
+    && scene.activeDatasetId === unconfirmedSeedId;
+  const contentFailed = !seedGuessUnconfirmed
+    && scene.contentError !== null && scene.contentError !== undefined;
   // Same reasoning as contentFailed, for the OTHER fetch. The empty state
   // below reads governanceIndex.datasets, so a failed governance fetch is
   // indistinguishable from a workspace with no brains — and told a user with
   // a perfectly good workspace to go create one.
   const governanceFailed = scene.governanceError !== null && scene.governanceError !== undefined;
+
+  const noDatasetLabel = noDatasetStateLabel({
+    isLoading: scene.isLoading,
+    activeDatasetId: scene.activeDatasetId,
+    listState: brainListState,
+    readableDatasetCount: governanceIndex.datasets.length,
+    governanceFailed,
+  });
 
   // The viewing narration counts what's in the dataset you switched TO, and
   // only that dataset's own graph knows those numbers — at click time
@@ -287,7 +368,7 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
   }, [narrate]);
 
   const selectedSourceDetail = selectedSourceName && scene.brainState
-    ? computeSourceDetail(selectedSourceName, scene.brainState)
+    ? computeSourceDetail(selectedSourceName, scene.brainState, encoding)
     : null;
 
   // "Single point of failure" preview: what would become unreachable if
@@ -326,16 +407,17 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
         background: "radial-gradient(1200px 700px at 50% 42%, #141D33, #0E1526)",
       }}
     >
-      <BusinessCanvas
+      <BusinessGraphCanvas
         ref={canvasRef}
         brainState={scene.brainState}
+        viewState={structured.view}
+        rowFilterKey={structured.filterKey}
+        colorMode={colorMode}
         selectedId={selection.selectedEntity?.id ?? null}
         onSelectEntity={(entity, shiftKey) => {
           setSelectedSourceName(null);
           selection.handleCanvasSelect(entity, shiftKey);
         }}
-        onHover={setHoveredHit}
-        onHoverMove={(x, y, containerWidth) => setHoverPos({ x, y, containerWidth })}
         onBackgroundClick={() => {
           // Only clears the clicked-entity selection. Clearing the source
           // focus lens here too meant tapping empty canvas space — easy to
@@ -356,6 +438,7 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
         }}
         spotlight={spotlight}
         focusSets={focusSets}
+        focusTypes={focusTypes}
         onLevelChange={(level, plumbing) => setAltimeterState({ level, plumbing })}
         sourceCardRefs={sourceCardRefs}
         activeDatasetId={scene.activeDatasetId}
@@ -367,35 +450,35 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
         hoveredPrincipalId={hoveredPrincipalId ?? hoveredMarkerAgentId}
         onHoverAgent={setHoveredMarkerAgentId}
       />
-      <HoverTooltip
-        hit={hoveredHit}
-        docCount={docCountFor(hoveredHit?.kind === "entity" ? hoveredHit.node : null)}
-        connectionCount={connectionCountFor(hoveredHit?.kind === "entity" ? hoveredHit.node : null)}
-        x={hoverPos.x}
-        y={hoverPos.y}
-        containerWidth={hoverPos.containerWidth}
-      />
       <SearchBar
         cogniInstance={cogniInstance}
         activeDatasetId={scene.activeDatasetId}
         onAnswer={qa.showManualAnswer}
-        entities={scene.brainState?.entities ?? null}
+        entities={structured.view?.entities ?? null}
         onPickEntity={(entity) => {
           setSelectedSourceName(null);
           selection.selectEntity(entity);
           requestAnimationFrame(() => canvasRef.current?.focusOnIds(new Set([entity.id])));
         }}
       />
-      <BusinessLegend />
+      {SHOW_STRUCTURED_EXPLORER && (
+        <StructuredExplorerPanel index={structured.index} filter={structured.filter}
+          onChange={changeRowFilter} matchingCount={structured.rowIds?.size ?? null} />
+      )}
+      <BusinessLegend colorMode={colorMode} onColorModeChange={setColorMode} />
       <GraphConstructionLog entries={constructionLog} />
       {/* leading-[15px] pins the label's line box so the switcher chip's top
           lands at exactly 10+15+4 = 29px — SearchBar (top-[29px]) and
           OperatorsRail's workspace card align to that same line. */}
       <div className="absolute left-2.5 top-2.5 z-10">
-        <div className="mb-1 px-1 text-[10px] leading-[15px] uppercase tracking-widest text-[#7E8CA6]">brain</div>
+        <div className="mb-1 px-1 text-[10px] leading-[15px] uppercase tracking-widest text-[#7E8CA6]">dataset</div>
+        {/* The index is already narrowed to the readable set; listState is
+            what lets the dropdown say WHY it is empty — still loading, the
+            list failed, or this caller may genuinely read nothing. */}
         <BrainSwitcher
           brains={brainsQuery.data ?? null}
           index={governanceIndex}
+          listState={brainListState}
           activeDatasetId={scene.activeDatasetId}
           onSelect={(id) => {
             scene.setActiveDatasetId(id);
@@ -405,6 +488,7 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
             // anything in the new dataset, so every entity dims and the
             // canvas reads as blank with no obvious way back (COG-6233).
             setFocusSets(null);
+            setFocusTypes(null);
             setSelectedSourceName(null);
             setSpotlight(null);
             setConstructionLog([]);
@@ -421,45 +505,100 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
           GraphConstructionLog (h-[104px], anchored bottom-24) below it in
           the same left column (COG-6233). */}
       <div className="absolute left-0 top-[68px] bottom-[208px] w-[196px]">
-        <ScrollFadeContainer className="h-full overflow-y-auto">
-          <SourcesRail
-            brainState={scene.brainState}
-            focusSets={focusSets}
-            onToggleFocus={(name) => {
-              const clearing = Boolean(focusSets && focusSets.has(name) && focusSets.size === 1);
-              if (clearing) {
-                clearSourceFocus();
-                return;
-              }
-              setSelectedSourceName(name);
-              const entityCount = scene.brainState?.setEntityCount[name] ?? 0;
-              // A source with zero extracted entities (e.g. Skill/other-stage
-              // content) has nothing an entity-keyed focus lens can show —
-              // entering the lens would dim every entity in the graph and
-              // read as the canvas going blank, with no visible content and
-              // no obvious reason why (COG-6233).
-              if (!entityCount) {
-                const memberCount = scene.brainState?.setMemberCount[name] ?? 0;
-                narrate(
-                  `${sourceLabel(name)} has no extracted entities yet — ${memberCount} item${memberCount === 1 ? "" : "s"} not shown as a graph`,
-                  "#7E8CA6",
+        {/* CLO-660: a type-keyed lens sits beside the source one, in the same
+            rail — reuses the exact card UI, no new screen space. Switching
+            tabs keeps the other lens's selection active in the background
+            (the dot marks a hidden filter still applied); inLens composes
+            both when both are set. */}
+        <div className="flex gap-1 px-1 pt-1">
+          <button
+            type="button"
+            onClick={() => setRailTab("sources")}
+            className={`flex-1 border-b-2 pb-1.5 text-[10px] uppercase tracking-widest ${
+              railTab === "sources" ? "border-[#43D9E8] text-[#E9EEF6]" : "border-transparent text-[#7E8CA6]"
+            }`}
+          >
+            sources
+            {railTab !== "sources" && focusSets && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-[#43D9E8]" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => setRailTab("types")}
+            className={`flex-1 border-b-2 pb-1.5 text-[10px] uppercase tracking-widest ${
+              railTab === "types" ? "border-[#43D9E8] text-[#E9EEF6]" : "border-transparent text-[#7E8CA6]"
+            }`}
+          >
+            types
+            {railTab !== "types" && focusTypes && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-[#43D9E8]" />}
+          </button>
+        </div>
+        <ScrollFadeContainer className="h-[calc(100%-32px)] overflow-y-auto">
+          {railTab === "sources" ? (
+            <SourcesRail
+              brainState={scene.brainState}
+              encoding={encoding}
+              focusSets={focusSets}
+              onToggleFocus={(name) => {
+                const clearing = Boolean(focusSets && focusSets.has(name) && focusSets.size === 1);
+                if (clearing) {
+                  clearSourceFocus();
+                  return;
+                }
+                setSelectedSourceName(name);
+                const entityCount = scene.brainState?.setEntityCount[name] ?? 0;
+                // A source with zero extracted entities (e.g. Skill/other-stage
+                // content) has nothing an entity-keyed focus lens can show —
+                // entering the lens would dim every entity in the graph and
+                // read as the canvas going blank, with no visible content and
+                // no obvious reason why (COG-6233).
+                if (!entityCount) {
+                  const memberCount = scene.brainState?.setMemberCount[name] ?? 0;
+                  narrate(
+                    `${sourceLabel(name)} has no extracted entities yet — ${memberCount} item${memberCount === 1 ? "" : "s"} not shown as a graph`,
+                    "#7E8CA6",
+                  );
+                  return;
+                }
+                setFocusSets(new Set([name]));
+                narrate(`showing only ${sourceLabel(name)} — ${entityCount} entities · click again for everything`, "#43D9E8");
+                // Without this, clicking a source only dimmed everyone else —
+                // invisible if the camera happened to be looking somewhere else
+                // already, which read as the click doing nothing at all.
+                const ids = new Set(
+                  (scene.brainState?.entities ?? []).filter((e) => setsOf(e).includes(name)).map((e) => e.id),
                 );
-                return;
-              }
-              setFocusSets(new Set([name]));
-              narrate(`showing only ${sourceLabel(name)} — ${entityCount} entities · click again for everything`, "#43D9E8");
-              // Without this, clicking a source only dimmed everyone else —
-              // invisible if the camera happened to be looking somewhere else
-              // already, which read as the click doing nothing at all.
-              const ids = new Set(
-                (scene.brainState?.entities ?? []).filter((e) => setsOf(e).includes(name)).map((e) => e.id),
-              );
-              if (ids.size) requestAnimationFrame(() => canvasRef.current?.focusOnIds(ids));
-            }}
-            registerCardRef={registerSourceCardRef}
-            flashSourceName={flashedSourceName}
-            reachableByHoveredPrincipal={sourcesReachable}
-          />
+                if (ids.size) requestAnimationFrame(() => canvasRef.current?.focusOnIds(ids));
+              }}
+              registerCardRef={registerSourceCardRef}
+              flashSourceName={flashedSourceName}
+              reachableByHoveredPrincipal={sourcesReachable}
+            />
+          ) : (
+            <TypesRail
+              typeNodes={scene.brainState?.typeNodes ?? null}
+              encoding={encoding}
+              focusTypes={focusTypes}
+              onToggleFocus={(name) => {
+                const clearing = Boolean(focusTypes && focusTypes.has(name) && focusTypes.size === 1);
+                if (clearing) {
+                  setFocusTypes(null);
+                  narrate("showing everything again", "#7E8CA6");
+                  return;
+                }
+                const typeNode = scene.brainState?.typeNodes.find((tn) => tn.name === name);
+                const count = typeNode?.members.length ?? 0;
+                setFocusTypes(new Set([name]));
+                narrate(`isolating ${count} ${name} node${count === 1 ? "" : "s"} · click again for everything`, "#43D9E8");
+                // Mirrors the sources handler above: without this, clicking a
+                // type only dimmed everyone else — invisible if the camera was
+                // looking elsewhere already. Worse here than for sources, since
+                // a type lens HIDES non-matching entities rather than dimming
+                // them, so the viewport could go fully empty instead of dim.
+                const ids = new Set((typeNode?.members ?? []).map((m) => m.id));
+                if (ids.size) requestAnimationFrame(() => canvasRef.current?.focusOnIds(ids));
+              }}
+            />
+          )}
         </ScrollFadeContainer>
       </div>
       {/* Docked above the legend rather than floating near the search bar:
@@ -506,6 +645,7 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
       />
       <OperatorsRail
         index={governanceIndex}
+        listState={brainListState}
         focusedDatasetId={scene.activeDatasetId}
         askingPrincipalId={qa.askingPrincipalId}
         onHoverPrincipal={setHoveredPrincipalId}
@@ -555,21 +695,14 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
         <BusinessLoading label="weaving your business model…" />
       )}
       {/* No dataset selected is its own state, not an empty dataset — the
-          auto-focus effect above normally picks the first brain, so this
-          only shows when there is genuinely nothing to pick. Gated on the
-          governance list actually being empty, the same source auto-focus
-          reads: keying it to /visualize/brains instead meant a workspace
-          whose datasets were all present but whose heavy brains fetch had
-          rejected was told it had no data at all. Also gated on the list
-          being empty rather than on activeDatasetId alone, because
-          auto-focus runs in a post-paint effect — for one paint after
-          governance resolves activeDatasetId is still null. */}
-      {!scene.isLoading && !scene.activeDatasetId && governanceIndex.datasets.length === 0 && !governanceFailed && (
-        <BusinessEmptyState label="no dataset selected — create a brain and upload documents to see your business model" />
-      )}
-      {!scene.isLoading && !scene.activeDatasetId && governanceFailed && (
-        <BusinessEmptyState label="couldn't load this workspace's brains — check your connection and reload" />
-      )}
+          auto-focus effect above normally picks the first brain, so this only
+          shows when there is genuinely nothing to pick. Gated on the list
+          being empty rather than on activeDatasetId alone, because auto-focus
+          runs in a post-paint effect: for one paint after the list resolves,
+          activeDatasetId is still null. Which of these messages is owed, and
+          when none is, lives in noDatasetStateLabel — see its tests for the
+          combinations. */}
+      {noDatasetLabel && <BusinessEmptyState label={noDatasetLabel} />}
       {/* A failed graph fetch must never masquerade as "this dataset is
           empty" — without this branch a /visualize/json 500 rendered the
           cheerful no-content state below. Only when there's genuinely nothing

@@ -3,8 +3,8 @@ import asyncio
 from common import configure_cognee_for_subprocess
 
 import cognee
-from cognee.api.v1.search import SearchType
 from cognee.shared.logging_utils import INFO, setup_logging
+from cognee.tests.utils.ci_search_type import completion_or_chunks
 
 
 async def main():
@@ -16,7 +16,7 @@ async def main():
         "Tell me what is in the context. Additionally write out 'FIRST_COGNIFY' before your answer"
     )
     search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
+        query_type=completion_or_chunks(),
         query_text=query_text,
         datasets=["first_cognify_dataset"],
     )

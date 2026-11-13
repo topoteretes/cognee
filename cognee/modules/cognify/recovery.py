@@ -3,6 +3,10 @@
 The API checks at startup and periodically. The age threshold is an eligibility
 floor; a local dataset lock and the run's OS ownership marker establish whether
 recovery may proceed. Unverifiable legacy/remote rows are left untouched.
+
+A dataset's status is its newest row. A run that died before a later run of the
+same pipeline on its dataset is closed with a row dated just after its own last
+row, so that closing it afterwards does not replace the later run's status.
 """
 
 import asyncio
@@ -16,16 +20,22 @@ from cognee.infrastructure.locks import get_dataset_lock
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.data.models import Dataset
 from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
-from cognee.modules.pipelines.methods import get_unterminated_pipeline_runs
+from cognee.modules.pipelines.methods import (
+    get_pipeline_run_by_dataset,
+    get_unterminated_pipeline_runs,
+)
 from cognee.modules.pipelines.methods.get_pipeline_run import get_latest_pipeline_run
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
+from cognee.modules.pipelines.operations.run_sessions import get_run_session_ids
 from cognee.modules.pipelines.operations.run_tasks_with_telemetry import (
     PIPELINE_RUN_ERRORED,
     pipeline_run_telemetry_properties,
 )
 from cognee.modules.pipelines.run_ownership import claim_run_ownership
+from cognee.modules.users.methods import get_user
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
 from cognee.shared.utils import send_telemetry
 
 logger = get_logger("cognify.recovery")
@@ -33,14 +43,28 @@ logger = get_logger("cognify.recovery")
 STALE_RUN_MIN_AGE_SECONDS = int(os.getenv("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS", "3600"))
 if STALE_RUN_MIN_AGE_SECONDS < 0:
     raise ValueError("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS must be nonnegative")
-RECOVERY_POLL_SECONDS = 60
+# How often the API looks again for abandoned runs. A run is not eligible before
+# STALE_RUN_MIN_AGE_SECONDS, so a shorter interval closes one barely sooner,
+# and every look reads the newest row of every run.
+RECOVERY_POLL_SECONDS = 300
 
 # The rollback each pipeline supplies for its own failed runs (the same policy
 # run_tasks applies when a run errors inline). A pipeline without an entry has
 # nothing to roll back at error time either, so at startup it is only closed.
 ROLLBACK_HANDLERS = {
-    "cognify_pipeline": cognify_rollback_handler,
+    COGNIFY_PIPELINE_NAME: cognify_rollback_handler,
+    # The indexing run stores its chunks under its own run id; the same handler
+    # undoes them and clears its stamps (pipeline_name selects the stamp slot).
+    INDEXING_PIPELINE_NAME: cognify_rollback_handler,
 }
+
+# The smallest step a timestamp column holds.
+CLOSING_ROW_OFFSET = timedelta(microseconds=1)
+
+
+def _as_utc(moment: datetime) -> datetime:
+    # SQLite hands a stored time back without its zone; the values are UTC.
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
 
 
 def _is_older_than_threshold(created_at) -> bool:
@@ -51,10 +75,8 @@ def _is_older_than_threshold(created_at) -> bool:
     """
     if created_at is None:
         return True
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_RUN_MIN_AGE_SECONDS)
-    return created_at <= cutoff
+    return _as_utc(created_at) <= cutoff
 
 
 async def recover_stale_pipeline_runs_on_startup() -> None:
@@ -67,6 +89,8 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
     """
     try:
         recovery_candidates = await get_unterminated_pipeline_runs()
+        # One lookup for every candidate's sessions, not one per closed run.
+        sessions_by_row = await get_run_session_ids(run.id for run in recovery_candidates)
     except Exception:
         logger.exception("Failed to load pipeline runs for startup recovery.")
         return
@@ -113,12 +137,14 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
                             await rollback_handler(
                                 pipeline_run_id=current.pipeline_run_id,
                                 dataset=dataset,
-                                keep_completed_data=True,
+                                pipeline_name=current.pipeline_name,
                             )
-                        await _close_as_abandoned(current, dataset)
+                        await _close_as_abandoned(
+                            current, dataset, sessions_by_row.get(current.id, [])
+                        )
                     ownership.closed = True
                     logger.info("Recovery closed run %s as abandoned", current.pipeline_run_id)
-                    _send_abandoned_run_telemetry(current)
+                    _send_abandoned_run_telemetry(current, await _run_principal(current))
         except Exception:
             logger.exception("Recovery failed for run %s; will retry", pipeline_run.pipeline_run_id)
 
@@ -142,32 +168,80 @@ async def pipeline_recovery_service():
             await task
 
 
-async def _close_as_abandoned(pipeline_run, dataset) -> None:
-    """Write the ERRORED row for ``pipeline_run``, carrying the STARTED row's metadata."""
+async def _closing_time(pipeline_run) -> datetime | None:
+    """The time the ERRORED row of ``pipeline_run`` is dated: ``None`` for now, or
+    just after the run's own newest row when a later run has rows on the dataset.
+
+    A dataset's status is the newest row of the pipeline on it. Dated now, the row
+    closing a run that died before a later run would become that row and report a
+    dataset the later run completed as failed. Dated just after the run's own
+    newest row it is still the newest row of its run, which closes it, and stays
+    older than the later run's.
+    """
+    newest = await get_pipeline_run_by_dataset(pipeline_run.dataset_id, pipeline_run.pipeline_name)
+    if newest is None or newest.pipeline_run_id == pipeline_run.pipeline_run_id:
+        return None
+    closing_time = _as_utc(pipeline_run.created_at) + CLOSING_ROW_OFFSET
+    if closing_time >= _as_utc(newest.created_at):
+        raise RuntimeError(
+            f"Run {pipeline_run.pipeline_run_id} cannot be closed beneath run "
+            f"{newest.pipeline_run_id}: their newest rows are not a microsecond apart."
+        )
+    return closing_time
+
+
+async def _close_as_abandoned(pipeline_run, dataset, session_ids: list[str]) -> None:
+    """Write the ERRORED row for ``pipeline_run``, carrying the STARTED row's metadata.
+
+    ``session_ids`` are the STARTED row's, read in one batch by the caller.
+    """
     await log_pipeline_run_error(
         pipeline_run_id=pipeline_run.pipeline_run_id,
         pipeline_id=pipeline_run.pipeline_id,
         pipeline_name=pipeline_run.pipeline_name,
         dataset_id=dataset.id,
-        data=None,
         e=AbandonedPipelineRunError(),
         user_id=pipeline_run.user_id,
         tenant_id=pipeline_run.tenant_id,
         started_at=getattr(pipeline_run, "started_at", None),
-        data_info=(getattr(pipeline_run, "run_info", None) or {}).get("data"),
         origin=getattr(pipeline_run, "origin", None),
         parent_operation_id=getattr(pipeline_run, "parent_operation_id", None),
+        session_ids=tuple(session_ids),
+        created_at=await _closing_time(pipeline_run),
     )
 
 
-def _send_abandoned_run_telemetry(pipeline_run) -> None:
+async def _run_principal(pipeline_run):
+    """The run's ``User`` when it still loads, else its stored ``user_id``.
+
+    Telemetry can tell an agent's run from a human's only from the model
+    (``parent_user_id``); a bare id cannot be resolved there without a
+    database lookup, so recovery does that lookup here. Never raises: a
+    missing or unloadable user only costs the event its agent attribution.
+    """
+    if pipeline_run.user_id is None:
+        return None
+    try:
+        return await get_user(pipeline_run.user_id)
+    except Exception:
+        logger.debug(
+            "Could not load the user of recovered run %s",
+            pipeline_run.pipeline_run_id,
+            exc_info=True,
+        )
+        return pipeline_run.user_id
+
+
+def _send_abandoned_run_telemetry(pipeline_run, user) -> None:
     """Emit the terminal telemetry event the dead process never sent.
 
     The run's ``Pipeline Run Started`` went out when it began; without this the
     warehouse counts an abandoned run as a silent gap forever while the local
     ``pipeline_runs`` table shows it closed. ``pipeline_name`` is the pipeline
     id, as the live emitter sends it; ``exception_type`` is the class the ERRORED
-    row carries. Diagnostic failures warn without turning a successful recovery
+    row carries. ``user`` is the run's loaded ``User`` (or its stored id, see
+    :func:`_run_principal`); the stored ``tenant_id`` is passed explicitly and
+    wins over the model's. Diagnostic failures warn without turning a successful recovery
     into a failed recovery or preventing other runs from being recovered.
     """
     try:
@@ -181,7 +255,7 @@ def _send_abandoned_run_telemetry(pipeline_run) -> None:
         }
         send_telemetry(
             PIPELINE_RUN_ERRORED,
-            pipeline_run.user_id,
+            user,
             tenant_id=tenant_id,
             additional_properties=properties,
         )
