@@ -111,6 +111,7 @@ class CompletionRetriever(BaseRetriever):
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
         wide_search_top_k: int | None = 100,
+        document_name: list[str] | None = None,
     ):
         """Initialize retriever with optional custom prompt paths.
 
@@ -129,6 +130,7 @@ class CompletionRetriever(BaseRetriever):
         self.node_type = node_type
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
+        self.document_name = document_name
 
     async def get_retrieved_objects(self, query: str) -> Any:
         vector_engine = await get_vector_engine_async()
@@ -158,13 +160,18 @@ class CompletionRetriever(BaseRetriever):
                     limit=limit,
                 )
             else:
+                search_kwargs = {
+                    "limit": limit,
+                    "include_payload": True,
+                    "node_name": self.node_name,
+                    "node_name_filter_operator": self.node_name_filter_operator,
+                }
+                if self.document_name:
+                    search_kwargs["document_name"] = self.document_name
                 found_chunks = await vector_engine.search(
                     "DocumentChunk_text",
                     query,
-                    limit=limit,
-                    include_payload=True,
-                    node_name=self.node_name,
-                    node_name_filter_operator=self.node_name_filter_operator,
+                    **search_kwargs,
                 )
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found")

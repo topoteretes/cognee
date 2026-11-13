@@ -46,6 +46,26 @@ async def test_get_context_success(mock_vector_engine):
 
 
 @pytest.mark.asyncio
+async def test_get_context_filters_by_source_document_name(mock_vector_engine):
+    retriever = CompletionRetriever(top_k=3, document_name=["doc_a"])
+    with patch(
+        "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
+        return_value=mock_vector_engine,
+    ):
+        await retriever.get_retrieved_objects("fruit")
+
+    mock_vector_engine.search.assert_awaited_once_with(
+        "DocumentChunk_text",
+        "fruit",
+        limit=3,
+        include_payload=True,
+        node_name=None,
+        node_name_filter_operator="OR",
+        document_name=["doc_a"],
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_context_collection_not_found_error(mock_vector_engine):
     """Test that CollectionNotFoundError is converted to NoDataError."""
     mock_vector_engine.search.side_effect = CollectionNotFoundError("Collection not found")

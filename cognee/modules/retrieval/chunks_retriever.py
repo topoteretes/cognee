@@ -39,6 +39,7 @@ class ChunksRetriever(BaseRetriever):
         node_type: type | None = NodeSet,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        document_name: list[str] | None = None,
     ):
         """
         Initializes the chunk retriever.
@@ -56,11 +57,14 @@ class ChunksRetriever(BaseRetriever):
               which applies no filtering.
             - node_name_filter_operator (str): Logical operator used when applying
               multiple node_name filters, such as "OR" or "AND". Defaults to "OR".
+            - document_name (Optional[List[str]]): Source document names used to
+              filter chunks; distinct from NodeSet tags.
         """
         self.top_k = top_k
         self.node_type = node_type
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
+        self.document_name = document_name
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
@@ -148,13 +152,18 @@ class ChunksRetriever(BaseRetriever):
                     limit=self.top_k,
                 )
             else:
+                search_kwargs = {
+                    "limit": self.top_k,
+                    "include_payload": True,
+                    "node_name": self.node_name,
+                    "node_name_filter_operator": self.node_name_filter_operator,
+                }
+                if self.document_name:
+                    search_kwargs["document_name"] = self.document_name
                 found_chunks = await vector_engine.search(
                     "DocumentChunk_text",
                     query,
-                    limit=self.top_k,
-                    include_payload=True,
-                    node_name=self.node_name,
-                    node_name_filter_operator=self.node_name_filter_operator,
+                    **search_kwargs,
                 )
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")

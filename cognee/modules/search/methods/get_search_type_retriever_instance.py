@@ -44,6 +44,10 @@ from cognee.modules.retrieval.skills_retriever import SkillsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 from cognee.modules.search.exceptions import SearchTypeDisabledError, UnsupportedSearchTypeError
+from cognee.modules.search.methods.document_name_scope import (
+    DOCUMENT_NAME_FILTER_SEARCH_TYPES,
+    is_document_name_scope,
+)
 from cognee.modules.search.methods.node_name_scope import (
     lucky_search_types,
     reject_unsupported_node_name,
@@ -119,6 +123,8 @@ async def get_search_type_retriever_instance(
     node_type = kwargs.get("node_type", NodeSet)
     node_name = kwargs.get("node_name")
     node_name_filter_operator = kwargs.get("node_name_filter_operator", "OR")
+    document_name_scope = is_document_name_scope(node_type, node_name)
+    document_name = node_name if document_name_scope else None
     wide_search_top_k = kwargs.get("wide_search_top_k")
     triplet_distance_penalty = kwargs.get("triplet_distance_penalty")
     feedback_influence = kwargs.get(
@@ -179,8 +185,9 @@ async def get_search_type_retriever_instance(
             {
                 "top_k": top_k,
                 "node_type": node_type,
-                "node_name": node_name,
+                "node_name": None if document_name_scope else node_name,
                 "node_name_filter_operator": node_name_filter_operator,
+                "document_name": document_name,
             },
         ),
         # No top_k: BROAD reads the whole dataset (SDK-324).
@@ -211,8 +218,9 @@ async def get_search_type_retriever_instance(
                 "response_model": retriever_specific_config.get("response_model", str),
                 "include_references": include_references,
                 "node_type": node_type,
-                "node_name": node_name,
+                "node_name": None if document_name_scope else node_name,
                 "node_name_filter_operator": node_name_filter_operator,
+                "document_name": document_name,
                 "wide_search_top_k": wide_search_top_k,
             },
         ),
@@ -465,6 +473,21 @@ async def get_search_type_retriever_instance(
     if query_type is SearchType.FEELING_LUCKY:
         query_type = await select_search_type(
             query_text, allowed_search_types=lucky_search_types(node_type, node_name)
+        )
+        if document_name_scope and query_type not in DOCUMENT_NAME_FILTER_SEARCH_TYPES:
+            logger.warning(
+                "FEELING_LUCKY chose %s, which cannot honor a TextDocument name filter; "
+                "using GRAPH_COMPLETION instead.",
+                query_type.value,
+            )
+            query_type = SearchType.GRAPH_COMPLETION
+
+    if document_name_scope and query_type not in DOCUMENT_NAME_FILTER_SEARCH_TYPES:
+        raise QueryValidationError(
+            message=(
+                f"{query_type.value} search cannot honor node_name for TextDocument. "
+                "Use CHUNKS, RAG_COMPLETION, or a graph-completion search type."
+            )
         )
 
     if query_type in CYPHER_SEARCH_TYPES and not cypher_queries_allowed():
