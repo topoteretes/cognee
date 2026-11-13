@@ -42,3 +42,5 @@ __all__ = [
     "onenote_source",
     "slack_source",
 ]
+from .readwise import readwise_source
+__all__.append("readwise_source")
