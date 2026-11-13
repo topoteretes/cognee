@@ -677,7 +677,6 @@ def onenote_source(
                 **{page_id: published[page_id] for page_id in unresolved},
                 **present,
             }
-            cache.pop("pending", None)
             cache.pop("confirmed_missing", None)
             cache.pop("swallowed", None)
             stats["deleted"] = len(deleted)

@@ -383,12 +383,20 @@ def _purge_forgotten_table(pipeline, owner_name: str, destination, scope: str) -
             destination=destination,
             dataset_name=pipeline.dataset_name,
         )
-        owner.sync_destination()
+
+        # The owner never loaded the empty table, so give it the cleared state row itself:
+        # a worker with its own copy of the owner's directory restores only a newer row.
+        # ``run`` restores the owner from the destination first, which is also what supplies
+        # its schema on a pod without a local copy.
+        @dlt.resource(name=scope, write_disposition="replace")
+        def cleared():
+            dlt.current.resource_state().clear()
+            yield []
+
+        owner.run(cleared())
     table = pipeline.default_schema.naming.normalize_table_identifier(scope)
     nested = get_nested_tables(owner.default_schema.tables, table) if owner.schema_names else []
     tables = [t["name"] for t in nested] or [table]
-    if owner is not pipeline:
-        owner.drop()
 
     with pipeline.sql_client() as client:
         _empty_tables(client, tables)
@@ -404,15 +412,29 @@ def _empty_tables(client, tables: list[str]) -> None:
 
 
 def _delete_state_rows(client, pipeline_names: set[str]) -> None:
-    """dlt keeps a state row per state-changing load and has no API to drop them."""
+    """Delete the state rows that may hold text; dlt has no API for it.
+
+    dlt keeps a state row per state-changing load and restores from the destination the row of
+    the highest load id (``get_stored_state``), and only one at least as new as a worker's local
+    copy. Each pipeline therefore keeps that row, the cleared state its last load wrote: a worker
+    with its own pipeline directory must find it, or it keeps its old cursor and the re-selected
+    table stays empty.
+    """
     if not _table_exists(client, "_dlt_pipeline_state"):
         return
-    marks = ", ".join("%s" for _ in pipeline_names)
-    client.execute_sql(
-        f"DELETE FROM {client.make_qualified_table_name('_dlt_pipeline_state')} "
-        f"WHERE pipeline_name IN ({marks})",
-        *sorted(pipeline_names),
-    )
+    state = client.make_qualified_table_name("_dlt_pipeline_state")
+    for name in sorted(pipeline_names):
+        rows = client.execute_sql(
+            f"SELECT _dlt_load_id FROM {state} WHERE pipeline_name = %s "
+            "ORDER BY _dlt_load_id DESC LIMIT 1",
+            name,
+        )
+        if rows:
+            client.execute_sql(
+                f"DELETE FROM {state} WHERE pipeline_name = %s AND _dlt_load_id <> %s",
+                name,
+                rows[0][0],
+            )
 
 
 def _table_exists(client, table: str) -> bool:

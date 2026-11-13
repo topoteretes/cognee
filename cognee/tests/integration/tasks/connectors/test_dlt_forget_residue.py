@@ -15,7 +15,6 @@ import uuid
 import zlib
 from pathlib import Path
 
-import asyncpg
 import pytest
 import pytest_asyncio
 
@@ -35,6 +34,8 @@ PG = {
 
 
 async def _pg_admin(sql: str) -> None:
+    import asyncpg
+
     conn = await asyncpg.connect(database="postgres", **PG)
     try:
         await conn.execute(sql)
@@ -51,6 +52,11 @@ async def backend(request, tmp_path, monkeypatch):
     cognee.config.system_root_directory(str(tmp_path / "system"))
     database = None
     if request.param == "postgres":
+        # CI sets TEST_POSTGRES_HOST: a missing driver there must fail, not skip the half.
+        if os.environ.get("TEST_POSTGRES_HOST"):
+            import asyncpg
+        else:
+            asyncpg = pytest.importorskip("asyncpg")
         database = f"sdk1549_{uuid.uuid4().hex[:8]}"
         try:
             await _pg_admin(f'create database "{database}"')
@@ -114,6 +120,8 @@ async def _holders(backend, token: str, only: str = "") -> list[str]:
                     if hits:
                         found.append(f"{path.name} {table} ({hits})")
     else:
+        import asyncpg
+
         conn = await asyncpg.connect(database=STAGING_DB, **PG)
         try:
             tables = await conn.fetch(
@@ -149,6 +157,8 @@ async def _state_rows(backend, table: str) -> int:
                         (pipeline,),
                     ).fetchone()[0]
         return total
+    import asyncpg
+
     conn = await asyncpg.connect(database=STAGING_DB, **PG)
     try:
         return await conn.fetchval(
@@ -159,13 +169,15 @@ async def _state_rows(backend, table: str) -> int:
         await conn.close()
 
 
-async def _merge_load(table: str, text: str, **extra):
+async def _merge_load(table: str, text: str, state_text: str = "", **extra):
     import dlt
 
     from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, PIPELINE_SCOPE_ATTR
 
     @dlt.resource(name=table, primary_key="id", write_disposition="merge")
     def documents():
+        if state_text:
+            dlt.current.resource_state()["note"] = state_text
         yield {"id": "1", "title": "t", "content": text, "url": "https://example.com/1", **extra}
 
     resource = documents()
@@ -232,19 +244,20 @@ async def test_empty_resource_leaves_no_text_in_the_merge_staging_copy(backend):
     await _forget("onenote_x")
 
     assert await _holders(backend, SECRET) == []
-    assert await _state_rows(backend, "onenote_x") == 0
+    assert await _state_rows(backend, "onenote_x") == 1  # the cleared one, which holds no text
 
 
 @pytest.mark.asyncio
 async def test_empty_under_another_spelling_of_the_name_leaves_no_text(backend):
     """Cloud's scoped delete empties under ``<dataset>.<resource>``, a pipeline of its own."""
-    await _merge_load("onenote_x", f"page about {SECRET}")
+    await _merge_load("onenote_x", f"page about {SECRET}", state_text=f"state {SECRET}")
     assert await _state_rows(backend, "onenote_x")
+    assert await _holders(backend, SECRET, "_dlt_pipeline_state"), "the state must hold text"
 
     await _forget(f"{DATASET}.onenote_x")
 
     assert await _holders(backend, SECRET) == []
-    assert await _state_rows(backend, "onenote_x") == 0
+    assert await _state_rows(backend, "onenote_x") == 1  # the cleared one
 
 
 @pytest.mark.asyncio
@@ -291,6 +304,36 @@ async def test_a_reselected_table_fetches_every_record_again(backend, spelling):
     await _onenote_sync(graph, "onenote_x")
     assert _bodies_fetched(graph) == 6
     await _forget(spelling)
+
+    before = _bodies_fetched(graph)
+    await _onenote_sync(graph, "onenote_x")
+
+    assert _bodies_fetched(graph) - before == 6
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("spelling", ["onenote_x", f"{DATASET}.onenote_x"])
+async def test_a_worker_that_kept_its_own_pipeline_directory_fetches_every_record_again(
+    backend, spelling, tmp_path
+):
+    """Cloud workers keep their own ``~/.dlt/pipelines``; dlt restores state from the destination
+    only from a row at least as new as its local copy, so the forget must leave that row."""
+    import shutil
+    from pathlib import Path
+
+    from dlt.common.pipeline import get_dlt_pipelines_dir
+
+    from cognee.tasks.ingestion.dlt_utils import pipeline_name_for_scope
+
+    graph = _notebook()
+    await _onenote_sync(graph, "onenote_x")
+    assert _bodies_fetched(graph) == 6
+    pipeline_dir = Path(get_dlt_pipelines_dir()) / pipeline_name_for_scope("onenote_x", DATASET)
+    shutil.copytree(pipeline_dir, tmp_path / "worker_b")  # worker B synced it before the forget
+
+    await _forget(spelling)  # served by worker A
+    shutil.rmtree(pipeline_dir)
+    shutil.copytree(tmp_path / "worker_b", pipeline_dir)  # the re-selection lands on worker B
 
     before = _bodies_fetched(graph)
     await _onenote_sync(graph, "onenote_x")
@@ -371,7 +414,7 @@ async def test_a_dotted_forget_works_on_a_pod_without_the_local_pipeline_directo
 
 
 @pytest.mark.asyncio
-async def test_a_dotted_forget_of_a_name_dlt_normalizes_deletes_the_state_of_both_pipelines(
+async def test_a_dotted_forget_of_a_name_dlt_normalizes_keeps_only_the_cleared_state(
     backend,
 ):
     from cognee.tasks.ingestion.dlt_utils import pipeline_name_for_scope
@@ -381,7 +424,7 @@ async def test_a_dotted_forget_of_a_name_dlt_normalizes_deletes_the_state_of_bot
 
     await _forget(f"{DATASET}.OneNote-X")
 
-    assert await _state_rows(backend, "OneNote-X") == 0, pipeline_name_for_scope(
+    assert await _state_rows(backend, "OneNote-X") == 1, pipeline_name_for_scope(
         "OneNote-X", DATASET
     )
     assert await _holders(backend, SECRET) == []

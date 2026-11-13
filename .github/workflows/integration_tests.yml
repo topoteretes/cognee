@@ -101,7 +101,7 @@ jobs:
         with:
           keyless-models: "true"
           python-version: '3.11.x'
-          extra-dependencies: "scraping"
+          extra-dependencies: "scraping postgres"
 
       - name: Run Document & Task Tests
         shell: bash

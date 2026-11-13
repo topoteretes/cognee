@@ -147,9 +147,10 @@ A run is **all or nothing for deletions**: they are published only after the com
 was read and validated. Any expected failure (Graph error, rate limit, spent budget, malformed
 metadata or an unreadable page) returns normally with `failed > 0` and `complete == 0`, deletes
 nothing and keeps what it already learned: confirmed removals are checkpointed. A run cut by
-`max_requests` also publishes the pages whose bodies it fetched and records their fingerprints,
-so the next run skips them and a notebook larger than the budget finishes in a few runs. Page
-bodies are never kept in state, so a run cut by anything else fetches them again.
+an interruption (a rate limit, a 5xx or transport error that used up its retries, or the
+`max_requests` budget) also publishes the pages whose bodies it fetched and records their
+fingerprints, so the next run skips them and a notebook larger than the budget finishes in a few
+runs. Page bodies are never kept in state, so a run cut by anything else fetches them again.
 
 State keys: `connection` (a hash of account and notebook, so another notebook cannot reuse the
 name), `onenote_cache.published` (page id to a 24 character fingerprint, no page text),
