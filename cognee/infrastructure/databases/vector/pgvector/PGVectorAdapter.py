@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import re
 import threading
 from typing import Any, get_type_hints
@@ -91,6 +92,13 @@ def _row_order(row_id: Any) -> str:
     collection run concurrently, and pgvector's HNSW index takes them concurrently.
     """
     return str(row_id)
+
+
+def _batches(rows: list[dict]) -> list[list[dict]]:
+    """``rows`` in consecutive slices of ``QUERY_BATCH_SIZE``, one statement each."""
+    return [
+        rows[start : start + QUERY_BATCH_SIZE] for start in range(0, len(rows), QUERY_BATCH_SIZE)
+    ]
 
 
 PgvectorVersion = tuple[int, ...]
@@ -600,12 +608,16 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     @staticmethod
     def _merged_belongs_to_set_payload(collection_name: str):
         """The ``ON CONFLICT`` payload column value (see ``_merged_payload_sql``)."""
-        return text(f"({PGVectorAdapter._merged_payload_sql(collection_name)})::json")
+        return text(f"({PGVectorAdapter._merged_payload_sql(collection_name, 'EXCLUDED')})::json")
 
     @staticmethod
-    def _merged_payload_sql(collection_name: str) -> str:
-        """The ``ON CONFLICT`` payload as jsonb SQL: the incoming one with ``belongs_to_set``
+    def _merged_payload_sql(collection_name: str, incoming: str) -> str:
+        """The upserted payload as jsonb SQL: the incoming one with ``belongs_to_set``
         unioned with the stored row's, so an upsert never drops a tag the row already carries.
+
+        ``incoming`` names the relation holding the incoming row's ``payload`` column:
+        ``EXCLUDED`` in the upsert, the incoming rows in ``_classify_sql``, so the two
+        cannot disagree on what an upsert would write.
 
         A side whose ``belongs_to_set`` is absent or JSON ``null`` (a DataPoint's default)
         counts as empty: ``COALESCE`` alone leaves a JSON ``null`` in place, and
@@ -613,10 +625,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """
         quoted_table = f'"{collection_name}"'
         stored_tags = f"NULLIF({quoted_table}.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
-        incoming_tags = "NULLIF(EXCLUDED.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
+        incoming_tags = f"NULLIF({incoming}.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
         return f"""
             jsonb_set(
-                EXCLUDED.payload::jsonb,
+                {incoming}.payload::jsonb,
                 '{{belongs_to_set}}',
                 (
                     SELECT COALESCE(jsonb_agg(DISTINCT val), '[]'::jsonb)
@@ -641,16 +653,55 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
 
     @staticmethod
-    def _payload_changed(collection_name: str):
-        """``ON CONFLICT`` condition: the merged payload differs from the stored one.
+    def _payload_changed(collection_name: str, incoming: str) -> str:
+        """SQL condition: the merged payload differs from the stored one. The upsert's
+        ``ON CONFLICT`` condition and ``_classify_sql``'s filter (``incoming`` as in
+        ``_merged_payload_sql``).
 
         The timestamps are stamped on every write and read by no one, so they are left
         out: an unchanged re-upsert writes no new row version and no HNSW index entry.
         """
         volatile = "- 'created_at' - 'updated_at'"
-        merged = PGVectorAdapter._merged_payload_sql(collection_name)
+        merged = PGVectorAdapter._merged_payload_sql(collection_name, incoming)
         stored = f'"{collection_name}".payload::jsonb'
-        return text(f"(({merged}) {volatile}) IS DISTINCT FROM ({stored} {volatile})")
+        return f"(({merged}) {volatile}) IS DISTINCT FROM ({stored} {volatile})"
+
+    @staticmethod
+    def _classify_sql(collection_name: str) -> TextClause:
+        """The incoming rows an upsert would write, each with whether its id is missing.
+
+        A plain ``SELECT``: it takes no row lock and waits for none. An existing row
+        the upsert would leave as it is (``_payload_changed`` false) is not returned.
+        ``:ids`` and ``:payloads`` are parallel arrays (uuid, payload as JSON text).
+        """
+        table = f'"{collection_name}"'
+        changed = PGVectorAdapter._payload_changed(collection_name, "incoming")
+        return text(
+            f"SELECT incoming.id, {table}.id IS NULL AS missing "
+            "FROM unnest(CAST(:ids AS uuid[]), CAST(:payloads AS text[])) "
+            "AS incoming(id, payload) "
+            f"LEFT JOIN {table} ON {table}.id = incoming.id "
+            f"WHERE {table}.id IS NULL OR {changed}"
+        )
+
+    async def _classify(
+        self, session, collection_name: str, rows: list[dict]
+    ) -> tuple[list[dict], list[dict]]:
+        """Split ``rows`` into (missing, changed) against the committed table, dropping
+        rows whose upsert would change nothing. Keeps the input order within each list."""
+        is_missing: dict = {}
+        for batch in _batches(rows):
+            result = await session.execute(
+                self._classify_sql(collection_name),
+                {
+                    "ids": [row["id"] for row in batch],
+                    "payloads": [json.dumps(row["payload"]) for row in batch],
+                },
+            )
+            is_missing.update(result.tuples().all())
+        missing = [row for row in rows if is_missing.get(row["id"]) is True]
+        changed = [row for row in rows if is_missing.get(row["id"]) is False]
+        return missing, changed
 
     @retry(
         retry=retry_if_exception(is_deadlock),
@@ -742,19 +793,47 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         point_dicts = [to_dict(data_point) for data_point in pgvector_data_points]
 
+        # ``ON CONFLICT DO UPDATE`` locks every conflicting row until commit, even when
+        # its ``WHERE`` is false, so an id many concurrent writers share (the same entity
+        # extracted from many documents) queued every writer behind every other one,
+        # although nearly all of them changed nothing. So only the rows that need it
+        # take a row lock: a lock-free classify drops the unchanged rows, the missing
+        # ones are inserted with ``DO NOTHING`` (which locks no existing row), and only
+        # what is left goes through the upsert. All inserts of the call precede all its
+        # upserts, each phase in ``_row_order``: a writer waiting for another's insert
+        # holds no updated row's lock yet, so the two phases form no wait cycle.
         async with self.get_async_session() as session:
-            for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
-                point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
-                insert_statement = insert(PGVectorDataPoint).values(point_batch)
-                insert_statement = insert_statement.on_conflict_do_update(
+            missing, changed = await self._classify(session, collection_name, point_dicts)
+
+            inserted_ids: set = set()
+            for batch in _batches(missing):
+                insert_statement = (
+                    insert(PGVectorDataPoint)
+                    .values(batch)
+                    .on_conflict_do_nothing(index_elements=["id"])
+                    .returning(PGVectorDataPoint.id)
+                )
+                inserted_ids.update((await session.execute(insert_statement)).scalars())
+
+            # An id another writer inserted after the classify: classified again, it
+            # is now an existing row, written below only if the upsert would change it.
+            lost_race = [row for row in missing if row["id"] not in inserted_ids]
+            still_missing, changed_since = await self._classify(session, collection_name, lost_race)
+
+            to_upsert = sorted(
+                changed + still_missing + changed_since, key=lambda row: _row_order(row["id"])
+            )
+            for batch in _batches(to_upsert):
+                upsert_statement = insert(PGVectorDataPoint).values(batch)
+                upsert_statement = upsert_statement.on_conflict_do_update(
                     index_elements=["id"],
                     set_={
                         "payload": self._merged_belongs_to_set_payload(collection_name),
                         "vector": self._vector_if_text_changed(collection_name),
                     },
-                    where=self._payload_changed(collection_name),
+                    where=text(self._payload_changed(collection_name, "EXCLUDED")),
                 )
-                await session.execute(insert_statement)
+                await session.execute(upsert_statement)
             await session.commit()
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
