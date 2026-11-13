@@ -160,8 +160,8 @@ class TestCOGXArchive:
                 writer.write(self._sample_records()[2])
                 writer.write_raw_node({"id": "raw-1", "type": "NodeSet"})
 
-        assert len((archive_dir / "entities.jsonl").read_text().splitlines()) == 1
-        assert len((archive_dir / "nodes.jsonl").read_text().splitlines()) == 1
+        assert len((archive_dir / "entities.jsonl").read_text(encoding="utf-8").splitlines()) == 1
+        assert len((archive_dir / "nodes.jsonl").read_text(encoding="utf-8").splitlines()) == 1
         manifest = read_manifest(archive_dir)
         assert manifest.counts == {"entity": 1, "raw_node": 1}
 
@@ -170,7 +170,7 @@ class TestCOGXArchive:
         with COGXArchiveWriter(archive_dir, source_system="test") as writer:
             writer.write(self._sample_records()[2])
         manifest_path = archive_dir / "manifest.json"
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["cogx_version"] = "99.0"
         manifest_path.write_text(json.dumps(manifest))
 
@@ -649,7 +649,7 @@ class TestFormatEmitters:
     def test_json(self, tmp_path):
         destination = tmp_path / "graph.json"
         write_json(self.NODES, self.EDGES, destination)
-        payload = json.loads(destination.read_text())
+        payload = json.loads(destination.read_text(encoding="utf-8"))
         assert len(payload["nodes"]) == 2
         assert payload["edges"][0]["relationship_name"] == "lives_in"
         assert payload["edges"][0]["edge_text"] == "Alice lives in Berlin"
@@ -692,7 +692,7 @@ class TestFormatEmitters:
     def test_cypher(self, tmp_path):
         destination = tmp_path / "graph.cypher"
         write_cypher(self.NODES, self.EDGES, destination)
-        script = destination.read_text()
+        script = destination.read_text(encoding="utf-8")
         # Indexed shared label keeps edge MATCH clauses off AllNodesScan plans.
         assert "CREATE INDEX IF NOT EXISTS FOR (n:CogneeNode) ON (n.id);" in script
         assert 'MERGE (n:CogneeNode {id: "id-1"}) SET n:`Entity`' in script
