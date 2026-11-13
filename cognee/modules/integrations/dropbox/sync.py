@@ -92,15 +92,19 @@ async def refuse_nested_selection(
 ) -> None:
     """Raise NestedSelectionError when a selected folder sits inside another one.
 
-    One credential check and one HTTP session for the whole selection. Paths are compared
+    One credential check, then, for two or more folders (a sync of fewer asks Dropbox nothing:
+    nothing can be nested), one HTTP session for the whole selection. Paths are compared
     sorted with a trailing slash: a folder inside another sorts right after it (or after a
     folder that is itself inside it), so checking each against its neighbour is enough. A
     folder without a path (unmounted) takes no part: its "/" would be a prefix of all.
 
     ``refuse_missing`` (when a selection is saved) raises SelectedFolderNotFoundError for an
-    id Dropbox cannot resolve. A sync lets it through: the source counts it as gone.
+    id Dropbox cannot resolve, a single folder included. A sync lets it through: the source
+    counts it as gone.
     """
     await ingestion.require_active_credential(credential)
+    if len(folder_ids) < 2 and not refuse_missing:
+        return
     metas = await client.get_folders(access_token, folder_ids)
     if refuse_missing and not all(meta is not None and _has_path(meta) for meta in metas):
         raise SelectedFolderNotFoundError(

@@ -93,12 +93,22 @@ A runnable version is `examples/dropbox.py`.
   its table, cursor and documents. Several folders are several sources, each with its own
   `resource_name`. The integration module (`cognee/modules/integrations/dropbox/`) and the
   Cloud pod build them through `ingestion.sync_scopes`, with the resource name derived from the
-  user, the account and the folder id. The integration module refuses a folder inside another
-  selected folder when the selection is saved (422 from
+  user, the account and the folder id; `selection.resource_name_for(user_id, account_id,
+  folder_id)` gives the same name, and a host that takes a connection over from cognee must use
+  it, or it starts with no state and extracts every file again. `CONNECTOR`'s `SyncScope` has
+  no field for it, so a host calls it itself. The integration module refuses a folder inside
+  another selected folder when the selection is saved (422 from
   `PUT /api/v1/integrations/dropbox/resources`) and again at sync time: the file would be two
   documents. Saving also refuses a folder id Dropbox cannot resolve (deleted, or not visible to
   the account), a single folder included. `dropbox_source` sees one folder and cannot check
   this; any other host (Cloud included) must refuse a nested selection itself.
+- A sync that finds nothing new costs three Dropbox calls per folder (`users/get_current_account`,
+  `files/get_metadata`, `files/list_folder/continue`) and one HTTP client per folder, plus one
+  `files/get_metadata` per folder for the nesting check when two or more folders are selected.
+  `CONNECTOR`'s poll cadence is `POLL_INTERVAL_SECONDS` (one hour); a host with many folders
+  can poll less often. With one folder the nesting check asks nothing, so a token Dropbox
+  refuses reaches the source and is counted as `failed_auth` (the run is degraded, not
+  raised); with two or more folders the nesting check meets it first and the sync raises.
 - The integration module's folder picker lists one level at a time:
   `GET /api/v1/integrations/dropbox/resources?parent=<folder id>` lists the folders directly
   inside it, without `parent` the top of the account (`recursive: false`, folders only, one

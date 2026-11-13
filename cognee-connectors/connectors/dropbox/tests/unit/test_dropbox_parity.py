@@ -241,3 +241,64 @@ def test_a_team_space_is_reported_the_same_way():
     fake.put("/a.md", "alpha")
     _rows, stats = Twins(fake, "").sync()
     assert stats["team_space_unsupported"] == 1
+
+
+SELECTIONS = {
+    "none": ([], []),
+    "one": (["id:a"], [{"path_lower": "/a"}]),
+    "one gone": (["id:gone"], [None]),
+    "siblings": (["id:a", "id:b"], [{"path_lower": "/notes"}, {"path_lower": "/notes-old"}]),
+    "nested": (["id:a", "id:b"], [{"path_lower": "/notes"}, {"path_lower": "/notes/sub"}]),
+    "one of two gone": (["id:a", "id:gone"], [{"path_lower": "/notes"}, None]),
+}
+
+
+async def _nesting_check(refuse, client_module, args, folder_ids, metas, refuse_missing):
+    """The Dropbox lookups one copy's refuse_nested_selection makes and how it ends."""
+    from unittest.mock import AsyncMock, patch
+
+    lookup = AsyncMock(return_value=metas)
+    with patch.object(client_module, "get_folders", lookup):
+        try:
+            await refuse(*args, folder_ids, refuse_missing=refuse_missing)
+            outcome = None
+        except ValueError as error:
+            outcome = type(error).__name__
+    return [call.args[1] for call in lookup.await_args_list], outcome
+
+
+@pytest.mark.parametrize("refuse_missing", [False, True])
+@pytest.mark.parametrize("case", list(SELECTIONS))
+@pytest.mark.asyncio
+async def test_the_nesting_check_asks_and_refuses_the_same(case, refuse_missing):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from cognee_connector_dropbox import client as package_client
+    from cognee_connector_dropbox import selection
+
+    in_tree_sync = pytest.importorskip("cognee.modules.integrations.dropbox.sync")
+    folder_ids, metas = SELECTIONS[case]
+    owner = SimpleNamespace(provider="dropbox", provider_account_id=ACCOUNT)
+
+    with patch.object(
+        in_tree_sync.ingestion, "require_active_credential", AsyncMock(return_value=owner)
+    ):
+        cognees = await _nesting_check(
+            in_tree_sync.refuse_nested_selection,
+            in_tree_sync.client,
+            (owner, TOKEN),
+            folder_ids,
+            metas,
+            refuse_missing,
+        )
+    packages = await _nesting_check(
+        selection.refuse_nested_selection,
+        package_client,
+        (TOKEN,),
+        folder_ids,
+        metas,
+        refuse_missing,
+    )
+
+    assert packages == cognees, case

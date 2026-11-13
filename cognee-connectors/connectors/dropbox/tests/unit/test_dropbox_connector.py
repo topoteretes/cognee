@@ -7,8 +7,10 @@ in anyway, to prove the core's form-encoded client never sees a call.
 """
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlsplit
+from uuid import UUID
 
 import pytest
 from fake_dropbox import ACCOUNT
@@ -24,6 +26,7 @@ from cognee_connector_dropbox.selection import (
     NestedSelectionError,
     SelectedFolderNotFoundError,
     refuse_nested_selection,
+    resource_name_for,
 )
 from cognee_connectors_core.testing import FakeCredential, FakeHttpClient, FakeSettings
 
@@ -355,3 +358,63 @@ async def test_a_missing_folder_passes_a_sync_and_is_refused_when_a_selection_is
 async def test_a_payload_without_an_access_token_is_refused():
     with pytest.raises(RuntimeError, match="no access token"):
         await connector().sync_scope(credential(), {}, resources=["id:a"])
+
+
+@pytest.mark.asyncio
+async def test_a_single_folder_is_not_looked_up_for_nesting_on_a_sync():
+    """One folder cannot sit inside another selected one, so a sync (every poll) asks Dropbox
+    nothing for the nesting check."""
+    with _folders({"path_lower": "/notes"}) as lookup:
+        scope = await connector().sync_scope(credential(), TOKENS, resources=["id:a"])
+    lookup.assert_not_awaited()
+    assert scope.items == ["id:a"]
+
+
+@pytest.mark.asyncio
+async def test_a_single_folder_is_still_resolved_when_a_selection_is_saved():
+    with _folders(None) as lookup, pytest.raises(SelectedFolderNotFoundError):
+        await refuse_nested_selection("sl.a", ["id:gone"], refuse_missing=True)
+    lookup.assert_awaited_once_with("sl.a", ["id:gone"])
+
+
+USER_ID = "22222222-2222-2222-2222-222222222222"
+
+
+def test_the_resource_name_is_cognees_table_and_cursor_name():
+    """A literal, like the dataset name: the table and cursor a host takes over from cognee."""
+    assert resource_name_for(USER_ID, ACCOUNT, "id:notes") == "dropbox_42d93adafa7b96c4c99470ce"
+    assert resource_name_for(UUID(USER_ID), ACCOUNT, "id:notes") == (
+        "dropbox_42d93adafa7b96c4c99470ce"
+    )
+    # Non-ASCII ids are escaped in the JSON the digest is taken over, as in cognee.
+    assert (
+        resource_name_for(USER_ID, ACCOUNT, "id:\u00e9_\u2603")
+        == "dropbox_df6ea6171015843cc180b808"
+    )
+
+
+def test_the_resource_name_matches_cognees_own_formula():
+    pytest.importorskip(
+        "cognee.tasks.ingestion.connectors.dropbox",
+        reason="the installed cognee has no in-tree Dropbox connector to compare with",
+    )
+    ingestion = pytest.importorskip("cognee.modules.integrations.ingestion")
+    for user_id in (USER_ID, UUID(USER_ID)):
+        for folder in ("id:notes", "id:a4ayc_80_OEAAAAAAAAAXw", "", "id:\u00e9", "id:\u2603"):
+            owner = SimpleNamespace(user_id=user_id, provider_account_id=ACCOUNT)
+            expected = ingestion.resource_name("dropbox", owner, folder)
+            assert resource_name_for(user_id, ACCOUNT, folder) == expected, (user_id, folder)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_token_reaches_the_source_with_one_folder_and_raises_with_two():
+    """One folder asks Dropbox nothing in sync_scope, so a token Dropbox refuses is the
+    source's to report; two or more folders meet it in the nesting lookup."""
+    refused = client.DropboxIntegrationError("folder lookup", "http_401")
+    with patch.object(client, "get_folders", AsyncMock(side_effect=refused)) as lookup:
+        scope = await connector().sync_scope(credential(), TOKENS, resources=["id:a"])
+        lookup.assert_not_awaited()
+        assert scope.items == ["id:a"]
+
+        with pytest.raises(client.DropboxIntegrationError):
+            await connector().sync_scope(credential(), TOKENS, resources=["id:a", "id:b"])

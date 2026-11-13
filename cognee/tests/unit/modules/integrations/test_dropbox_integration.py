@@ -1429,3 +1429,42 @@ async def test_a_selected_folder_never_found_does_not_block_retiring_deselected_
 
     assert counts["failed_folder_not_found"] == 1 and status == "degraded"
     sync_mocks.retire.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_single_folder_sync_makes_no_nesting_lookup(monkeypatch):
+    """One folder cannot sit inside another selected one: a sync checks the credential and
+    asks Dropbox nothing."""
+    lookup = AsyncMock(return_value=[{".tag": "folder", "path_lower": "/a"}])
+    reads = AsyncMock(side_effect=lambda credential: credential)
+    monkeypatch.setattr(sync_module.client, "get_folders", lookup)
+    monkeypatch.setattr(sync_module.ingestion, "require_active_credential", reads)
+
+    await sync_module.refuse_nested_selection(credential(), "sl.token", ["id:a"])
+
+    lookup.assert_not_awaited()
+    reads.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_token_on_one_folder_is_counted_and_on_two_folders_raises(sync_mocks):
+    """One folder asks Dropbox nothing before its source runs, so a token Dropbox refuses
+    reaches the source and is counted as failed_auth; two or more folders meet it in the
+    nesting check, which raises before any source runs."""
+    from cognee.tasks.ingestion.connectors.dropbox import DropboxAuthError
+
+    sync_mocks.folder.side_effect = client_module.DropboxIntegrationError(
+        "folder lookup", "http_401"
+    )
+    sync_mocks.remember.side_effect = DropboxAuthError("refused")
+
+    await DropboxIntegration().sync_now(credential(selected_folder_ids=["id:n"]))
+
+    sync_mocks.folder.assert_not_awaited()
+    record = sync_mocks.record.await_args.kwargs
+    assert record["status"] == "degraded" and record["counts"]["failed_auth"] == 1
+
+    sync_mocks.remember.reset_mock()
+    with pytest.raises(client_module.DropboxIntegrationError):
+        await DropboxIntegration().sync_now(credential(selected_folder_ids=["id:n", "id:w"]))
+    sync_mocks.remember.assert_not_awaited()

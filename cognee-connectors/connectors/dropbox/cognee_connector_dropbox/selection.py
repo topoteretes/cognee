@@ -8,12 +8,15 @@ runs it before it hands out the token.
 
 The dataset name replicates cognee's ``ingestion.dataset_name_for_account`` for an account's
 stored email and id, so a cognee server and any other host land the same account in the same
-dataset. The name is a stored identifier: neither copy may change it once an account synced.
+dataset; ``resource_name_for`` replicates ``ingestion.resource_name`` for a folder's table and
+cursor. Both are stored identifiers: neither copy may change them once an account synced.
 """
 
+import json
 import re
 from hashlib import sha256
 from itertools import pairwise
+from uuid import UUID
 
 from cognee_connector_dropbox import client
 from cognee_connector_dropbox.source import valid_folder_id
@@ -41,6 +44,19 @@ def dataset_name_for_account(email: str, account_id: str) -> str:
     return f"{name}_{sha256(account_id.encode()).hexdigest()[:10]}" if account_id else name
 
 
+def resource_name_for(user_id: str | UUID, account_id: str, folder_id: str) -> str:
+    """The dlt table and cursor name of one folder, as cognee's ``ingestion.resource_name``.
+
+    ``dropbox_`` and 24 hex of the sha256 of ``[user_id, account_id, folder_id]`` as JSON. A
+    host that takes a connection over from cognee must name each folder's source with it, or
+    it starts with no state and extracts every file again under new data ids. A stored
+    identifier, like the dataset name.
+    """
+    identity = [str(user_id), account_id, folder_id]
+    digest = sha256(json.dumps(identity).encode()).hexdigest()[:24]
+    return f"{DROPBOX_DATASET_PREFIX}_{digest}"
+
+
 def check_selection_shape(selected: object) -> list[str]:
     """The selection as sorted folder ids, or ValueError when it is not a list of ``id:...``."""
     if not isinstance(selected, list) or not all(valid_folder_id(folder) for folder in selected):
@@ -59,14 +75,18 @@ async def refuse_nested_selection(
 ) -> None:
     """Raise NestedSelectionError when a selected folder sits inside another one.
 
-    One HTTP session for the whole selection. Paths are compared sorted with a trailing slash:
+    A sync of fewer than two folders asks Dropbox nothing: nothing can be nested. Otherwise
+    one HTTP session for the whole selection. Paths are compared sorted with a trailing slash:
     a folder inside another sorts right after it (or after a folder that is itself inside it),
     so checking each against its neighbour is enough. A folder without a path (unmounted)
     takes no part: its "/" would be a prefix of all.
 
     ``refuse_missing`` (when a selection is saved) raises SelectedFolderNotFoundError for an
-    id Dropbox cannot resolve. A sync lets it through: the source counts it as gone.
+    id Dropbox cannot resolve, a single folder included. A sync lets it through: the source
+    counts it as gone.
     """
+    if len(folder_ids) < 2 and not refuse_missing:
+        return
     metas = await client.get_folders(access_token, folder_ids)
     if refuse_missing and not all(meta is not None and _has_path(meta) for meta in metas):
         raise SelectedFolderNotFoundError(

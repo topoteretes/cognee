@@ -43,8 +43,10 @@ logger = logging.getLogger(__name__)
 SCOPES = "files.metadata.read files.content.read account_info.read"
 # How often a host without webhooks re-syncs a connection. Dropbox pushes nothing on this
 # path; cognee syncs on Sync now or on a sync policy. The contract asks a webhook-less OAuth2
-# provider for a cadence, and a run that finds nothing new costs one list_folder/continue call
-# per folder.
+# provider for a cadence. A run that finds nothing new costs three Dropbox calls per folder at
+# the source (users/get_current_account, files/get_metadata, list_folder/continue, through one
+# HTTP client per folder), plus one files/get_metadata per folder in sync_scope's nesting check
+# when two or more folders are selected.
 POLL_INTERVAL_SECONDS = 3600
 # How long before its expiry a stored access token is renewed before a revoke: cognee's
 # ``credentials.TOKEN_REFRESH_MARGIN``.
@@ -199,9 +201,11 @@ class DropboxConnector(DescriptorConnector):
         scope: nothing syncs until folders are picked. An explicit empty ``resources`` is
         refused, as the contract requires. A selection that is not a list of ``id:...`` raises
         ``ValueError`` before any request; a folder inside another selected folder raises
-        :class:`~.selection.NestedSelectionError` (one ``get_metadata`` per folder), as
-        cognee's sync does. ``options`` carries what ``dropbox_source`` needs besides the
-        folder and the token: ``account_id`` and ``max_file_size_mb``.
+        :class:`~.selection.NestedSelectionError` (one ``get_metadata`` per folder when two or
+        more are selected), as cognee's sync does. With one folder nothing is asked here, so a
+        token Dropbox refuses reaches the source; with two or more the lookup raises it.
+        ``options`` carries what ``dropbox_source`` needs besides the folder and the token:
+        ``account_id`` and ``max_file_size_mb``.
         """
         if resources is not None and not resources:
             raise ValueError(
@@ -214,8 +218,7 @@ class DropboxConnector(DescriptorConnector):
             selected = (credential.provider_metadata or {}).get(SELECTION_KEY) or []
         folder_ids = check_selection_shape(selected)
         token = self._bearer(credential, tokens)
-        if folder_ids:
-            await refuse_nested_selection(token, folder_ids)
+        await refuse_nested_selection(token, folder_ids)
         return SyncScope(
             dataset_name=self.dataset_name(credential),
             content_type=self.content_type,

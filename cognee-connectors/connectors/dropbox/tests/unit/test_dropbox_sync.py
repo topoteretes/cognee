@@ -1245,3 +1245,22 @@ def test_a_never_listed_folder_that_is_missing_has_its_own_key(fake):
 
     assert isinstance(error, DropboxFolderNotFoundError)
     assert (stats["failed_folder_not_found"], stats["failed_folder_gone"]) == (1, 0)
+
+
+def test_a_run_that_finds_nothing_new_costs_three_requests(fake):
+    """What one poll costs per folder at the source: the account check, the folder lookup and
+    one ``list_folder/continue``, through one client."""
+    notes = fake.mkdir("/Notes")
+    fake.put("/Notes/a.md", "# Alpha notes")
+    state: dict = {}
+    sync(fake, state, notes)
+    fake.calls.clear()
+
+    upserts, deletes, _stats = sync(fake, state, notes)
+
+    assert upserts == {} and deletes == []
+    assert fake.calls == [
+        "users/get_current_account",
+        "files/get_metadata",
+        "files/list_folder/continue",
+    ]
