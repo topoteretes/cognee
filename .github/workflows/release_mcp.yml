@@ -159,7 +159,7 @@ jobs:
         # The action picks its path from `password`. Non-empty: token auth, and
         # it warns and skips attestations, which need OIDC. Empty: Trusted
         # Publishing, with PEP 740 attestations uploaded by default.
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2 (twine 7.0.0: accepts Metadata-Version 2.5)
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.2 (twine 7.0.0: accepts Metadata-Version 2.5)
         with:
           packages-dir: cognee-mcp/dist/
           password: ${{ secrets.PYPI_TOKEN }}
