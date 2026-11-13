@@ -83,8 +83,12 @@ async def store_capture(
     entry,
     build_payload,
     index_qa,
+    after_admitted=None,
 ) -> dict:
     """Commit the entry and receipt together; serialize indexing across retries.
+
+    ``after_admitted(entry_id)`` runs once, after the commit, only for the call that
+    admitted the event; a retry that finds the receipt never runs it.
 
     A vector write cannot join the SQL transaction. Its stable ID makes replay an
     upsert if a process dies after indexing but before recording completion. This
@@ -128,7 +132,8 @@ async def store_capture(
             .on_conflict_do_nothing()
             .returning(receipts.c.client_event_id)
         )
-        if admitted.scalar_one_or_none() is not None:
+        newly_admitted = admitted.scalar_one_or_none() is not None
+        if newly_admitted:
             payload = await build_payload(entry_id)
             values = {
                 "user_id": user_id,
@@ -146,6 +151,8 @@ async def store_capture(
                 raise CaptureConflictError("client_event_id already belongs to another payload")
             receipt = existing["receipt"]
 
+    if newly_admitted and after_admitted is not None:
+        await after_admitted(entry_id)
     if entry["type"] == "qa":
         await _finish_index(adapter, predicate, user_id, session_id, receipt["entry_id"], index_qa)
     await adapter._maybe_purge_expired()

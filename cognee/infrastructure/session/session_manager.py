@@ -264,6 +264,30 @@ class SessionManager:
             error_message=error_message,
             session_feedback=session_feedback,
         )
+        await self.after_trace_stored(
+            user_id=user_id,
+            session_id=session_id,
+            trace_id=trace_id,
+            origin_function=origin_function,
+            status=status,
+            error_message=error_message,
+        )
+        return trace_id
+
+    async def after_trace_stored(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        trace_id: str,
+        origin_function: str,
+        status: str,
+        error_message: str,
+    ) -> None:
+        """Run what follows a stored trace step: session activity (counting an error
+        step) and agent-context extraction. Shared by the plain trace write and
+        idempotent capture, which calls it once per admitted event. Fail-open.
+        """
         await record_session_activity(
             user_id, session_id, dataset_id=self.dataset_id, errored=status == "error"
         )
@@ -275,7 +299,6 @@ class SessionManager:
             status=status,
             error_message=error_message,
         )
-        return trace_id
 
     async def _maybe_extract_agent_context(
         self,

@@ -101,11 +101,51 @@ async def test_retry_after_failed_cognify_updates_the_same_document(env):
     assert await _publish(env)
     assert not await _publish(env)
 
-    env.llm.assert_awaited_once()
+    # Nothing is staged: the retry summarizes again, then updates the same document.
+    assert env.llm.await_count == 2
     env.add.assert_awaited_once()
     assert env.update.await_args.kwargs["data_id"] == env.data_id
     saved = await module.latest_session_summary(env.cache, str(env.user.id), "s")
     assert saved["open_items"] == ["Run crash recovery test"]
+
+
+async def test_failed_update_keeps_the_previous_summary(env):
+    assert await _publish(env)
+    env.cache.turns.append(_turn("Add crash recovery test"))
+    env.llm.return_value = SUMMARY.model_copy(update={"outcome": "Recovery test added"})
+    env.update.return_value = {"status": "failed", "error": {"error_class": "Boom"}}
+
+    with pytest.raises(RuntimeError, match="Boom"):
+        await _publish(env)
+
+    saved = await module.latest_session_summary(env.cache, str(env.user.id), "s")
+    assert saved["outcome"] == "Atomic cursor update implemented"
+
+    env.update.return_value = {"status": "incremental", "after_run_error": None}
+    assert await _publish(env)
+    saved = await module.latest_session_summary(env.cache, str(env.user.id), "s")
+    assert saved["outcome"] == "Recovery test added"
+    assert env.llm.await_count == 3
+
+
+async def test_recall_shows_the_previous_summary_while_republishing(env):
+    assert await _publish(env)
+    env.cache.turns.append(_turn("Add crash recovery test"))
+    env.llm.return_value = SUMMARY.model_copy(update={"outcome": "Recovery test added"})
+    seen_during_update = []
+
+    async def slow_update(**kwargs):
+        seen_during_update.append(
+            await module.latest_session_summary(env.cache, str(env.user.id), "s")
+        )
+        return {"status": "incremental", "after_run_error": None}
+
+    env.update.side_effect = slow_update
+    assert await _publish(env)
+
+    assert seen_during_update[0]["outcome"] == "Atomic cursor update implemented"
+    saved = await module.latest_session_summary(env.cache, str(env.user.id), "s")
+    assert saved["outcome"] == "Recovery test added"
 
 
 async def test_a_new_turn_replaces_the_summary_in_place(env):

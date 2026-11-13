@@ -205,6 +205,19 @@ async def remember_capture(
                         status=entry.status,
                         error_message=entry.error_message,
                     )
+
+            async def after_trace_admitted(entry_id):
+                # What the plain trace write runs after storing a step: error
+                # count and agent-context extraction, once per admitted event.
+                await SessionManager(adapter, dataset_id=bound_dataset_id).after_trace_stored(
+                    user_id=user_id,
+                    session_id=session_id,
+                    trace_id=entry_id,
+                    origin_function=entry.origin_function,
+                    status=entry.status,
+                    error_message=entry.error_message,
+                )
+
             return await store_capture(
                 adapter,
                 tenant_id=getattr(user, "tenant_id", None),
@@ -216,4 +229,5 @@ async def remember_capture(
                 entry=normalized,
                 build_payload=build,
                 index_qa=index,
+                after_admitted=after_trace_admitted if isinstance(entry, TraceEntry) else None,
             )

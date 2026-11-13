@@ -333,3 +333,65 @@ async def test_capture_refuses_a_different_node_set_before_writing(service):
 
     assert await _pinned_node_set(service) == ("proj",)
     assert await _receipt_count(service) == 1
+
+
+def _error_trace():
+    return TraceEntry(
+        origin_function="Bash",
+        status="error",
+        error_message="ModuleNotFoundError: cognee_db_workers",
+        generate_feedback_with_llm=False,
+    )
+
+
+async def _error_count(service):
+    async with service.sessions() as session:
+        record = (
+            await session.execute(
+                select(SessionRecord).where(SessionRecord.session_id == "session")
+            )
+        ).scalar_one()
+    return record.error_count
+
+
+@pytest.mark.asyncio
+async def test_admitted_error_trace_counts_and_extracts_once(service, monkeypatch):
+    from cognee.infrastructure.session.session_manager import SessionManager
+
+    extract = AsyncMock()
+    monkeypatch.setattr(SessionManager, "_maybe_extract_agent_context", extract)
+    args = {**service.args, "entry": _error_trace()}
+
+    receipt = await capture.remember_capture(**args)
+    assert await capture.remember_capture(**args) == receipt
+
+    assert await _error_count(service) == 1
+    extract.assert_awaited_once()
+    assert extract.await_args.kwargs["trace_id"] == receipt["entry_id"]
+    assert extract.await_args.kwargs["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_successful_trace_counts_no_error(service, monkeypatch):
+    from cognee.infrastructure.session.session_manager import SessionManager
+
+    extract = AsyncMock()
+    monkeypatch.setattr(SessionManager, "_maybe_extract_agent_context", extract)
+    entry = TraceEntry(origin_function="Bash", status="success", generate_feedback_with_llm=False)
+
+    await capture.remember_capture(**{**service.args, "entry": entry})
+
+    assert await _error_count(service) == 0
+    extract.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_qa_capture_runs_no_trace_post_write(service, monkeypatch):
+    from cognee.infrastructure.session.session_manager import SessionManager
+
+    after = AsyncMock()
+    monkeypatch.setattr(SessionManager, "after_trace_stored", after)
+
+    await capture.remember_capture(**service.args)
+
+    after.assert_not_awaited()
