@@ -16,7 +16,8 @@ Usage:
 
 NAME is a distribution name (``cognee-connector-notion``) or a package directory
 (``connectors/notion``). A ``--json`` record carries ``name``, ``dir`` (POSIX path
-relative to the repository root), ``module``, ``has_tests`` (a ``tests/`` folder
+relative to the repository root), ``module``, ``version`` (the version in its
+pyproject.toml), ``has_tests`` (a ``tests/`` folder
 exists) and ``depends_on_workspace`` (the distribution names of the workspace packages
 it requires, in its dependencies or its extras).
 
@@ -343,6 +344,7 @@ class Package:
             "name": self.name,
             "dir": self.dir,
             "module": self.module,
+            "version": self.version,
             "has_tests": self.has_tests,
             "depends_on_workspace": list(self.depends_on_workspace),
         }
