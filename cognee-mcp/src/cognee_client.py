@@ -220,15 +220,13 @@ class CogneeClient:
             # guards direct-mode ingestion applies to this string: a path outside
             # COGNEE_ALLOWED_LOCAL_FILE_ROOTS is stored as text, and with
             # ACCEPT_LOCAL_FILE_PATH=false a local file is refused outright.
-            from cognee.modules.ingestion.exceptions import IngestionError
             from cognee.tasks.ingestion.save_data_item_to_storage import (
                 _resolve_local_file_uri,
-                settings,
+                require_server_path_access,
             )
 
             if _resolve_local_file_uri(data) is not None:
-                if not settings.accept_local_file_path:
-                    raise IngestionError(message="Local files are not accepted.")
+                require_server_path_access()
                 return CogneeClient._path_upload(data)
         return CogneeClient._text_upload(data)
 
@@ -768,7 +766,7 @@ class CogneeClient:
                     # Same loader as the REST cognify/remember routers: the stored
                     # upload keeps its detected format, filename and content type,
                     # so Turtle/JSON-LD ontologies are parsed with the right parser.
-                    ontology_files = OntologyService().get_ontology_files(ontology_keys, user)
+                    ontology_files = await OntologyService().get_ontology_files(ontology_keys, user)
                     ontology_config = {
                         "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_files)
                     }

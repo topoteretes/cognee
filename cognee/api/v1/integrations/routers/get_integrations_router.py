@@ -43,6 +43,7 @@ import hmac
 import logging
 import secrets
 from datetime import datetime, timezone
+from typing import Literal
 from urllib.parse import quote
 from uuid import UUID
 
@@ -54,7 +55,6 @@ from sqlalchemy.exc import IntegrityError
 
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.integrations.routers.get_sync_progress_router import get_sync_progress_router
-from cognee.infrastructure.background_tasks import register_background_task
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.list_agents import list_agents
 from cognee.modules.agents.registry import (
@@ -63,21 +63,35 @@ from cognee.modules.agents.registry import (
     deactivate_agent_connection,
     register_agent_connection,
 )
-from cognee.modules.integrations.base import OAuthIntegration
+from cognee.modules.integrations.background import spawn_background
+from cognee.modules.integrations.base import (
+    OAuthIntegration,
+    ResourceParentError,
+    ResourceParentNotFoundError,
+)
 from cognee.modules.integrations.connect import complete_installation
 from cognee.modules.integrations.credentials import (
+    REVOKED_BY_OWNER,
+    CredentialInactiveError,
     CrossUserConflictError,
+    change_provider_metadata,
     get_active_credential_for_user,
+    get_ended_connection,
     list_active_credentials_for_provider,
     list_active_credentials_for_user,
+    owner_principal_id,
     revoke_credential_by_account,
-    update_provider_metadata,
 )
+from cognee.modules.integrations.crypto import oauth_state_signing_key
 from cognee.modules.integrations.linear.resume_sync import linear_resume_lifespan
 from cognee.modules.integrations.oauth_flow import (
     DEFAULT_STATE_TTL_SECONDS,
     make_state,
     validate_state,
+)
+from cognee.modules.integrations.outbound import (
+    OutboundHttpDisabledError,
+    require_outbound_http,
 )
 from cognee.modules.integrations.plugin_keys import (
     PluginAgentKeyLimitError,
@@ -95,6 +109,22 @@ from cognee.modules.integrations.plugin_status import (
 )
 from cognee.modules.integrations.plugins import KNOWN_PLUGINS, get_plugin
 from cognee.modules.integrations.registry import get_integration, supported_integrations
+from cognee.modules.integrations.scheduled_sync import sync_scheduler_lifespan
+from cognee.modules.integrations.sync_policy import (
+    CUSTOM_HOURS,
+    INTERVAL_PRESETS,
+    SyncPolicy,
+    delete_sync_policy,
+    get_caller_effective_sync_policy,
+    get_sync_pause_level,
+    get_sync_policy,
+    pause_sync_policy,
+    policy_level,
+    require_sync_not_paused,
+    resume_sync_policy,
+    save_sync_policy,
+)
+from cognee.modules.integrations.sync_policy.models import IntegrationSyncPolicy
 from cognee.modules.observability import new_span
 from cognee.modules.session_lifecycle.visibility import visible_user_ids
 from cognee.modules.users.api_key.delete_api_key import delete_api_key
@@ -111,24 +141,17 @@ from cognee.modules.users.models import User
 
 logger = logging.getLogger(__name__)
 
-# Detached post-install / webhook work (initial syncs, event handling) runs
-# off the request path; strong references keep the tasks alive until done —
-# same pattern as remember()'s _BACKGROUND_REMEMBER_TASKS.
-_BACKGROUND_INTEGRATION_TASKS: set = set()
+
+def _as_set(selection: list[str] | None) -> frozenset[str] | None:
+    """A selection compared without its order; ``None`` (everything) stays ``None``."""
+    return None if selection is None else frozenset(selection)
 
 
-def _spawn_background(coro, *, description: str) -> None:
-    """Run ``coro`` detached, logging (never raising) on failure."""
-
-    async def _guarded():
-        try:
-            await coro
-        except Exception:  # detached work must log, not crash the loop
-            logger.exception("%s failed", description)
-
-    task = register_background_task(asyncio.create_task(_guarded()))
-    _BACKGROUND_INTEGRATION_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_INTEGRATION_TASKS.discard)
+# How long a disconnect waits for its staging copy to be dropped before it answers and lets
+# the drop finish in the background. The drop takes the lock every dlt run in the process
+# holds, which another connection's backfill can keep for minutes; a drop that fails within
+# the wait is reported to the owner.
+STAGING_DROP_WAIT_SECONDS = 10
 
 
 # Plugin keys with a native AgentConnectionType; anything else registers as
@@ -159,10 +182,27 @@ class ConnectionStatusDTO(OutDTO):
     sync_status: str | None = None
     last_synced_at: datetime | None = None
     sync_counts: dict[str, int] | None = None
+    # Set only when ``connected`` is false for a connection the user had: "owner" (a
+    # disconnect) or "provider" (an uninstall, a rejected token), absent when unknown.
+    # Its data stays in ``dataset_id``.
+    disconnected_by: str | None = None
+    disconnected_at: datetime | None = None
+    # When the data of an ended connection is deleted (Slack: 14 days after an uninstall);
+    # absent when it is kept.
+    data_deleted_after: datetime | None = None
+    # When that deletion ran; set, the data is gone.
+    data_deleted_at: datetime | None = None
 
 
 class DisconnectResultDTO(OutDTO):
     disconnected: bool
+
+
+class ConnectionDisconnectResultDTO(DisconnectResultDTO):
+    # True when ALLOW_HTTP_REQUESTS=false kept cognee from asking the provider to
+    # revoke the token: the local connection is gone, the token is still live at
+    # the provider until it expires or the user removes the app there.
+    remote_revoke_skipped: bool = False
 
 
 class ConnectionSummaryDTO(OutDTO):
@@ -198,6 +238,49 @@ class IntegrationResourceSelectionResultDTO(OutDTO):
 
 class IntegrationSyncResultDTO(OutDTO):
     accepted: bool
+
+
+class SyncPolicyDTO(OutDTO):
+    """A saved sync policy, with the intervals a UI may offer, so it hard-codes none.
+
+    ``level`` is ``default`` for the owner's default and ``connection`` for one
+    connection's own policy. On a connection's routes ``held_by`` names the level that
+    holds it paused: a paused default holds it even when its own row is not. Times are UTC.
+    """
+
+    level: Literal["default", "connection"]
+    interval_minutes: int
+    weekdays: list[int]
+    timezone: str
+    paused: bool
+    paused_by: UUID | None
+    paused_at: datetime | None
+    next_due_at: datetime | None
+    held_by: Literal["default", "connection"] | None = None
+    interval_presets: list[int] = list(INTERVAL_PRESETS)
+    custom_hours: list[int] = list(CUSTOM_HOURS)
+
+
+def _sync_policy_dto(row: IntegrationSyncPolicy, held_by: str | None = None) -> SyncPolicyDTO:
+    return SyncPolicyDTO(
+        level=policy_level(row),
+        held_by=held_by,
+        interval_minutes=row.interval_minutes,
+        weekdays=row.weekdays,
+        timezone=row.timezone,
+        paused=row.paused,
+        paused_by=row.paused_by,
+        # SQLite returns the stored UTC values without their offset.
+        paused_at=as_utc(row.paused_at),
+        next_due_at=as_utc(row.next_due_at),
+    )
+
+
+async def _connection_policy_dto(row: IntegrationSyncPolicy, credential) -> SyncPolicyDTO:
+    held_by = await get_sync_pause_level(
+        credential_id=credential.id, principal_id=owner_principal_id(credential)
+    )
+    return _sync_policy_dto(row, held_by=held_by)
 
 
 class PluginProvisionDTO(OutDTO):
@@ -250,6 +333,20 @@ class IntegrationsStatusDTO(OutDTO):
     plugins: list[PluginStatusItemDTO]
 
 
+def _outbound_http_or_503(provider: str) -> None:
+    """Refuse a connect or sync while ``ALLOW_HTTP_REQUESTS=false``.
+
+    Every provider call is already refused at its ``client_session``; here
+    the check answers the caller directly with a 503, instead of a sync
+    accepted into the background that fails where nobody sees it, or an
+    OAuth round trip whose callback cannot complete.
+    """
+    try:
+        require_outbound_http(provider)
+    except OutboundHttpDisabledError as error:
+        raise HTTPException(status_code=503, detail=error.message) from error
+
+
 def _integration_or_404(provider: str) -> OAuthIntegration:
     try:
         return get_integration(provider)
@@ -264,13 +361,29 @@ async def _credential_or_404(user: User, integration: OAuthIntegration, account_
     user's (unknown, disconnected, or someone else's) is a 404 and never falls back to
     another account: the caller asked for that one. A blank id names nothing and is a 422.
     """
-    if account_id is not None and not account_id.strip():
-        raise HTTPException(status_code=422, detail="account_id must not be blank")
+    _require_non_blank(account_id)
     credential = await get_active_credential_for_user(user.id, integration.provider, account_id)
     if credential is None and account_id is not None:
-        raise HTTPException(
-            status_code=404, detail=f"{integration.provider} account is not connected"
-        )
+        raise _account_not_connected(integration)
+    return credential
+
+
+def _require_non_blank(account_id: str | None) -> None:
+    if account_id is not None and not account_id.strip():
+        raise HTTPException(status_code=422, detail="account_id must not be blank")
+
+
+def _account_not_connected(integration: OAuthIntegration) -> HTTPException:
+    return HTTPException(status_code=404, detail=f"{integration.provider} account is not connected")
+
+
+async def _connected_credential_or_404(
+    user: User, integration: OAuthIntegration, account_id: str | None
+):
+    """``_credential_or_404`` for routes that act on a connection: none at all is a 404 too."""
+    credential = await _credential_or_404(user, integration, account_id)
+    if credential is None:
+        raise HTTPException(status_code=404, detail=f"{integration.provider} is not connected")
     return credential
 
 
@@ -409,6 +522,46 @@ def _pending_install_nonces(request: Request, provider: str) -> list[str]:
     ]
 
 
+def _start_authorization(provider: str, user: User) -> tuple[str, str]:
+    """The provider's authorize URL for ``user`` and the nonce its state carries; the
+    caller sets the nonce cookie on its response: the state says which user started it,
+    the cookie that the browser finishing it is the same one (:func:`_set_install_nonce`)."""
+    integration = _integration_or_404(provider)
+    _outbound_http_or_503(provider)
+    try:
+        nonce = secrets.token_urlsafe(32)
+        state = make_state(user.id, nonce, signing_secret=oauth_state_signing_key())
+        return integration.authorize_url(state), nonce
+    except RuntimeError:
+        # A provider's require()-style settings guard raises when its client id/secret/
+        # signing key aren't configured — a deploy-time gap, not a per-request fault.
+        # Surface it as a clear 503 instead of a bare 500.
+        logger.exception("%s authorize requested but is not configured", provider)
+        raise HTTPException(
+            status_code=503,
+            detail=f"{provider} integration is not configured on this server.",
+        )
+
+
+async def _drop_staging_copy(provider: str, dataset_name: str, drop_dlt_dataset) -> None:
+    """Drop the staging copy, waiting at most ``STAGING_DROP_WAIT_SECONDS``.
+
+    A failure within the wait raises, so the owner is told. The drop is background work from
+    the start, so whatever ends the wait (the timeout, a cancelled request) it still finishes,
+    the shutdown drains it, and a failure is logged.
+    """
+    drop = asyncio.ensure_future(drop_dlt_dataset(dataset_name))
+    spawn_background(_finish(drop), description=f"{provider} staging copy drop on disconnect")
+    try:
+        await asyncio.wait_for(asyncio.shield(drop), timeout=STAGING_DROP_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        logger.info("%s staging copy drop continues in the background", provider)
+
+
+async def _finish(task: asyncio.Future) -> None:
+    await task
+
+
 def _set_install_nonce(response: Response, request: Request, provider: str, nonce: str) -> None:
     response.set_cookie(
         _install_nonce_cookie_name(provider, nonce),
@@ -468,6 +621,46 @@ def _frontend_redirect(integration: OAuthIntegration, outcome: str) -> RedirectR
 def get_integrations_router():
     integrations_router = APIRouter(lifespan=linear_resume_lifespan)
     integrations_router.include_router(get_sync_progress_router())
+    # A router holds one lifespan, and an included router's lifespan runs with its parent's.
+    integrations_router.include_router(APIRouter(lifespan=sync_scheduler_lifespan))
+
+    # ------------------------------------------------------------------ #
+    # Sync policies: the caller's own default (fixed /sync/policy path, before the
+    # {provider} routes). Scoped by construction: no route here takes an owner.
+    # ------------------------------------------------------------------ #
+
+    @integrations_router.get("/sync/policy")
+    async def get_default_sync_policy(
+        user: User = Depends(get_authenticated_user),
+    ) -> SyncPolicyDTO:
+        """The caller's default sync policy, which every connection without its own inherits."""
+        return _sync_policy_dto(await get_sync_policy(user, user.id))
+
+    @integrations_router.put("/sync/policy")
+    async def set_default_sync_policy(
+        policy: SyncPolicy, user: User = Depends(get_authenticated_user)
+    ) -> SyncPolicyDTO:
+        """Create or replace the caller's default sync policy. A pause is kept."""
+        return _sync_policy_dto(await save_sync_policy(user, user.id, policy))
+
+    @integrations_router.delete("/sync/policy", status_code=204)
+    async def remove_default_sync_policy(user: User = Depends(get_authenticated_user)) -> None:
+        """Remove the caller's default: connections without their own stop syncing on schedule."""
+        await delete_sync_policy(user, user.id)
+
+    @integrations_router.post("/sync/policy/pause")
+    async def pause_default_sync_policy(
+        user: User = Depends(get_authenticated_user),
+    ) -> SyncPolicyDTO:
+        """Pause every connection of the caller, those with their own policy too."""
+        return _sync_policy_dto(await pause_sync_policy(user, user.id))
+
+    @integrations_router.post("/sync/policy/resume")
+    async def resume_default_sync_policy(
+        user: User = Depends(get_authenticated_user),
+    ) -> SyncPolicyDTO:
+        """Resume the caller's default; its next slot is the first one after now."""
+        return _sync_policy_dto(await resume_sync_policy(user, user.id))
 
     # ------------------------------------------------------------------ #
     # Aggregate status (fixed /status path — before the {provider} routes)
@@ -763,26 +956,26 @@ def get_integrations_router():
         """
         with new_span("cognee.integrations.authorize") as span:
             span.set_attribute("cognee.integrations.provider", provider)
-            integration = _integration_or_404(provider)
-            try:
-                nonce = secrets.token_urlsafe(32)
-                state = make_state(
-                    user.id, nonce, signing_secret=integration.state_signing_secret()
-                )
-                authorize_url = integration.authorize_url(state)
-                _set_install_nonce(response, request, provider, nonce)
-                return AuthorizeUrlDTO(authorize_url=authorize_url)
-            except RuntimeError:
-                # A provider's require()-style settings guard raises when its
-                # client id/secret/signing key aren't configured — a
-                # deploy-time gap, not a per-request fault. Surface it as a
-                # clear 503 instead of a bare 500 so the frontend doesn't have
-                # to guess why "Connect" failed.
-                logger.exception("%s authorize requested but is not configured", provider)
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"{provider} integration is not configured on this server.",
-                )
+            authorize_url, nonce = _start_authorization(provider, user)
+            _set_install_nonce(response, request, provider, nonce)
+            return AuthorizeUrlDTO(authorize_url=authorize_url)
+
+    @integrations_router.get("/{provider}/start", include_in_schema=False)
+    async def start(provider: str, request: Request, user: User = Depends(get_authenticated_user)):
+        """``authorize`` for a link opened in the browser: the same nonce cookie, then a
+        redirect to the provider's authorize page instead of the URL as JSON.
+
+        A link a member follows from the provider, where no page of cognee's runs
+        (Slack's ``@cognee link``), starts sign-in here, in the browser where they are
+        logged in to cognee; the callback binds the account to that user as after
+        ``authorize``. Not logged in, it answers 401.
+        """
+        with new_span("cognee.integrations.start") as span:
+            span.set_attribute("cognee.integrations.provider", provider)
+            authorize_url, nonce = _start_authorization(provider, user)
+            redirect = RedirectResponse(url=authorize_url, status_code=302)
+            _set_install_nonce(redirect, request, provider, nonce)
+            return redirect
 
     @integrations_router.get("/{provider}/callback", include_in_schema=False)
     async def callback(
@@ -804,9 +997,7 @@ def get_integrations_router():
                 # cookie's own max-age.
                 return _frontend_redirect(integration, "cancelled")
 
-            fields = validate_state(
-                state, signing_secret=integration.state_signing_secret(), field_count=2
-            )
+            fields = validate_state(state, signing_secret=oauth_state_signing_key(), field_count=2)
             if not isinstance(fields, tuple):
                 span.set_attribute("cognee.integrations.outcome", "error_invalid_state")
                 return _frontend_redirect(integration, "error_invalid_state")
@@ -875,7 +1066,7 @@ def get_integrations_router():
             )
             # Post-install work (e.g. GitHub's initial repo sync) runs
             # detached — the browser gets its redirect now, not after.
-            _spawn_background(
+            spawn_background(
                 integration.on_installed(credential),
                 description=f"{provider} on_installed hook",
             )
@@ -911,7 +1102,7 @@ def get_integrations_router():
 
             raw_body = await verifier.verify(request)
             headers = {key.lower(): value for key, value in request.headers.items()}
-            _spawn_background(
+            spawn_background(
                 integration.handle_webhook(raw_body, headers),
                 description=f"{provider} webhook handling",
             )
@@ -961,13 +1152,41 @@ def get_integrations_router():
         - **account_id** (str, optional): The ``provider_account_id`` of one of the
           user's connections (see GET /{provider}/connections). Without it the newest
           connection answers. An id that is not the user's is a 404, never another account.
-        """
-        integration = _integration_or_404(provider)
-        credential = await _credential_or_404(user, integration, account_id)
-        if credential is None:
-            return ConnectionStatusDTO(connected=False)
 
+        With no active connection, the newest one the user had (or the one named) answers
+        ``connected: false`` with ``disconnectedBy`` (``"owner"`` for a disconnect,
+        ``"provider"`` for an app uninstalled or a token it no longer accepts, absent when
+        unknown), ``disconnectedAt`` and the dataset its data stays in; the data is deleted
+        only from the datasets, or by the provider's own schedule, which ``dataDeletedAfter``
+        (when it is due) and ``dataDeletedAt`` (when it ran) report (Slack: 14 days after an
+        uninstall). A named account the user never had is still a 404.
+        """
         from cognee.modules.integrations.ingestion import dataset_summary, sync_is_running
+
+        integration = _integration_or_404(provider)
+        _require_non_blank(account_id)
+        credential = await get_active_credential_for_user(user.id, integration.provider, account_id)
+        if credential is None:
+            ended = await get_ended_connection(user.id, integration.provider, account_id)
+            if ended is None:
+                if account_id is not None:
+                    raise _account_not_connected(integration)
+                return ConnectionStatusDTO(connected=False)
+            dataset_id, stored_items = None, None
+            dataset_name = integration.dataset_name(ended)
+            if dataset_name is not None:
+                dataset_id, stored_items = await dataset_summary(ended, dataset_name)
+            return ConnectionStatusDTO(
+                connected=False,
+                dataset_id=dataset_id,
+                stored_items=stored_items,
+                account_label=ended.account_label,
+                provider_account_id=ended.provider_account_id,
+                disconnected_by=ended.revoked_by,
+                disconnected_at=as_utc(ended.revoked_at),
+                data_deleted_after=as_utc(integration.data_deleted_after(ended)),
+                data_deleted_at=as_utc(integration.data_deleted_at(ended)),
+            )
 
         dataset_id, stored_items = None, None
         dataset_name = integration.dataset_name(credential)
@@ -999,6 +1218,7 @@ def get_integrations_router():
     async def integration_resources(
         provider: str,
         account_id: str | None = None,
+        parent: str | None = None,
         user: User = Depends(get_authenticated_user),
     ) -> IntegrationResourceListDTO:
         """List selectable resources for a connected integration.
@@ -1017,15 +1237,33 @@ def get_integrations_router():
           /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
           An id that is not the caller's returns 404 and never falls back to another
           connection; a blank id returns 422.
+        - **parent** (Optional[str]): For a provider that lists its resources one level at a
+          time (Dropbox folders), the resource whose children to list; omitted means the top
+          level. A provider that lists everything at once, or a parent that is not a valid id,
+          answers 422; a parent the provider cannot find answers 404.
         """
         integration = _integration_or_404(provider)
+        _outbound_http_or_503(provider)
         if integration.resource_selection_key is None:
             raise HTTPException(status_code=404, detail=f"{provider} has no selectable resources")
         credential = await _credential_or_404(user, integration, account_id)
         if credential is None:
             raise HTTPException(status_code=404, detail=f"{provider} is not connected")
+        from cognee.modules.integrations.ingestion import RateLimitedError
+
         try:
-            resources = await integration.list_resources(credential)
+            resources = await integration.list_resources(credential, parent=parent)
+        except ResourceParentNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
+        except ResourceParentError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        except RateLimitedError as error:
+            # Never waited out inside the request: the client is told when to try again.
+            raise HTTPException(
+                status_code=429,
+                detail=f"{provider} is limiting requests; try again shortly",
+                headers={"Retry-After": str(error.retry_after)} if error.retry_after else None,
+            )
         except Exception:
             logger.exception("Could not list %s resources for user %s", provider, user.id)
             raise HTTPException(status_code=502, detail=f"Could not list {provider} resources")
@@ -1056,6 +1294,29 @@ def get_integrations_router():
             selected=selected,
         )
 
+    async def _validate_selection_or_http_error(integration, credential, resource_ids):
+        """Ask the provider to check a selection, mapped like the listing route's errors.
+
+        A refused selection is 422 with the provider's message. A connection that is no
+        longer active is 404, as on the progress route; outbound HTTP switched off is 503;
+        any other provider failure (a refused token, the network, a 5xx) is 502 as when
+        listing resources, with a fixed message and the cause in the server log only.
+        """
+        provider = integration.provider
+        try:
+            await integration.validate_resource_selection(credential, resource_ids)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        except CredentialInactiveError:
+            raise HTTPException(status_code=404, detail=f"{provider} is not connected") from None
+        except OutboundHttpDisabledError as error:
+            raise HTTPException(status_code=503, detail=error.message) from None
+        except Exception:
+            logger.exception("Could not check the %s selection for its connection", provider)
+            raise HTTPException(
+                status_code=502, detail=f"Could not check the {provider} selection; try again"
+            ) from None
+
     @integrations_router.put("/{provider}/resources")
     @integrations_router.put("/{provider}/folders")
     @integrations_router.put("/{provider}/labels")
@@ -1082,6 +1343,10 @@ def get_integrations_router():
           ids; duplicates are dropped, blank or whitespace-only ids give 422. Null (also the
           value when omitted) means every resource and is a 422 for providers that do not
           allow it.
+
+        A changed selection starts a sync at once, or one more run of the sync already
+        running, so added resources arrive and removed ones leave memory without waiting
+        for the schedule. An unchanged selection starts nothing.
         """
         integration = _integration_or_404(provider)
         selection_key = integration.resource_selection_key
@@ -1104,11 +1369,36 @@ def get_integrations_router():
                     status_code=422, detail="Resource ids must not be blank or whitespace only"
                 )
             resource_ids = list(dict.fromkeys(payload.resource_ids))
-        updated = await update_provider_metadata(
-            provider,
-            credential.provider_account_id,
-            {selection_key: resource_ids},
-        )
+            invalid = integration.invalid_resource_ids(resource_ids)
+            if invalid:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Not a {provider} resource id: {', '.join(invalid)}",
+                )
+            await _validate_selection_or_http_error(integration, credential, resource_ids)
+        changed = False
+
+        def select(current: dict) -> dict:
+            # Compared with what is stored under the connection's lock, not with the copy
+            # read above: of two saves at once, the second must see the first's selection.
+            nonlocal changed
+            changed = _as_set(current.get(selection_key)) != _as_set(resource_ids)
+            return {selection_key: resource_ids}
+
+        updated = await change_provider_metadata(provider, credential.provider_account_id, select)
+        if changed:
+            from cognee.modules.integrations import ingestion
+
+            # A paused connection keeps the new selection for its first sync after the
+            # resume.
+            paused = await ingestion.sync_is_paused(provider, updated, "selection change")
+            if not paused and not ingestion.request_rerun_if_running(
+                provider, credential.provider_account_id
+            ):
+                spawn_background(
+                    integration.sync_now(updated),
+                    description=f"{provider} sync after a selection change",
+                )
         return IntegrationResourceSelectionResultDTO(
             selected=(updated.provider_metadata or {}).get(selection_key)
         )
@@ -1132,17 +1422,111 @@ def get_integrations_router():
           connection; a blank id returns 422.
         """
         integration = _integration_or_404(provider)
-        credential = await _credential_or_404(user, integration, account_id)
-        if credential is None:
-            raise HTTPException(status_code=404, detail=f"{provider} is not connected")
+        _outbound_http_or_503(provider)
+        credential = await _connected_credential_or_404(user, integration, account_id)
+        await require_sync_not_paused(
+            credential_id=credential.id, principal_id=owner_principal_id(credential)
+        )
         from cognee.modules.integrations.ingestion import sync_is_running
 
         if sync_is_running(provider, credential.provider_account_id):
             # The running sync owns the cursor and a second request is dropped, so
             # saying "accepted" would be telling the user a sync started.
             return IntegrationSyncResultDTO(accepted=False)
-        _spawn_background(integration.sync_now(credential), description=f"{provider} manual sync")
+        spawn_background(integration.sync_now(credential), description=f"{provider} manual sync")
         return IntegrationSyncResultDTO(accepted=True)
+
+    # ------------------------------------------------------------------ #
+    # Sync policy of one connection. The connection is found among the
+    # caller's own, like every route above, and the owner is read off it, so
+    # a connection is never paired with a principal that does not own it.
+    # ------------------------------------------------------------------ #
+
+    @integrations_router.get("/{provider}/sync/policy")
+    async def get_connection_sync_policy(
+        provider: str, account_id: str | None = None, user: User = Depends(get_authenticated_user)
+    ) -> SyncPolicyDTO:
+        """The policy the connection syncs by: its own, else its owner's default.
+
+        ``level`` says which. No policy at either level is a 404.
+
+        ## Query Parameters
+        - **account_id** (str, optional): As for POST /{provider}/sync.
+        """
+        credential = await _connected_credential_or_404(
+            user, _integration_or_404(provider), account_id
+        )
+        row, held_by = await get_caller_effective_sync_policy(
+            user, owner_principal_id(credential), credential.id
+        )
+        return _sync_policy_dto(row, held_by=held_by)
+
+    @integrations_router.put("/{provider}/sync/policy")
+    async def set_connection_sync_policy(
+        provider: str,
+        policy: SyncPolicy,
+        account_id: str | None = None,
+        user: User = Depends(get_authenticated_user),
+    ) -> SyncPolicyDTO:
+        """Create or replace the connection's own policy, which overrides the default.
+
+        ## Query Parameters
+        - **account_id** (str, optional): As for POST /{provider}/sync.
+        """
+        credential = await _connected_credential_or_404(
+            user, _integration_or_404(provider), account_id
+        )
+        return await _connection_policy_dto(
+            await save_sync_policy(user, owner_principal_id(credential), policy, credential.id),
+            credential,
+        )
+
+    @integrations_router.delete("/{provider}/sync/policy", status_code=204)
+    async def remove_connection_sync_policy(
+        provider: str, account_id: str | None = None, user: User = Depends(get_authenticated_user)
+    ) -> None:
+        """Remove the connection's own policy; it inherits the owner's default again.
+
+        ## Query Parameters
+        - **account_id** (str, optional): As for POST /{provider}/sync.
+        """
+        credential = await _connected_credential_or_404(
+            user, _integration_or_404(provider), account_id
+        )
+        await delete_sync_policy(user, owner_principal_id(credential), credential.id)
+
+    @integrations_router.post("/{provider}/sync/policy/pause")
+    async def pause_connection_sync_policy(
+        provider: str, account_id: str | None = None, user: User = Depends(get_authenticated_user)
+    ) -> SyncPolicyDTO:
+        """Pause this connection only. It needs a policy of its own: a 404 otherwise.
+
+        ## Query Parameters
+        - **account_id** (str, optional): As for POST /{provider}/sync.
+        """
+        credential = await _connected_credential_or_404(
+            user, _integration_or_404(provider), account_id
+        )
+        return await _connection_policy_dto(
+            await pause_sync_policy(user, owner_principal_id(credential), credential.id), credential
+        )
+
+    @integrations_router.post("/{provider}/sync/policy/resume")
+    async def resume_connection_sync_policy(
+        provider: str, account_id: str | None = None, user: User = Depends(get_authenticated_user)
+    ) -> SyncPolicyDTO:
+        """Resume this connection; its next slot is the first one after now.
+
+        ## Query Parameters
+        - **account_id** (str, optional): As for POST /{provider}/sync.
+        """
+        credential = await _connected_credential_or_404(
+            user, _integration_or_404(provider), account_id
+        )
+        return await _connection_policy_dto(
+            await resume_sync_policy(user, owner_principal_id(credential), credential.id),
+            credential,
+        )
 
     @integrations_router.delete("/{provider}/connection")
     async def disconnect(
@@ -1150,11 +1534,11 @@ def get_integrations_router():
         delete_data: bool = False,
         account_id: str | None = None,
         user: User = Depends(get_authenticated_user),
-    ) -> DisconnectResultDTO:
+    ) -> ConnectionDisconnectResultDTO:
         """Disconnect the account connected by the requesting user.
 
-        Marks the stored installation revoked, and best-effort asks the
-        provider to kill the token on its own side via
+        Marks the stored installation revoked by its owner, then best-effort asks
+        the provider to kill the token on its own side via
         ``integration.revoke_remote``. That call is wrapped here too, on top
         of each adapter's own best-effort handling — a third-party
         integration that doesn't honor the "never raise" contract on
@@ -1170,18 +1554,31 @@ def get_integrations_router():
           An id that is not the caller's returns 404 and never falls back to another
           connection; a blank id returns 422.
         - **delete_data** (bool): When true, the integration's dataset is deleted after the
-          connection is revoked. A provider that exposes no deletable dataset returns 400
-          before anything is revoked; a deletion that fails after the disconnect returns
-          502, unless the deletion itself answered with an HTTP error, whose status is kept.
-          Ignored when account_id is omitted and the caller has no connection. Defaults to
-          False.
+          connection is revoked, with the dlt staging copy it was synced through (the staged
+          rows, the sync state and the load packages), together with what the provider's
+          app stored for the caller outside it (Slack: the messages the caller remembered
+          from that workspace). A dataset that was never created (nothing synced yet) is
+          nothing to delete, and the app's data is deleted whatever happens to the dataset. A
+          provider that exposes no deletable dataset returns 400, and a sync of the connection
+          still running returns 409, both before anything is revoked; a deletion that fails after
+          the disconnect returns 502, unless the deletion itself answered with an HTTP error,
+          whose status is kept. A staging copy still waiting for its lock after
+          ``STAGING_DROP_WAIT_SECONDS`` is dropped in the background, and a failure there is
+          logged. Ignored when account_id is omitted and the caller has no connection. Defaults
+          to False.
+
+        ## Response
+        - **disconnected** (bool): Whether a connection was revoked locally.
+        - **remoteRevokeSkipped** (bool): True when ``ALLOW_HTTP_REQUESTS=false`` kept the
+          server from asking the provider to revoke the token, which then stays live at the
+          provider until it expires or the user removes the app there.
         """
         with new_span("cognee.integrations.disconnect") as span:
             span.set_attribute("cognee.integrations.provider", provider)
             integration = _integration_or_404(provider)
             credential = await _credential_or_404(user, integration, account_id)
             if credential is None or credential.provider_account_id is None:
-                return DisconnectResultDTO(disconnected=False)
+                return ConnectionDisconnectResultDTO(disconnected=False)
 
             dataset_name = None
             if delete_data:
@@ -1191,22 +1588,67 @@ def get_integrations_router():
                         status_code=400,
                         detail=f"{provider} does not expose a deletable dataset",
                     )
+                from cognee.modules.integrations.ingestion import sync_is_running
 
+                # A sync stops at its next check once the connection is revoked, but a
+                # scope it already started could store into the dataset deleted below.
+                if sync_is_running(provider, credential.provider_account_id):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"{provider} is syncing; disconnect once the sync has finished",
+                    )
+
+            # Ended locally first, so the provider's echo of this revoke (Slack's
+            # tokens_revoked, a refresh that meets the revoked token) finds it ended by
+            # its owner and records nothing over it.
+            await revoke_credential_by_account(
+                integration.provider,
+                credential.provider_account_id,
+                revoked_by=REVOKED_BY_OWNER,
+            )
+
+            remote_revoke_skipped = False
             try:
-                await integration.revoke_remote(credential)
-            except Exception:  # a remote-revoke failure must never block disconnect
-                logger.exception(
-                    "%s revoke_remote raised for account %s",
+                require_outbound_http(provider)
+            except OutboundHttpDisabledError:
+                # Not attempted rather than attempted and swallowed: the caller is
+                # told, since the token stays live at the provider.
+                remote_revoke_skipped = True
+                logger.warning(
+                    "%s token for account %s was not revoked at the provider: "
+                    "ALLOW_HTTP_REQUESTS disables outbound HTTP",
                     provider,
                     credential.provider_account_id,
                 )
-
-            await revoke_credential_by_account(integration.provider, credential.provider_account_id)
-            if delete_data:
+            else:
                 try:
-                    from cognee.api.v1.forget.forget import forget
+                    await integration.revoke_remote(credential)
+                except Exception:  # a remote-revoke failure must never block disconnect
+                    logger.exception(
+                        "%s revoke_remote raised for account %s",
+                        provider,
+                        credential.provider_account_id,
+                    )
 
-                    await forget(dataset=dataset_name, user=user)
+            if delete_data:
+                from cognee.api.v1.forget.forget import forget
+                from cognee.modules.data.exceptions import DatasetNotFoundError
+                from cognee.tasks.ingestion.ingest_dlt_source import drop_dlt_dataset
+
+                try:
+                    try:
+                        try:
+                            await forget(dataset=dataset_name, user=user)
+                        except DatasetNotFoundError:
+                            pass  # nothing was synced yet, so there is no dataset to delete
+                    finally:
+                        # The credential is already revoked, so this is the only chance to
+                        # delete the app's own data: it runs whatever the dataset did.
+                        await integration.forget_related_data(credential, user)
+                    # forget leaves dlt's staging copy, state and load packages, which hold
+                    # every synced row's text: the next connect and sync would build every
+                    # document again.
+                    await _drop_staging_copy(provider, dataset_name, drop_dlt_dataset)
                 except HTTPException:
                     raise
                 except Exception:
@@ -1219,6 +1661,8 @@ def get_integrations_router():
                         status_code=502,
                         detail=f"{provider} disconnected, but its data could not be deleted",
                     )
-            return DisconnectResultDTO(disconnected=True)
+            return ConnectionDisconnectResultDTO(
+                disconnected=True, remote_revoke_skipped=remote_revoke_skipped
+            )
 
     return integrations_router

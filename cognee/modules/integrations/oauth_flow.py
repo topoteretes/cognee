@@ -5,11 +5,11 @@ callback to whichever cognee user started it — the callback itself is
 necessarily unauthenticated (the browser arrives from the provider's site
 without a session header), so a valid, unexpired, unforged state is the
 *only* thing tying an inbound ``code`` back to a user. That requirement is
-identical across every provider; only the signing secret differs. This
-module is the one place that logic lives — extracted out of the Slack
-adapter (see :mod:`cognee.modules.integrations.slack.oauth`, which now just
-supplies its own signing secret to the functions here) so a second provider
-never has to re-derive or copy this HMAC scheme.
+identical across every provider, and so is the key: the router signs every
+state with ``crypto.oauth_state_signing_key()``, which only this server holds.
+A provider's webhook or signing secret is never used for it, since the provider
+and the app's administrators there know it and could mint a state for any user.
+This module is the one place the HMAC scheme lives.
 
 The state format is ``{field_1}:...:{field_n}:{expires}:{hmac}`` — plain, not
 encoded, since none of the fields need to survive arbitrary transport beyond

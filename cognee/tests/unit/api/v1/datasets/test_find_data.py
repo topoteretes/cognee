@@ -261,6 +261,7 @@ def _row(content_hash: str) -> SimpleNamespace:
         external_metadata=None,
         data_size=42,
         content_hash=content_hash,
+        system_metadata=None,
     )
 
 

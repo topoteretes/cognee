@@ -29,11 +29,13 @@ def mocks(monkeypatch):
         get_credential=AsyncMock(return_value=_ACTIVE_CREDENTIAL),
         agent_session=AsyncMock(),
         request_sync=AsyncMock(),
+        paused=AsyncMock(return_value=False),
     )
     monkeypatch.setattr(handle_module, "revoke_credential_by_account", mocked.revoke)
     monkeypatch.setattr(handle_module, "get_credential_by_account", mocked.get_credential)
     monkeypatch.setattr(handle_module, "handle_agent_session", mocked.agent_session)
     monkeypatch.setattr(handle_module, "request_sync", mocked.request_sync)
+    monkeypatch.setattr(handle_module, "sync_is_paused", mocked.paused)
     return mocked
 
 
@@ -91,7 +93,7 @@ async def test_oauth_app_revoked_revokes_the_credential(mocks):
         {},
     )
 
-    mocks.revoke.assert_awaited_once_with("linear", "org-1")
+    mocks.revoke.assert_awaited_once_with("linear", "org-1", revoked_by="provider")
     mocks.agent_session.assert_not_awaited()
     mocks.request_sync.assert_not_awaited()
 
@@ -201,3 +203,28 @@ async def test_unknown_event_types_are_ignored(mocks):
     mocks.agent_session.assert_not_awaited()
     mocks.request_sync.assert_not_awaited()
     mocks.revoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_paused_connection_syncs_no_team_from_a_delivery(mocks):
+    """Pause means no new data, but an agent session is a chat reply, not a sync (SDK-1434)."""
+    mocks.paused.return_value = True
+
+    await handle_linear_event(
+        _body(
+            {
+                "type": "Issue",
+                "action": "update",
+                "organizationId": "org-1",
+                "data": {"teamId": "t1"},
+            }
+        ),
+        {},
+    )
+    await handle_linear_event(
+        _body({"type": "AgentSessionEvent", "action": "created", "organizationId": "org-1"}),
+        {},
+    )
+
+    mocks.request_sync.assert_not_awaited()
+    mocks.agent_session.assert_awaited_once()

@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import os
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Union
 from uuid import UUID
@@ -286,8 +287,26 @@ def _data_to_text(data) -> str:
 _SESSION_PLACEHOLDER_PREFIXES = ("[UploadFile]", "[file:", "[BinaryIO", "[SpooledTemporaryFile")
 
 
-async def _add_to_session(session_id: str, data, user, node_set: list[str] | None = None):
+async def _add_to_session(
+    session_id: str,
+    data,
+    user,
+    node_set: list[str] | None = None,
+    dataset_id: UUID | None = None,
+):
     """Add a Q&A entry to the session cache.
+
+    ``dataset_id`` is the session's dataset, resolved from its binding by
+    ``_resolve_entry_dataset`` exactly as for a typed entry. Before anything is
+    written the session is bound to it (an unbound session is bound here, so the
+    first plain-text write binds it, like any other write). The write then runs
+    inside that dataset's database context, so the entry's Q&A vector lands in
+    the dataset's vector store, where a search turn writes and reads it; written
+    outside the context it would land in the global store and never be found.
+    With backend access control on, entering the context takes a dataset queue
+    slot (``DATASET_QUEUE_MAX_CONCURRENT``) and provisions the dataset's
+    databases on first use, so a session write waits behind busy datasets like a
+    search turn does, and fails when those databases cannot be bound.
 
     Sessions store chat-shaped content (prompts, assistant answers,
     Q&A turns). File-upload data coerces to placeholder strings like
@@ -300,6 +319,7 @@ async def _add_to_session(session_id: str, data, user, node_set: list[str] | Non
     session already carries a different set. It is validated first, by the same
     rule as the field, so an invalid value fails even when nothing is written.
     """
+    from cognee.context_global_variables import set_database_global_context_variables
     from cognee.infrastructure.session.get_session_manager import get_session_manager
     from cognee.infrastructure.session.session_node_set import (
         normalize_node_set,
@@ -331,17 +351,30 @@ async def _add_to_session(session_id: str, data, user, node_set: list[str] | Non
         )
         return
 
-    if node_set:
-        await pin_session_node_set(sm, user_id, session_id, node_set)
+    if dataset_id is not None:
+        await _bind_session_dataset(
+            session_id=session_id, user_id=user.id, dataset_id=dataset_id, was_bound=False
+        )
 
-    await sm.add_qa(
-        user_id=user_id,
-        session_id=session_id,
-        question="",
-        context="",
-        answer=text,
+    database_context = (
+        set_database_global_context_variables(dataset_id, user.id)
+        if dataset_id is not None
+        else nullcontext()
     )
-    logger.info("remember: added entry to session '%s'", session_id)
+    async with database_context:
+        # Built inside the context: the manager binds to the dataset it finds there.
+        sm = get_session_manager()
+        if node_set:
+            await pin_session_node_set(sm, user_id, session_id, node_set)
+
+        await sm.add_qa(
+            user_id=user_id,
+            session_id=session_id,
+            question="",
+            context="",
+            answer=text,
+        )
+        logger.info("remember: added entry to session '%s'", session_id)
 
 
 def _entry_with_node_set(entry: "MemoryEntry", node_set) -> "MemoryEntry":
@@ -469,6 +502,17 @@ async def _remember_entry(
     )
 
 
+def _dataset_uuid(dataset_id) -> UUID | None:
+    """``dataset_id`` as a UUID: RememberResult.dataset_id is a str; accept it back as
+    the UUID it names, so it compares equal to a session's binding."""
+    if dataset_id is None or isinstance(dataset_id, UUID):
+        return dataset_id
+    try:
+        return UUID(str(dataset_id))
+    except ValueError:
+        raise ValueError(f"dataset_id must be a dataset UUID, got {dataset_id!r}") from None
+
+
 async def _resolve_entry_dataset(
     *, session_id: str, dataset_name: str, dataset_id: UUID | None, user
 ) -> tuple[Any, "Dataset", bool]:
@@ -517,6 +561,29 @@ async def _resolve_entry_dataset(
     return user, dataset, bound_dataset_id is not None
 
 
+async def _bind_session_dataset(
+    *, session_id: str, user_id: UUID, dataset_id: UUID, was_bound: bool
+) -> None:
+    """Bind ``session_id`` to ``dataset_id`` (or keep its binding) before a session write.
+
+    Every write bumps the session's activity; the atomic upsert binds an unbound
+    session and preserves an existing binding. For a session that was unbound,
+    the row is re-read: a concurrent writer may have bound it to another dataset
+    first, and this write's vectors would then land in a store the session never
+    reads.
+    """
+    from cognee.modules.session_lifecycle.metrics import (
+        ensure_and_touch_session,
+        get_session_row,
+    )
+
+    await ensure_and_touch_session(session_id=session_id, user_id=user_id, dataset_id=dataset_id)
+    if not was_bound:
+        row = await get_session_row(session_id=session_id, user_id=user_id)
+        if row is None or row.dataset_id != dataset_id:
+            raise ValueError("Session is already bound to another dataset or cannot be bound")
+
+
 async def _dispatch_session_entry(
     entry: "MemoryEntry",
     *,
@@ -542,12 +609,7 @@ async def _dispatch_session_entry(
     name); the ``"main_dataset"`` default is accepted because it cannot be told
     apart from no name at all.
     """
-    # RememberResult.dataset_id is a str; accept it back as the UUID it names.
-    if dataset_id is not None and not isinstance(dataset_id, UUID):
-        try:
-            dataset_id = UUID(str(dataset_id))
-        except ValueError:
-            raise ValueError(f"dataset_id must be a dataset UUID, got {dataset_id!r}") from None
+    dataset_id = _dataset_uuid(dataset_id)
 
     from cognee.modules.engine.operations.setup import setup
 
@@ -623,95 +685,90 @@ async def _dispatch_session_entry(
     if not user_id:
         raise ValueError("Could not resolve user for session entry")
 
-    sm = get_session_manager()
-    if not sm.is_available:
+    if not get_session_manager().is_available:
         raise RuntimeError("Session cache unavailable — set CACHING=true to enable session memory")
 
     # Resolve write access before caching any content.
     user, dataset, was_bound = await _resolve_entry_dataset(
         session_id=session_id, dataset_name=dataset_name, dataset_id=dataset_id, user=user
     )
+    from cognee.context_global_variables import set_database_global_context_variables
 
-    from cognee.modules.session_lifecycle.metrics import (
-        ensure_and_touch_session,
-        get_session_row,
+    await _bind_session_dataset(
+        session_id=session_id, user_id=user.id, dataset_id=dataset.id, was_bound=was_bound
     )
 
-    # Every entry bumps the session's activity; the atomic upsert binds an unbound
-    # session and preserves an existing binding. For a session that was unbound,
-    # re-read it before caching: a concurrent writer may have bound it first.
-    await ensure_and_touch_session(session_id=session_id, user_id=user.id, dataset_id=dataset.id)
-    if not was_bound:
-        row = await get_session_row(session_id=session_id, user_id=user.id)
-        if row is None or row.dataset_id != dataset.id:
-            raise ValueError("Session is already bound to another dataset or cannot be bound")
+    # The entry's vectors go to the dataset's vector store, where the search
+    # turns of this session write and read them.
+    async with set_database_global_context_variables(dataset.id, user.id):
+        # Built inside the context: the manager binds to the dataset it finds there.
+        sm = get_session_manager()
+        if isinstance(entry, (QAEntry, TraceEntry)) and entry.node_set:
+            from cognee.infrastructure.session.session_node_set import pin_session_node_set
 
-    if isinstance(entry, (QAEntry, TraceEntry)) and entry.node_set:
-        from cognee.infrastructure.session.session_node_set import pin_session_node_set
+            # Pins the session's node_set before anything is written, or raises
+            # SessionNodeSetConflictError (HTTP 409) when the session already carries a
+            # different set.
+            await pin_session_node_set(sm, user_id, session_id, entry.node_set)
 
-        # Pins the session's node_set before anything is written, or raises
-        # SessionNodeSetConflictError (HTTP 409) when the session already carries a
-        # different set.
-        await pin_session_node_set(sm, user_id, session_id, entry.node_set)
-
-    result = RememberResult(
-        status="session_stored",
-        dataset_name=dataset.name,
-        dataset_id=str(dataset.id),
-        session_ids=[session_id],
-    )
-    result.elapsed_seconds = time.monotonic() - result._started_at
-    result.entry_type = entry.type
-
-    if isinstance(entry, QAEntry):
-        qa_id = await sm.add_qa(
-            user_id=user_id,
-            session_id=session_id,
-            question=entry.question,
-            context=entry.context,
-            answer=entry.answer,
-            feedback_text=entry.feedback_text,
-            feedback_score=entry.feedback_score,
-            used_graph_element_ids=entry.used_graph_element_ids,
+        result = RememberResult(
+            status="session_stored",
+            dataset_name=dataset.name,
+            dataset_id=str(dataset.id),
+            session_ids=[session_id],
         )
-        result.entry_id = qa_id
-        if qa_id is None:
-            result.status = "errored"
-            result.error = "SessionManager.add_qa returned None"
-        return result
+        result.elapsed_seconds = time.monotonic() - result._started_at
+        result.entry_type = entry.type
 
-    if isinstance(entry, TraceEntry):
-        trace_id = await sm.add_agent_trace_step(
-            user_id=user_id,
-            session_id=session_id,
-            origin_function=entry.origin_function,
-            status=entry.status,
-            generate_feedback_with_llm=entry.generate_feedback_with_llm,
-            memory_query=entry.memory_query,
-            memory_context=entry.memory_context,
-            method_params=entry.method_params,
-            method_return_value=entry.method_return_value,
-            error_message=entry.error_message,
-        )
-        result.entry_id = trace_id
-        if trace_id is None:
-            result.status = "errored"
-            result.error = "SessionManager.add_agent_trace_step returned None"
-        return result
+        if isinstance(entry, QAEntry):
+            qa_id = await sm.add_qa(
+                user_id=user_id,
+                session_id=session_id,
+                question=entry.question,
+                context=entry.context,
+                answer=entry.answer,
+                feedback_text=entry.feedback_text,
+                feedback_score=entry.feedback_score,
+                used_graph_element_ids=entry.used_graph_element_ids,
+            )
+            result.entry_id = qa_id
+            if qa_id is None:
+                result.status = "errored"
+                result.error = "SessionManager.add_qa returned None"
+            return result
 
-    if isinstance(entry, FeedbackEntry):
-        ok = await sm.add_feedback(
-            user_id=user_id,
-            session_id=session_id,
-            qa_id=entry.qa_id,
-            feedback_text=entry.feedback_text,
-            feedback_score=entry.feedback_score,
-        )
-        result.entry_id = entry.qa_id
-        if not ok:
-            result.status = "errored"
-            result.error = f"add_feedback: QA {entry.qa_id} not found in session {session_id}"
-        return result
+        if isinstance(entry, TraceEntry):
+            trace_id = await sm.add_agent_trace_step(
+                user_id=user_id,
+                session_id=session_id,
+                origin_function=entry.origin_function,
+                status=entry.status,
+                generate_feedback_with_llm=entry.generate_feedback_with_llm,
+                memory_query=entry.memory_query,
+                memory_context=entry.memory_context,
+                method_params=entry.method_params,
+                method_return_value=entry.method_return_value,
+                error_message=entry.error_message,
+            )
+            result.entry_id = trace_id
+            if trace_id is None:
+                result.status = "errored"
+                result.error = "SessionManager.add_agent_trace_step returned None"
+            return result
+
+        if isinstance(entry, FeedbackEntry):
+            ok = await sm.add_feedback(
+                user_id=user_id,
+                session_id=session_id,
+                qa_id=entry.qa_id,
+                feedback_text=entry.feedback_text,
+                feedback_score=entry.feedback_score,
+            )
+            result.entry_id = entry.qa_id
+            if not ok:
+                result.status = "errored"
+                result.error = f"add_feedback: QA {entry.qa_id} not found in session {session_id}"
+            return result
 
     raise TypeError(f"Unsupported memory entry type: {type(entry).__name__}")
 
@@ -1606,10 +1663,14 @@ async def _remember_inner(
     # Run vector migrations lazily on the first local SDK call.
     # This ensures stale LanceDB schemas are migrated before any
     # writes, even when the API server was never started. Scoped to the
-    # dataset this call targets (dataset_id override, else dataset_name).
+    # dataset this call targets (dataset_id override, else dataset_name). A
+    # plain session write targets the session's bound dataset, known only once
+    # the binding is resolved, so it takes the gate there instead.
     from cognee.modules.migrations.startup import run_migrations_and_block
 
-    await run_migrations_and_block(dataset_id or dataset_name, kwargs.get("user"))
+    session_write = bool(session_id) and not kwargs.get("content_type")
+    if not session_write:
+        await run_migrations_and_block(dataset_id or dataset_name, kwargs.get("user"))
 
     # Normalize "" to None — HTML forms and Swagger UI submit untouched
     # optional fields as empty strings.
@@ -1682,6 +1743,22 @@ async def _remember_inner(
                 "content_type='code' expects a repository path or git URL "
                 "(or a list of them) as data."
             )
+
+        # Before any clone starts, and before run_in_background hands the clones to a
+        # task: a refusal there would reach only the log, not the caller.
+        if any(is_remote_repo(spec) for spec in repo_specs):
+            from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
+            from cognee.tasks.web_scraper.ssrf_protection import (
+                SSRFProtectionError,
+                require_http_requests_allowed,
+            )
+
+            try:
+                require_http_requests_allowed()
+            except SSRFProtectionError as error:
+                raise CodeRepositoryError(
+                    message=error.message, status_code=error.status_code
+                ) from error
 
         send_telemetry(
             "cognee.remember.code_graph",
@@ -2096,10 +2173,28 @@ async def _remember_inner(
         operation_context.set_user(user)
 
         # Build the result object — starts as "running"
-        if not dataset_id and dataset_name:
+        if session_id and (dataset_id or dataset_name):
+            # A session write targets the session's dataset, by the same rule as a
+            # typed entry: a bound session keeps its dataset (a disagreeing
+            # dataset_id or non-default dataset_name is refused), an unbound one
+            # resolves or creates dataset_name. The session's search turns read
+            # its Q&A vectors from that dataset's store only.
+            user, session_dataset, _ = await _resolve_entry_dataset(
+                session_id=session_id,
+                dataset_name=dataset_name,
+                dataset_id=_dataset_uuid(dataset_id),
+                user=user,
+            )
+            dataset_id, dataset_name = session_dataset.id, session_dataset.name
+        elif not dataset_id and dataset_name:
             # Create dataset if it doesn't exist
             user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
             dataset_id = dataset_id[0].id if dataset_id else None
+
+        if session_write:
+            # The migration gate, deferred from above: block on the dataset the
+            # session write actually targets, before anything is written to it.
+            await run_migrations_and_block(dataset_id, user)
 
         if dataset_id:
             operation_context.set_dataset(dataset_id)
@@ -2153,7 +2248,9 @@ async def _remember_inner(
         # Session memory: store in session cache, then optionally bridge to graph
         if session_id:
             operation_context.set_session_ids([session_id])
-            await _add_to_session(session_id, data, user, node_set=add_kwargs.get("node_set"))
+            await _add_to_session(
+                session_id, data, user, node_set=add_kwargs.get("node_set"), dataset_id=dataset_id
+            )
             result = RememberResult(
                 status="session_stored",
                 dataset_name=dataset_name,
@@ -2208,6 +2305,12 @@ async def _remember_inner(
                 result._task = _anchor_background_task(asyncio.create_task(_session_improve()))
 
             return result
+
+        from cognee.tasks.web_scraper.ssrf_protection import require_http_requests_allowed_for
+
+        # Before the run starts: add() checks too, but with run_in_background it runs
+        # inside the background task, where a refusal would never reach the caller.
+        require_http_requests_allowed_for(data)
 
         result = RememberResult(
             status="running",

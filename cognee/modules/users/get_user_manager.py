@@ -36,7 +36,9 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     async def on_before_delete(self, user: User, request: Request | None = None) -> None:
         # Imported here: the agents package imports the users package, which imports this module.
         from cognee.modules.agents.delete_agents_of_user import delete_agents_of_user
+        from cognee.modules.agents.delete_sync_policies import delete_sync_policies
 
+        await delete_sync_policies(self.user_db.session, [user.id])
         await delete_agents_of_user(self.user_db.session, user.id)
 
     async def on_after_login(

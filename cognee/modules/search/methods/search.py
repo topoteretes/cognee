@@ -106,7 +106,9 @@ async def search(
         system_prompt: Inline system prompt; overrides ``system_prompt_path``.
         top_k: Maximum retrieved objects per dataset (default 15). Hybrid caps
             its per-lane ``top_k`` unless overridden via ``retriever_specific_config``.
-        node_type: ``DataPoint`` subclass used to filter nodes (default ``NodeSet``).
+        node_type: What ``node_name`` names (default ``NodeSet``): node-set tags, else
+            the graph nodes of that type and their one-hop neighbours. See
+            ``node_name_scope`` for which search types honour each.
             A custom type forces hybrid to defer to graph completion.
         node_name: Restrict retrieval to these node names (e.g. node-set tags),
             combined with ``node_name_filter_operator`` (``"OR"``/``"AND"``).
@@ -274,11 +276,12 @@ async def authorized_search(
             embedding_config=embedding_config,
         )
 
-    routed_datasets = await _route_datasets(query_text, dataset_ids, search_datasets)
+    routed_datasets = await _route_datasets(query_type, query_text, dataset_ids, search_datasets)
     if routed_datasets is None:
         return await _search(search_datasets)
 
-    # Routed: the best-scoring datasets plus every unindexed one. Retrieving
+    # Routed: the best-scoring datasets only; datasets with no routing row wait
+    # for the widening pass below, with the other skipped ones. Retrieving
     # nothing there (judged on the retrieval context, since a completion is
     # written even over an empty one) widens the search to the datasets
     # routing skipped, searched as the rest of this one search, so the routed
@@ -286,14 +289,10 @@ async def authorized_search(
     # retrieving would repeat those calls) and the merged list reads as one
     # fan-out over every readable dataset. Only datasets without searchable
     # memory (an unscoped search raises that only when every dataset lacks
-    # it), or a CODE seed the routed dataset alone cannot resolve (the fan-out
-    # softens a seed miss per dataset only when it searches several), fail
-    # before any retrieval, so there the whole set is searched as one.
-    from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
-
+    # it) fail before any retrieval, so there the whole set is searched as one.
     try:
         search_results = await _search(routed_datasets)
-    except (NoDataError, CodeSeedNotFoundError) as error:
+    except NoDataError as error:
         logger.info(
             "Dataset routing picked datasets that cannot answer (%s); "
             "searching every readable dataset.",
@@ -317,17 +316,33 @@ async def authorized_search(
 
 
 async def _route_datasets(
-    query_text: str, dataset_ids: list[UUID] | None, search_datasets: list[Dataset]
+    query_type: SearchType,
+    query_text: str,
+    dataset_ids: list[UUID] | None,
+    search_datasets: list[Dataset],
 ) -> list[Dataset] | None:
     """The datasets an unscoped search covers after routing, or None to cover them all.
 
     Routing applies only when the caller named no dataset, more than one is
-    readable, and backend access control gives each its own store. The decision keeps every dataset with no routing rows, so a dataset
-    never searched by the global context index is never dropped.
+    readable, backend access control gives each its own store, and the search
+    is not CODE. A code dataset has no chunks, so it never gets routing rows,
+    and a CODE operation over a dataset without a code graph returns an empty
+    result rather than nothing: routed elsewhere, a CODE search would never
+    reach the code dataset. A dataset
+    with no routing rows is not searched next to a routed one: it is covered
+    by the widening pass when the routed datasets retrieve nothing, so a
+    backlog of datasets the global context index never saw does not turn every
+    unscoped search into a search of all of them. With no dataset routed, every
+    readable dataset is searched.
     """
     from cognee.modules.search.dataset_routing import get_dataset_routing_config, route_datasets
 
-    if dataset_ids is not None or len(search_datasets) < 2 or not backend_access_control_enabled():
+    if (
+        query_type is SearchType.CODE
+        or dataset_ids is not None
+        or len(search_datasets) < 2
+        or not backend_access_control_enabled()
+    ):
         return None
 
     config = get_dataset_routing_config()
@@ -374,7 +389,10 @@ async def _route_datasets(
         else ("matches, tied" if len(decision.routed) > config.top_k else "matches"),
         len(search_datasets),
         distances,
-        f", plus {len(decision.unindexed)} without a routing index" if decision.unindexed else "",
+        f"; {len(decision.unindexed)} without a routing index are searched only if "
+        f"{'it retrieves' if len(decision.routed) == 1 else 'they retrieve'} nothing"
+        if decision.unindexed
+        else "",
     )
     return routed
 

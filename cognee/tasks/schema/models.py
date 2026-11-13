@@ -27,6 +27,16 @@ class SchemaTable(DataPoint):
     metadata: dict = {"index_fields": ["description", "name"]}
 
 
+class SchemaColumn(DataPoint):
+    """A DLT column anchoring its materialized values and owning table."""
+
+    name: str
+    table_name: str
+    column_name: str
+    description: str
+    metadata: dict = {"index_fields": ["name"]}
+
+
 class SchemaRelationship(DataPoint):
     """Represents relationships between tables"""
 

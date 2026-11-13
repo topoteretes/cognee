@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Flex, Text, Title, TextInput, PasswordInput, Button } from "@mantine/core";
 
-const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
+import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
 
 const DEFAULT_EMAIL = "default_user@example.com";
 const DEFAULT_PASSWORD = "default_password";
@@ -22,6 +22,7 @@ export default function LocalSignInForm() {
   const [isLoading, setIsLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
+    const localApiUrl = getLocalApiUrl();
     e.preventDefault();
     setError(null);
     setIsLoading(true);

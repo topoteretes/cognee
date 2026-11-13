@@ -93,8 +93,18 @@ async def add(
           project, or any URL ending in .git) is shallow-cloned and ingested as ONE
           code-repo item that cognify runs through the enola code graph pipeline
           (cross-file edges), plus the repo's documents; same as adding a local code
-          project directory. Requires ALLOW_HTTP_REQUESTS and git on PATH. Pass
+          project directory. Requires git on PATH, and ALLOW_HTTP_REQUESTS=true on
+          the server for API calls. Pass
           ``branch`` to clone a branch other than the remote's default.
+        - **Database connection strings**: "postgresql://...", "mysql://...",
+          "sqlite:///path/to/file.db" and the other schemes in
+          ``create_dlt_source.DB_CONNECTION_PATTERNS`` are read through dlt, with
+          ``dlt_config["query"]`` as an optional single-table filter. The connection is
+          made from the machine running cognee: the SDK, CLI and MCP server ingest a
+          database by default, the API server refuses it (422
+          ``DatabaseIngestionDisabled``) unless ``ALLOW_DATABASE_INGESTION=true``, and
+          ``false`` refuses it everywhere. Cognee's own databases are refused whatever
+          the setting, and a sqlite:/// path must be an existing file.
         - **Lists**: Multiple files or text strings in a single call
 
     Supported File Formats:
@@ -268,6 +278,12 @@ async def add(
 
         # Before anything is written, and before the name can reach git.
         check_branch_name(branch)
+
+    from cognee.tasks.web_scraper.ssrf_protection import require_http_requests_allowed_for
+
+    # Before any work starts: with run_in_background the fetch runs after this call
+    # has returned, where its refusal would never reach the caller.
+    require_http_requests_allowed_for(data)
 
     if preferred_loaders is not None:
         transformed = {}

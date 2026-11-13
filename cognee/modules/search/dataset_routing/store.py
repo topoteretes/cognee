@@ -32,26 +32,13 @@ from __future__ import annotations
 from contextvars import copy_context
 
 from cognee.infrastructure.databases.vector import get_vectordb_config
+from cognee.infrastructure.databases.vector.embeddings.vector_size import engine_vector_size
 from cognee.infrastructure.databases.vector.get_vector_engine import _VectorEngineHandle
-from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger
 
 DATASET_ROUTE_COLLECTION = "DatasetRoute_text"
 
 logger = get_logger("dataset_routing")
-
-
-class DatasetRoute(DataPoint):
-    """One routing row: a global context index summary, tagged with its dataset.
-
-    It keeps the id of the ``GlobalContextSummary`` it mirrors, so the read path
-    derives every row id it may score from the dataset and document ids alone.
-    """
-
-    text: str
-    dataset_id: str
-    is_root: bool = False
-    metadata: dict = {"index_fields": ["text"]}
 
 
 class _DatasetRouteEngineHandle(_VectorEngineHandle):
@@ -159,7 +146,9 @@ async def routing_width_matches(engine) -> bool:
     if read_stored_size is None:
         return True
     stored = await read_stored_size()
-    configured = engine.embedding_engine.get_vector_size()
+    # Awaited: a sync get_vector_size() may block this loop to ask a remote
+    # embedding worker for its size (embedding_worker without EMBEDDING_DIMENSIONS).
+    configured = await engine_vector_size(engine.embedding_engine)
     if stored is None or stored == configured:
         return True
     logger.warning(

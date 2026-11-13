@@ -60,6 +60,25 @@ def test_apollo_names_are_pinned_and_a_dlt_table_name():
     )
 
 
+def test_slack_names_are_pinned_and_a_dlt_table_name():
+    # Same rule as the Linear pin: the literal is deliberate. One resource is one channel,
+    # so the channel id is the scope, and the Cloud control plane only tracks tables that
+    # start with the provider prefix.
+    name = ingestion.resource_name("slack", CREDENTIAL, "C0123ABCD")
+    assert name == "slack_channel_02eaa4a14233ea3cb69a0f49"
+    assert name == name.lower() and set(name) <= set("abcdefghijklmnopqrstuvwxyz0123456789_")
+    assert len(name) <= 63
+    assert ingestion.source_factory("slack").__module__ == (
+        "cognee.tasks.ingestion.connectors.slack"
+    )
+
+
+def test_slack_service_is_built_from_the_connections_access_token():
+    from cognee.tasks.ingestion.connectors.slack import SlackClient
+
+    assert isinstance(ingestion.build_service("slack", "xoxb-a-bot-token"), SlackClient)
+
+
 def test_apollo_service_is_built_from_the_connections_api_key():
     from cognee.tasks.ingestion.connectors.apollo import ApolloClient
 
@@ -143,3 +162,39 @@ def test_importing_the_neutral_module_loads_no_provider_library():
         "assert not bad, bad"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_dropbox_names_are_pinned_and_a_valid_resource_name():
+    # Same rule as the Linear pin: the literal is deliberate. One selected folder is one scope,
+    # named by its Dropbox folder id so a rename keeps the table.
+    name = ingestion.resource_name("dropbox", CREDENTIAL, "id:folder-1")
+    assert name == "dropbox_85beb5eb5e658f00e364d3ab"
+    assert len(name) <= 63
+    assert ingestion.source_factory("dropbox").__module__ == (
+        "cognee.tasks.ingestion.connectors.dropbox"
+    )
+    # The pinned name is one dropbox_source accepts.
+    ingestion.source_factory("dropbox")(
+        folder_id="id:folder-1", account_id="dbid:A", resource_name=name, token="t"
+    )
+
+
+def test_dropbox_service_from_providers_sends_the_oauth_token_as_bearer():
+    import httpx
+
+    from cognee.tasks.ingestion.connectors.dropbox import DropboxAuthError, DropboxClient
+
+    token = "sl.cloud-oauth-access-token"
+    service = ingestion.build_service("dropbox", token)
+    assert isinstance(service, DropboxClient) and token not in repr(service)
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers["Authorization"])
+        return httpx.Response(401, json={"error": {".tag": "expired_access_token"}})
+
+    service._http = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(DropboxAuthError) as error:
+        service.rpc("users/get_current_account", None)
+    assert seen == [f"Bearer {token}"]
+    assert token not in f"{error.value} {error.value!r}"

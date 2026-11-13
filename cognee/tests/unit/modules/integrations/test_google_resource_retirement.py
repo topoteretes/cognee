@@ -65,3 +65,48 @@ async def test_deselection_only_retires_the_owners_selected_provider_tables(monk
             assert call.kwargs["user"] == "owner"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("retained", "retired"), [({"folder_a"}, set()), (set(), {"folder_a"})])
+async def test_a_schema_qualified_table_name_is_retired_by_its_table(
+    monkeypatch, retained, retired
+):
+    """On a Postgres staging database the stored ``table_name`` carries the dataset's schema
+    (``drive.folder_a``); a retained table must still be kept, and a retired one emptied
+    under its own name, which is the only one a load reaches ."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    owner, dataset = uuid4(), uuid4()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Dataset.__table__.create)
+            await conn.run_sync(Data.__table__.create)
+        async with sessions() as db:
+            db.add(Dataset(id=dataset, name="drive", owner_id=owner))
+            db.add(
+                Data(
+                    dataset_id=dataset,
+                    system_metadata={"source": "google_drive", "table_name": "drive.folder_a"},
+                )
+            )
+            await db.commit()
+        monkeypatch.setattr(
+            "cognee.infrastructure.databases.relational.get_relational_engine",
+            lambda: SimpleNamespace(get_async_session=sessions),
+        )
+        monkeypatch.setattr(ingestion, "require_active_credential", AsyncMock())
+        monkeypatch.setattr(
+            "cognee.modules.users.methods.get_user", AsyncMock(return_value="owner")
+        )
+        remember = AsyncMock(return_value=SimpleNamespace(status="completed"))
+        monkeypatch.setattr(import_module("cognee.api.v1.remember.remember"), "remember", remember)
+
+        removed = await ingestion.retire_resources(
+            "google_drive", SimpleNamespace(user_id=owner), "drive", retained
+        )
+
+        assert removed == retired
+        assert {call.args[0].name for call in remember.await_args_list} == retired
+    finally:
+        await engine.dispose()

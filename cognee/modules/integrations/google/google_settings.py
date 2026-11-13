@@ -12,8 +12,6 @@ class GoogleSettings(IntegrationSettings):
 
     model_config = SettingsConfigDict(extra="ignore")
 
-    state_secret: str = ""
-
 
 def require(settings: GoogleSettings, field_name: str, env_prefix: str) -> str:
     """Return a configured setting or fail with the exact environment name."""

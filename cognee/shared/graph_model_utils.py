@@ -40,6 +40,11 @@ from cognee.shared.llm_graph_model import (
     rebuild_models,
 )
 
+# The module the classes a remote cognify rebuilds from a request's schema live in.
+# It stays in ``sys.modules`` for the process, so the classes are found by every
+# walk of the DataPoint subclasses; the node_type resolver excludes them by it.
+GENERATED_GRAPH_MODELS_MODULE = "cognee.shared._generated_graph_models"
+
 EDGE_KEY = "x-cognee-edge"
 FROM_IDENTITY_KEY = "x-cognee-from-identity"
 
@@ -97,9 +102,8 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
 
     # Dynamically create a module to execute the generated code and retrieve the model class
     # This is necessary to properly handle imports and references in the generated code
-    module_name = "cognee.shared._generated_graph_models"
-    mod = types.ModuleType(module_name)
-    sys.modules[module_name] = mod
+    mod = types.ModuleType(GENERATED_GRAPH_MODELS_MODULE)
+    sys.modules[GENERATED_GRAPH_MODELS_MODULE] = mod
 
     exec(result, mod.__dict__)  # noqa: S102 - runs the generated model module source on purpose
     namespace = mod.__dict__
