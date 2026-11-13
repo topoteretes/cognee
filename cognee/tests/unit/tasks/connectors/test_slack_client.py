@@ -7,6 +7,7 @@ code that builds the messages.
 """
 
 import logging
+import threading
 from urllib.parse import parse_qs
 
 import httpx
@@ -89,7 +90,12 @@ def test_no_secret_id_or_url_reaches_an_error_or_a_log(caplog, status, error):
     assert TOKEN not in caplog.text and CHANNEL not in caplog.text
     # httpx itself logs the request line; the URL is the constant endpoint, never an id.
     # Our own lines name the method and Slack's code, never a URL.
-    ours = [r.getMessage() for r in caplog.records if not r.name.startswith(("httpx", "httpcore"))]
+    # Only this thread's records: a background thread (dlt's telemetry) may log its own URL.
+    ours = [
+        r.getMessage()
+        for r in caplog.records
+        if r.thread == threading.get_ident() and not r.name.startswith(("httpx", "httpcore"))
+    ]
     assert not any("://" in message for message in ours)
 
 

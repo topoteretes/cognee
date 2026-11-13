@@ -15,8 +15,17 @@ from cognee.modules.integrations.slack import status
 TEAM = "T0TEAM"
 INSTALLER = "U0INSTALLER"
 OWNER = uuid4()
-# Two minutes ago: both the next regular sync and a resume are still ahead.
+# Two minutes before each test starts (_last_sync_two_minutes_ago): both the next regular
+# sync and a resume are still ahead.
 LAST = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(minutes=2)
+
+
+@pytest.fixture(autouse=True)
+def _last_sync_two_minutes_ago():
+    """LAST is set when each test starts, not at import: a CI shard can reach this module
+    more than ten minutes after collecting it, and a resume due then is already past."""
+    global LAST
+    LAST = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(minutes=2)
 
 
 def _credential(**metadata):
