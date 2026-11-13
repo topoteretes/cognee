@@ -8,7 +8,7 @@ import threading
 from collections import Counter
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
 from sqlalchemy import URL, text
@@ -269,10 +269,18 @@ async def ingest_dlt_source(
             ) from e
         forgotten = getattr(dlt_source, FORGET_TABLE_ATTR, None)
         if forgotten:
+            scope = forgotten.removeprefix(f"{original_dataset_name}.")
+            owner_name = pipeline_name_for_scope(scope, original_dataset_name)
             try:
-                await asyncio.to_thread(
-                    _purge_forgotten_table, pipeline, destination, forgotten, original_dataset_name
-                )
+                async with AsyncExitStack() as stack:
+                    if owner_name != pipeline_name:
+                        # <dataset>.<table> loads a pipeline of its own; the bare table's
+                        # pipeline may be loading it right now. The dataset lock is already
+                        # held, so only the pipeline's is taken, in the documented order.
+                        await stack.enter_async_context(_staging_lock(f"pipeline:{owner_name}"))
+                    await asyncio.to_thread(
+                        _purge_forgotten_table, pipeline, owner_name, destination, scope
+                    )
             except Exception as e:
                 raise DLTIngestionError(
                     message=f"Table '{forgotten}' was emptied but its staging copy or state "
@@ -355,27 +363,30 @@ async def ingest_dlt_source(
     return DltRows(row_data_list, loaded_tables=filtered_schema)
 
 
-def _purge_forgotten_table(pipeline, destination, name: str, dataset: str) -> None:
+def _purge_forgotten_table(pipeline, owner_name: str, destination, scope: str) -> None:
     """Empty a forgotten table everywhere dlt keeps its text, and reset its state.
 
     That is its rows and nested tables in the dataset and in ``<dataset>_staging`` (a merge
-    load never truncates it), and the ``_dlt_pipeline_state`` rows of its pipeline. ``name``
-    is the table or, as Cloud spells it, ``<dataset>.<table>``, which loads a pipeline of its
-    own: the bare table's pipeline then supplies the nested tables and loses its cursor.
+    load never truncates it), and the ``_dlt_pipeline_state`` rows of its pipeline. Cloud
+    spells the table ``<dataset>.<table>``, which loads a pipeline of its own: the bare
+    table's pipeline (``owner_name``, named by the raw ``scope``) then supplies the nested
+    tables, restored from the destination when this process has no copy of it, and loses its
+    cursor and state.
     """
     import dlt
     from dlt.common.schema.utils import get_nested_tables
 
-    table = name.removeprefix(f"{dataset}.")
     owner = pipeline
-    if table != name:
+    if owner_name != pipeline.pipeline_name:
         owner = dlt.pipeline(
-            pipeline_name=pipeline_name_for_scope(table, dataset),
+            pipeline_name=owner_name,
             destination=destination,
             dataset_name=pipeline.dataset_name,
         )
-    table = owner.default_schema.naming.normalize_table_identifier(table)
-    tables = [t["name"] for t in get_nested_tables(owner.default_schema.tables, table)] or [table]
+        owner.sync_destination()
+    table = pipeline.default_schema.naming.normalize_table_identifier(scope)
+    nested = get_nested_tables(owner.default_schema.tables, table) if owner.schema_names else []
+    tables = [t["name"] for t in nested] or [table]
     if owner is not pipeline:
         owner.drop()
 
@@ -383,9 +394,7 @@ def _purge_forgotten_table(pipeline, destination, name: str, dataset: str) -> No
         _empty_tables(client, tables)
         with client.with_staging_dataset():
             _empty_tables(client, tables)
-        _delete_state_rows(
-            client, {pipeline.pipeline_name, pipeline_name_for_scope(table, dataset)}
-        )
+        _delete_state_rows(client, {pipeline.pipeline_name, owner_name})
 
 
 def _empty_tables(client, tables: list[str]) -> None:

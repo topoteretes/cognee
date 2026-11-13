@@ -349,3 +349,60 @@ async def test_runs_cut_by_the_same_budget_get_further_and_every_body_is_fetched
 
     assert completes[-1] == 1, f"never completed: {completes}"
     assert _bodies_fetched(graph) == 6
+
+
+@pytest.mark.asyncio
+async def test_a_dotted_forget_works_on_a_pod_without_the_local_pipeline_directory(backend):
+    """A fresh Cloud pod has the staging database but no ``~/.dlt/pipelines`` of its own."""
+    import shutil
+    from pathlib import Path
+
+    from dlt.common.pipeline import get_dlt_pipelines_dir
+
+    from cognee.tasks.ingestion.dlt_utils import pipeline_name_for_scope
+
+    await _merge_load("onenote_x", "page", tags=[{"name": f"tag {SECRET}"}])
+    assert await _holders(backend, SECRET, "onenote_x")
+    shutil.rmtree(Path(get_dlt_pipelines_dir()) / pipeline_name_for_scope("onenote_x", DATASET))
+
+    await _forget(f"{DATASET}.onenote_x")
+
+    assert await _holders(backend, SECRET) == []
+
+
+@pytest.mark.asyncio
+async def test_a_dotted_forget_of_a_name_dlt_normalizes_deletes_the_state_of_both_pipelines(
+    backend,
+):
+    from cognee.tasks.ingestion.dlt_utils import pipeline_name_for_scope
+
+    await _merge_load("OneNote-X", f"page about {SECRET}")
+    assert await _state_rows(backend, "OneNote-X")
+
+    await _forget(f"{DATASET}.OneNote-X")
+
+    assert await _state_rows(backend, "OneNote-X") == 0, pipeline_name_for_scope(
+        "OneNote-X", DATASET
+    )
+    assert await _holders(backend, SECRET) == []
+
+
+@pytest.mark.asyncio
+async def test_a_throttled_run_keeps_the_bodies_it_fetched_and_the_next_run_fetches_each_once(
+    backend,
+):
+    """A 503 after three pages must not cost those pages: a throttled notebook still ends."""
+    graph = _notebook()
+    graph.script("pages/p3/content", *[(503, {"Retry-After": "0"})] * 20)
+
+    failed = await _onenote_sync(graph, "onenote_cut")
+    assert failed.cognee_sync_stats.get("complete") == 0, "the run must fail"
+    first = {path: n for path, n in graph.content_requests().items() if "p3" not in path}
+    assert first, "the pages before p3 must have been fetched"
+    graph.scripted.clear()  # Graph recovers
+
+    done = await _onenote_sync(graph, "onenote_cut")
+
+    assert done.cognee_sync_stats.get("complete") == 1
+    for path in first:
+        assert graph.content_requests()[path] == 1, f"{path} was fetched again"
