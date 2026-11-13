@@ -21,6 +21,12 @@ except ModuleNotFoundError:
     HAS_PGVECTOR = False
 
 
+def _vector_type():
+    from pgvector.sqlalchemy import Vector
+
+    return Vector(3)
+
+
 class _DummyEmbeddingEngine:
     def get_vector_size(self):
         return 3
@@ -196,7 +202,9 @@ async def test_pgvector_search_returns_raw_distance(monkeypatch):
             c=SimpleNamespace(
                 id="id_col",
                 vector=SimpleNamespace(
-                    cosine_distance=lambda _v: SimpleNamespace(label=lambda _l: "x")
+                    cosine_distance=lambda _v: SimpleNamespace(label=lambda _l: "x"),
+                    # Search reads the column's type: a ``vector`` collection here.
+                    type=_vector_type(),
                 ),
             )
         )
@@ -240,7 +248,7 @@ async def test_pgvector_search_never_selects_vector_column(monkeypatch, include_
     monkeypatch.setattr(pg_module, "select", _select)
 
     distance = SimpleNamespace(label=lambda _l: "distance_col")
-    vector_col = SimpleNamespace(cosine_distance=lambda _v: distance)
+    vector_col = SimpleNamespace(cosine_distance=lambda _v: distance, type=_vector_type())
     table = SimpleNamespace(
         c=SimpleNamespace(id="id_col", payload="payload_col", vector=vector_col)
     )
