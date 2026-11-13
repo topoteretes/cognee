@@ -143,22 +143,22 @@ text stays the same costs one HTML request and no re-extraction. Renaming or mov
 changes the fingerprint of every page below it: each costs one HTML request (the text is not
 kept), is published again so its structure is written, and is not extracted again.
 
-A run is **all or nothing for the notebook**: documents and deletions are published only after
-the complete snapshot was read and validated. Any expected failure (Graph error, rate limit,
-spent budget, malformed metadata or an unreadable page) returns normally with `failed > 0` and
-`complete == 0`, publishes nothing and keeps what it already learned: the bodies fetched but not
-yet published and confirmed removals are checkpointed, so the next run resumes without repeating
-them. Bodies are dropped from state the moment a complete run publishes them.
+A run is **all or nothing for deletions**: they are published only after the complete snapshot
+was read and validated. Any expected failure (Graph error, rate limit, spent budget, malformed
+metadata or an unreadable page) returns normally with `failed > 0` and `complete == 0`, deletes
+nothing and keeps what it already learned: confirmed removals are checkpointed. A run cut by
+`max_requests` also publishes the pages whose bodies it fetched and records their fingerprints,
+so the next run skips them and a notebook larger than the budget finishes in a few runs. Page
+bodies are never kept in state, so a run cut by anything else fetches them again.
 
 State keys: `connection` (a hash of account and notebook, so another notebook cannot reuse the
 name), `onenote_cache.published` (page id to a 24 character fingerprint, no page text),
-`onenote_cache.pending` (page id to the fetched text, only between a cut run and the run that
-publishes it), `onenote_cache.unresolved`, `onenote_cache.confirmed_missing` and
-`onenote_cache.swallowed`. State does not grow with the size of the pages.
+`onenote_cache.unresolved`, `onenote_cache.confirmed_missing` and `onenote_cache.swallowed`.
+State holds no page text, so it does not grow with the size of the pages.
 
 If the staging table is deleted while the dlt state is kept, unchanged pages are not published
-again and stay missing until they change. `cognee.forget` removes neither, so it does not cause
-this.
+again and stay missing until they change. Forgetting the table (`empty_resource`) deletes its
+staging copy and its state together, so it does not cause this.
 
 ## Deletion and its gaps
 

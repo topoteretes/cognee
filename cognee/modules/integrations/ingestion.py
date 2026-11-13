@@ -204,10 +204,19 @@ def build_service(provider: str, access_token: str) -> Any:
 
 
 def empty_resource(provider: str, name: str, check_active=None):
-    """Explicitly empty a staging table and reset its cursor for re-selection."""
+    """Explicitly empty a staging table and reset its cursor for re-selection.
+
+    The ingestion that loads it also deletes the table's merge staging copy and every state
+    row of its pipeline, which hold the text of what was forgotten. ``name`` may be the table
+    or ``<dataset>.<table>``.
+    """
     import dlt
 
-    from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, PIPELINE_SCOPE_ATTR
+    from cognee.tasks.ingestion.dlt_utils import (
+        DOCUMENT_SOURCE_ATTR,
+        FORGET_TABLE_ATTR,
+        PIPELINE_SCOPE_ATTR,
+    )
 
     @dlt.resource(name=name, columns={"id": {"data_type": "text", "primary_key": True}})
     def empty():
@@ -219,6 +228,7 @@ def empty_resource(provider: str, name: str, check_active=None):
     resource = empty()
     setattr(resource, DOCUMENT_SOURCE_ATTR, provider)
     setattr(resource, PIPELINE_SCOPE_ATTR, name)
+    setattr(resource, FORGET_TABLE_ATTR, name)
     return resource
 
 

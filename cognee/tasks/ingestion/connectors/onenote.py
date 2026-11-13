@@ -387,18 +387,16 @@ def _lookup(graph, page_id, notebook_id):
     return True
 
 
-def _snapshot(graph, notebook_id, cache):
+def _snapshot(graph, notebook_id, cache, rows, present):
     """Build an authoritative view of the notebook.
 
-    Returns ``(rows, present, unresolved)``: the rows of pages that are new or whose
-    fingerprint changed, ``{page_id: fingerprint}`` of every listed page, and the pages kept
-    because Graph answered 20102 for them. Bodies fetched for the rows are kept in
-    ``cache["pending"]`` until a run publishes them, so a failed run does not repeat them.
+    Fills ``rows`` with the pages that are new or whose fingerprint changed and ``present``
+    with ``{page_id: fingerprint}`` of every listed page as it goes, so a run cut by its
+    budget still has what it fetched. Returns the pages kept because Graph answered 20102
+    for them. Bodies live only in rows: dlt stores the state with every load, so page text
+    there would outlive a forget in the state history.
     """
-    pending = cache.setdefault("pending", {})
     published = cache.get("published", {})
-    rows = {}
-    present = {}
     locations = {}
     deleted_parent = False
     # Containers whose listing answered 20113 and was read as "no children" in this walk.
@@ -461,16 +459,10 @@ def _snapshot(graph, notebook_id, cache):
                     if published.get(page_id) == fingerprint:
                         graph.stats["skipped"] += 1
                         continue
-                    held = pending.get(page_id)
-                    if held is None or held["fingerprint"] != fingerprint:
-                        held = {
-                            "fingerprint": fingerprint,
-                            "text": _body(
-                                graph.request(f"{_BASE}/pages/{_path(page_id)}/content", html=True)
-                            ),
-                        }
-                        pending[page_id] = held
-                    rows[page_id] = _row(fields, page_ancestors, held["text"])
+                    text = _body(
+                        graph.request(f"{_BASE}/pages/{_path(page_id)}/content", html=True)
+                    )
+                    rows[page_id] = _row(fields, page_ancestors, text)
             for group in children(f"{container}/sectionGroups"):
                 _require(group, "id", "displayName")
                 group_ancestors = (
@@ -524,7 +516,7 @@ def _snapshot(graph, notebook_id, cache):
             confirmed[page_id] = True
         else:
             unresolved.append(page_id)
-    return rows, present, set(unresolved)
+    return set(unresolved)
 
 
 def onenote_source(
@@ -618,6 +610,7 @@ def onenote_source(
             raise ValueError("Resource name is already bound to another OneNote connection")
         state["connection"] = identity
         cache = state.setdefault("onenote_cache", {})
+        cache.pop("pending", None)  # Page text an older release kept in state.
         graph = _Graph(
             token,
             http_client if http_client is not None else service,
@@ -626,8 +619,9 @@ def onenote_source(
             max_requests=max_requests,
         )
         try:
+            rows, present = {}, {}
             try:
-                rows, present, unresolved = _snapshot(graph, notebook_id, cache)
+                unresolved = _snapshot(graph, notebook_id, cache, rows, present)
             except OneNoteError as exc:
                 stats["failed"] += 1
                 stats["failed_rate_limit"] += int(isinstance(exc, OneNoteRateLimitedError))
@@ -636,7 +630,18 @@ def onenote_source(
                     "OneNote sync incomplete; retaining documents and checkpointing progress",
                     reason=str(exc),
                 )
-                yield dlt.mark.materialize_table_schema()
+                if isinstance(exc, OneNoteBudgetExceededError) and rows:
+                    # Progress the budget bought is published, never deletions: the next run
+                    # skips these pages instead of fetching their bodies again.
+                    for page_id in sorted(rows):
+                        graph.ensure_active()
+                        yield rows[page_id]
+                    cache["published"] = {
+                        **cache.get("published", {}),
+                        **{page_id: present[page_id] for page_id in rows},
+                    }
+                else:
+                    yield dlt.mark.materialize_table_schema()
                 return
             graph.ensure_active()
             if unresolved:

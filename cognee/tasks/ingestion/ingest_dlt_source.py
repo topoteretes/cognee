@@ -26,11 +26,13 @@ from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.dlt_row_data import DltRowData, DltRows
 from cognee.tasks.ingestion.dlt_utils import (
     DOCUMENT_COLUMN_HINTS,
+    FORGET_TABLE_ATTR,
     NODE_SET_COLUMN,
     STRUCTURE_COLUMN,
     UNSCOPED_PIPELINE_NAME,
     apply_dlt_runtime_defaults,
     document_source_tag,
+    pipeline_name_for_scope,
     pipeline_name_for_source,
 )
 from cognee.tasks.ingestion.exceptions.exceptions import (
@@ -265,6 +267,18 @@ async def ingest_dlt_source(
             raise DLTIngestionError(
                 message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
             ) from e
+        forgotten = getattr(dlt_source, FORGET_TABLE_ATTR, None)
+        if forgotten:
+            try:
+                await asyncio.to_thread(
+                    _purge_forgotten_table, pipeline, destination, forgotten, original_dataset_name
+                )
+            except Exception as e:
+                raise DLTIngestionError(
+                    message=f"Table '{forgotten}' was emptied but its staging copy or state "
+                    f"could not be deleted for dataset '{original_dataset_name}'; "
+                    f"forget it again: {e}"
+                ) from e
         key_hints = _dlt_key_hints(_source_tables(pipeline, dlt_source))
 
         # An incremental source can emit no rows (or only update its cursor),
@@ -339,6 +353,67 @@ async def ingest_dlt_source(
         ) from e
 
     return DltRows(row_data_list, loaded_tables=filtered_schema)
+
+
+def _purge_forgotten_table(pipeline, destination, name: str, dataset: str) -> None:
+    """Empty a forgotten table everywhere dlt keeps its text, and reset its state.
+
+    That is its rows and nested tables in the dataset and in ``<dataset>_staging`` (a merge
+    load never truncates it), and the ``_dlt_pipeline_state`` rows of its pipeline. ``name``
+    is the table or, as Cloud spells it, ``<dataset>.<table>``, which loads a pipeline of its
+    own: the bare table's pipeline then supplies the nested tables and loses its cursor.
+    """
+    import dlt
+    from dlt.common.schema.utils import get_nested_tables
+
+    table = name.removeprefix(f"{dataset}.")
+    owner = pipeline
+    if table != name:
+        owner = dlt.pipeline(
+            pipeline_name=pipeline_name_for_scope(table, dataset),
+            destination=destination,
+            dataset_name=pipeline.dataset_name,
+        )
+    table = owner.default_schema.naming.normalize_table_identifier(table)
+    tables = [t["name"] for t in get_nested_tables(owner.default_schema.tables, table)] or [table]
+    if owner is not pipeline:
+        owner.drop()
+
+    with pipeline.sql_client() as client:
+        _empty_tables(client, tables)
+        with client.with_staging_dataset():
+            _empty_tables(client, tables)
+        _delete_state_rows(
+            client, {pipeline.pipeline_name, pipeline_name_for_scope(table, dataset)}
+        )
+
+
+def _empty_tables(client, tables: list[str]) -> None:
+    present = [table for table in tables if _table_exists(client, table)]
+    if present:
+        client.truncate_tables(*present)
+
+
+def _delete_state_rows(client, pipeline_names: set[str]) -> None:
+    """dlt keeps a state row per state-changing load and has no API to drop them."""
+    if not _table_exists(client, "_dlt_pipeline_state"):
+        return
+    marks = ", ".join("%s" for _ in pipeline_names)
+    client.execute_sql(
+        f"DELETE FROM {client.make_qualified_table_name('_dlt_pipeline_state')} "
+        f"WHERE pipeline_name IN ({marks})",
+        *sorted(pipeline_names),
+    )
+
+
+def _table_exists(client, table: str) -> bool:
+    from dlt.destinations.exceptions import DatabaseUndefinedRelation
+
+    try:
+        client.execute_sql(f"SELECT 1 FROM {client.make_qualified_table_name(table)} LIMIT 1")
+    except DatabaseUndefinedRelation:
+        return False
+    return True
 
 
 async def _extract_dlt_schema(
