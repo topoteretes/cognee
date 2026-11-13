@@ -88,10 +88,14 @@ async def test_edge_ingestion():
         f"Number of made_from and is_part_of edges are not matching, found {edge_type_counts.get('made_from', 0)} made from and {edge_type_counts.get('is_part_of', 0)} is_part_of."
     )
 
-    "Tests whether we generate is_a for all entity that is contained by a chunk"
-    assert edge_type_counts.get("contains", 0) == edge_type_counts.get("is_a", 0), (
-        f"Number of contains and is_a edges are not matching, found {edge_type_counts.get('is_a', 0)} is_a and {edge_type_counts.get('is_part_of', 0)} contains."
-    )
+    # An entity can belong to several chunks, and contains can also connect other
+    # model types. Compare entity identities, not counts of two different relations.
+    entity_ids = {str(node_id) for node_id, props in graph[0] if props.get("type") == "Entity"}
+    contained_entities = {str(edge[1]) for edge in contains_edges} & entity_ids
+    typed_entities = {str(edge[0]) for edge in graph[1] if edge[2] == "is_a"}
+    assert contained_entities, "Expected contained Entity nodes"
+    missing_types = contained_entities - typed_entities
+    assert not missing_types, f"Contained entities missing is_a edges: {sorted(missing_types)}"
 
     found_edges = 0
     for entity_to_entity_edge in entity_to_entity_edges:

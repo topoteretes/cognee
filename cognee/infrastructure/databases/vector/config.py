@@ -36,6 +36,12 @@ class VectorConfig(BaseSettings):
     vector_db_host: str = ""
     vector_db_subprocess_enabled: bool = True
     vector_pool_args: str | None = None
+    # Rows per vector write (one upsert per batch), ``VECTOR_WRITE_BATCH_SIZE``. Kept
+    # apart from the embedding request size: EmbeddingGateway embeds a batch larger
+    # than one request in consecutive requests. 128 measured best on pgvector (fewer
+    # statements and commits); larger batches stopped paying off and cost memory.
+    # Not part of ``to_dict()``, which only carries the engine-construction settings.
+    vector_write_batch_size: int = pydantic.Field(default=128, gt=0)
 
     model_config = SettingsConfigDict(extra="allow")
 

@@ -68,6 +68,7 @@ a local model does not get the local default of 10 requests; set
 |---|---|
 | `EMBEDDING_BATCH_SIZE` | 32 texts per request |
 | `EMBEDDING_MAX_CONCURRENT_DATA_POINTS` | 150 (so 150 / 32 = 4 concurrent requests) |
+| `VECTOR_WRITE_BATCH_SIZE` | 128 rows per vector write, embedded in consecutive 32-text requests |
 | `EMBEDDING_RATE_LIMIT_ENABLED` / `_REQUESTS` / `_INTERVAL` | off / 60 / 60 s |
 
 Embedding calls retry transient errors, rate-limit 429s included, with

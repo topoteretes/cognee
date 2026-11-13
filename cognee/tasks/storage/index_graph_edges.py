@@ -55,6 +55,7 @@ def create_edge_type_datapoints(edges_data) -> list[EdgeType]:
 async def index_graph_edges(
     edges_data: list[EdgeData] | list[tuple[str, str, str, dict[str, Any] | None]] | None = None,
     vector_engine=None,
+    semaphore=None,
 ):
     """
     Indexes graph edges by creating and managing vector indexes for relationship types.
@@ -67,6 +68,9 @@ async def index_graph_edges(
     1. Initialize the graph engine if needed and retrieve edge data.
     2. Transform edge data into EdgeType datapoints.
     3. Index the EdgeType datapoints using the standard indexing function.
+
+    ``semaphore`` is handed to ``index_data_points`` so a caller indexing nodes at the
+    same time can keep both under one bound on concurrent vector writes.
 
     Raises:
         RuntimeError: If initialization of the graph engine fails.
@@ -84,7 +88,9 @@ async def index_graph_edges(
 
         edge_type_datapoints = create_edge_type_datapoints(edges_data)
 
-        await index_data_points(edge_type_datapoints, vector_engine=vector_engine)
+        await index_data_points(
+            edge_type_datapoints, vector_engine=vector_engine, semaphore=semaphore
+        )
     except Exception as e:
         logger.error("Failed to index graph edges: %s", e)
         raise RuntimeError("Graph edge indexing error") from e

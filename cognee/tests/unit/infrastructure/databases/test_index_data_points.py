@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import EmbeddingGateway
 from cognee.infrastructure.engine import DataPoint
 from cognee.tasks.storage.index_data_points import index_data_points
 
@@ -11,6 +13,52 @@ from cognee.tasks.storage.index_data_points import index_data_points
 class TestDataPoint(DataPoint):
     name: str
     description: str = "test description"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_ids_across_write_batches_merge_tags_and_embed_once_per_field():
+    first = TestDataPoint(name="old", description="old description", belongs_to_set=["a", "shared"])
+    other = TestDataPoint(name="other")
+    last = TestDataPoint(
+        id=first.id, name="new", description="new description", belongs_to_set=["shared", "b"]
+    )
+    points = [first, other, last]
+    for point in points:
+        point.metadata = {"index_fields": ["name", "description"]}
+    before = [point.model_dump() for point in points]
+    engine = AsyncMock()
+    engine.embedding_engine.get_batch_size = MagicMock(return_value=32)
+    with patch.dict(index_data_points.__globals__, {"write_batch_size": lambda: 1}):
+        assert await index_data_points(points, vector_engine=engine) is points
+
+    written = [
+        (call.args[1], point)
+        for call in engine.index_data_points.await_args_list
+        for point in call.args[2]
+    ]
+    assert len(written) == 4
+    assert len({(field, point.id) for field, point in written}) == 4
+    for field, point in written:
+        assert point.metadata["index_fields"] == [field]
+        if point.id == first.id:
+            assert point.name == "new"
+            assert point.description == "new description"
+            assert point.belongs_to_set == ["a", "shared", "b"]
+    assert [point.model_dump() for point in points] == before
+
+
+@pytest.mark.asyncio
+async def test_edge_text_identity_collisions_are_indexed_once():
+    from cognee.modules.graph.models.EdgeType import EdgeType
+
+    first = EdgeType(relationship_name="IS A", number_of_edges=1)
+    last = EdgeType(relationship_name="is a", number_of_edges=2)
+    assert first.id == last.id
+    engine = AsyncMock()
+    engine.embedding_engine.get_batch_size = MagicMock(return_value=32)
+    with patch.dict(index_data_points.__globals__, {"write_batch_size": lambda: 1}):
+        await index_data_points([first, last], vector_engine=engine)
+    engine.index_data_points.assert_awaited_once_with("EdgeType", "relationship_name", [last])
 
 
 @pytest.mark.asyncio
@@ -36,7 +84,7 @@ async def test_index_data_points_calls_vector_engine():
 
 
 async def _run_and_measure_peak_concurrency(data_points, batch_size, max_concurrent_data_points):
-    """Run index_data_points and return the peak number of concurrent index calls."""
+    """Measure provider requests through the real gateway and storage planner."""
     in_flight = 0
     peak = 0
 
@@ -46,17 +94,26 @@ async def _run_and_measure_peak_concurrency(data_points, batch_size, max_concurr
         peak = max(peak, in_flight)
         await asyncio.sleep(0)
         in_flight -= 1
+        return EmbeddingResult([[1.0]] * len(args[0]), tokens=len(args[0]))
 
     mock_vector_engine = AsyncMock()
-    mock_vector_engine.embedding_engine.get_batch_size = MagicMock(return_value=batch_size)
-    mock_vector_engine.index_data_points = AsyncMock(side_effect=_index)
+    raw = SimpleNamespace(get_batch_size=lambda: batch_size, embed_text=_index)
+    mock_vector_engine.embedding_engine = EmbeddingGateway(raw)
+    mock_vector_engine.embedding_engine._record_usage = AsyncMock()
+
+    async def index(_type, _field, points):
+        await mock_vector_engine.embedding_engine.embed_text([p.name for p in points])
+
+    mock_vector_engine.index_data_points = AsyncMock(side_effect=index)
 
     with patch.dict(
         index_data_points.__globals__,
         {
             "get_embedding_context_config": lambda: SimpleNamespace(
                 embedding_max_concurrent_data_points=max_concurrent_data_points
-            )
+            ),
+            # One write per embedding request, so the batch count is the request count.
+            "get_vectordb_config": lambda: SimpleNamespace(vector_write_batch_size=batch_size),
         },
     ):
         await index_data_points(data_points, vector_engine=mock_vector_engine)
@@ -93,6 +150,100 @@ async def test_concurrency_floors_at_one_when_batch_size_exceeds_limit():
 
 
 @pytest.mark.asyncio
+async def test_write_batches_hold_vector_write_batch_size_rows():
+    """The write batch is VECTOR_WRITE_BATCH_SIZE rows, not the embedding request size:
+    300 points with 32-text requests and 128-row writes are three writes."""
+    data_points = [TestDataPoint(name=f"point{i}") for i in range(300)]
+    for data_point in data_points:
+        data_point.metadata["index_fields"] = ["name"]
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.get_batch_size = MagicMock(return_value=32)
+
+    with patch.dict(
+        index_data_points.__globals__,
+        {"get_vectordb_config": lambda: SimpleNamespace(vector_write_batch_size=128)},
+    ):
+        await index_data_points(data_points, vector_engine=mock_vector_engine)
+
+    batch_sizes = [
+        len(call.args[2]) for call in mock_vector_engine.index_data_points.await_args_list
+    ]
+    assert sorted(batch_sizes, reverse=True) == [128, 128, 44]
+
+
+@pytest.mark.asyncio
+async def test_a_point_with_one_index_field_is_handed_over_without_a_copy():
+    """Adapters embed the first index field, so nothing has to change on the point; only
+    a point indexed on several fields gets a copy per field, each naming its field."""
+
+    class TwoFieldPoint(DataPoint):
+        name: str
+        description: str
+        metadata: dict = {"index_fields": ["name", "description"]}
+
+    single = TestDataPoint(name="single")
+    single.metadata["index_fields"] = ["name"]
+    double = TwoFieldPoint(name="n", description="d")
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.get_batch_size = MagicMock(return_value=100)
+
+    await index_data_points([single, double], vector_engine=mock_vector_engine)
+
+    handed_over = {
+        (call.args[0], call.args[1]): call.args[2]
+        for call in mock_vector_engine.index_data_points.await_args_list
+    }
+    assert handed_over[("TestDataPoint", "name")][0] is single
+    (by_name,) = handed_over[("TwoFieldPoint", "name")]
+    (by_description,) = handed_over[("TwoFieldPoint", "description")]
+    assert by_name is not double and by_description is not double
+    assert by_name.metadata["index_fields"] == ["name"]
+    assert by_description.metadata["index_fields"] == ["description"]
+    assert double.metadata["index_fields"] == ["name", "description"]
+
+
+@pytest.mark.asyncio
+async def test_a_shared_semaphore_bounds_concurrent_calls_together():
+    """Two index calls handed one semaphore never exceed its bound between them."""
+    in_flight = 0
+    peak = 0
+
+    async def _index(*args, **kwargs):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0)
+        in_flight -= 1
+        return EmbeddingResult([[1.0]] * len(args[0]), tokens=len(args[0]))
+
+    mock_vector_engine = AsyncMock()
+    raw = SimpleNamespace(get_batch_size=lambda: 1, embed_text=_index)
+    mock_vector_engine.embedding_engine = EmbeddingGateway(raw)
+    mock_vector_engine.embedding_engine._record_usage = AsyncMock()
+
+    async def index(_type, _field, points):
+        await mock_vector_engine.embedding_engine.embed_text([p.name for p in points])
+
+    mock_vector_engine.index_data_points = AsyncMock(side_effect=index)
+    first = [TestDataPoint(name=f"a{i}") for i in range(6)]
+    second = [TestDataPoint(name=f"b{i}") for i in range(6)]
+    for data_point in first + second:
+        data_point.metadata["index_fields"] = ["name"]
+    shared = asyncio.Semaphore(2)
+
+    with patch.dict(
+        index_data_points.__globals__,
+        {"get_vectordb_config": lambda: SimpleNamespace(vector_write_batch_size=1)},
+    ):
+        await asyncio.gather(
+            index_data_points(first, vector_engine=mock_vector_engine, semaphore=shared),
+            index_data_points(second, vector_engine=mock_vector_engine, semaphore=shared),
+        )
+
+    assert peak == 2
+
+
+@pytest.mark.asyncio
 async def test_index_data_points_does_not_mutate_metadata():
     data_point = TestDataPoint(name="test")
     data_point.metadata["index_fields"] = ["name", "description"]
@@ -112,3 +263,78 @@ async def test_index_data_points_does_not_mutate_metadata():
         await index_data_points([data_point])
 
     assert data_point.metadata["index_fields"] == original_index_fields
+
+
+@pytest.mark.asyncio
+async def test_failed_batch_waits_for_sibling_writes():
+    completed = asyncio.Event()
+    started = asyncio.Event()
+
+    async def write(_index, _property, batch):
+        if batch[0].name == "fails":
+            await started.wait()
+            raise ValueError("write failed")
+        started.set()
+        await asyncio.sleep(0.01)
+        completed.set()
+
+    engine = AsyncMock()
+    engine.index_data_points.side_effect = write
+    points = [TestDataPoint(name=name) for name in ("fails", "finishes")]
+    for point in points:
+        point.metadata = {"index_fields": ["name"]}
+    with (
+        patch.dict(index_data_points.__globals__, {"write_batch_size": lambda: 1}),
+        pytest.raises(ValueError, match="write failed"),
+    ):
+        await index_data_points(points, vector_engine=engine, semaphore=asyncio.Semaphore(2))
+    assert completed.is_set(), "no sibling write may outlive the failed storage call"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "count,request_size,cap,expected", [(128, 32, 150, 4), (1024, 256, 1024, 8)]
+)
+async def test_provider_requests_overlap_independently_of_write_batches(
+    count, request_size, cap, expected
+):
+    active = peak = 0
+    reached = asyncio.Event()
+
+    async def embed(texts):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        if active == expected:
+            reached.set()
+        await asyncio.wait_for(reached.wait(), 1)
+        active -= 1
+        return EmbeddingResult([[float(text)] for text in texts], tokens=len(texts))
+
+    gateway = EmbeddingGateway(
+        SimpleNamespace(get_batch_size=lambda: request_size, embed_text=embed)
+    )
+    gateway._record_usage = AsyncMock()
+    writes = []
+
+    async def index(_type, _field, points):
+        vectors = await gateway.embed_text([p.name for p in points])
+        assert vectors == [[float(p.name)] for p in points]
+        writes.append(len(points))
+
+    engine = SimpleNamespace(
+        embedding_engine=gateway, create_vector_index=AsyncMock(), index_data_points=index
+    )
+    points = [TestDataPoint(name=str(i), metadata={"index_fields": ["name"]}) for i in range(count)]
+    with patch.dict(
+        index_data_points.__globals__,
+        {
+            "write_batch_size": lambda: 128,
+            "get_embedding_context_config": lambda: SimpleNamespace(
+                embedding_max_concurrent_data_points=cap
+            ),
+        },
+    ):
+        await index_data_points(points, vector_engine=engine)
+    assert peak == expected
+    assert writes == [128] * (count // 128)
