@@ -46,10 +46,13 @@ Token = str | Callable[[], str]
 class OneNoteError(RuntimeError):
     """Graph failure with safe diagnostics (never response bodies or bearer tokens)."""
 
-    def __init__(self, message: str, *, status: int = 0, code: str = ""):
+    def __init__(self, message: str, *, status: int = 0, code: str = "", interrupted: bool = False):
         super().__init__(message)
         self.status = status
         self.code = code
+        # The run stopped for a reason a later run need not share (Graph kept failing); what
+        # it fetched before is still good. A rate limit or a spent budget says so by its type.
+        self.interrupted = interrupted
 
 
 class OneNoteRateLimitedError(OneNoteError):
@@ -143,7 +146,9 @@ class _Graph:
                 check_active=self.check_active,
             )
         except _TransportFailure:
-            raise OneNoteError("Graph transport failed after five attempts") from None
+            raise OneNoteError(
+                "Graph transport failed after five attempts", interrupted=True
+            ) from None
         except _Transient as error:
             # Out of retries: the caller sees the public error, as for any other answer.
             public = (
@@ -151,7 +156,9 @@ class _Graph:
                 if isinstance(error, OneNoteRateLimitedError)
                 else OneNoteError
             )
-            raise public(str(error), status=error.status, code=error.code) from None
+            raise public(
+                str(error), status=error.status, code=error.code, interrupted=True
+            ) from None
 
     def _retry_delay(self, error: _Transient, number: int) -> float | None:
         """Seconds to wait before the next attempt, charged to the run's wait budget.
@@ -161,7 +168,7 @@ class _Graph:
         if isinstance(error, _TransportFailure):
             delay = 2**number
             if self.slept + delay > RETRY_WAIT_BUDGET_SECONDS:
-                raise OneNoteError("Graph retry wait budget exhausted") from None
+                raise OneNoteError("Graph retry wait budget exhausted", interrupted=True) from None
         else:
             try:
                 delay = float(error.retry_after if error.retry_after is not None else 2**number)
@@ -172,7 +179,7 @@ class _Graph:
             if self.slept + delay > RETRY_WAIT_BUDGET_SECONDS:
                 exceeded = OneNoteRateLimitedError if error.status == 429 else OneNoteError
                 raise exceeded(
-                    "Graph Retry-After exceeds wait budget", status=error.status
+                    "Graph Retry-After exceeds wait budget", status=error.status, interrupted=True
                 ) from None
         self.slept += delay
         return delay
@@ -631,9 +638,14 @@ def onenote_source(
                     "(reason: %s)",
                     exc,
                 )
-                if isinstance(exc, OneNoteBudgetExceededError) and rows:
-                    # Progress the budget bought is published, never deletions: the next run
-                    # skips these pages instead of fetching their bodies again.
+                if (
+                    exc.interrupted
+                    or isinstance(exc, (OneNoteRateLimitedError, OneNoteBudgetExceededError))
+                ) and rows:
+                    # Progress an interrupted run bought (a budget cut, a throttle, a 5xx) is
+                    # published, never deletions: the next run skips these pages instead of
+                    # fetching their bodies again. A structural failure (a malformed page,
+                    # a page that moved) still holds everything until a full recovery.
                     for page_id in sorted(rows):
                         graph.ensure_active()
                         yield rows[page_id]
