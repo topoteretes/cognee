@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import Coroutine
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
 from textwrap import dedent
@@ -14,8 +14,10 @@ from neo4j.exceptions import Neo4jError
 
 from cognee.infrastructure.databases.exceptions import DatabaseCredentialsError
 from cognee.infrastructure.databases.graph.graph_db_interface import (
+    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
     GraphDBInterface,
     temporal_anchors_from_rows,
+    validate_graph_stream_batch_size,
 )
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
@@ -84,6 +86,27 @@ def _strip_provenance(properties: dict[str, Any] | None) -> dict[str, Any] | Non
     if any(key in properties for key in _PROVENANCE_KEY_SET):
         return {key: value for key, value in properties.items() if key not in _PROVENANCE_KEY_SET}
     return properties
+
+
+def _format_graph_node(record: dict[str, Any]) -> tuple:
+    """A ``properties`` record as a get_graph_data node, keyed by its ``id`` property."""
+    properties = _strip_provenance(record["properties"])
+    return properties["id"], properties
+
+
+def _format_graph_edge(record: dict[str, Any]) -> tuple:
+    """A ``type`` + ``properties`` record as a get_graph_data edge.
+
+    The endpoints come from the edge's own ``source_node_id`` /
+    ``target_node_id`` properties, as get_graph_data has always read them.
+    """
+    properties = _strip_provenance(record["properties"])
+    return (
+        properties["source_node_id"],
+        properties["target_node_id"],
+        record["type"],
+        properties,
+    )
 
 
 def _prov_list(value: Any) -> list[str]:
@@ -1854,15 +1877,7 @@ class Neo4jAdapter(GraphDBInterface):
             )
             result = await self.query(query)
 
-            nodes = []
-            for record in result:
-                properties = _strip_provenance(record["properties"])
-                nodes.append(
-                    (
-                        properties["id"],
-                        properties,
-                    )
-                )
+            nodes = [_format_graph_node(record) for record in result]
 
             # Retrieve edges
             query = f"""
@@ -1871,17 +1886,7 @@ class Neo4jAdapter(GraphDBInterface):
             """
             result = await self.query(query)
 
-            edges = []
-            for record in result:
-                properties = _strip_provenance(record["properties"])
-                edges.append(
-                    (
-                        properties["source_node_id"],
-                        properties["target_node_id"],
-                        record["type"],
-                        properties,
-                    )
-                )
+            edges = [_format_graph_edge(record) for record in result]
 
             retrieval_time = time.time() - start_time
             logger.info(
@@ -1893,6 +1898,69 @@ class Neo4jAdapter(GraphDBInterface):
         except Exception as e:
             logger.error(f"Error during graph data retrieval: {e!s}")
             raise
+
+    async def stream_graph_data(
+        self, batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE
+    ) -> AsyncIterator[tuple[list[tuple[Any, dict[str, Any]]], list[tuple]]]:
+        """``get_graph_data`` in pages; see ``GraphDBInterface.stream_graph_data``.
+
+        Nodes are paged by keyset on ``n.id``, which the ``__Node__`` uniqueness
+        constraint indexes. Edges are paged by source node: a keyset page of
+        source ids, then their outgoing edges, so a hub's edges arrive in one
+        page. Every page is one ``self.query`` call, its own session.
+        """
+        validate_graph_stream_batch_size(batch_size)
+
+        node_page = (
+            f"MATCH (n:`{BASE_LABEL}`) {{where}} "
+            "RETURN properties(n) AS properties ORDER BY n.id LIMIT $batch_size"
+        )
+        # A flag, not a None last_id, marks the first page: an id-less node
+        # sorts last and must not restart the scan.
+        first_page, last_id = True, None
+        while True:
+            if first_page:
+                records = await self.query(node_page.format(where=""), {"batch_size": batch_size})
+            else:
+                records = await self.query(
+                    node_page.format(where="WHERE n.id > $last_id"),
+                    {"last_id": last_id, "batch_size": batch_size},
+                )
+            if not records:
+                break
+            nodes = [_format_graph_node(record) for record in records]
+            first_page, last_id = False, nodes[-1][0]
+            yield nodes, []
+        if first_page:
+            return
+
+        source_page = (
+            f"MATCH (n:`{BASE_LABEL}`) {{where}} RETURN n.id AS id ORDER BY n.id LIMIT $batch_size"
+        )
+        edge_lookup = f"""
+        UNWIND $source_ids AS source_id
+        MATCH (n:`{BASE_LABEL}` {{id: source_id}})-[r]->(m:`{BASE_LABEL}`)
+        RETURN TYPE(r) AS type, properties(r) AS properties
+        """
+        first_page, last_id = True, None
+        while True:
+            if first_page:
+                records = await self.query(source_page.format(where=""), {"batch_size": batch_size})
+            else:
+                records = await self.query(
+                    source_page.format(where="WHERE n.id > $last_id"),
+                    {"last_id": last_id, "batch_size": batch_size},
+                )
+            if not records:
+                break
+            source_ids = [record["id"] for record in records]
+            first_page, last_id = False, source_ids[-1]
+            edges = [
+                _format_graph_edge(record)
+                for record in await self.query(edge_lookup, {"source_ids": source_ids})
+            ]
+            if edges:
+                yield [], edges
 
     async def get_neighborhood(
         self,

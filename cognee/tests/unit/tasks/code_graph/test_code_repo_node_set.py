@@ -19,13 +19,13 @@ from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model
 from cognee.tasks.code_graph.extract_code_graph import (
     CODE_GRAPH_MAPPING_VERSION,
-    add_code_graph_data_points,
-    add_code_graph_edges,
-    extract_code_graph,
     fact_node_id,
+    load_code_graph,
     map_facts_to_data_points,
 )
 from cognee.tasks.code_graph.models import CodeRepository, CodeSymbol
+from cognee.tests.utils.code_graph_load import extracted_points, load_with_node_writes_mocked
+from cognee.tests.utils.graph_stream import stream_through_get_graph_data
 
 graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
@@ -68,6 +68,7 @@ def _write_snapshot(tmp_path, facts, snapshot_id=SNAPSHOT_ID):
 def _mock_engine(monkeypatch, nodes=(), edges=(), get_node_return=None):
     engine = AsyncMock()
     engine.get_graph_data.return_value = (list(nodes), list(edges))
+    stream_through_get_graph_data(engine)
     engine.get_node.return_value = get_node_return
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
     monkeypatch.setattr(
@@ -193,7 +194,7 @@ async def test_a_tagged_repo_always_reloads_an_unchanged_snapshot(
     _write_snapshot(tmp_path, FACTS)
     _mock_engine(monkeypatch, get_node_return=stored)
 
-    data_points = await extract_code_graph(
+    data_points = await extracted_points(
         repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=node_set
     )
 
@@ -212,7 +213,7 @@ async def test_unchanged_untagged_repo_still_skips(tmp_path, monkeypatch):
         },
     )
 
-    data_points = await extract_code_graph(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+    data_points = await extracted_points(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
 
     assert data_points == []
     engine.get_node.assert_awaited_once_with(REPO_NODE_ID)
@@ -235,7 +236,7 @@ async def test_unchanged_snapshot_reloads_when_the_mapping_changed(
         stored["last_mapping_version"] = stored_version
     _mock_engine(monkeypatch, get_node_return=stored)
 
-    data_points = await extract_code_graph(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+    data_points = await extracted_points(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
 
     assert len(data_points) == 3
 
@@ -256,7 +257,7 @@ async def test_mapping_version_stored_as_text_still_skips(tmp_path, monkeypatch)
         },
     )
 
-    assert await extract_code_graph(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path) == []
+    assert await extracted_points(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path) == []
 
 
 # ---------------------------------------------------------------------------
@@ -270,8 +271,8 @@ async def test_coderepository_keeps_its_tag_after_the_snapshot_stamp(tmp_path, m
     existing_nodes = [(REPO_NODE_ID, {"type": "CodeRepository", "name": REPO})]
     engine = _mock_engine(monkeypatch, existing_nodes, [])
 
-    await add_code_graph_edges(
-        ["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=["team-x"]
+    await load_with_node_writes_mocked(
+        monkeypatch, repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=["team-x"]
     )
 
     stamped = engine.add_nodes.await_args.args[0]
@@ -294,7 +295,9 @@ async def test_untagged_repo_is_never_detagged(tmp_path, monkeypatch):
     existing_nodes = [(REPO_NODE_ID, {"type": "CodeRepository", "name": REPO})]
     engine = _mock_engine(monkeypatch, existing_nodes, [])
 
-    await add_code_graph_edges(["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+    await load_with_node_writes_mocked(
+        monkeypatch, repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path
+    )
 
     engine.delete_edge_triples.assert_not_awaited()
     engine.remove_belongs_to_set_tags.assert_not_awaited()
@@ -332,8 +335,8 @@ async def test_retag_strips_old_tag_from_every_surviving_code_node(tmp_path, mon
     ]
     engine = _mock_engine(monkeypatch, existing_nodes, existing_edges)
 
-    await add_code_graph_edges(
-        ["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=["new-team"]
+    await load_with_node_writes_mocked(
+        monkeypatch, repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=["new-team"]
     )
 
     deleted_edges = {
@@ -373,8 +376,8 @@ async def test_retag_does_not_touch_names_kept_across_the_change(tmp_path, monke
     ]
     engine = _mock_engine(monkeypatch, existing_nodes, [])
 
-    await add_code_graph_edges(
-        ["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=["keep"]
+    await load_with_node_writes_mocked(
+        monkeypatch, repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=["keep"]
     )
 
     engine.remove_belongs_to_set_tags.assert_awaited_once_with(["drop"], node_ids=[REPO_NODE_ID])
@@ -402,8 +405,8 @@ async def test_retag_is_scoped_to_this_repos_code_nodes_only(tmp_path, monkeypat
     ]
     engine = _mock_engine(monkeypatch, existing_nodes, [])
 
-    await add_code_graph_edges(
-        ["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=["new-team"]
+    await load_with_node_writes_mocked(
+        monkeypatch, repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=["new-team"]
     )
 
     tags_call = engine.remove_belongs_to_set_tags.await_args
@@ -429,13 +432,7 @@ def _ladybug_engine(monkeypatch, tmp_path):
 
 
 async def _sync(repo_path, snapshot_dir, node_set):
-    data_points = await extract_code_graph(
-        repo_path=repo_path, snapshot_dir=snapshot_dir, node_set=node_set
-    )
-    state = await add_code_graph_data_points(data_points)
-    await add_code_graph_edges(
-        state, repo_path=repo_path, snapshot_dir=snapshot_dir, node_set=node_set
-    )
+    await load_code_graph(repo_path=repo_path, snapshot_dir=snapshot_dir, node_set=node_set)
 
 
 @pytest.mark.asyncio
@@ -565,8 +562,8 @@ async def test_respelling_retag_strips_old_spelling_from_property_but_keeps_the_
     ]
     engine = _mock_engine(monkeypatch, existing_nodes, [])
 
-    await add_code_graph_edges(
-        ["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=["team-a"]
+    await load_with_node_writes_mocked(
+        monkeypatch, repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=["team-a"]
     )
 
     engine.remove_belongs_to_set_tags.assert_awaited_once_with(["Team-A"], node_ids=[REPO_NODE_ID])
@@ -589,11 +586,9 @@ def _repo_manifest_item(tmp_path, external_metadata):
 
 def _stub_code_graph_tasks(monkeypatch):
     module = importlib.import_module("cognee.tasks.code_graph.extract_code_graph")
-    extract = AsyncMock(return_value=[])
-    monkeypatch.setattr(module, "extract_code_graph", extract)
-    monkeypatch.setattr(module, "add_code_graph_data_points", AsyncMock(return_value=[]))
-    monkeypatch.setattr(module, "add_code_graph_edges", AsyncMock(return_value=[]))
-    return extract
+    load = AsyncMock()
+    monkeypatch.setattr(module, "load_code_graph", load)
+    return load
 
 
 @pytest.mark.asyncio
