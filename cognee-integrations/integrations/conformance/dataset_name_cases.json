@@ -1,0 +1,92 @@
+[
+  {
+    "input": "agent_sessions",
+    "fallback": "agent_sessions",
+    "expected": "agent_sessions",
+    "note": "a valid name passes through unchanged"
+  },
+  {
+    "input": "My-Project_2",
+    "fallback": "agent_sessions",
+    "expected": "My-Project_2",
+    "note": "letters, digits, dash and underscore are untouched"
+  },
+  {
+    "input": "Foo+Bar@team",
+    "fallback": "agent_sessions",
+    "expected": "Foo+Bar@team",
+    "note": "characters the server accepts are left alone, so no existing dataset is orphaned"
+  },
+  {
+    "input": "héllo-wörld",
+    "fallback": "agent_sessions",
+    "expected": "héllo-wörld",
+    "note": "non-ASCII letters are accepted by the server and left alone"
+  },
+  {
+    "input": "my project",
+    "fallback": "agent_sessions",
+    "expected": "my_project",
+    "note": "a space becomes an underscore"
+  },
+  {
+    "input": "project-x_2.0",
+    "fallback": "agent_sessions",
+    "expected": "project-x_2_0",
+    "note": "a dot becomes an underscore"
+  },
+  {
+    "input": "team-user-a.b@x.com",
+    "fallback": "agent_sessions",
+    "expected": "team-user-a_b@x_com",
+    "note": "dots inside a derived name (an email user id) are replaced"
+  },
+  {
+    "input": "a . b",
+    "fallback": "agent_sessions",
+    "expected": "a_b",
+    "note": "a run of spaces and dots collapses to one underscore"
+  },
+  {
+    "input": "  padded  ",
+    "fallback": "agent_sessions",
+    "expected": "padded",
+    "note": "surrounding whitespace is trimmed"
+  },
+  {
+    "input": ".hidden",
+    "fallback": "agent_sessions",
+    "expected": "_hidden",
+    "note": "a leading dot becomes an underscore rather than being dropped"
+  },
+  {
+    "input": "_x_",
+    "fallback": "agent_sessions",
+    "expected": "_x_",
+    "note": "existing underscores are not trimmed"
+  },
+  {
+    "input": "___",
+    "fallback": "agent_sessions",
+    "expected": "___",
+    "note": "a valid all-underscore name is kept, not replaced by the fallback"
+  },
+  {
+    "input": "...",
+    "fallback": "agent_sessions",
+    "expected": "agent_sessions",
+    "note": "nothing usable left after replacement falls back to the default"
+  },
+  {
+    "input": "   ",
+    "fallback": "my-default",
+    "expected": "my-default",
+    "note": "a blank name falls back to the integration's own default"
+  },
+  {
+    "input": "",
+    "fallback": "agent_sessions",
+    "expected": "agent_sessions",
+    "note": "an empty name falls back to the default"
+  }
+]

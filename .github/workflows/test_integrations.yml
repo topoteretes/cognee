@@ -1,0 +1,473 @@
+name: test | integrations
+# Checks for the agent plugins under cognee-integrations/integrations/: lint, the
+# lockfile and each plugin's own test suite on every change, and, when dispatched
+# with `live`, each plugin's live round trip against a real cognee server and LLM.
+#
+# Plugins are discovered from their folders (a pyproject.toml makes a Python
+# plugin), so moving one here needs no edit to this file. A pull request tests
+# only the plugins it changes, or all of them when it changes something they
+# share. `integrations-tests` is the one job to require.
+#
+# Each plugin declares no cognee dependency (cognee's pins conflict with the
+# environments the host agents share between plugins). A plugin whose tests
+# start a local server gets cognee from its local-mode-requirements.txt, the
+# release its local mode installs: a PyPI release, not this checkout.
+#
+# The live tier (tests/test_integration_*.py) needs secrets and spends LLM
+# tokens, so it runs only on dispatch: nightly_scheduler.yml dispatches it
+# against dev every evening. It fails when any of those tests skips, so a
+# missing dependency or key can never pass as green, and `notify` posts every
+# dispatched run's result, green included, to #nightly-ci-integrations: the
+# live tier and every other job that run executes, so no failure reports green.
+#
+# The case tables in integrations/conformance/ are a copy: the hook plugins in
+# topoteretes/cognee-integrations generate two of them and test against the
+# same files there. `conformance-drift` fails when the copy here differs from
+# upstream main, on pull requests that touch it and on every dispatched run.
+
+on:
+  push:
+    branches: [ main, dev ]
+    paths: &paths
+      - "cognee-integrations/**"
+      - ".github/workflows/test_integrations.yml"
+  pull_request:
+    branches: [ main, dev ]
+    types: [opened, synchronize, reopened]
+    paths: *paths
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Also run each plugin's live round trip (real cognee server and LLM)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.live && 'live' || 'checks' }}
+  # Cancel superseded PR runs, never a push-to-dev or live run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TELEMETRY_DISABLED: "1"
+
+jobs:
+  detect:
+    name: Detect integration plugins
+    runs-on: ubuntu-22.04
+    outputs:
+      python: ${{ steps.plugins.outputs.python }}
+      live: ${{ steps.plugins.outputs.live }}
+      conformance: ${{ steps.plugins.outputs.conformance }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # The pull request's base commit, to list what it changed.
+          fetch-depth: 0
+
+      - name: List the plugins to test
+        id: plugins
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # On a pull request, test the plugins it changed, or all of them when it
+          # changed something they share. Everywhere else, test all of them.
+          # Conformance drift: on pull requests that touch the tables, and on
+          # dispatched runs (the nightly), never on a push.
+          all=true
+          changed=""
+          conformance=false
+          if [ "${EVENT}" = "workflow_dispatch" ]; then
+            conformance=true
+          fi
+          if [ "${EVENT}" = "pull_request" ]; then
+            conformance=true
+            changed="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")"
+            if ! grep -q -E '^(cognee-integrations/pyproject\.toml|cognee-integrations/integrations/conformance/|\.github/workflows/test_integrations\.yml)' <<<"${changed}"; then
+              all=false
+            fi
+            if ! grep -q '^cognee-integrations/integrations/conformance/' <<<"${changed}"; then
+              conformance=false
+            fi
+          fi
+
+          python=()
+          live=()
+          cd cognee-integrations/integrations
+          for dir in */; do
+            slug="${dir%/}"
+            case "${slug}" in conformance|tests) continue ;; esac
+            if [ -f "${slug}/pyproject.toml" ]; then
+              if [ "${all}" = true ] || grep -q "^cognee-integrations/integrations/${slug}/" <<<"${changed}"; then
+                python+=("${slug}")
+              fi
+              # The live tier runs every plugin that has one, changed or not.
+              if compgen -G "${slug}/tests/test_integration_*.py" > /dev/null; then
+                live+=("${slug}")
+              fi
+            elif [ -f "${slug}/package.json" ]; then
+              echo "::error::${slug} is a Node plugin, and this workflow has no Node job yet. Add one before moving it here."
+              exit 1
+            else
+              echo "::error::${slug} has neither a pyproject.toml nor a package.json."
+              exit 1
+            fi
+          done
+
+          to_json() { printf '%s\n' "$@" | jq -R . | jq -sc 'map(select(length > 0))'; }
+          echo "python=$(to_json ${python[@]+"${python[@]}"})" >> "$GITHUB_OUTPUT"
+          echo "live=$(to_json ${live[@]+"${live[@]}"})" >> "$GITHUB_OUTPUT"
+          echo "conformance=${conformance}" >> "$GITHUB_OUTPUT"
+          echo "Python plugins to test: ${python[*]:-(none)}"
+          echo "Plugins with a live tier: ${live[*]:-(none)}"
+          echo "Check conformance drift: ${conformance}"
+
+  python-plugin:
+    name: integration tests (${{ matrix.slug }})
+    needs: detect
+    if: ${{ needs.detect.outputs.python != '[]' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        slug: ${{ fromJSON(needs.detect.outputs.python) }}
+    defaults:
+      run:
+        working-directory: cognee-integrations/integrations/${{ matrix.slug }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        # The version in the plugin's .python-version, which uv reads from the
+        # working directory.
+        run: uv python install
+
+      - name: Validate uv lockfile
+        # Before the sync on purpose: `uv sync` refreshes a stale lock in the
+        # runner's checkout, and a check after it would pass against what it
+        # had just written.
+        run: uv lock --check || { echo "'uv lock --check' failed. Run 'uv lock' in cognee-integrations/integrations/${{ matrix.slug }}/ and push your changes."; exit 1; }
+
+      - name: Install the plugin and its dev tools
+        run: uv sync --locked --dev
+
+      - name: Install the local-mode cognee release
+        run: |
+          if [ -f local-mode-requirements.txt ]; then
+            uv pip install -r local-mode-requirements.txt
+          else
+            echo "No local-mode-requirements.txt; the suite runs without cognee."
+          fi
+
+      - name: Ruff check
+        if: ${{ !cancelled() }}
+        run: uv run --no-sync ruff check .
+
+      - name: Ruff format check
+        if: ${{ !cancelled() }}
+        run: uv run --no-sync ruff format --check .
+
+      - name: Run the test suite
+        if: ${{ !cancelled() }}
+        # --no-sync: a re-sync to uv.lock would remove the cognee installed above.
+        run: uv run --no-sync pytest tests/ -v
+
+  live:
+    name: live round trip (${{ matrix.slug }})
+    needs: detect
+    if: ${{ inputs.live && needs.detect.outputs.live != '[]' }}
+    runs-on: ubuntu-22.04
+    # The suites budget 120s for a server boot, 600s for a graph write and 900s
+    # for an improve; this bounds a run where several tests stall.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        slug: ${{ fromJSON(needs.detect.outputs.live) }}
+    defaults:
+      run:
+        working-directory: cognee-integrations/integrations/${{ matrix.slug }}
+    env:
+      # The gate the live tests read at import time.
+      COGNEE_RUN_INTEGRATION: "1"
+      # The same credentials cognee's own suites use; the server the tests spawn
+      # inherits them.
+      LLM_PROVIDER: openai
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_ARGS: ${{ secrets.LLM_ARGS }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+      EMBEDDING_PROVIDER: openai
+      EMBEDDING_DIMENSIONS: 300
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Install the plugin, its dev tools and the local-mode cognee release
+        # The live tests skip themselves without cognee; upstream's nightly ran
+        # them that way, reporting green, from 30 Oct to 11 Nov 2026.
+        run: |
+          uv sync --locked --dev
+          if [ ! -f local-mode-requirements.txt ]; then
+            echo "::error::${{ matrix.slug }} has live tests but no local-mode-requirements.txt to install cognee from."
+            exit 1
+          fi
+          uv pip install -r local-mode-requirements.txt
+
+      - name: Run the live round trip
+        run: |
+          set -o pipefail
+          if [ -z "${LLM_API_KEY}" ]; then
+            echo "::error::The LLM_API_KEY secret is not available to this run; the live tier cannot run."
+            exit 1
+          fi
+          # tee keeps the log in the run and gives the Slack report its FAILED lines.
+          uv run --no-sync pytest tests/test_integration_*.py -v -rs \
+            --junitxml="${RUNNER_TEMP}/live.xml" 2>&1 | tee "${RUNNER_TEMP}/live.log"
+
+      - name: Fail on skipped live tests
+        # Only after a passing run: a failed one is already red.
+        run: |
+          python3 - "${RUNNER_TEMP}/live.xml" "${RUNNER_TEMP}/skipped.txt" <<'EOF'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          skipped = [
+              f"{case.get('classname')}::{case.get('name')}"
+              for case in ET.parse(sys.argv[1]).iter("testcase")
+              if case.find("skipped") is not None
+          ]
+          if skipped:
+              with open(sys.argv[2], "w", encoding="utf-8") as out:
+                  out.write("".join(f"SKIPPED {name}\n" for name in skipped))
+              print("::error::Live tests skipped, so the round trip was not proven:")
+              print("\n".join(skipped))
+              sys.exit(1)
+          print("No live test skipped.")
+          EOF
+
+      - name: Write this plugin's report
+        # Read by `notify`. First line is the job status, then up to 20 failed,
+        # errored or skipped tests.
+        if: ${{ always() }}
+        env:
+          SLUG: ${{ matrix.slug }}
+          STATUS: ${{ job.status }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/report"
+          {
+            echo "${STATUS}"
+            { grep -E '^(FAILED|ERROR) ' "${RUNNER_TEMP}/live.log" 2>/dev/null || true
+              cat "${RUNNER_TEMP}/skipped.txt" 2>/dev/null || true
+            } | cut -c1-200 | head -20
+          } > "${RUNNER_TEMP}/report/${SLUG}.txt"
+
+      - name: Upload this plugin's report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: live-report-${{ matrix.slug }}
+          path: ${{ runner.temp }}/report/${{ matrix.slug }}.txt
+          retention-days: 7
+
+  notify:
+    name: Slack nightly report
+    # Every job a dispatched run executes: a dispatch also runs the plugin checks,
+    # the conformance drift check and the inventory check, and a report built from
+    # the live tier alone would post green over any of them failing.
+    needs: [detect, python-plugin, live, conformance-drift, inventory]
+    # Every dispatched run, green included: a failure-only report makes a passing
+    # night and a broken notifier look the same. Not on push or PR runs.
+    if: ${{ always() && inputs.live }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Download the plugin reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          pattern: live-report-*
+          path: ${{ runner.temp }}/reports
+          merge-multiple: true
+        continue-on-error: true  # no report at all is reported below
+
+      - name: Post to #nightly-ci-integrations
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ secrets.SLACK_INTEGRATIONS_NIGHTLY_CHANNEL_ID }}
+          PLUGINS: ${{ needs.detect.outputs.live }}
+          DETECT_RESULT: ${{ needs.detect.result }}
+          LIVE_RESULT: ${{ needs.live.result }}
+          PLUGIN_CHECKS_RESULT: ${{ needs.python-plugin.result }}
+          CONFORMANCE_RESULT: ${{ needs.conformance-drift.result }}
+          INVENTORY_RESULT: ${{ needs.inventory.result }}
+          REPORTS: ${{ runner.temp }}/reports
+          REF: ${{ github.ref_name }}
+          TRIGGER: ${{ github.event_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import sys
+          import urllib.request
+          from pathlib import Path
+
+          token = os.environ["SLACK_BOT_TOKEN"].strip()
+          channel = os.environ["SLACK_CHANNEL"].strip()
+          if not token or not channel:
+              print("::error::SLACK_BOT_TOKEN / SLACK_INTEGRATIONS_NIGHTLY_CHANNEL_ID are not set; cannot post the nightly report.")
+              sys.exit(1)
+
+          icons = {
+              "success": ":white_check_mark:",
+              "failure": ":red_circle:",
+              "cancelled": ":octagonal_sign:",
+              "skipped": ":fast_forward:",
+          }
+          try:
+              plugins = json.loads(os.environ.get("PLUGINS") or "[]")
+          except ValueError:
+              plugins = []
+          lines, outcomes = [], set()
+          if os.environ["DETECT_RESULT"] != "success":
+              outcomes.add("failure")
+              lines.append(":red_circle: *detect*: " + os.environ["DETECT_RESULT"] + " — no plugin was tested")
+          elif not plugins:
+              outcomes.add("skipped")
+              lines.append(":fast_forward: no plugin has a live tier (`tests/test_integration_*.py`)")
+          for slug in plugins:
+              report = Path(os.environ["REPORTS"]) / f"{slug}.txt"
+              if report.is_file():
+                  status, *tests = report.read_text(encoding="utf-8").splitlines()
+              else:
+                  status, tests = os.environ["LIVE_RESULT"] or "unknown", []
+              outcomes.add(status)
+              lines.append(f"{icons.get(status, ':white_circle:')} *{slug}*: {status}")
+              lines += [f"> `{t}`" for t in tests if t.strip()]
+              if status != "success" and not any(t.strip() for t in tests):
+                  lines.append("> no per-test summary — the job likely crashed or timed out; see the run log")
+
+          # The other jobs of the run. Skipped means it had nothing to check
+          # (no plugin, no conformance run) and does not change the headline.
+          checks = {
+              "lint and unit tests": os.environ["PLUGIN_CHECKS_RESULT"],
+              "conformance drift": os.environ["CONFORMANCE_RESULT"],
+              "inventory": os.environ["INVENTORY_RESULT"],
+          }
+          for name, result in checks.items():
+              result = result or "unknown"
+              lines.append(f"{icons.get(result, ':white_circle:')} *{name}*: {result}")
+              if result != "skipped":
+                  outcomes.add(result)
+
+          trigger = os.environ["TRIGGER"]
+          ref = os.environ["REF"]
+          if outcomes == {"success"}:
+              headline = f":large_green_circle: *Integrations nightly green* (`{ref}`, {trigger})"
+          elif "failure" in outcomes:
+              headline = f":rotating_light: *Integrations nightly failed* (`{ref}`, {trigger})"
+          else:
+              headline = f":warning: *Integrations nightly incomplete* (`{ref}`, {trigger}) — a job was cancelled or not run"
+          text = "\n".join([headline, *lines, f"<{os.environ['RUN_URL']}|Open the run>"])
+
+          request = urllib.request.Request(
+              "https://slack.com/api/chat.postMessage",
+              data=json.dumps({"channel": channel, "text": text, "unfurl_links": False}).encode(),
+              headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              body = json.load(response)
+          if not body.get("ok"):
+              print(f"::error::Slack chat.postMessage failed: {body.get('error')}")
+              sys.exit(1)
+          print(f"Posted: {headline}")
+          PYEOF
+
+  conformance-drift:
+    name: conformance tables match upstream
+    needs: detect
+    if: ${{ needs.detect.outputs.conformance == 'true' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Compare the case tables with topoteretes/cognee-integrations@main
+        working-directory: cognee-integrations/integrations/conformance
+        run: |
+          set -euo pipefail
+          upstream=https://github.com/topoteretes/cognee-integrations
+          sha="$(git ls-remote "${upstream}" refs/heads/main | cut -f1)"
+          echo "Upstream main is at ${sha}"
+          drift=0
+          for table in *_cases.json; do
+            curl -fsSL "https://raw.githubusercontent.com/topoteretes/cognee-integrations/${sha}/integrations/conformance/${table}" \
+              -o "${RUNNER_TEMP}/${table}"
+            if ! cmp -s "${table}" "${RUNNER_TEMP}/${table}"; then
+              echo "::error file=cognee-integrations/integrations/conformance/${table}::${table} differs from upstream. Copy it from ${upstream}/blob/${sha}/integrations/conformance/${table}"
+              drift=1
+            fi
+          done
+          [ "${drift}" = 0 ] && echo "All case tables match upstream main."
+          exit "${drift}"
+
+  inventory:
+    name: inventory matches the plugins
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+
+      - name: Check inventory.yml and the README table
+        # Every plugin folder has an entry, each entry matches its manifest,
+        # and the README table is the one inventory.yml renders.
+        run: uv run --no-project --python 3.12 --with pyyaml==6.0.2 python cognee-integrations/scripts/inventory.py --check
+
+  integrations-tests:
+    name: integrations-tests
+    needs: [detect, python-plugin, live, notify, conformance-drift, inventory]
+    runs-on: ubuntu-22.04
+    if: always()
+    steps:
+      - name: Check status
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          # Fails when any job failed or was cancelled; a skipped job (nothing
+          # changed, or no live run asked for) passes.
+          echo "${RESULTS}" | jq -r 'to_entries[] | "\(.key)=\(.value.result)"'
+          if echo "${RESULTS}" | jq -e 'any(.[]; .result == "failure" or .result == "cancelled")' > /dev/null; then
+            echo "One or more integration checks failed."
+            exit 1
+          fi
+          echo "All integration checks passed."

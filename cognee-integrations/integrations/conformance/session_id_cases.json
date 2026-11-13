@@ -1,0 +1,72 @@
+[
+  {
+    "input": "claude_session-01.log",
+    "expected": "claude_session-01.log",
+    "note": "allowed set passes through unchanged"
+  },
+  {
+    "input": "hello world",
+    "expected": "hello_world",
+    "note": "space becomes underscore"
+  },
+  {
+    "input": "a/b\\c:d",
+    "expected": "a_b_c_d",
+    "note": "path separators and colon become underscores"
+  },
+  {
+    "input": "__lead_and_trail__",
+    "expected": "lead_and_trail",
+    "note": "leading and trailing underscores are trimmed"
+  },
+  {
+    "input": "...dots...",
+    "expected": "dots",
+    "note": "leading and trailing dots are trimmed"
+  },
+  {
+    "input": "@@@leading",
+    "expected": "leading",
+    "note": "leading run of disallowed chars is trimmed after replacement"
+  },
+  {
+    "input": "naïve",
+    "expected": "na_ve",
+    "note": "unicode letter is not in the ASCII set, becomes underscore"
+  },
+  {
+    "input": "tab\tnl\n",
+    "expected": "tab_nl",
+    "note": "control chars become underscores, trailing one is trimmed"
+  },
+  {
+    "input": "3.14_pi",
+    "expected": "3.14_pi",
+    "note": "digits, dot and underscore are kept"
+  },
+  {
+    "input": "550e8400-e29b-41d4-a716-446655440000",
+    "expected": "550e8400-e29b-41d4-a716-446655440000",
+    "note": "a real UUID stays intact"
+  },
+  {
+    "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "expected": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "note": "length is capped at 120 characters"
+  },
+  {
+    "input": "a٣b",
+    "expected": "a_b",
+    "note": "non-ASCII unicode digit is rejected by the isascii guard, becomes underscore"
+  },
+  {
+    "input": "a😀b",
+    "expected": "a_b",
+    "note": "astral/emoji code point becomes a single underscore, pinning code-point iteration"
+  },
+  {
+    "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbb",
+    "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_",
+    "note": "trailing trim happens before the 120-char cap, so a boundary underscore is kept"
+  }
+]

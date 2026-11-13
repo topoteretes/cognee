@@ -156,3 +156,78 @@ jobs:
           payload: |
             channel: ${{ secrets.SLACK_NIGHTLY_CHANNEL_ID }}
             text: "Nightly Scheduler failed to dispatch Nightly Tests at `${{ steps.pick.outputs.ref }}` — tonight's nightly will not run and will post nothing. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+  # The integrations' live round trip (test_integrations.yml, `live`), every
+  # evening against dev: plugin fixes land on dev, and main only moves at core
+  # releases, so main's copy of the plugins would be weeks old. Its own job, so a
+  # failure here never stops the core nightly above. Skips the Sunday 06:00 cron,
+  # which would run it a second time that day.
+  dispatch-integrations:
+    name: Dispatch the integrations live tier
+    if: ${{ github.event_name == 'schedule' && github.event.schedule != '0 6 * * 0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Note the newest existing integrations run
+        id: baseline
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Before dispatching, so the confirm step below cannot match an older run.
+          id="$(gh run list --workflow test_integrations.yml --branch dev \
+                  --event workflow_dispatch --limit 1 \
+                  --json databaseId --jq '.[0].databaseId // 0')"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "baseline run id: $id"
+
+      - name: Dispatch test_integrations.yml at dev with live
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Input values as strings, as the dispatch API documents them; a
+          # boolean input still arrives as a boolean `inputs.live`.
+          jq -nc '{ref: "dev", inputs: {live: "true"}}' \
+          | gh api -X POST \
+              "repos/$GH_REPO/actions/workflows/test_integrations.yml/dispatches" \
+              --input -
+
+      - name: Confirm a NEW run was created
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          BASELINE: ${{ steps.baseline.outputs.id }}
+        run: |
+          set -euo pipefail
+          # The dispatch endpoint answers 204 with no body, so a lost dispatch
+          # looks like success, and a live tier that never starts posts nothing.
+          for _ in $(seq 1 12); do
+            read -r id url <<<"$(gh run list --workflow test_integrations.yml \
+                  --branch dev --event workflow_dispatch --limit 1 \
+                  --json databaseId,url --jq '.[0] | "\(.databaseId) \(.url)"' \
+                  2>/dev/null || echo "0 -")"
+            if [ "${id:-0}" != "0" ] && [ "${id}" != "${BASELINE}" ]; then
+              echo "dispatched: $url"
+              echo "Integrations live tier dispatched at \`dev\`: $url" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::no NEW test_integrations.yml run appeared for dev within 60s"
+          exit 1
+
+      - name: Alert Slack if the dispatch failed
+        if: ${{ failure() }}
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d  # v4.0.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            channel: ${{ secrets.SLACK_INTEGRATIONS_NIGHTLY_CHANNEL_ID }}
+            text: "Nightly Scheduler failed to dispatch the integrations live tier at `dev` — tonight's live tier will not run and will post nothing. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
