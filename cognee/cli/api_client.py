@@ -11,7 +11,8 @@ writes, which is the correct model for file-based backends.
 """
 
 from __future__ import annotations
-
+import hashlib
+from importlib.metadata import files
 import io
 import mimetypes
 import os
@@ -282,10 +283,11 @@ class CogneeApiClient:
                         ("data", (os.path.basename(item), fh, mime or "application/octet-stream"))
                     )
                 else:
+                    content_hash = hashlib.md5(item.encode("utf-8")).hexdigest()
                     files.append(
                         (
                             "data",
-                            (f"text_{len(files)}.txt", io.BytesIO(item.encode()), "text/plain"),
+                            (f"text_{content_hash}.txt", io.BytesIO(item.encode()), "text/plain"),
                         )
                     )
             form_data: dict[str, Any] = {
