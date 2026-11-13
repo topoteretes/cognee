@@ -1,0 +1,31 @@
+id: dify
+title: Cognee tool plugin for Dify
+kind: integration
+stack: workflow-tool
+tags:
+  - dify
+  - plugin
+  - memory
+  - remember
+  - recall
+summary: >-
+  A Dify tool plugin exposing Cognee's memory API to agents and workflows:
+  remember, recall, improve and forget over Cognee Cloud or a self-hosted server.
+what_youll_build: >-
+  Dify workflows where a Remember node stores context, a Recall node injects
+  the answer before the LLM node, and sessions persist across runs.
+quickstart: |
+  git clone https://github.com/topoteretes/cognee-integrations.git
+  cd cognee-integrations
+  dify plugin package integrations/dify
+  # In Dify (Plugins page): Install from local file -> upload dify.difypkg
+  # Provider config: Cognee Server URL http://localhost:8000 (or your Cognee Cloud
+  # tenant URL) with an API key, or email/password on a self-hosted server.
+expected_output: >-
+  The provider health check passes; a Remember node followed by a Recall node
+  answers from the graph, and a later Recall with the same Session ID returns
+  the stored exchange.
+difficulty: medium
+repo: topoteretes/cognee-integrations
+path: integrations/dify
+inventory_slug: dify

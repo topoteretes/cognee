@@ -1,0 +1,30 @@
+id: crewai
+title: Cognee tools for CrewAI agents
+kind: integration
+stack: framework
+tags:
+  - crewai
+  - python
+  - pypi
+  - tools
+  - session-management
+summary: >-
+  Drop-in CrewAI tools that store and search a persistent Cognee knowledge
+  base, with sessionized isolation for multi-user agents.
+what_youll_build: >-
+  A CrewAI agent whose add tool persists context into the knowledge graph and
+  whose search tool retrieves it again on later kickoff calls.
+quickstart: |
+  pip install cognee-integration-crewai
+  export LLM_API_KEY=your_openai_key
+  # in your async agent code:
+  from cognee_integration_crewai import get_sessionized_cognee_tools
+  add_tool, search_tool = get_sessionized_cognee_tools("user-123")
+  # pass [add_tool, search_tool] into Agent(tools=...)
+expected_output: >-
+  The agent calls the add tool to store context and the search tool to
+  retrieve the stored fact on a later run.
+difficulty: medium
+repo: topoteretes/cognee-integrations
+path: integrations/crewai
+inventory_slug: crewai
