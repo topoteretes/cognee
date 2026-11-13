@@ -354,6 +354,8 @@ class CloudClient:
             payload["tools_trigger"] = kwargs["tools_trigger"]
         if kwargs.get("code_query") is not None:
             payload["code_query"] = kwargs["code_query"]
+        if kwargs.get("retriever_specific_config") is not None:
+            payload["retriever_specific_config"] = kwargs["retriever_specific_config"]
 
         async with session.post(
             f"{self.service_url}/api/v1/recall",
@@ -845,6 +847,8 @@ class CloudClient:
             payload["includeReferences"] = kwargs["include_references"]
         if kwargs.get("code_query") is not None:
             payload["codeQuery"] = kwargs["code_query"]
+        if kwargs.get("retriever_specific_config") is not None:
+            payload["retriever_specific_config"] = kwargs["retriever_specific_config"]
 
         async with session.post(
             f"{self.service_url}/api/v1/search",
