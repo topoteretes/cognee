@@ -17,7 +17,8 @@ name: test | integrations
 # tokens, so it runs only on dispatch: nightly_scheduler.yml dispatches it
 # against dev every evening. It fails when any of those tests skips, so a
 # missing dependency or key can never pass as green, and `notify` posts every
-# live run's result, green included, to #nightly-ci-integrations.
+# dispatched run's result, green included, to #nightly-ci-integrations: the
+# live tier and every other job that run executes, so no failure reports green.
 #
 # The case tables in integrations/conformance/ are a copy: the hook plugins in
 # topoteretes/cognee-integrations generate two of them and test against the
@@ -295,9 +296,12 @@ jobs:
           retention-days: 7
 
   notify:
-    name: Slack live report
-    needs: [detect, live]
-    # Every live run, green included: a failure-only report makes a passing
+    name: Slack nightly report
+    # Every job a dispatched run executes: a dispatch also runs the plugin checks,
+    # the conformance drift check and the inventory check, and a report built from
+    # the live tier alone would post green over any of them failing.
+    needs: [detect, python-plugin, live, conformance-drift, inventory]
+    # Every dispatched run, green included: a failure-only report makes a passing
     # night and a broken notifier look the same. Not on push or PR runs.
     if: ${{ always() && inputs.live }}
     runs-on: ubuntu-22.04
@@ -318,6 +322,9 @@ jobs:
           PLUGINS: ${{ needs.detect.outputs.live }}
           DETECT_RESULT: ${{ needs.detect.result }}
           LIVE_RESULT: ${{ needs.live.result }}
+          PLUGIN_CHECKS_RESULT: ${{ needs.python-plugin.result }}
+          CONFORMANCE_RESULT: ${{ needs.conformance-drift.result }}
+          INVENTORY_RESULT: ${{ needs.inventory.result }}
           REPORTS: ${{ runner.temp }}/reports
           REF: ${{ github.ref_name }}
           TRIGGER: ${{ github.event_name }}
@@ -333,13 +340,14 @@ jobs:
           token = os.environ["SLACK_BOT_TOKEN"].strip()
           channel = os.environ["SLACK_CHANNEL"].strip()
           if not token or not channel:
-              print("::error::SLACK_BOT_TOKEN / SLACK_INTEGRATIONS_NIGHTLY_CHANNEL_ID are not set; cannot post the live report.")
+              print("::error::SLACK_BOT_TOKEN / SLACK_INTEGRATIONS_NIGHTLY_CHANNEL_ID are not set; cannot post the nightly report.")
               sys.exit(1)
 
           icons = {
               "success": ":white_check_mark:",
               "failure": ":red_circle:",
               "cancelled": ":octagonal_sign:",
+              "skipped": ":fast_forward:",
           }
           try:
               plugins = json.loads(os.environ.get("PLUGINS") or "[]")
@@ -364,14 +372,27 @@ jobs:
               if status != "success" and not any(t.strip() for t in tests):
                   lines.append("> no per-test summary — the job likely crashed or timed out; see the run log")
 
+          # The other jobs of the run. Skipped means it had nothing to check
+          # (no plugin, no conformance run) and does not change the headline.
+          checks = {
+              "lint and unit tests": os.environ["PLUGIN_CHECKS_RESULT"],
+              "conformance drift": os.environ["CONFORMANCE_RESULT"],
+              "inventory": os.environ["INVENTORY_RESULT"],
+          }
+          for name, result in checks.items():
+              result = result or "unknown"
+              lines.append(f"{icons.get(result, ':white_circle:')} *{name}*: {result}")
+              if result != "skipped":
+                  outcomes.add(result)
+
           trigger = os.environ["TRIGGER"]
           ref = os.environ["REF"]
           if outcomes == {"success"}:
-              headline = f":large_green_circle: *Integrations live tier green* (`{ref}`, {trigger})"
+              headline = f":large_green_circle: *Integrations nightly green* (`{ref}`, {trigger})"
           elif "failure" in outcomes:
-              headline = f":rotating_light: *Integrations live tier failed* (`{ref}`, {trigger})"
+              headline = f":rotating_light: *Integrations nightly failed* (`{ref}`, {trigger})"
           else:
-              headline = f":warning: *Integrations live tier incomplete* (`{ref}`, {trigger}) — a plugin was cancelled or not run"
+              headline = f":warning: *Integrations nightly incomplete* (`{ref}`, {trigger}) — a job was cancelled or not run"
           text = "\n".join([headline, *lines, f"<{os.environ['RUN_URL']}|Open the run>"])
 
           request = urllib.request.Request(
