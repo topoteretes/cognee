@@ -69,6 +69,7 @@ from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
+from cognee.modules.session_lifecycle.usage_tracking import track_session_usage
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
@@ -227,9 +228,14 @@ async def improve(
         if inputs.legacy_memify is not None:
             # Deprecated custom tasks run last, under the same lock and result.
             stages.append(LegacyCustomTasksStage())
+        # A single-session run bills its session-fed stages to that session.
+        # Dataset-wide stages and multi-session runs stay unattributed.
+        usage_session = inputs.session_ids[0] if len(inputs.session_ids) == 1 else None
         try:
             for index, stage in enumerate(stages):
-                stage_result = await execute_stage(stage, inputs)
+                usage_target = usage_session if stage.needs_sessions else None
+                async with track_session_usage(usage_target, inputs.user.id):
+                    stage_result = await execute_stage(stage, inputs)
                 result.record(stage_result)
                 if stage_result.run_info_stamp:
                     # The stage decides when and what it stamps; the row's

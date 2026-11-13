@@ -1,5 +1,6 @@
 import asyncio
 import re
+from contextlib import nullcontext
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -51,6 +52,7 @@ from cognee.modules.search.methods.node_name_scope import node_name_scope
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.search.types.SearchType import resolve_deprecated_search_type
+from cognee.modules.session_lifecycle.usage_tracking import track_session_usage
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -386,11 +388,14 @@ async def _fetch_session_context(
     session_id: str,
     context_profile: str,
     user: str | None = None,
+    record_context_usage: bool = False,
 ) -> list[ResponseSessionContextEntry]:
     """Render active session-context lessons for one profile as a one-item list.
 
-    Read-only: uses the deterministic builder with ``stamp_served=False`` so it never updates
-    served metadata. Returns an empty list when no lessons match the profile.
+    Read-only by default. ``record_context_usage`` opts into stamping returned guidance,
+    and only in the caller's own session: a read grant on someone else's session never
+    writes to it. Published structured summaries are included without raw transcript
+    fallback.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
     from cognee.infrastructure.session.session_context_builder import build_active_context_block
@@ -412,14 +417,20 @@ async def _fetch_session_context(
         session_id=session_id,
         query=query_text,
         context_profile=context_profile,
-        stamp_served=False,
+        stamp_served=record_context_usage and cache_user_id == caller_user_id,
     )
-    if not block:
+    from cognee.modules.session_distillation.summary import latest_session_summary
+
+    summary = await latest_session_summary(sm, cache_user_id, session_id)
+    if not block and not summary:
         return []
 
     return [
         ResponseSessionContextEntry(
-            content=block, context_profile=context_profile, source="session_context"
+            content=block,
+            context_profile=context_profile,
+            source="session_context",
+            session_summary=summary,
         )
     ]
 
@@ -428,6 +439,23 @@ def _scope_should_forward_resolved(scope: str | list[str] | None) -> bool:
     if isinstance(scope, str):
         return scope in {"all", "graph_context"}
     return bool(scope and {"all", "graph_context"}.intersection(scope))
+
+
+async def _session_usage_scope(session_id: str | None, user):
+    """Bind an explicit session as the usage target for the whole recall.
+
+    Covers retrieval-stage LLM and embedding calls, not just the answer the
+    session turn already records. Without a session_id, or before cognee has a
+    default user, usage stays where it was attributed before.
+    """
+    if not session_id:
+        return nullcontext()
+    if user is None:
+        try:
+            user = await get_default_user()
+        except (DatabaseNotCreatedError, UserNotFoundError):
+            return nullcontext()
+    return track_session_usage(session_id, user.id)
 
 
 @telemetry_on_error("cognee.recall ERRORED")
@@ -451,6 +479,7 @@ async def recall(
     only_context: bool = False,
     session_id: str | None = None,
     context_profile: str = "qa",
+    record_context_usage: bool = False,
     wide_search_top_k: int | None = None,
     triplet_distance_penalty: float | None = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
@@ -667,6 +696,7 @@ async def recall(
                 only_context=only_context,
                 session_id=session_id,
                 context_profile=context_profile,
+                record_context_usage=record_context_usage,
                 verbose=verbose,
                 include_references=include_references,
                 response_schema=(
@@ -682,7 +712,8 @@ async def recall(
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
             return results
 
-        async with record_operation("recall", user=user, session_ids=[session_id]):
+        usage_scope = await _session_usage_scope(session_id, user)
+        async with usage_scope, record_operation("recall", user=user, session_ids=[session_id]):
             merged: list[RecallResponse] = []
 
             async def _run_session() -> list[RecallResponse]:
@@ -718,6 +749,7 @@ async def recall(
                         session_id=session_id,
                         context_profile=context_profile,
                         user=user,
+                        record_context_usage=record_context_usage,
                     )
                 )
 

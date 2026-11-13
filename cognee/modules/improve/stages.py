@@ -372,8 +372,11 @@ class DistillSessionsStage(BaseStage):
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
         from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
         from cognee.modules.session_distillation import distill_session
+        from cognee.modules.session_distillation.summary import publish_session_summary
 
         distilled = 0
+        summaries = 0
+        summaries_failed = 0
         completed = 0
         failed = 0
         uncurated = 0
@@ -417,13 +420,42 @@ class DistillSessionsStage(BaseStage):
                     e,
                     exc_info=True,
                 )
+            # The summary is independent of distillation: its failure is counted
+            # on its own, never as a failed distillation.
+            try:
+                summaries += int(
+                    await publish_session_summary(
+                        session_id, dataset=inputs.dataset_id, user=inputs.user
+                    )
+                )
+            except LLMPaymentRequiredError as e:
+                summaries_failed += 1
+                last_error = e
+                logger.warning(
+                    "improve: LLM budget exhausted summarizing session '%s'; "
+                    "skipping the remaining sessions: %s",
+                    session_id,
+                    e,
+                )
+                break
+            except Exception as e:
+                summaries_failed += 1
+                last_error = e
+                logger.warning(
+                    "improve: session summary failed for '%s' (non-fatal): %s",
+                    session_id,
+                    e,
+                    exc_info=True,
+                )
         counts = {
             "documents": distilled,
+            "summaries": summaries,
+            "summaries_failed": summaries_failed,
             "sessions_completed": completed,
             "sessions_failed": failed,
             "entries_uncurated": uncurated,
         }
-        if failed:
+        if failed or summaries_failed:
             return StageResult.errored(self.name, last_error, **counts)
         return StageResult.completed(self.name, **counts)
 

@@ -192,9 +192,12 @@ async def test_recall_session_context_scope_threads_profile(monkeypatch, api_rec
     user = _make_user()
     captured = {}
 
-    async def dummy_fetch_session_context(query_text, session_id, context_profile, user=None):
+    async def dummy_fetch_session_context(
+        query_text, session_id, context_profile, user=None, record_context_usage=False
+    ):
         captured["context_profile"] = context_profile
         captured["session_id"] = session_id
+        assert record_context_usage is False
         return [
             ResponseSessionContextEntry(
                 content="block", context_profile=context_profile, source="session_context"
@@ -427,6 +430,57 @@ async def test_fetch_session_context_renders_profile_read_only(monkeypatch, api_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("own_session, stamped", [(True, True), (False, False)])
+async def test_fetch_session_context_stamps_only_the_callers_own_session(
+    monkeypatch, api_recall_mod, own_session, stamped
+):
+    """A read grant on someone else's session never writes to it (record_context_usage)."""
+    from cognee.infrastructure.session.session_context_models import SessionContextEntry
+
+    agent_row = SessionContextEntry(
+        id="a1",
+        section="tool_rules",
+        context_profile="agent",
+        content="Use uv run",
+        created_at="2026-06-11T10:00:00",
+    ).model_dump()
+
+    class _FakeSM:
+        is_available = True
+
+        def __init__(self):
+            self.updates = 0
+
+        async def get_session_context_entries(self, user_id, session_id):
+            return [agent_row]
+
+        async def update_session_context_entry(self, **kwargs):
+            self.updates += 1
+            return True
+
+    fake = _FakeSM()
+    owner_id = str(uuid4())
+
+    async def fake_resolve_cache_user(session_id, caller_user_id):
+        return caller_user_id if own_session else owner_id
+
+    gsm_mod = importlib.import_module("cognee.infrastructure.session.get_session_manager")
+    monkeypatch.setattr(gsm_mod, "get_session_manager", lambda: fake)
+    monkeypatch.setattr(api_recall_mod, "_resolve_session_cache_user_id", fake_resolve_cache_user)
+
+    out = await api_recall_mod._fetch_session_context(
+        query_text="q",
+        session_id="s",
+        context_profile="agent",
+        user=_make_user(),
+        record_context_usage=True,
+    )
+
+    assert "Use uv run" in out[0].content
+    assert (fake.updates > 0) is stamped
+
+
+@pytest.mark.asyncio
 async def test_fetch_session_context_empty_when_no_lessons(monkeypatch, api_recall_mod):
     class _EmptySM:
         is_available = True
@@ -466,6 +520,31 @@ async def test_cloud_client_recall_payload_includes_context_profile(monkeypatch)
     )
 
     assert fake.last_json.get("context_profile") == "agent"
+
+
+@pytest.mark.asyncio
+async def test_context_usage_is_opt_in_and_summary_is_returned(monkeypatch, api_recall_mod):
+    from unittest.mock import AsyncMock
+
+    from cognee.infrastructure.session import session_context_builder
+    from cognee.modules.session_distillation import summary
+
+    manager = types.SimpleNamespace(is_available=True)
+    gsm_mod = importlib.import_module("cognee.infrastructure.session.get_session_manager")
+    monkeypatch.setattr(gsm_mod, "get_session_manager", lambda: manager)
+    user = _make_user()
+    # The caller's own session: only the owner's recall stamps usage.
+    monkeypatch.setattr(
+        api_recall_mod, "_resolve_session_cache_user_id", AsyncMock(return_value=str(user.id))
+    )
+    builder = AsyncMock(return_value=("project fact", ["e"]))
+    monkeypatch.setattr(session_context_builder, "build_active_context_block", builder)
+    monkeypatch.setattr(summary, "latest_session_summary", AsyncMock(return_value={"goal": "ship"}))
+    output = await api_recall_mod._fetch_session_context(
+        "q", "s", "agent", user=user, record_context_usage=True
+    )
+    assert builder.await_args.kwargs["stamp_served"] is True
+    assert output[0].session_summary == {"goal": "ship"}
 
 
 @pytest.mark.asyncio
