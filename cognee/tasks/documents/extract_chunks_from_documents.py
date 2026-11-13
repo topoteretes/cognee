@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.utils.run_cpu_bound import run_cpu_bound
 from cognee.modules.chunking.Chunker import Chunker
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.models import Data
@@ -67,8 +68,10 @@ async def extract_chunks_from_documents(
             document_token_count += document_chunk.chunk_size
             document_chunk.belongs_to_set = document.belongs_to_set
             if temporal_hints:
-                document_chunk._temporal_hints, temporal_base = hint_lines(
-                    document_chunk.text, temporal_base
+                # dateparser's search is CPU-bound and costs more than cutting the chunks
+                # did, so like the chunker it runs on the shared CPU worker.
+                document_chunk._temporal_hints, temporal_base = await run_cpu_bound(
+                    hint_lines, document_chunk.text, temporal_base
                 )
             yield document_chunk
 
