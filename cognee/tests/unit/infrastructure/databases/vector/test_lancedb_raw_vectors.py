@@ -35,6 +35,29 @@ class _RawPayload(BaseModel):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_raw_width_override_and_catalog_preserve_other_collections(tmp_path):
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "mixed"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
+    )
+    try:
+        point = {"id": uuid4(), "vector": [1.0, 0.0], "payload": {"text": "copied"}}
+        point["payload"]["id"] = str(point["id"])
+        await adapter.upsert_raw_vectors("Two_text", [point], vector_size=2)
+        await adapter.upsert_raw_vectors("Three_text", [{**point, "vector": [1.0, 0.0, 0.0]}])
+        assert set(await adapter.list_collections()) == {"Two_text", "Three_text"}
+        [row] = await adapter.retrieve("Two_text", [str(point["id"])], include_vector=True)
+        assert row.payload["vector"] == [1.0, 0.0]
+        with pytest.raises(ValueError, match="Collection vector size"):
+            await adapter.upsert_raw_vectors("Two_text", [{**point, "vector": [1.0, 0.0, 0.0]}])
+        with pytest.raises(ValueError, match="expected size 4"):
+            await adapter.upsert_raw_vectors("Invalid_text", [point], vector_size=4)
+        assert "Invalid_text" not in await adapter.list_collections()
+    finally:
+        await adapter.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
 async def test_lancedb_upsert_raw_vectors_writes_and_updates_payload(tmp_path):
     adapter = LanceDBAdapter(
         url=str(tmp_path / "db"),

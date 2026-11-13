@@ -449,6 +449,9 @@ class LanceDBAdapter(VectorDBInterface):
         table_names = set(await connection.table_names())
         return [name for name in collection_names if name in table_names]
 
+    async def list_collections(self) -> list[str]:
+        return list(await (await self.get_connection()).table_names())
+
     async def delete_collection(self, collection_name: str) -> None:
         """Drop the table for ``collection_name``; a missing table is not an error.
 
@@ -687,6 +690,8 @@ class LanceDBAdapter(VectorDBInterface):
         collection_name: str,
         points: list[dict],
         payload_schema: type[BaseModel] | None = None,
+        *,
+        vector_size: int | None = None,
     ) -> None:
         """Upsert caller-provided vectors without invoking the embedding engine.
 
@@ -706,7 +711,8 @@ class LanceDBAdapter(VectorDBInterface):
         if payload_schema is None:
             payload_schema = IndexSchema
 
-        vector_size = self.embedding_engine.get_vector_size()
+        if vector_size is None:
+            vector_size = self.embedding_engine.get_vector_size()
         payload_model = self._payload_model_for(payload_schema)
         LanceDataPoint = self._make_lance_datapoint_cls(payload_model, vector_size)
 
@@ -728,6 +734,10 @@ class LanceDBAdapter(VectorDBInterface):
                     )
 
         collection = await self.get_collection(collection_name)
+
+        stored_width = (await collection.schema()).field("vector").type.list_size
+        if stored_width != vector_size:
+            raise ValueError(f"Collection vector size {stored_width} does not match {vector_size}")
 
         self._mark_written(collection_name)
         # Read the stored tags, build and write under one lock section, as
@@ -768,7 +778,9 @@ class LanceDBAdapter(VectorDBInterface):
                 collection_name,
                 e,
             )
-            await self._migrate_collection_schema(collection_name, payload_schema, raw_points)
+            await self._migrate_collection_schema(
+                collection_name, payload_schema, raw_points, vector_size=vector_size
+            )
 
     # ------------------------------------------------------------------
     # Compaction
@@ -1021,6 +1033,8 @@ class LanceDBAdapter(VectorDBInterface):
         collection_name: str,
         payload_schema: type,
         new_lance_data_points: list,
+        *,
+        vector_size: int | None = None,
     ):
         """Bring a LanceDB table to the current payload schema and write the points.
 
@@ -1049,7 +1063,11 @@ class LanceDBAdapter(VectorDBInterface):
                     if not self._is_schema_drift_error(e):
                         raise
             return await self._evolve_collection_schema(
-                collection_name, collection, payload_schema, new_lance_data_points
+                collection_name,
+                collection,
+                payload_schema,
+                new_lance_data_points,
+                vector_size=vector_size,
             )
 
     async def _evolve_collection_schema(
@@ -1058,6 +1076,8 @@ class LanceDBAdapter(VectorDBInterface):
         old_collection,
         payload_schema: type,
         new_lance_data_points: list,
+        *,
+        vector_size: int | None = None,
     ):
         """Bring the table's ``payload`` struct to ``payload_schema``'s shape, in place.
 
@@ -1073,7 +1093,8 @@ class LanceDBAdapter(VectorDBInterface):
         are not the configured width is refused: that is a re-embedding, not a schema
         migration.
         """
-        vector_size = self.embedding_engine.get_vector_size()
+        if vector_size is None:
+            vector_size = self.embedding_engine.get_vector_size()
         target, required = self._target_payload_struct(payload_schema)
         if target is None:
             raise TypeError(

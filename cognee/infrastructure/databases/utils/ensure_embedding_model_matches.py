@@ -58,8 +58,10 @@ async def ensure_embedding_model_matches(dataset_database: DatasetDatabase) -> N
     """Raise ``EmbeddingDimensionMismatchError`` if the configured model cannot serve this dataset.
 
     Runs with the dataset's vector configuration already bound, so a row with
-    no recorded width can ask the store once. An empty store adopts the
-    configured model; a store this cannot read (a provider without
+    no recorded width can ask the store once. After matching width, a missing
+    model adopts the configured model as an assumption about legacy provenance,
+    not proof of its original model. An empty store adopts the configured
+    identity; a store this cannot read (a provider without
     ``get_stored_vector_size``) is left to the store's own errors.
     """
     embedding_record = embedding_model_record()
@@ -80,14 +82,20 @@ async def ensure_embedding_model_matches(dataset_database: DatasetDatabase) -> N
             return
         stored_dimensions = await read_stored_size()
         if stored_dimensions is None:
-            await _record_embedding_model(dataset_database, embedding_record)
+            await _record_embedding_model(
+                dataset_database,
+                {
+                    **embedding_record,
+                    MODEL_KEY: configured_model if info.get(MODEL_KEY) is None else info[MODEL_KEY],
+                },
+            )
             return
-        # The model that built a legacy row is unknown; its width is what matters.
-        await _record_embedding_model(
-            dataset_database, {MODEL_KEY: None, DIMENSIONS_KEY: stored_dimensions}
-        )
+        # Preserve known provenance; legacy provenance is assumed only after compatibility.
+        await _record_embedding_model(dataset_database, {DIMENSIONS_KEY: stored_dimensions})
 
     if stored_dimensions == configured_dimensions:
+        if info.get(MODEL_KEY) is None:
+            await _record_embedding_model(dataset_database, embedding_record)
         return
 
     raise EmbeddingDimensionMismatchError(

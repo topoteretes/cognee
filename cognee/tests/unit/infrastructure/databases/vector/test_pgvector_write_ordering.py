@@ -112,7 +112,11 @@ async def test_upsert_raw_vectors_writes_rows_in_row_order():
     ids = _ids_in_reverse_order(5)
     adapter = _adapter(log)
     table = Table(
-        "Point_text", MetaData(), Column("id", String), Column("payload", JSON), Column("vector")
+        "Point_text",
+        MetaData(),
+        Column("id", String),
+        Column("payload", JSON),
+        Column("vector", Vector(3)),
     )
 
     async def get_table(name):
@@ -127,6 +131,65 @@ async def test_upsert_raw_vectors_writes_rows_in_row_order():
 
     assert len(log) == 1
     assert log[0] == sorted(str(i) for i in ids)
+
+
+@pytest.mark.asyncio
+async def test_raw_width_override_creates_addressed_width_and_rejects_existing_mismatch():
+    log, created = [], []
+    adapter = _adapter(log)
+    table = Table(
+        "Two_text",
+        MetaData(),
+        Column("id", String),
+        Column("payload", JSON),
+        Column("vector", Vector(2)),
+    )
+
+    async def missing(name):
+        return False
+
+    async def create(name, payload_schema=None, *, vector_size=None):
+        created.append((name, vector_size))
+
+    async def get_table(name):
+        return table
+
+    adapter.has_collection, adapter.create_collection, adapter.get_table = (
+        missing,
+        create,
+        get_table,
+    )
+    point = {"id": uuid4(), "vector": [1.0, 0.0], "payload": {"text": "copied"}}
+    await adapter.upsert_raw_vectors("Two_text", [point], vector_size=2)
+    assert created == [("Two_text", 2)] and len(log) == 1
+    with pytest.raises(ValueError, match="Collection vector size"):
+        await adapter.upsert_raw_vectors("Two_text", [{**point, "vector": [1.0, 0.0, 0.0]}])
+    assert len(log) == 1
+
+
+@pytest.mark.asyncio
+async def test_native_collection_enumeration_reads_catalog(monkeypatch):
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    module = import_module("cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter")
+    sync_connection = object()
+
+    async def run_sync(callback):
+        return callback(sync_connection)
+
+    @asynccontextmanager
+    async def connect():
+        yield SimpleNamespace(run_sync=run_sync)
+
+    adapter = object.__new__(PGVectorAdapter)
+    adapter.engine = SimpleNamespace(connect=connect)
+    monkeypatch.setattr(
+        module,
+        "inspect",
+        lambda conn: SimpleNamespace(get_table_names=lambda: ["Historic_text", "Current_text"]),
+    )
+    assert await adapter.list_collections() == ["Historic_text", "Current_text"]
 
 
 def test_row_order_is_the_uuid_btree_order():

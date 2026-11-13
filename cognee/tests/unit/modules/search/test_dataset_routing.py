@@ -12,7 +12,6 @@ import pytest
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.modules.search.dataset_routing import (
-    DATASET_ROUTE_COLLECTION,
     dataset_route_ids,
     route_datasets,
     sync_dataset_routes,
@@ -26,6 +25,7 @@ from cognee.tasks.summarization.models import GlobalContextSummary
 index_module = import_module("cognee.modules.search.dataset_routing.index")
 route_module = import_module("cognee.modules.search.dataset_routing.route")
 store_module = import_module("cognee.modules.search.dataset_routing.store")
+DATASET_ROUTE_COLLECTION = store_module.dataset_route_collection("model-a", 2)
 
 
 async def _route(query, dataset_ids, top_k=1, distance_cutoff=0.8, tie_margin=0.001):
@@ -73,6 +73,9 @@ class FakeEngine:
         assert collection_name == DATASET_ROUTE_COLLECTION
         return self.collection_exists
 
+    async def list_collections(self):
+        return [DATASET_ROUTE_COLLECTION]
+
     async def get_stored_vector_size(self):
         return self.stored_width
 
@@ -102,7 +105,9 @@ class FakeEngine:
     async def create_data_points(self, collection_name, data_points):
         raise AssertionError("the routing mirror must copy vectors, never embed its rows")
 
-    async def upsert_raw_vectors(self, collection_name, points, payload_schema=None):
+    async def upsert_raw_vectors(
+        self, collection_name, points, payload_schema=None, *, vector_size=None
+    ):
         assert collection_name == DATASET_ROUTE_COLLECTION
         # No schema: the rows are index rows, copied from the dataset's store as stored.
         assert payload_schema is None
@@ -115,6 +120,17 @@ class FakeEngine:
 
 
 def _patch(monkeypatch, engine, documents, access_control=True):
+    async def identity():
+        return {"embedding_model": "model-a", "embedding_dimensions": 2}
+
+    async def records(dataset_ids):
+        return {dataset_id: await identity() for dataset_id in dataset_ids}
+
+    monkeypatch.setattr(store_module, "deployment_embedding_record", identity)
+    monkeypatch.setattr(store_module, "dataset_embedding_records", records)
+    monkeypatch.setattr(index_module, "dataset_embedding_records", records)
+    monkeypatch.setattr(route_module, "deployment_embedding_record", identity)
+
     async def fake_data_ids(dataset_ids=None):
         if dataset_ids is None:
             return documents
@@ -160,6 +176,177 @@ def _summary(dataset_id, row_id, text, is_root=False):
 
 
 # --- ids -------------------------------------------------------------------
+
+
+def test_collection_identity_is_portable_and_isolates_models_and_widths():
+    names = {
+        store_module.dataset_route_collection(model, width)
+        for model, width in [("vendor/model", 8), ("vendor/model", 16), ("Vendor/model", 8)]
+    }
+    assert len(names) == 3
+    assert all(len(name) <= 63 and name.replace("_", "").isalnum() for name in names)
+
+
+@pytest.mark.asyncio
+async def test_candidates_match_both_model_and_width_without_dataset_store_entry(monkeypatch):
+    ids = [uuid4() for _ in range(7)]
+    records = dict(
+        zip(
+            ids,
+            [
+                {"embedding_model": "model-a", "embedding_dimensions": 2},
+                {"embedding_model": "model-b", "embedding_dimensions": 2},
+                {"embedding_model": "model-a", "embedding_dimensions": 3},
+                {"embedding_model": None, "embedding_dimensions": 2},
+                {"embedding_dimensions": 3},
+                {},
+                {"embedding_model": "model-a"},
+            ],
+        )
+    )
+    _patch(monkeypatch, FakeEngine(), {})
+
+    async def registry(requested):
+        assert requested == ids
+        return records
+
+    monkeypatch.setattr(store_module, "dataset_embedding_records", registry)
+    assert await store_module.eligible_dataset_ids(ids) == [ids[0], ids[3], ids[5]]
+
+
+@pytest.mark.asyncio
+async def test_registry_failure_propagates_before_routing(monkeypatch):
+    _patch(monkeypatch, FakeEngine(), {})
+
+    async def broken(ids):
+        raise ConnectionError("registry unavailable")
+
+    monkeypatch.setattr(store_module, "dataset_embedding_records", broken)
+    with pytest.raises(ConnectionError, match="registry unavailable"):
+        await _route("q", [uuid4(), uuid4()])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width_b", [2, 3])
+async def test_ten_datasets_switch_models_and_never_score_excluded_ids(monkeypatch, width_b):
+    ids = [uuid4() for _ in range(10)]
+    engine = FakeEngine(scores={dataset_route_ids(id, [])[0]: i / 20 for i, id in enumerate(ids)})
+    _patch(monkeypatch, engine, {})
+    current = {"embedding_model": "model-a", "embedding_dimensions": 2}
+    records = {
+        id: {
+            "embedding_model": "model-a" if i < 5 else "model-b",
+            "embedding_dimensions": 2 if i < 5 else width_b,
+        }
+        for i, id in enumerate(ids)
+    }
+
+    async def identity():
+        return current.copy()
+
+    async def registry(requested):
+        return {id: records[id] for id in requested}
+
+    async def has_collection(name):
+        assert name == store_module.dataset_route_collection(
+            current["embedding_model"], current["embedding_dimensions"]
+        )
+        return True
+
+    async def score(name, requested, vector):
+        engine.scored_ids.extend(requested)
+        return [ScoredResult(id=UUID(id), score=engine.scores[id]) for id in requested]
+
+    monkeypatch.setattr(store_module, "deployment_embedding_record", identity)
+    monkeypatch.setattr(route_module, "deployment_embedding_record", identity)
+    monkeypatch.setattr(store_module, "dataset_embedding_records", registry)
+    engine.has_collection, engine.score_by_ids = has_collection, score
+    for model, width, expected in [
+        ("model-a", 2, ids[:5]),
+        ("model-b", width_b, ids[5:]),
+        ("model-a", 2, ids[:5]),
+    ]:
+        current.update(embedding_model=model, embedding_dimensions=width)
+        engine.scored_ids.clear()
+        decision = await _route("q", ids)
+        assert decision.candidates == tuple(expected)
+        assert engine.scored_ids == [dataset_route_ids(id, [])[0] for id in expected]
+    # A registry move excludes an old row before reconciliation touches the store.
+    records[ids[0]] = {"embedding_model": "model-b", "embedding_dimensions": width_b}
+    engine.scored_ids.clear()
+    decision = await _route("q", ids)
+    assert ids[0] not in decision.candidates
+    assert dataset_route_ids(ids[0], [])[0] not in engine.scored_ids
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_moves_unchanged_text_to_recorded_collection(monkeypatch):
+    dataset = uuid4()
+    [root] = dataset_route_ids(dataset, [])
+    engine = FakeEngine(existing={root: "same text"})
+    _patch(monkeypatch, engine, {dataset: []})
+    target = store_module.dataset_route_collection("model-b", 3)
+    collections = [DATASET_ROUTE_COLLECTION, store_module.DATASET_ROUTE_COLLECTION, target]
+    deleted = []
+    written = []
+
+    async def registry(ids):
+        return {dataset: {"embedding_model": "model-b", "embedding_dimensions": 3}}
+
+    async def listing():
+        return collections + ["Unrelated_text"]
+
+    async def retrieve(collection, ids):
+        assert collection == target
+        return []
+
+    async def delete(collection, ids):
+        deleted.append((collection, ids))
+
+    async def upsert(collection, points, *, vector_size):
+        assert collection == target and vector_size == 3
+        written.extend(points)
+
+    monkeypatch.setattr(index_module, "dataset_embedding_records", registry)
+    engine.list_collections, engine.retrieve = listing, retrieve
+    engine.delete_data_points, engine.upsert_raw_vectors = delete, upsert
+    assert (
+        await sync_dataset_routes(
+            str(dataset),
+            [_summary(dataset, UUID(root), "same text", True)],
+            FakeIndexStore({root: [1.0, 0.0, 0.0]}),
+        )
+        == 1
+    )
+    assert deleted == [(name, [UUID(root)]) for name in collections[:-1]]
+    assert written[0]["vector"] == [1.0, 0.0, 0.0]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_discovers_historical_and_legacy_collections(monkeypatch):
+    dataset, doc = uuid4(), uuid4()
+    engine = FakeEngine()
+    _patch(monkeypatch, engine, {})
+    collections = [
+        store_module.DATASET_ROUTE_COLLECTION,
+        DATASET_ROUTE_COLLECTION,
+        store_module.dataset_route_collection("historic", 16).lower(),
+    ]
+    deleted = []
+
+    async def listing():
+        return collections + ["Entity_name", "DatasetRoute_textual"]
+
+    async def delete(collection, ids):
+        deleted.append((collection, ids))
+
+    engine.list_collections, engine.delete_data_points = listing, delete
+    await index_module.remove_dataset_routes(dataset, [doc])
+    assert deleted == [
+        (name, [UUID(id) for id in dataset_route_ids(dataset, [doc])]) for name in collections
+    ]
+    await index_module.prune_dataset_routes()
+    assert engine.dropped == collections
 
 
 def test_route_ids_are_the_index_ids_derived_from_dataset_and_documents():
@@ -320,7 +507,7 @@ async def test_an_unreachable_routing_store_warns_and_leaves_every_dataset_searc
 
 
 @pytest.mark.asyncio
-async def test_a_routing_collection_of_another_width_turns_routing_off(monkeypatch, caplog):
+async def test_other_collection_width_does_not_disable_routing(monkeypatch, caplog):
     """EMBEDDING_MODEL changed without a prune: the search covers every dataset, as before
     routing, and the store is never asked to compare vectors it cannot."""
     a, b = uuid4(), uuid4()
@@ -333,8 +520,9 @@ async def test_a_routing_collection_of_another_width_turns_routing_off(monkeypat
     assert decision.routed == ()
     assert decision.unindexed == (a, b)
     assert decision.narrowed is False
-    assert engine.embedded == [] and engine.scored_ids == []
-    assert "3-dimensional" in caplog.text and "produces 2" in caplog.text
+    assert engine.embedded == ["q"]
+    assert engine.scored_ids == dataset_route_ids(a, []) + dataset_route_ids(b, [])
+    assert caplog.text == ""
 
 
 @pytest.mark.asyncio
@@ -476,10 +664,15 @@ async def test_sync_ignores_rows_whose_ids_recall_cannot_derive(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_sync_writes_nothing_into_a_collection_of_another_width(monkeypatch):
+async def test_sync_does_not_mirror_unknown_identity(monkeypatch):
     dataset_id, doc = uuid4(), uuid4()
     engine = FakeEngine(existing={}, stored_width=3)
     _patch(monkeypatch, engine, {dataset_id: [doc]})
+
+    async def unknown(ids):
+        return {}
+
+    monkeypatch.setattr(index_module, "dataset_embedding_records", unknown)
     root = _summary(dataset_id, create_root_summary_id(str(dataset_id)), "root", is_root=True)
 
     assert await sync_dataset_routes(str(dataset_id), [root], FakeIndexStore({})) == 0
@@ -526,7 +719,9 @@ async def test_sync_on_an_adapter_without_raw_vector_writes_warns_and_moves_on(m
     (root_id,) = dataset_route_ids(dataset_id, [])
 
     class EngineWithoutRawWrites(FakeEngine):
-        async def upsert_raw_vectors(self, collection_name, points, payload_schema=None):
+        async def upsert_raw_vectors(
+            self, collection_name, points, payload_schema=None, *, vector_size=None
+        ):
             raise NotImplementedError
 
     engine = EngineWithoutRawWrites()
@@ -647,12 +842,26 @@ async def test_route_engine_embeds_with_the_deployment_settings_not_a_per_call_o
         seen.append((embedding_config.get(), llm_config.get()))
         return types.SimpleNamespace(name="routing-engine")
 
+    registry_module = import_module(
+        "cognee.infrastructure.databases.utils.ensure_embedding_model_matches"
+    )
+
+    def resolved_record():
+        assert embedding_config.get() is None and llm_config.get() is None
+        return {"embedding_model": "deployment-model", "embedding_dimensions": 16}
+
+    monkeypatch.setattr(registry_module, "embedding_model_record", resolved_record)
+
     monkeypatch.setattr(handle_module, "create_vector_engine", fake_create_vector_engine)
     override = types.SimpleNamespace(embedding_endpoint="https://tenant-a.example")
     embedding_token = embedding_config.set(override)
     llm_token = llm_config.set(override)
     try:
         assert (await get_dataset_route_engine()).name == "routing-engine"
+        assert await store_module.deployment_embedding_record() == {
+            "embedding_model": "deployment-model",
+            "embedding_dimensions": 16,
+        }
         # The caller's own context keeps its override.
         assert embedding_config.get() is override and llm_config.get() is override
     finally:
@@ -741,9 +950,8 @@ async def test_no_database_is_created_without_access_control_or_outside_pgvector
 
 
 @pytest.mark.asyncio
-async def test_routing_width_check_awaits_the_engines_vector_size():
+async def test_routing_identity_awaits_the_engines_vector_size(monkeypatch):
     """A worker-backed engine's size is awaited, never asked with the blocking call."""
-    from cognee.modules.search.dataset_routing.store import routing_width_matches
 
     class SelfSizingEmbedder:
         async def resolve_vector_size(self):
@@ -755,11 +963,19 @@ async def test_routing_width_check_awaits_the_engines_vector_size():
     class Store:
         embedding_engine = SelfSizingEmbedder()
 
-        def __init__(self, stored):
-            self.stored = stored
+    async def engine():
+        return Store()
 
-        async def get_stored_vector_size(self):
-            return self.stored
-
-    assert await routing_width_matches(Store(4)) is True
-    assert await routing_width_matches(Store(8)) is False
+    monkeypatch.setattr(store_module, "get_dataset_route_engine", engine)
+    monkeypatch.setattr(
+        store_module,
+        "_deployment_embedding_record",
+        lambda: {
+            "embedding_model": "worker/model",
+            "embedding_dimensions": None,
+        },
+    )
+    assert await store_module.deployment_embedding_record() == {
+        "embedding_model": "worker/model",
+        "embedding_dimensions": 4,
+    }

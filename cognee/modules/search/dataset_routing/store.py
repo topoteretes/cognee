@@ -9,16 +9,11 @@ dataset's store. The engine is built from the global config, never from the
 per-dataset ContextVar, so an upsert from inside a dataset's pipeline run and
 a read from search reach the same collection.
 
-One embedding model for the whole deployment: the collection has one vector
-width, and distances from two models cannot be ranked against each other. The
-rows are not embedded here at all: the mirror copies the vectors the index
-build stored in the dataset's own store (``sync_dataset_routes``), so each
-summary is embedded once. The query is embedded by this engine with the
-``.env`` embedding settings, never with a per-call ``embedding_config``, and
-when the collection's width no longer matches those settings
-(``EMBEDDING_MODEL`` changed without a prune) routing steps aside with a
-warning and the search covers every readable dataset, as it did before
-routing. Datasets built with different models are SDK-1316.
+Each exact model identifier and vector width has a separate collection. The
+mirror copies the dataset's precomputed index vectors into its recorded
+collection; queries use only the deployment model's collection. The legacy
+unsuffixed collection is never scored, since its model provenance is unknown.
+Switching models reuses existing collections without comparing models' scores.
 
 The engine is the default store's own cache entry, the one prune uses too.
 It belongs to no dataset, so no dataset-queue slot would pin it against the
@@ -30,6 +25,8 @@ store itself under access control (``DatasetQueuePinPredicate``).
 from __future__ import annotations
 
 from contextvars import copy_context
+from hashlib import sha256
+from uuid import UUID
 
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.vector.embeddings.vector_size import engine_vector_size
@@ -39,6 +36,79 @@ from cognee.shared.logging_utils import get_logger
 DATASET_ROUTE_COLLECTION = "DatasetRoute_text"
 
 logger = get_logger("dataset_routing")
+
+
+def dataset_route_collection(model: str, dimensions: int) -> str:
+    """A portable collection identifier for an exact model identity and width."""
+    return f"{DATASET_ROUTE_COLLECTION}__{sha256(model.encode()).hexdigest()[:24]}_{dimensions}"
+
+
+async def routing_collections(engine) -> list[str]:
+    """Discover historical routing tables, including Turso's lowercased identifiers."""
+    legacy = DATASET_ROUTE_COLLECTION.lower()
+    return [
+        name
+        for name in await engine.list_collections()
+        if name.lower() == legacy or name.lower().startswith(legacy + "__")
+    ]
+
+
+def _deployment_embedding_record() -> dict:
+    from cognee.context_global_variables import embedding_config, llm_config
+    from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import (
+        embedding_model_record,
+    )
+
+    embedding_config.set(None)
+    llm_config.set(None)
+    return embedding_model_record()
+
+
+async def deployment_embedding_record() -> dict:
+    """Resolve routing identity without entering a candidate dataset's store."""
+    from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import DIMENSIONS_KEY
+
+    record = copy_context().run(_deployment_embedding_record)
+    if record[DIMENSIONS_KEY] is None:
+        engine = await get_dataset_route_engine()
+        record[DIMENSIONS_KEY] = await engine_vector_size(engine.embedding_engine)
+    return record
+
+
+async def dataset_embedding_records(dataset_ids: list[UUID]) -> dict[UUID, dict]:
+    """Batch-read registry identity; failure must never permit incompatible search."""
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.users.models import DatasetDatabase
+
+    async with get_relational_engine().get_async_session() as session:
+        rows = await session.execute(
+            select(
+                DatasetDatabase.dataset_id, DatasetDatabase.vector_database_connection_info
+            ).where(DatasetDatabase.dataset_id.in_(dataset_ids))
+        )
+        return {dataset_id: info or {} for dataset_id, info in rows}
+
+
+async def eligible_dataset_ids(dataset_ids: list[UUID]) -> list[UUID]:
+    """Keep deployment-compatible registry identities; unknown models await first use."""
+    from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import (
+        DIMENSIONS_KEY,
+        MODEL_KEY,
+    )
+
+    identity = await deployment_embedding_record()
+    records = await dataset_embedding_records(dataset_ids)
+    eligible = []
+    for dataset_id in dataset_ids:
+        info = records.get(dataset_id, {})
+        model, width = info.get(MODEL_KEY), info.get(DIMENSIONS_KEY)
+        if (model is None and width in (None, identity[DIMENSIONS_KEY])) or (
+            model == identity[MODEL_KEY] and width == identity[DIMENSIONS_KEY]
+        ):
+            eligible.append(dataset_id)
+    return eligible
 
 
 class _DatasetRouteEngineHandle(_VectorEngineHandle):
@@ -130,32 +200,3 @@ async def ensure_default_store() -> None:
     ):
         logger.info("Created the default vector database '%s' for dataset routing.", db_name)
     _default_store_ensured = True
-
-
-async def routing_width_matches(engine) -> bool:
-    """Whether the routing collection takes the configured model's vectors.
-
-    The collection's vector width is fixed when it is created. After an
-    ``EMBEDDING_MODEL`` change without a prune every write and query on it
-    would fail inside the store, so the width is compared first and a mismatch
-    turns routing off with a warning. An adapter that cannot report its stored
-    width (Turso, community adapters) is not checked; an empty store matches,
-    the first write creates the collection at the configured width.
-    """
-    read_stored_size = getattr(engine, "get_stored_vector_size", None)
-    if read_stored_size is None:
-        return True
-    stored = await read_stored_size()
-    # Awaited: a sync get_vector_size() may block this loop to ask a remote
-    # embedding worker for its size (embedding_worker without EMBEDDING_DIMENSIONS).
-    configured = await engine_vector_size(engine.embedding_engine)
-    if stored is None or stored == configured:
-        return True
-    logger.warning(
-        "Dataset routing is off: the routing collection holds %d-dimensional vectors and "
-        "the configured embedding model produces %d. Searches cover every readable "
-        "dataset until the vector stores are pruned and rebuilt with one model.",
-        stored,
-        configured,
-    )
-    return False
