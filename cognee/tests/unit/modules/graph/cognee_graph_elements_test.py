@@ -38,6 +38,40 @@ def test_remove_skeleton_neighbor():
     assert node2 not in node1.skeleton_neighbours
 
 
+def test_add_skeleton_neighbor_skips_duplicates():
+    """Adding the same neighbor twice, or an equal node, keeps one entry."""
+    node1 = Node("node1")
+    node1.add_skeleton_neighbor(Node("node2"))
+    node1.add_skeleton_neighbor(Node("node2"))
+    assert [n.id for n in node1.skeleton_neighbours] == ["node2"]
+
+
+def test_neighbor_can_be_added_again_after_removal():
+    node1 = Node("node1")
+    node2 = Node("node2")
+    node1.add_skeleton_neighbor(node2)
+    node1.remove_skeleton_neighbor(node2)
+    node1.add_skeleton_neighbor(node2)
+    assert node1.skeleton_neighbours == [node2]
+
+
+def test_hub_node_edges_are_linear():
+    """A node with tens of thousands of edges projects in well under a second.
+
+    The duplicate check used to scan the neighbour list, so a hub of N edges
+    cost O(N^2) comparisons: about 8 s for 20k edges, minutes on a pod.
+    """
+    import time
+
+    hub = Node("hub")
+    others = [Node(f"n{i}") for i in range(20_000)]
+    start = time.perf_counter()
+    for other in others:
+        hub.add_skeleton_edge(Edge(hub, other))
+    assert time.perf_counter() - start < 2
+    assert len(hub.skeleton_neighbours) == 20_000
+
+
 def test_add_skeleton_edge():
     """Test adding an edge updates both skeleton_edges and skeleton_neighbours."""
     node1 = Node("node1")
