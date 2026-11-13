@@ -1,6 +1,6 @@
 from fastapi import status
 
-from cognee.exceptions import CogneeValidationError
+from cognee.exceptions import CogneeConfigurationError, CogneeValidationError
 
 
 class SharedDatabasePruneError(RuntimeError):
@@ -93,6 +93,32 @@ class StoredVectorWidthMismatchError(CogneeValidationError):
             name=name,
             status_code=status_code,
             remediation=remediation,
+        )
+
+
+class PgvectorVersionError(CogneeConfigurationError):
+    """The database's pgvector extension is older than the adapter requires."""
+
+    def __init__(
+        self,
+        installed: str,
+        required: str,
+        name: str = "PgvectorVersionError",
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ):
+        self.installed = installed
+        self.required = required
+        super().__init__(
+            message=(
+                f"The database's pgvector extension is version {installed}; cognee needs "
+                f"{required} or newer (it stores vectors as halfvec)."
+            ),
+            name=name,
+            status_code=status_code,
+            remediation=(
+                f"Install pgvector {required} or newer on the Postgres server, then run "
+                "ALTER EXTENSION vector UPDATE; in this database."
+            ),
         )
 
 
