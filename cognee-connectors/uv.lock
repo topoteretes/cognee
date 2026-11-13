@@ -49,6 +49,7 @@ members = [
     "cognee-connector-obsidian",
     "cognee-connector-onenote",
     "cognee-connector-slack",
+    "cognee-connector-vercel",
     "cognee-connectors-core",
     "cognee-connectors-workspace",
 ]
@@ -1245,6 +1246,28 @@ requires-dist = [
 provides-extras = ["cognee"]
 
 [[package]]
+name = "cognee-connector-vercel"
+version = "0.1.0"
+source = { editable = "connectors/vercel" }
+dependencies = [
+    { name = "cognee-connectors-core", extra = ["dlt"] },
+    { name = "requests" },
+]
+
+[package.optional-dependencies]
+cognee = [
+    { name = "cognee" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cognee", marker = "extra == 'cognee'", specifier = ">=1.6.5,<2" },
+    { name = "cognee-connectors-core", extras = ["dlt"], editable = "core" },
+    { name = "requests", specifier = ">=2.26.0,<3" },
+]
+provides-extras = ["cognee"]
+
+[[package]]
 name = "cognee-connectors-core"
 version = "0.2.0"
 source = { editable = "core" }
@@ -1280,6 +1303,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "pytest-timeout" },
     { name = "ruff" },
 ]
 
@@ -1292,6 +1316,7 @@ dev = [
     { name = "pytest", specifier = ">=7.4.0,<8" },
     { name = "pytest-asyncio", specifier = ">=0.21.1,<0.22" },
     { name = "pytest-cov", specifier = ">=6.1.1,<7.0.0" },
+    { name = "pytest-timeout", specifier = ">=2.3,<3" },
     { name = "ruff", specifier = "==0.16.6" },
 ]
 
@@ -5332,6 +5357,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/30/4c/f883ab8f0daad69f47efdf95f55a66b51a8b939c430dadce0611508d9e99/pytest_cov-6.3.0.tar.gz", hash = "sha256:35c580e7800f87ce892e687461166e1ac2bcb8fb9e13aea79032518d6e503ff2", size = 70398, upload-time = "2025-09-06T15:40:14.361Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/80/b4/bb7263e12aade3842b938bc5c6958cae79c5ee18992f9b9349019579da0f/pytest_cov-6.3.0-py3-none-any.whl", hash = "sha256:440db28156d2468cafc0415b4f8e50856a0d11faefa38f30906048fe490f1749", size = 25115, upload-time = "2025-09-06T15:40:12.44Z" },
+]
+
+[[package]]
+name = "pytest-timeout"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/82/4c9ecabab13363e72d880f2fb504c5f750433b2b6f16e99f4ec21ada284c/pytest_timeout-2.4.0.tar.gz", hash = "sha256:7e68e90b01f9eff71332b25001f85c75495fc4e3a836701876183c4bcfd0540a", size = 17973, upload-time = "2025-05-05T19:44:34.99Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/b6/3127540ecdf1464a00e5a01ee60a1b09175f6913f0644ac748494d9c4b21/pytest_timeout-2.4.0-py3-none-any.whl", hash = "sha256:c42667e5cdadb151aeb5b26d114aff6bdf5a907f176a007a30b940d3d865b5c2", size = 14382, upload-time = "2025-05-05T19:44:33.502Z" },
 ]
 
 [[package]]

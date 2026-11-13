@@ -57,6 +57,7 @@ on:
           - cognee-connector-obsidian
           - cognee-connector-onenote
           - cognee-connector-slack
+          - cognee-connector-vercel
 
 # Minimal default permissions (OSSF Scorecard: Token-Permissions). The release
 # jobs opt in to exactly what they need.
