@@ -42,3 +42,6 @@ __all__ = [
     "onenote_source",
     "slack_source",
 ]
+from .airtable import airtable_source
+
+__all__.append("airtable_source")
