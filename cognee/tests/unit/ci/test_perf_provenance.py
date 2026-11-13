@@ -19,7 +19,7 @@ for filename in (
     "performance_report_cloud.yml",
     "performance_report_rust.yml",
 ):
-    workflow = yaml.safe_load((WORKFLOWS / filename).read_text())
+    workflow = yaml.safe_load((WORKFLOWS / filename).read_text(encoding="utf-8"))
     for job_name, job in workflow["jobs"].items():
         for step in job.get("steps", []):
             if step.get("name") == "Stamp run provenance into the report":
@@ -57,7 +57,7 @@ def test_stamp_uses_checked_out_commit_and_preserves_results(tmp_path, filename,
     rust_sha = checkout(tmp_path / "cognee-rs", rust_date)
     report = tmp_path / "report.json"
     original = {"num_runs": 1, "stats": {"latency": {"p50": 1.25}}}
-    report.write_text(json.dumps(original))
+    report.write_text(json.dumps(original), encoding="utf-8")
     env = {
         **os.environ,
         "JSON_PATH": report.as_posix(),
@@ -91,7 +91,7 @@ def test_stamp_uses_checked_out_commit_and_preserves_results(tmp_path, filename,
         )
     assert bash is not None, "Bash is required for workflow tests"
     subprocess.run([str(bash), "-c", step["run"]], cwd=tmp_path, env=env, check=True)
-    result = json.loads(report.read_text())
+    result = json.loads(report.read_text(encoding="utf-8"))
     rust = filename == "performance_report_rust.yml"
     assert result["git_sha"] == (rust_sha if rust else workflow_sha)
     # Git versions spell UTC as either Z or +00:00. Both represent the
