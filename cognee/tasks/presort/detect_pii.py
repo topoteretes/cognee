@@ -15,6 +15,7 @@ raw matched text never enters the report.
 """
 
 import asyncio
+import codecs
 import re
 from typing import Literal
 
@@ -180,10 +181,21 @@ class PiiAssessment(BaseModel):
 def _read_sample(record: FileRecord, max_sample_bytes: int) -> str | None:
     try:
         with open(record.path, "rb") as file:
-            return file.read(max_sample_bytes).decode("utf-8", errors="replace")
+            sample = file.read(max_sample_bytes)
     except OSError as error:
         record.warnings.append(f"could not read sample for PII scan: {error}")
         return None
+
+    # Check UTF-32 first: its LE BOM starts with the UTF-16 LE BOM.
+    if sample.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        encoding = "utf-32"
+    elif sample.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        encoding = "utf-16"
+    elif sample.startswith(codecs.BOM_UTF8):
+        encoding = "utf-8-sig"
+    else:
+        encoding = "utf-8"
+    return sample.decode(encoding, errors="replace")
 
 
 async def _llm_assess(record: FileRecord, text: str) -> list[PiiFinding]:
