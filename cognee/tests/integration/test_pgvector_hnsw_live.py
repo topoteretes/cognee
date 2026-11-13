@@ -131,8 +131,8 @@ async def test_collections_get_an_index_the_search_uses(dimensions, cleanup):
     finally:
         event.remove(adapter.engine.sync_engine, "before_cursor_execute", _capture)
 
-    # More rows than hnsw.ef_search's default of 40, sorted by the exact distance, and
-    # the stored copy of the query vector first.
+    # More rows than pgvector's own hnsw.ef_search default of 40 (the adapter searches
+    # with at least 100), sorted by the exact distance, the stored copy of the query first.
     assert len(results) == 100
     scores = [result.score for result in results]
     assert scores == sorted(scores)
@@ -272,3 +272,50 @@ async def test_a_failed_build_is_logged_and_the_rest_are_indexed(monkeypatch, cl
     assert healthy in result["hnsw_index_checked"]
     assert await _index_names(adapter, broken) == []
     assert await _index_names(adapter, healthy) == [hnsw_index_name(healthy)]
+
+
+async def test_new_indexes_are_built_with_eight_links_per_node(cleanup):
+    adapter = _adapter(8)
+    collection = f"HnswLive_{uuid4().hex[:8]}_text"
+    cleanup.append((adapter, f'DROP TABLE IF EXISTS "{collection}"'))
+    await _fill(adapter, collection, 10)
+
+    async with adapter.engine.connect() as conn:
+        options = (
+            await conn.execute(
+                text("SELECT reloptions FROM pg_class WHERE relname = :index"),
+                {"index": hnsw_index_name(collection)},
+            )
+        ).scalar_one()
+    assert sorted(options) == ["ef_construction=64", "m=8"]
+
+
+@pytest.mark.parametrize(
+    ("limit", "ef_search"),
+    [(10, 100), (100, 100), (300, 300), (1000, 1000), (1001, None)],
+)
+async def test_an_indexed_search_examines_at_least_100_candidates(limit, ef_search, cleanup):
+    """``hnsw.ef_search`` is 100, or the limit when it is larger; above pgvector's cap of
+    1,000 the search keeps the exact scan and sets nothing."""
+    adapter = _adapter(8)
+    collection = f"HnswLive_{uuid4().hex[:8]}_text"
+    cleanup.append((adapter, f'DROP TABLE IF EXISTS "{collection}"'))
+    await _fill(adapter, collection, 30)
+
+    settings = []
+
+    def _capture(_conn, _cursor, statement, _parameters, _context, _many):
+        if "hnsw.ef_search" in statement:
+            settings.append(statement)
+
+    event.listen(adapter.engine.sync_engine, "before_cursor_execute", _capture)
+    try:
+        results = await adapter.search(
+            collection, query_vector=adapter.embedding_engine.vector("x"), limit=limit
+        )
+    finally:
+        event.remove(adapter.engine.sync_engine, "before_cursor_execute", _capture)
+
+    assert len(results) == min(limit, 30)
+    expected = [] if ef_search is None else [f"SET LOCAL hnsw.ef_search = {ef_search}"]
+    assert settings == expected
