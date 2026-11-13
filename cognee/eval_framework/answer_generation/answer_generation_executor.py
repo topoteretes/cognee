@@ -1,5 +1,7 @@
+from collections.abc import Callable
 from typing import Any
 
+from cognee.eval_framework.integrity.answering import answer_question
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
@@ -25,34 +27,35 @@ class AnswerGeneratorExecutor:
         self,
         questions: list[dict[str, str]],
         retriever: BaseRetriever,
-    ) -> list[dict[str, str]]:
+        on_answer: Callable[[dict[str, Any]], None] | None = None,
+        record_failures: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Answer each question in turn.
+
+        A retrieval or completion error propagates, as it always did. With
+        ``record_failures`` the question instead gets a record with a failed ``status`` and the
+        error text (never answer text) and the run continues. ``on_answer`` is called with every
+        finished record as soon as it exists, which is how the run checkpoints its progress.
+        """
         answers = []
         for instance in questions:
             query_text = instance["question"]
-            correct_answer = instance["answer"]
-
-            retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
-            retrieval_context = await retriever.get_context_from_objects(
-                query=query_text, retrieved_objects=retrieved_objects
-            )
-            search_results = await retriever.get_completion_from_context(
-                query=query_text, retrieved_objects=retrieved_objects, context=retrieval_context
-            )
-
-            ############
-            if isinstance(search_results, str):
-                search_results = [search_results]
-            #############
+            outcome = await answer_question(retriever, query_text, record_failures)
             answer = {
                 "question": query_text,
-                "answer": search_results[0],
-                "golden_answer": correct_answer,
-                "retrieval_context": retrieval_context,
+                "answer": outcome["answer"],
+                "golden_answer": instance["answer"],
+                "retrieval_context": outcome["retrieval_context"],
+                "status": outcome["status"],
             }
+            if "error" in outcome:
+                answer["error"] = outcome["error"]
 
             if "golden_context" in instance:
                 answer["golden_context"] = instance["golden_context"]
 
+            if on_answer is not None:
+                on_answer(answer)
             answers.append(answer)
 
         return answers

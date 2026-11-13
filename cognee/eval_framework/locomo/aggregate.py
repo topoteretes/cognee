@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from cognee.eval_framework.analysis.metrics_calculator import bootstrap_ci
+from cognee.eval_framework.integrity.status import answer_status
 from cognee.eval_framework.locomo.scope import load_gold_exclusions
 from cognee.eval_framework.reporting.io import read_json, write_json
 
@@ -108,7 +109,7 @@ def aggregate_run_dir(
         retriever = info["retriever"]
         conversations.add(info["conversation_index"])
         for entry in read_json(str(info["path"])):
-            if isinstance(entry.get("answer"), str) and entry["answer"].startswith("ERROR:"):
+            if answer_status(entry).failed:
                 errors[retriever] += 1
             question_idx = entry.get("question_idx")
             rows_by_retriever[retriever].append(
