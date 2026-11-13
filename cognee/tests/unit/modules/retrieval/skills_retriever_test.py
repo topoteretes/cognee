@@ -1,10 +1,11 @@
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+from cognee.modules.engine.models import Skill
 from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 from cognee.modules.retrieval.skills_retriever import SkillsRetriever
 
@@ -28,8 +29,22 @@ def mock_vector_engine():
     return engine
 
 
+@pytest.fixture(autouse=True)
+def mock_graph_nodes(monkeypatch):
+    """Stub the graph loader. Default: the graph has no Skill nodes at all."""
+    import cognee.modules.retrieval.skills_retriever as mod
+
+    loader = AsyncMock(return_value=[])
+    monkeypatch.setattr(mod, "_load_skill_nodes", loader, raising=False)
+    return loader
+
+
 def _skill_payload(**overrides):
-    """A full Skill vector payload, procedure body included."""
+    """A full Skill vector payload, procedure body included.
+
+    Shaped like the pre-1.6.5 payload, i.e. what a legacy index row (or a
+    backend that stores the whole node) still returns.
+    """
     payload = {
         "id": str(uuid4()),
         "name": "deploy-checklist",
@@ -52,8 +67,50 @@ def _skill_payload(**overrides):
     return payload
 
 
+def _bare_vector_payload(skill_id, **overrides):
+    """What the vector lane really returns: IndexSchema columns only."""
+    payload = {
+        "id": str(skill_id),
+        "text": "deploy-checklist\n\nSECRET PROCEDURE BODY",
+        "document_id": None,
+        "document_name": None,
+        "chunk_index": None,
+        "source_chunk_id": None,
+        "belongs_to_set": ["skills"],
+        "importance_weight": None,
+        "external_metadata": None,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _skill_node(**overrides):
+    """A real Skill graph node, as ``_load_skill_nodes()`` returns it."""
+    fields = {
+        "id": uuid4(),
+        "name": "deploy-checklist",
+        "description": "Steps to deploy to staging",
+        "procedure": "SECRET PROCEDURE BODY",
+        "skill_text": "deploy-checklist\n\nSECRET PROCEDURE BODY",
+        "search_text": "deploy-checklist\n\nSECRET PROCEDURE BODY",
+        "declared_tools": ["bash"],
+        "maintainer": "ops-team",
+        "maintainer_url": "https://example.com",
+        "skill_version": "1.2",
+        "tags": ["ops"],
+        "license": "MIT",
+        "source_repo_url": "",
+        "source_dir": "skills/deploy-checklist",
+        "dataset_scope": [DATASET_ID],
+        "is_active": True,
+    }
+    fields.update(overrides)
+    return Skill(**fields)
+
+
 def _result(payload, score=0.1):
-    return SimpleNamespace(id=payload.get("id"), payload=payload, score=score)
+    """A real vector hit — the engine returns ScoredResult, not a namespace."""
+    return ScoredResult(id=UUID(str(payload["id"])), score=score, payload=payload)
 
 
 def _patch_engine(monkeypatch, vector_engine):
@@ -163,6 +220,88 @@ async def test_get_objects_empty_results(monkeypatch, mock_vector_engine):
 
 
 @pytest.mark.asyncio
+async def test_get_objects_hydrates_metadata_from_graph_when_payload_is_bare(
+    monkeypatch, mock_vector_engine, mock_graph_nodes
+):
+    """The vector lane stores no skill metadata, so the hit payload has no
+
+    ``dataset_scope`` and no display fields; the graph node must still make the
+    hit usable, and the vector ``text`` must not leak into the result.
+    """
+    node = _skill_node()
+    mock_graph_nodes.return_value = [node]
+    mock_vector_engine.search.return_value = [_result(_bare_vector_payload(node.id), score=0.11)]
+    _patch_engine(monkeypatch, mock_vector_engine)
+
+    retriever = SkillsRetriever(dataset_id=DATASET_ID)
+    objects = await retriever.get_retrieved_objects("deploy")
+    completion = await retriever.get_completion_from_context("deploy", objects, "")
+
+    assert [entry["name"] for entry in completion] == ["deploy-checklist"]
+    projected = completion[0]
+    assert projected["description"] == "Steps to deploy to staging"
+    assert projected["version"] == "1.2"
+    assert projected["dataset_scope"] == [DATASET_ID]
+    assert projected["score"] == 0.11
+    assert "SECRET PROCEDURE BODY" not in str(completion)
+
+
+@pytest.mark.asyncio
+async def test_graph_scope_wins_over_stale_payload_scope(
+    monkeypatch, mock_vector_engine, mock_graph_nodes
+):
+    """A node scoped to another dataset is dropped even when a stale payload
+
+    claims this dataset — the graph is authoritative.
+    """
+    node = _skill_node(dataset_scope=[OTHER_DATASET_ID])
+    mock_graph_nodes.return_value = [node]
+    mock_vector_engine.search.return_value = [
+        _result(_bare_vector_payload(node.id, dataset_scope=[DATASET_ID], is_active=True))
+    ]
+    _patch_engine(monkeypatch, mock_vector_engine)
+
+    retriever = SkillsRetriever(dataset_id=DATASET_ID)
+
+    assert await retriever.get_retrieved_objects("deploy") == []
+
+
+@pytest.mark.asyncio
+async def test_graph_node_inactive_skill_is_dropped(
+    monkeypatch, mock_vector_engine, mock_graph_nodes
+):
+    """``is_active`` is read from the node too, not from the vector payload."""
+    node = _skill_node(is_active=False)
+    mock_graph_nodes.return_value = [node]
+    mock_vector_engine.search.return_value = [
+        _result(_bare_vector_payload(node.id, is_active=True))
+    ]
+    _patch_engine(monkeypatch, mock_vector_engine)
+
+    retriever = SkillsRetriever(dataset_id=DATASET_ID)
+
+    assert await retriever.get_retrieved_objects("deploy") == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_payload_metadata_still_works_without_graph_node(
+    monkeypatch, mock_vector_engine, mock_graph_nodes
+):
+    """No node for the hit (stale row / backend without type lookup): fall back
+
+    to payload metadata when it claims this dataset.
+    """
+    mock_graph_nodes.return_value = []
+    mock_vector_engine.search.return_value = [_result(_skill_payload(name="legacy"))]
+    _patch_engine(monkeypatch, mock_vector_engine)
+
+    retriever = SkillsRetriever(dataset_id=DATASET_ID)
+    objects = await retriever.get_retrieved_objects("deploy")
+
+    assert [obj.payload["name"] for obj in objects] == ["legacy"]
+
+
+@pytest.mark.asyncio
 async def test_context_lists_names_and_descriptions_only():
     retriever = SkillsRetriever(dataset_id=DATASET_ID)
     objects = [_result(_skill_payload(name="deploy-checklist"))]
@@ -205,7 +344,7 @@ async def test_completion_tolerates_sparse_legacy_payload():
     """Skills ingested before newer fields existed must not crash the projection."""
     retriever = SkillsRetriever(dataset_id=DATASET_ID)
     sparse = {"id": str(uuid4()), "name": "old-skill", "dataset_scope": [DATASET_ID]}
-    objects = [SimpleNamespace(id=sparse["id"], payload=sparse, score=None)]
+    objects = [_result(sparse, score=0.5)]
 
     completion = await retriever.get_completion_from_context("deploy", objects, "")
 
@@ -213,7 +352,7 @@ async def test_completion_tolerates_sparse_legacy_payload():
     assert completion[0]["description"] == ""
     assert completion[0]["tags"] == []
     assert completion[0]["is_active"] is True
-    assert "score" not in completion[0]
+    assert completion[0]["score"] == 0.5
 
 
 @pytest.mark.asyncio
