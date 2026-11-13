@@ -42,3 +42,5 @@ __all__ = [
     "onenote_source",
     "slack_source",
 ]
+from .intercom import intercom_source
+__all__.append("intercom_source")
