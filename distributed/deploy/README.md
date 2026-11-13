@@ -12,6 +12,7 @@
 | **Render** | Simple PaaS with managed Postgres | Deploy to Render button |
 | **Daytona** | Cloud sandboxes (SDK or CLI) | `python distributed/deploy/daytona_sandbox.py` |
 | **Islo** | Isolated cloud sandboxes for agents (SDK) | `python distributed/deploy/islo_sandbox.py` |
+| **boxd** | MicroVMs that hibernate when idle and wake on request (SDK) | `python distributed/deploy/boxd_sandbox.py` |
 
 All platforms require setting `LLM_API_KEY` as a minimum.
 
@@ -159,6 +160,35 @@ client.sandboxes.delete_sandbox("cognee-api")
 ```
 
 The sandbox name is fixed (`cognee-api`), so re-running the script while a previous deployment still exists fails with a name conflict — delete the old sandbox first (see above), then re-run.
+
+---
+
+## boxd (MicroVM)
+
+[boxd](https://boxd.sh?ref=cognee) runs microVMs: full Ubuntu machines with a persistent disk and a public HTTPS URL. With boxd's default idle settings a machine hibernates when it is idle and wakes on the next request, so the API keeps its data between uses. Docs: https://docs.boxd.sh?ref=cognee
+
+```bash
+pip install boxd
+export BOXD_API_KEY=your-key   # from the boxd console, or: boxd auth keys create cognee-deploy
+export LLM_API_KEY=sk-xxx
+export DEFAULT_USER_PASSWORD=choose-a-password   # to log in as the default user
+python distributed/deploy/boxd_sandbox.py
+```
+
+The script uses the official Python SDK to create an isolated machine (2 vCPU, 8 GB), install `cognee[api]` into a virtualenv, run the API server as a systemd service, verify `/health`, and print the machine's HTTPS URL. `LLM_API_KEY` and the Cognee settings the script forwards when set (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_ENDPOINT`, `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, `EMBEDDING_API_KEY`, `DEFAULT_USER_PASSWORD`) go into a `.env` file on the machine that only the server user can read. Values may not contain a newline or `${`. The script sets no LLM or embedding defaults of its own: for the settings you leave unset, Cognee's own defaults apply (OpenAI models unless you change them), so `LLM_API_KEY` must match the provider you end up with. Optional: `BOXD_ORG`, `BOXD_REGION` (e.g. `fra` or `nyc`) and `BOXD_MACHINE_NAME` (default `cognee-api`).
+
+The URL is public. Authentication stays on (the default), but `POST /api/v1/auth/register` is open, so anyone who finds the URL can create an account and run requests that use your LLM key. Set `DEFAULT_USER_PASSWORD` and log in as `default_user@example.com` at `/api/v1/auth/login`; without it the default user has no password. The script turns off the browser check boxd puts in front of a sleeping machine, so API clients can wake it. Stop or delete the machine via the SDK (use your `BOXD_MACHINE_NAME` if you set one):
+
+```python
+from boxd import Boxd
+
+client = Boxd()  # reads BOXD_API_KEY from the environment
+machine = client.machines.get("cognee-api")
+client.machines.stop(machine.id)
+client.machines.delete(machine.id)
+```
+
+Machine names are unique, so re-running the script while a previous deployment still exists fails with a name conflict. Delete the old machine first (see above), then re-run.
 
 ---
 
