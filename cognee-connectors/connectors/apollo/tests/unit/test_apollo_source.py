@@ -1075,6 +1075,20 @@ def test_changing_the_filters_restarts_the_listing():
     assert {row["id"] for row in rows if row["_deleted"]} == _ids(first)
 
 
+def test_a_revoked_run_is_not_reported_as_a_spent_budget():
+    """A walk that hits its budget after the connection was revoked raises the revocation."""
+    fake, stats = _workspace(), {}
+
+    def check_active():
+        if len(fake.calls) >= 3:
+            raise PermissionError("access revoked")
+
+    with pytest.raises(PermissionError):
+        list(_iter_rows(fake, {}, stats, max_requests=3, check_active=check_active))
+
+    assert "failed_budget" not in stats
+
+
 def test_check_active_runs_before_every_request_and_can_stop_the_sync():
     fake, checks = _workspace(), []
 

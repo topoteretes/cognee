@@ -13,8 +13,7 @@ class GoogleDriveSettings(GoogleSettings):
     (``GoogleOAuthIntegration._require``), which fails loudly per missing value.
 
     ``client_id``/``client_secret``/``redirect_uri``/``frontend_base_url``
-    come from :class:`IntegrationSettings`; the field below is the one thing
-    this integration needs beyond that shape.
+    come from :class:`IntegrationSettings`.
 
     The prefix is ``GOOGLE_DRIVE_`` rather than ``GOOGLE_`` because the latter
     is already taken by unrelated settings (the translation task's
@@ -24,11 +23,6 @@ class GoogleDriveSettings(GoogleSettings):
     """
 
     model_config = SettingsConfigDict(env_prefix="GOOGLE_DRIVE_", extra="ignore")
-
-    # Signs the OAuth state parameter. Unlike Slack, GitHub and Linear, this
-    # secret has exactly one use: Google sends no signed webhooks on this
-    # path, so there is no inbound HMAC to key. Env: GOOGLE_DRIVE_STATE_SECRET
-    state_secret: str = ""
 
 
 google_drive_settings = GoogleDriveSettings()

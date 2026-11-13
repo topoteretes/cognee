@@ -29,6 +29,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.operations import record_operation
 from cognee.modules.search.methods import search as search_function
+from cognee.modules.search.methods.node_name_scope import node_name_scope
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.search.types.SearchType import resolve_deprecated_search_type
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
@@ -294,6 +295,9 @@ async def search(
 
     client = get_remote_client()
     if client is not None:
+        # The wire carries the class name and cannot tell node_type=None from an
+        # omitted one, so the local rule for names without a type applies here.
+        node_name_scope(node_type, node_name)
         return await client.search(
             query_text,
             search_type=query_type,
@@ -301,6 +305,7 @@ async def search(
             dataset_ids=dataset_ids,
             system_prompt=system_prompt,
             top_k=top_k,
+            node_type=node_type,
             node_name=node_name,
             only_context=only_context,
             verbose=verbose,

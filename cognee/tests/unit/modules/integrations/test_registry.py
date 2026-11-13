@@ -29,9 +29,6 @@ class _FakeIntegration(OAuthIntegration):
     def parse_installation(self, token_response):
         return OAuthInstallation(provider_account_id="fake-account", token_payload={})
 
-    def state_signing_secret(self):
-        return "fake-secret"
-
     def frontend_base_url(self):
         return "https://fake.example"
 

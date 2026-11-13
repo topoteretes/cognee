@@ -4,7 +4,7 @@ import re
 
 from cognee.shared.logging_utils import get_logger
 
-from .dlt_utils import SOURCE_LABEL_ATTR
+from .dlt_utils import SOURCE_LABEL_ATTR, apply_dlt_runtime_defaults
 
 logger = get_logger("create_dlt_source")
 
@@ -68,6 +68,7 @@ def create_dlt_source_from_connection_string(
     from cognee.exceptions import CogneeValidationError
 
     _require_database_ingestion_allowed()
+    apply_dlt_runtime_defaults()
     if connection_string.startswith("sqlite:///"):
         connection_string = _allowed_sqlite_connection_string(connection_string)
     else:
@@ -211,26 +212,31 @@ def _require_database_ingestion_allowed() -> None:
     The server connects with its own network position, so a caller who can name a
     database can read any one the server reaches. Unset (the default), the SDK, CLI
     and MCP server may ingest a database and the API server may not: its callers
-    are whoever can register. ``true`` allows every surface; ``false`` refuses all.
+    are whoever can register. ``true`` (or ``1``, ``yes``, ``on``) allows every
+    surface; any other set value, a misspelling included, refuses all.
     """
     from cognee.exceptions import CogneeValidationError
     from cognee.modules.operations import ORIGIN_API, get_operation_origin
-    from cognee.tasks.web_scraper.ssrf_protection import _FALSEY
+    from cognee.tasks.web_scraper.ssrf_protection import opt_in_setting
 
-    value = (os.getenv(ALLOW_DATABASE_INGESTION_ENV) or "").strip().lower()
-    if not value:
+    allowed = opt_in_setting(ALLOW_DATABASE_INGESTION_ENV)
+    if allowed is None:
         if get_operation_origin() == ORIGIN_API:
             raise CogneeValidationError(
-                message="Ingesting a database from a connection string is not enabled for "
-                f"API callers on this server (set {ALLOW_DATABASE_INGESTION_ENV}=true to "
-                "allow it).",
+                message="Ingesting a database from a connection string is disabled by "
+                f"default for API requests because {ALLOW_DATABASE_INGESTION_ENV} is unset. "
+                f"Set {ALLOW_DATABASE_INGESTION_ENV}=true in the server's environment to "
+                "allow it.",
                 name="DatabaseIngestionDisabled",
             )
         return
-    if value in _FALSEY:
+    if not allowed:
+        value = os.getenv(ALLOW_DATABASE_INGESTION_ENV, "").strip()
         raise CogneeValidationError(
             message="Ingesting a database from a connection string is disabled on this "
-            f"server ({ALLOW_DATABASE_INGESTION_ENV}=false).",
+            f"server ({ALLOW_DATABASE_INGESTION_ENV}={value}; only true, 1, yes or on "
+            f"enable it). Set {ALLOW_DATABASE_INGESTION_ENV}=true in the Cognee "
+            "environment (on the server for API calls) to allow it.",
             name="DatabaseIngestionDisabled",
         )
 

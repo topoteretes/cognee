@@ -2,7 +2,7 @@
 
 Separate from get_slack_router.py's public, signature-verified webhooks on
 purpose: these need a real cognee session (Depends(get_authenticated_user)),
-not an HMAC over the raw body, and "which channels can run slash commands"
+not an HMAC over the raw body, and "which channels Cognee's commands work in"
 is a Slack-specific concept that has no equivalent for a future Notion/GitHub
 integration — it does not belong on the generic integrations router either.
 """
@@ -13,16 +13,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from cognee.api.DTO import InDTO, OutDTO
-from cognee.api.v1.slack.routers.get_slack_history_router import get_slack_history_router
 from cognee.modules.integrations.credentials import (
     decrypt_token_payload,
     get_active_credential_for_user,
     update_provider_metadata,
 )
+from cognee.modules.integrations.ingestion import RateLimitedError
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
-from cognee.modules.integrations.slack.channels import list_channels
-from cognee.modules.integrations.slack.handle_slack_link import confirm_link
+from cognee.modules.integrations.slack.adapter import visible_channels
 from cognee.modules.integrations.slack.persistence import PROVIDER
+from cognee.modules.integrations.slack.sync import FORGET_UNAVAILABLE_KEY, slack_sync_lifespan
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 
@@ -48,12 +48,12 @@ class SetAllowedChannelsResultDTO(OutDTO):
     allowed_channel_ids: list[str]
 
 
-class ConfirmLinkPayload(InDTO):
-    code: str
+class SlackSettingsPayload(InDTO):
+    forget_unavailable_channels: bool
 
 
-class ConfirmLinkResultDTO(OutDTO):
-    linked: bool
+class SlackSettingsDTO(OutDTO):
+    forget_unavailable_channels: bool
 
 
 def _connected_credential_or_404(credential) -> IntegrationCredential:
@@ -62,33 +62,54 @@ def _connected_credential_or_404(credential) -> IntegrationCredential:
     return credential
 
 
+async def _offered_channels(credential: IntegrationCredential) -> list[dict]:
+    """The channels the allowlist offers, or a 502 when Slack refuses the list.
+
+    An allowed private channel whose members cannot be read right now is still offered, so
+    the editor neither drops it nor refuses it when its list is saved back.
+    """
+    access_token = decrypt_token_payload(credential).get("access_token")
+    allowed = (credential.provider_metadata or {}).get("allowed_channel_ids") or []
+    try:
+        return await visible_channels(credential, access_token, selected=allowed)
+    except RateLimitedError as error:
+        # Never waited out inside the request: the client is told when to try again.
+        raise HTTPException(
+            status_code=429,
+            detail="Slack is limiting requests; try again shortly.",
+            headers={"Retry-After": str(error.retry_after)} if error.retry_after else None,
+        )
+    except RuntimeError:
+        # Most likely: the workspace connected before channels:read was
+        # added to the app's scopes, and Slack never retroactively grants
+        # new scopes to an existing installation — reconnecting is the fix.
+        logger.exception(
+            "Slack conversations.list failed for team %s", credential.provider_account_id
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Could not fetch Slack channels. Try disconnecting and reconnecting Slack.",
+        )
+
+
 def get_slack_channels_router():
-    router = APIRouter()
-    router.include_router(get_slack_history_router())
+    # The channel sync tick runs for the life of the app; channel selection and manual
+    # syncs go through the generic /api/v1/integrations/slack routes.
+    router = APIRouter(lifespan=slack_sync_lifespan)
 
     @router.get("/channels")
     async def get_channels(
         user: Annotated[User, Depends(get_authenticated_user)],
     ) -> ChannelListDTO:
-        """List the connected workspace's public channels, flagging the current allowlist."""
+        """List the channels Cognee's commands can be allowed in, flagging the current allowlist.
+
+        Every public channel, and the private channels the app is in that the person who
+        connected the workspace is in too: a private channel they cannot see is never named.
+        """
         credential = _connected_credential_or_404(
             await get_active_credential_for_user(user.id, PROVIDER)
         )
-        access_token = decrypt_token_payload(credential).get("access_token")
-
-        try:
-            channels = await list_channels(access_token)
-        except RuntimeError:
-            # Most likely: the workspace connected before channels:read was
-            # added to the app's scopes, and Slack never retroactively grants
-            # new scopes to an existing installation — reconnecting is the fix.
-            logger.exception(
-                "Slack conversations.list failed for team %s", credential.provider_account_id
-            )
-            raise HTTPException(
-                status_code=502,
-                detail="Could not fetch Slack channels. Try disconnecting and reconnecting Slack.",
-            )
+        channels = await _offered_channels(credential)
 
         allowed_ids = set((credential.provider_metadata or {}).get("allowed_channel_ids") or [])
         return ChannelListDTO(
@@ -107,19 +128,34 @@ def get_slack_channels_router():
     async def set_allowed_channels(
         payload: SetAllowedChannelsPayload, user: Annotated[User, Depends(get_authenticated_user)]
     ) -> SetAllowedChannelsResultDTO:
-        """Restrict slash commands to exactly these channel ids.
+        """Restrict Cognee's commands and "Remember this" to exactly these channel ids.
 
-        An empty list means unrestricted (the default) — channel scoping is
-        opt-in, so a workspace that never visits this settings screen keeps
-        working everywhere, exactly as before this feature existed.
+        The allowlist decides where Cognee can be used in Slack, never which channels are
+        synced into memory: that is the channel selection's alone. An empty list means
+        unrestricted (the default) — channel scoping is opt-in, so a workspace that never
+        visits this settings screen keeps working everywhere.
 
         ## Request Parameters
-        - **channelIds** (List[str]): Slack channel IDs allowed to run slash commands; an
-          empty list removes all channel restrictions.
+        - **channelIds** (List[str]): Slack channel IDs Cognee may be used in, each one the
+          channels listing offers; an empty list removes all channel restrictions.
+
+        ## Error Codes
+        - **422**: an id the channels listing does not offer (a name instead of an id, a
+          private channel the connecting user is not in); nothing is saved.
         """
         credential = _connected_credential_or_404(
             await get_active_credential_for_user(user.id, PROVIDER)
         )
+        if payload.channel_ids:
+            offered = {channel["id"] for channel in await _offered_channels(credential)}
+            unknown = [
+                channel_id for channel_id in payload.channel_ids if channel_id not in offered
+            ]
+            if unknown:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Not a channel Cognee can be allowed in: {', '.join(unknown)}",
+                )
         updated = await update_provider_metadata(
             PROVIDER,
             credential.provider_account_id,
@@ -129,23 +165,43 @@ def get_slack_channels_router():
             allowed_channel_ids=updated.provider_metadata["allowed_channel_ids"]
         )
 
-    @router.post("/link")
-    async def link(
-        payload: ConfirmLinkPayload, user: Annotated[User, Depends(get_authenticated_user)]
-    ) -> ConfirmLinkResultDTO:
-        """Confirm a ``/cognee-link`` magic-link code for the authenticated caller.
+    @router.get("/settings")
+    async def get_settings(
+        user: Annotated[User, Depends(get_authenticated_user)],
+    ) -> SlackSettingsDTO:
+        """The connection owner's Slack sync settings."""
+        credential = _connected_credential_or_404(
+            await get_active_credential_for_user(user.id, PROVIDER)
+        )
+        metadata = credential.provider_metadata or {}
+        return SlackSettingsDTO(
+            forget_unavailable_channels=metadata.get(FORGET_UNAVAILABLE_KEY) is True
+        )
 
-        Backs the ``/link-slack`` frontend page — the browser session here
-        (not anything typed into Slack) is what proves which cognee account
-        the invoking Slack member should be linked to.
+    @router.put("/settings")
+    async def set_settings(
+        payload: SlackSettingsPayload, user: Annotated[User, Depends(get_authenticated_user)]
+    ) -> SlackSettingsDTO:
+        """Decide what happens to a selected channel that was deleted in Slack or that the
+        app was removed from.
+
+        Off (the default), the channel keeps its memory and every sync reports it under
+        ``failed_channel_unavailable`` until it is deselected. On, the next sync removes its
+        memory like a deselected channel's. Only the connection's owner can change it.
 
         ## Request Parameters
-        - **code** (str): Magic-link code issued by /cognee-link, confirmed to bind the
-          Slack member to this account.
+        - **forgetUnavailableChannels** (bool): Remove the memory of unavailable channels.
         """
-        linked = await confirm_link(payload.code, user.id)
-        if not linked:
-            raise HTTPException(status_code=400, detail="This link is invalid or has expired.")
-        return ConfirmLinkResultDTO(linked=True)
+        credential = _connected_credential_or_404(
+            await get_active_credential_for_user(user.id, PROVIDER)
+        )
+        updated = await update_provider_metadata(
+            PROVIDER,
+            credential.provider_account_id,
+            {FORGET_UNAVAILABLE_KEY: payload.forget_unavailable_channels},
+        )
+        return SlackSettingsDTO(
+            forget_unavailable_channels=updated.provider_metadata[FORGET_UNAVAILABLE_KEY]
+        )
 
     return router

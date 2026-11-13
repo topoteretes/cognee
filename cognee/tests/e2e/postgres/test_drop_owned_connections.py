@@ -1,0 +1,102 @@
+"""Run against an explicitly opted-in disposable PostgreSQL, never a tenant DB."""
+
+import os
+from uuid import uuid4
+
+import asyncpg
+import pytest
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
+
+from cognee.infrastructure.databases.postgres import drop_pg_database_if_exists
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("privilege", ["unrelated", "superuser_membership", "signal_superuser"])
+async def test_non_superuser_drop_leaves_foreign_role_connected(privilege):
+    url = os.getenv("COGNEE_PG_TEST_URL")
+    if not url:
+        pytest.skip("set COGNEE_PG_TEST_URL to a disposable superuser Postgres")
+    admin = await asyncpg.connect(url)
+    suffix = uuid4().hex[:12]
+    owner, foreign, database = (
+        f"clo1521_{prefix}_{suffix}" for prefix in ("owner", "foreign", "db")
+    )
+    own_connection = foreign_connection = None
+    try:
+        await admin.execute(
+            f"CREATE ROLE \"{owner}\" LOGIN NOSUPERUSER CREATEDB PASSWORD 'test-only'"
+        )
+        role_kind = "NOSUPERUSER" if privilege == "unrelated" else "SUPERUSER"
+        await admin.execute(f"CREATE ROLE \"{foreign}\" LOGIN {role_kind} PASSWORD 'test-only'")
+        if privilege == "superuser_membership":
+            await admin.execute(f'GRANT "{foreign}" TO "{owner}"')
+        elif privilege == "signal_superuser":
+            await admin.execute(f'GRANT pg_signal_backend TO "{owner}"')
+        await admin.execute(f'CREATE DATABASE "{database}" OWNER "{owner}"')
+        parsed = make_url(url)
+        params = {"host": parsed.host, "port": parsed.port or 5432, "password": "test-only"}
+        own_connection = await asyncpg.connect(**params, user=owner, database=database)
+        foreign_connection = await asyncpg.connect(**params, user=foreign, database=database)
+        # The old helper raises 42501 (insufficient privilege) while trying to
+        # terminate the other role. The fixed one reaches DROP, which honestly
+        # reports 55006 (database in use) without touching that session.
+        with pytest.raises(DBAPIError) as failure:
+            await drop_pg_database_if_exists(database, username=owner, **params)
+        assert failure.value.orig.sqlstate == "55006"
+        assert await foreign_connection.fetchval("SELECT 1") == 1
+        assert own_connection.is_closed()
+        await foreign_connection.close()
+        await drop_pg_database_if_exists(database, username=owner, **params)
+        assert not await admin.fetchval("SELECT 1 FROM pg_database WHERE datname=$1", database)
+        # Missing databases remain an idempotent successful delete.
+        await drop_pg_database_if_exists(database, username=owner, **params)
+    finally:
+        for connection in (own_connection, foreign_connection):
+            if connection is not None:
+                await connection.close()
+        await admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
+        await admin.execute(f'DROP ROLE IF EXISTS "{owner}"')
+        await admin.execute(f'DROP ROLE IF EXISTS "{foreign}"')
+        await admin.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("privilege", ["superuser", "membership", "signal_backend"])
+async def test_drop_terminates_permitted_foreign_sessions(privilege):
+    url = os.getenv("COGNEE_PG_TEST_URL")
+    if not url:
+        pytest.skip("set COGNEE_PG_TEST_URL to a disposable superuser Postgres")
+    admin = await asyncpg.connect(url)
+    suffix = uuid4().hex[:12]
+    owner, foreign, database = (
+        f"clo1521_{prefix}_{suffix}" for prefix in ("owner", "foreign", "db")
+    )
+    own_connection = foreign_connection = None
+    try:
+        role_kind = "SUPERUSER" if privilege == "superuser" else "NOSUPERUSER"
+        await admin.execute(
+            f"CREATE ROLE \"{owner}\" LOGIN {role_kind} CREATEDB PASSWORD 'test-only'"
+        )
+        await admin.execute(f"CREATE ROLE \"{foreign}\" LOGIN {role_kind} PASSWORD 'test-only'")
+        if privilege == "membership":
+            await admin.execute(f'GRANT "{foreign}" TO "{owner}"')
+        elif privilege == "signal_backend":
+            await admin.execute(f'GRANT pg_signal_backend TO "{owner}"')
+        await admin.execute(f'CREATE DATABASE "{database}" OWNER "{owner}"')
+        parsed = make_url(url)
+        params = {"host": parsed.host, "port": parsed.port or 5432, "password": "test-only"}
+        own_connection = await asyncpg.connect(**params, user=owner, database=database)
+        foreign_connection = await asyncpg.connect(**params, user=foreign, database=database)
+        await drop_pg_database_if_exists(database, username=owner, **params)
+        assert not await admin.fetchval("SELECT 1 FROM pg_database WHERE datname=$1", database)
+        assert own_connection.is_closed()
+        assert foreign_connection.is_closed()
+    finally:
+        for connection in (own_connection, foreign_connection):
+            if connection is not None:
+                await connection.close()
+        await admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
+        await admin.execute(f'DROP ROLE IF EXISTS "{owner}"')
+        await admin.execute(f'DROP ROLE IF EXISTS "{foreign}"')
+        await admin.close()

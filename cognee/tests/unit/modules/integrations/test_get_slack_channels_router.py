@@ -67,7 +67,7 @@ def test_get_channels_marks_allowed_flag_correctly(client):
         patch.object(MODULE, "decrypt_token_payload", return_value={"access_token": "xoxb-x"}),
         patch.object(
             MODULE,
-            "list_channels",
+            "visible_channels",
             new=AsyncMock(
                 return_value=[
                     {"id": "C1", "name": "general", "is_private": False},
@@ -92,7 +92,7 @@ def test_get_channels_surfaces_slack_rejection_as_502(client):
         ),
         patch.object(MODULE, "decrypt_token_payload", return_value={"access_token": "xoxb-x"}),
         patch.object(
-            MODULE, "list_channels", new=AsyncMock(side_effect=RuntimeError("missing_scope"))
+            MODULE, "visible_channels", new=AsyncMock(side_effect=RuntimeError("missing_scope"))
         ),
     ):
         response = client.get("/api/v1/slack/channels")
@@ -112,6 +112,12 @@ def test_put_channels_saves_and_echoes_the_allowlist(client):
         patch.object(
             MODULE, "get_active_credential_for_user", new=AsyncMock(return_value=credential)
         ),
+        patch.object(MODULE, "decrypt_token_payload", return_value={"access_token": "xoxb-x"}),
+        patch.object(
+            MODULE,
+            "visible_channels",
+            new=AsyncMock(return_value=[{"id": "C1"}, {"id": "C2"}]),
+        ),
         patch.object(
             MODULE, "update_provider_metadata", new=AsyncMock(return_value=updated)
         ) as update_mock,
@@ -121,3 +127,155 @@ def test_put_channels_saves_and_echoes_the_allowlist(client):
     assert response.status_code == 200
     assert response.json()["allowedChannelIds"] == ["C1", "C2"]
     update_mock.assert_awaited_once_with("slack", "T123", {"allowed_channel_ids": ["C1", "C2"]})
+
+
+def test_settings_are_off_until_the_owner_turns_them_on(client):
+    with patch.object(
+        MODULE, "get_active_credential_for_user", new=AsyncMock(return_value=_credential())
+    ):
+        response = client.get("/api/v1/slack/settings")
+
+    assert response.status_code == 200
+    assert response.json() == {"forgetUnavailableChannels": False}
+
+
+def test_put_settings_404s_when_slack_not_connected(client):
+    with patch.object(MODULE, "get_active_credential_for_user", new=AsyncMock(return_value=None)):
+        response = client.put("/api/v1/slack/settings", json={"forgetUnavailableChannels": True})
+    assert response.status_code == 404
+
+
+def test_put_settings_saves_the_owners_choice_on_their_connection(client):
+    updated = SimpleNamespace(
+        provider_account_id="T123", provider_metadata={"forget_unavailable_channels": True}
+    )
+    with (
+        patch.object(
+            MODULE, "get_active_credential_for_user", new=AsyncMock(return_value=_credential())
+        ) as lookup,
+        patch.object(
+            MODULE, "update_provider_metadata", new=AsyncMock(return_value=updated)
+        ) as update_mock,
+    ):
+        response = client.put("/api/v1/slack/settings", json={"forgetUnavailableChannels": True})
+
+    assert response.status_code == 200
+    assert response.json() == {"forgetUnavailableChannels": True}
+    assert lookup.await_args.args[0] == _FakeUser().id
+    update_mock.assert_awaited_once_with("slack", "T123", {"forget_unavailable_channels": True})
+
+
+# --- the allowlist governs commands: it offers what the owner can see, refuses the rest ---
+
+INSTALLER = "U0INSTALLER"
+
+# What conversations.list returns to the bot token. Private channels are listed only
+# where the app is a member; C3 is one the installer is not in.
+SLACK_CHANNELS = [
+    {"id": "C1", "name": "general", "is_private": False, "is_member": True},
+    {"id": "C2", "name": "board", "is_private": True, "is_member": True},
+    {"id": "C3", "name": "hr", "is_private": True, "is_member": True},
+]
+
+
+@pytest.fixture
+def slack(monkeypatch):
+    """Slack faked at its HTTP edge: the channel list by type and private members."""
+    from cognee.modules.integrations.slack import adapter as adapter_module
+    from cognee.modules.integrations.slack import channels as channels_module
+    from cognee.tests.unit.tasks.connectors.fake_slack import FakeSlack
+
+    async def fetch_page(session, access_token, params):
+        private = {"public_channel": False, "private_channel": True}
+        wanted = {private[kind] for kind in params["types"].split(",")}
+        return {"ok": True, "channels": [c for c in SLACK_CHANNELS if c["is_private"] in wanted]}
+
+    members = FakeSlack()
+    members.members = {"C2": [INSTALLER, "U1"], "C3": ["U1"]}
+    monkeypatch.setattr(channels_module, "_fetch_page", fetch_page)
+    monkeypatch.setattr(adapter_module, "_picker_client", lambda token: members)
+    monkeypatch.setattr(adapter_module, "access_token_for", AsyncMock(return_value="xoxb-test"))
+    credential = SimpleNamespace(
+        provider_account_id="T123",
+        provider_metadata={"installed_by_slack_user_id": INSTALLER},
+    )
+    with (
+        patch.object(
+            MODULE, "get_active_credential_for_user", new=AsyncMock(return_value=credential)
+        ),
+        patch.object(MODULE, "decrypt_token_payload", return_value={"access_token": "xoxb-test"}),
+    ):
+        yield SimpleNamespace(credential=credential, members=members)
+
+
+def test_the_allowlist_editor_offers_the_private_channels_the_installer_is_in(client, slack):
+    channel_ids = {
+        channel["id"] for channel in client.get("/api/v1/slack/channels").json()["channels"]
+    }
+
+    assert {"C1", "C2"} <= channel_ids
+    # A private channel the installer cannot see: its name never leaves Slack.
+    assert "C3" not in channel_ids
+
+
+@pytest.mark.parametrize(
+    "channel_ids",
+    [["general"], ["C3"]],
+    ids=["a_channel_name_instead_of_its_id", "a_private_channel_the_installer_is_not_in"],
+)
+def test_the_allowlist_refuses_a_channel_it_does_not_offer(client, slack, channel_ids):
+    save = AsyncMock()
+    with patch.object(MODULE, "update_provider_metadata", new=save):
+        response = client.put("/api/v1/slack/channels", json={"channelIds": channel_ids})
+
+    assert response.status_code == 422
+    save.assert_not_awaited()
+
+
+def test_the_allowlist_accepts_a_private_channel_the_installer_is_in(client, slack):
+    updated = SimpleNamespace(provider_metadata={"allowed_channel_ids": ["C1", "C2"]})
+    save = AsyncMock(return_value=updated)
+    with patch.object(MODULE, "update_provider_metadata", new=save):
+        response = client.put("/api/v1/slack/channels", json={"channelIds": ["C1", "C2"]})
+
+    assert response.status_code == 200
+    save.assert_awaited_once()
+
+
+def test_an_allowed_private_channel_whose_members_cannot_be_read_stays_in_the_editor(client, slack):
+    """A rate limit on the member list must not drop an allowed channel: saving the editor
+    back would take it off the allowlist, and sending it again would be refused."""
+    from cognee.tests.unit.tasks.connectors.fake_slack import rate_limited
+
+    slack.credential.provider_metadata["allowed_channel_ids"] = ["C2"]
+    slack.members.fail("conversations.members", rate_limited("conversations.members"))
+
+    channels = client.get("/api/v1/slack/channels").json()["channels"]
+    assert [(c["id"], c["allowed"]) for c in channels if c["isPrivate"]] == [("C2", True)]
+
+    updated = SimpleNamespace(provider_metadata={"allowed_channel_ids": ["C2"]})
+    with patch.object(MODULE, "update_provider_metadata", new=AsyncMock(return_value=updated)):
+        response = client.put("/api/v1/slack/channels", json={"channelIds": ["C2"]})
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("method", ["get", "put"])
+def test_a_rate_limited_channel_list_answers_429_in_the_allowlist_editor(
+    client, slack, monkeypatch, method
+):
+    from cognee.modules.integrations.ingestion import RateLimitedError
+    from cognee.modules.integrations.slack import channels as channels_module
+
+    async def fetch_page(session, access_token, params):
+        limited = RateLimitedError("Slack conversations.list is rate limited")
+        limited.retry_after = 30
+        raise limited
+
+    monkeypatch.setattr(channels_module, "_fetch_page", fetch_page)
+    if method == "get":
+        response = client.get("/api/v1/slack/channels")
+    else:
+        response = client.put("/api/v1/slack/channels", json={"channelIds": ["C1"]})
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "30"
