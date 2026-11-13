@@ -700,6 +700,65 @@ class TestFormatEmitters:
         # Non-scalar property serialized as JSON string, not raw repr.
         assert '"[\\"city\\", \\"capital\\"]"' in script
 
+    def test_graphml_declares_every_data_key(self, tmp_path):
+        # Strict readers (e.g. networkx.read_graphml) reject a <data> element
+        # whose key has no matching <key> declaration. The relationship_name
+        # data element is emitted for every edge, so its key must be declared.
+        destination = tmp_path / "graph.graphml"
+        write_graphml(self.NODES, self.EDGES, destination)
+        namespace = "{http://graphml.graphdrawing.org/xmlns}"
+        root = ET.parse(destination).getroot()
+        declared = {key.get("id") for key in root.findall(f"{namespace}key")}
+        used = {data.get("key") for data in root.iter(f"{namespace}data")}
+        assert "e_relationship_name" in declared
+        assert used <= declared
+
+    def test_graphml_rejects_xml_illegal_character(self, tmp_path):
+        # A control code XML 1.0 cannot represent (U+000C) must fail loudly
+        # rather than produce a .graphml file no parser will read.
+        destination = tmp_path / "bad.graphml"
+        nodes = [("n1", {"text": "page one\x0cpage two"})]
+        try:
+            write_graphml(nodes, [], destination)
+            raise AssertionError("expected ValueError")
+        except ValueError as error:
+            assert "U+000C" in str(error)
+            assert "json" in str(error)
+        # No best-effort partial file is left behind.
+        assert not destination.exists()
+
+    def test_graphml_rejects_lone_surrogate(self, tmp_path):
+        # A lone surrogate would raise UnicodeEncodeError inside write_text;
+        # we catch it first and report the field like any other illegal char.
+        destination = tmp_path / "surrogate.graphml"
+        try:
+            write_graphml([("n1", {"text": "bad\ud800here"})], [], destination)
+            raise AssertionError("expected ValueError")
+        except ValueError as error:
+            assert "U+D800" in str(error)
+
+    def test_graphml_rejects_illegal_character_in_property_name(self, tmp_path):
+        destination = tmp_path / "key.graphml"
+        try:
+            write_graphml([("n1", {"ke\x00y": "v"})], [], destination)
+            raise AssertionError("expected ValueError")
+        except ValueError as error:
+            assert "U+0000" in str(error)
+
+    def test_graphml_keeps_legal_whitespace(self, tmp_path):
+        # Tab, newline and carriage return are valid XML 1.0 characters and
+        # must survive export unchanged.
+        destination = tmp_path / "ws.graphml"
+        write_graphml([("n1", {"text": "a\tb\nc\rd"})], [], destination)
+        ET.parse(destination)
+
+    def test_json_keeps_full_fidelity_for_illegal_xml_character(self, tmp_path):
+        # The documented escape hatch: control characters that GraphML rejects
+        # round-trip through write_json untouched.
+        destination = tmp_path / "full.json"
+        write_json([("n1", {"text": "a\x0cb"})], [], destination)
+        assert json.loads(destination.read_text())["nodes"][0]["text"] == "a\x0cb"
+
 
 class TestImportModeValidation:
     def test_unknown_mode_rejected(self):
