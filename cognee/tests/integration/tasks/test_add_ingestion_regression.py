@@ -347,3 +347,49 @@ async def test_delete_keeps_files_another_row_still_references(add_env):
     await get_relational_engine().delete_data_entity(row_a.id, row_a.dataset_id)
 
     assert await _read_raw(row_b) == b"shared reclaim body"
+
+
+async def test_delete_does_not_reclaim_files_an_in_flight_add_will_reference(add_env, monkeypatch):
+    # Regression for #6559: stored files are shared across datasets, and an
+    # add() writes its files well before it commits the row that references
+    # them. A delete in another dataset that ran in between counted zero
+    # references and removed them, so the add committed a row pointing at
+    # files that no longer exist. The add is paused right after its loader
+    # wrote the stored text, the window the delete used to fall into.
+    import asyncio
+    import importlib
+    import os
+
+    import cognee
+    from cognee.infrastructure.databases.relational import get_relational_engine
+
+    ingest_module = importlib.import_module("cognee.tasks.ingestion.ingest_data")
+    text = "Alice maintains the payments service. Bob reviews every change to it."
+
+    await cognee.add(text, "reg_race_a")
+    (row_a,) = await _rows("reg_race_a")
+
+    paused, resume = asyncio.Event(), asyncio.Event()
+    original_loader = ingest_module.data_item_to_text_file
+
+    async def paused_loader(*args, **kwargs):
+        result = await original_loader(*args, **kwargs)
+        if kwargs.get("dataset_name") == "reg_race_b":
+            paused.set()
+            await resume.wait()
+        return result
+
+    monkeypatch.setattr(ingest_module, "data_item_to_text_file", paused_loader)
+    add_b = asyncio.create_task(cognee.add(text, "reg_race_b"))
+    try:
+        await asyncio.wait_for(paused.wait(), timeout=60)
+        await get_relational_engine().delete_data_entity(row_a.id, row_a.dataset_id)
+    finally:
+        resume.set()
+        await add_b
+
+    (row_b,) = await _rows("reg_race_b")
+    assert row_b.original_data_location == row_a.original_data_location
+    for location in (row_b.original_data_location, row_b.raw_data_location):
+        local_path = location.removeprefix("file://")
+        assert os.path.exists(local_path), f"{location} was removed under an in-flight add"
