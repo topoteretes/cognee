@@ -53,6 +53,19 @@ from cognee.tasks.ingestion.dlt_utils import (
 TABLE = "vercel_web"
 
 
+@pytest.fixture(autouse=True)
+def _no_active_dlt_pipeline():
+    """A source iterated outside a pipeline keeps its state in the active pipeline, and a
+    test that ran a real pipeline leaves it active, so the next test read that state. A CI
+    shard orders tests differently from a local run, which hid it."""
+    from dlt.common.configuration.container import Container
+    from dlt.common.pipeline import PipelineContext
+
+    context = Container()[PipelineContext]
+    if context.is_active():
+        context.deactivate()
+
+
 def _team(*, failed: int = 1, page_size: int | None = None) -> FakeVercel:
     """Team acme, project web: a READY production deployment, a preview and ``failed`` ERRORs."""
     fake = FakeVercel(page_size=page_size)
