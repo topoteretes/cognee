@@ -9,6 +9,7 @@ import json
 from datetime import datetime, timezone
 
 import pytest
+from pydantic import BaseModel
 
 from cognee.modules.migration.cogx import (
     COGX_VERSION,
@@ -152,6 +153,38 @@ class TestModels:
         entity = COGXEntity(external_id="e", name="Alice", description="A person")
         assert entity.content_hash == content_hash_of("Alice: A person")
         assert entity.media_type == "text/plain"
+
+    def test_an_empty_field_added_later_keeps_the_checksum(self):
+        class LaterMemory(COGXMemory):
+            later: list[str] = []  # a field a future COGX version adds
+
+        record = COGXMemory(external_id="m", content=TEXT)
+        assert checksum_of(LaterMemory(external_id="m", content=TEXT)) == checksum_of(record)
+
+    def test_a_nested_empty_field_added_later_keeps_the_checksum(self):
+        class LaterLink(COGXLink):
+            later: list[str] = []  # a field a future COGX version adds to links
+
+        class Before(BaseModel):
+            links: list[COGXLink] = []
+
+        class After(BaseModel):
+            links: list[LaterLink] = []
+
+        link = {"target": "t", "rel": "relates_to"}
+        assert checksum_of(After(links=[link])) == checksum_of(Before(links=[link]))
+
+    def test_a_sub_model_added_later_with_only_empty_fields_keeps_the_checksum(self):
+        class Inner(BaseModel):
+            later: list[str] = []
+
+        class Before(BaseModel):
+            name: str = "x"
+
+        class After(Before):
+            inner: Inner = Inner()  # dumps as {"later": []}, empty once cleaned
+
+        assert checksum_of(After()) == checksum_of(Before())
 
     def test_legacy_float_confidence_becomes_score(self):
         fact = COGXFact(
@@ -320,6 +353,22 @@ class TestLegacyNames:
         assert normalize_legacy_fields({"provenance": ["x"], "evidence": [{"ref": "y"}]})[
             "evidence"
         ] == [{"ref": "y"}, {"ref": "x"}]
+
+    def test_fact_keeps_contributors_beside_provenance_strings(self):
+        """A 0.2 fact carried episode refs under ``provenance`` and its
+        authors under ``contributors``: neither is lost on read."""
+        fact = COGXFact.model_validate(
+            {
+                "external_id": "f",
+                "subject_ref": "a",
+                "predicate": "p",
+                "object_ref": "b",
+                "provenance": ["ep1"],
+                "contributors": [{"role": "author", "actor": "user-a", "kind": "human"}],
+            }
+        )
+        assert fact.evidence == [COGXEvidence(ref="ep1")]
+        assert [(c.id, c.contribution) for c in fact.provenance] == [("user-a", "authored")]
 
     def test_stored_0_2_header_is_read(self):
         stored = json.dumps(

@@ -31,6 +31,7 @@ async def export(
     user=None,
     link_relations: bool = False,
     include_permissions: bool = False,
+    overwrite: bool = False,
 ) -> ExportResult: ...
 
 
@@ -43,6 +44,7 @@ async def export(
     user=None,
     link_relations: bool = False,
     include_permissions: bool = False,
+    overwrite: bool = False,
 ) -> ExportResult: ...
 
 
@@ -53,6 +55,7 @@ async def export(
     user=None,
     link_relations: bool = False,
     include_permissions: bool = False,
+    overwrite: bool = False,
 ) -> ExportResult | GraphSnapshot:
     """Export a dataset's knowledge graph.
 
@@ -81,6 +84,10 @@ async def export(
         link_relations: ``pydantic`` only — re-attach edges as object
             references on declared relation fields (e.g. ``entity.is_a``),
             turning the snapshot into a traversable object graph.
+        overwrite: ``omp`` formats only — they refuse a ``destination`` that
+            is not empty, since leftover files would be read back as memories.
+            ``True`` deletes the folder and everything in it first, files
+            cognee did not write included.
 
     Returns:
         GraphSnapshot for ``format="pydantic"``, ExportResult otherwise.
@@ -110,4 +117,5 @@ async def export(
             user=user,
             link_relations=link_relations,
             include_permissions=include_permissions,
+            overwrite=overwrite,
         )

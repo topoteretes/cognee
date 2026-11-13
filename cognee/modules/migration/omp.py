@@ -14,15 +14,24 @@ carries the same memories as front matter plus body. A folder of markdown
 memories with no other metadata meets the minimal profile (Appendix C).
 """
 
+import hashlib
 import re
-from collections.abc import Iterable, Iterator
+import shutil
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_serializer,
+    model_validator,
+)
 from typing_extensions import Self
 
 from cognee.modules.migration.cogx import (
@@ -42,7 +51,8 @@ from cognee.modules.migration.cogx import (
     COGXScope,
     COGXTurn,
     COGXVersion,
-    canonical_checksum,
+    UTCDateTime,
+    format_timestamp,
     is_media_type,
 )
 
@@ -61,6 +71,17 @@ _FRONT_MATTER = re.compile(
 _SLUG_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
+class _TextTimestampLoader(yaml.SafeLoader):
+    """Safe YAML that leaves timestamps as the text written: the checksum
+    hashes that text, which a parsed ``datetime`` no longer carries."""
+
+
+_TextTimestampLoader.yaml_implicit_resolvers = {
+    first: [(tag, regexp) for tag, regexp in resolvers if tag != "tag:yaml.org,2002:timestamp"]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+
 class OMPManifest(BaseModel):
     """What an export says about itself (draft 5.3 working text).
 
@@ -77,7 +98,7 @@ class OMPManifest(BaseModel):
     protocol_version: str = OMP_PROTOCOL_VERSION
     profiles: list[str] = Field(default_factory=list)
     origin: str | None = None
-    exported_at: datetime | None = None
+    exported_at: UTCDateTime | None = None
     selection: str = "snapshot"
     intent: str = "copy"
     media_types: list[str] = Field(default_factory=list)
@@ -121,22 +142,43 @@ class OMPMemory(BaseModel):
     identifier: str
     media_type: str
     body: str
-    created_at: datetime
+    created_at: UTCDateTime
     protocol_version: str | None = None
     path: str | None = None
     title: str | None = None
     stub: bool | None = None
     tags: list[str] = Field(default_factory=list)
     scope: list[str] = Field(default_factory=list)
-    valid_from: datetime | None = None
-    valid_until: datetime | None = None
+    valid_from: UTCDateTime | None = None
+    valid_until: UTCDateTime | None = None
     version: COGXVersion | None = None
-    updated_at: datetime | None = None
+    updated_at: UTCDateTime | None = None
     checksum: str | None = None
     provenance: list[COGXContributor] = Field(default_factory=list)
     evidence: list[COGXEvidence] = Field(default_factory=list)
     links: list[COGXLink] = Field(default_factory=list)
     weight: float | None = None
+
+    # Timestamps as the text they arrived as: the checksum hashes that text,
+    # and it is written back unchanged so the checksum still holds downstream.
+    # Each as (text, the value read from it), so a changed field drops its text.
+    _received_timestamps: dict[str, tuple[str, datetime]] = PrivateAttr(default_factory=dict)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _keep_received_timestamps(cls, data: Any, handler: Any) -> Self:
+        memory = handler(data)
+        if isinstance(data, dict):
+            memory._received_timestamps = {
+                key: (data[key], getattr(memory, key))
+                for key in _TIMESTAMP_FIELDS
+                if isinstance(data.get(key), str)
+            }
+        return memory
+
+    @field_serializer(*_TIMESTAMP_FIELDS, when_used="json")
+    def _write_timestamp(self, value: datetime | None, info: Any) -> str | None:
+        return None if value is None else self._timestamp_text(info.field_name)
 
     def extension(self, name: str) -> Any:
         """A field outside the standard table, or None."""
@@ -146,11 +188,33 @@ class OMPMemory(BaseModel):
         """The memory as the JSON object of Appendix A: every stated field,
         unknown fields included, empty lists and null fields left out."""
         data = self.model_dump(mode="json", exclude_none=True)
+        # Top level only, unlike the COGX checksum's filter: a field's own value
+        # (an unknown field included) is kept exactly as stated.
         return {key: value for key, value in data.items() if value not in ([], {})}
 
     def compute_checksum(self) -> str:
-        """``sha256:<hex>`` over the canonical interchange form minus ``checksum``."""
-        return canonical_checksum(self.interchange())
+        """``sha256:<hex>`` over ``identifier``, ``version`` where present,
+        ``created_at``, ``updated_at`` where present and ``media_type``, each
+        followed by a newline, then the body bytes."""
+        parts = [self.identifier]
+        if self.version is not None:
+            parts.append(str(self.version.value))
+        parts.append(self._timestamp_text("created_at"))
+        if self.updated_at is not None:
+            parts.append(self._timestamp_text("updated_at"))
+        parts.append(self.media_type)
+        hashed = "".join(f"{part}\n" for part in parts) + self.body
+        return "sha256:" + hashlib.sha256(hashed.encode("utf-8")).hexdigest()
+
+    def _timestamp_text(self, name: str) -> str:
+        """A timestamp as this memory states it: the text it arrived with while
+        the field still holds the value read from it, else as
+        :func:`format_timestamp` spells it."""
+        value = getattr(self, name)
+        received = self._received_timestamps.get(name)
+        if received is not None and received[1] == value:
+            return received[0]
+        return format_timestamp(value)
 
     def stamp_checksum(self) -> Self:
         self.checksum = self.compute_checksum()
@@ -159,9 +223,9 @@ class OMPMemory(BaseModel):
     def verify_checksum(self) -> bool | None:
         """True/False when the memory carries a checksum; None when it does not.
 
-        The draft fixes no canonical form (U-1), so a memory another system
-        hashed differently reports False here; receivers report that, they
-        do not reject on it (3.5.7).
+        Timestamps are hashed as the memory states them, so a memory hashed
+        by another system verifies here; a mismatch is reported, never a
+        reason to reject.
         """
         if not self.checksum:
             return None
@@ -222,7 +286,8 @@ class OMPMemory(BaseModel):
             view["title"] = self.title
         if self.tags:
             view["tags"] = list(self.tags)
-        view["created_at"] = self.created_at.isoformat()
+        # One spelling for the agent; the received text only matters to checksums.
+        view["created_at"] = format_timestamp(self.created_at)
         if self.path:
             view["path"] = self.path
         if self.version is not None:
@@ -230,7 +295,7 @@ class OMPMemory(BaseModel):
         for key in ("valid_from", "valid_until"):
             value = getattr(self, key)
             if value is not None:
-                view[key] = value.isoformat()
+                view[key] = format_timestamp(value)
         if self.provenance:
             view["provenance"] = [
                 {
@@ -283,7 +348,7 @@ class OMPMemory(BaseModel):
         body = text
         match = _FRONT_MATTER.match(text)
         if match:
-            loaded = yaml.safe_load(match.group(1)) or {}
+            loaded = yaml.load(match.group(1), Loader=_TextTimestampLoader) or {}
             if not isinstance(loaded, dict):
                 raise ValueError("Front matter must be a YAML mapping.")
             metadata = loaded
@@ -299,10 +364,6 @@ class OMPMemory(BaseModel):
         if created_at is not None:
             metadata.setdefault("created_at", created_at)
         metadata.setdefault("media_type", "text/markdown")
-        for key in _TIMESTAMP_FIELDS:
-            value = metadata.get(key)
-            if isinstance(value, date) and not isinstance(value, datetime):
-                metadata[key] = datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
         if isinstance(metadata.get("protocol_version"), (int, float)):
             metadata["protocol_version"] = str(metadata["protocol_version"])
         return cls.model_validate({**metadata, "body": body})
@@ -356,13 +417,6 @@ def _cognee_extension(record: COGXRecordBase) -> dict[str, Any]:
     return extension
 
 
-def _fact_body(record: COGXFact) -> str:
-    """A fact without text renders as its triple, with the endpoint names the
-    exporter put in ``subject`` where it had them."""
-    subject, obj = (list(record.subject) + [None, None])[:2]
-    return f"{subject or record.subject_ref} {record.predicate} {obj or record.object_ref}"
-
-
 def memory_from_record(
     record: COGXRecord,
     *,
@@ -386,7 +440,7 @@ def memory_from_record(
         return None
     body = record.body_text()
     if body is None and isinstance(record, COGXFact):
-        body = _fact_body(record)
+        body = record.readable_text()
     if body is None:
         body = ""
 
@@ -401,6 +455,8 @@ def memory_from_record(
         tags.append(record.semantic_kind)
     if isinstance(record, COGXMemory):
         tags.extend(category for category in record.categories if category not in tags)
+    if isinstance(record, COGXEntity) and record.entity_type and record.entity_type not in tags:
+        tags.append(record.entity_type)  # the kind of the memory, readable by any system
 
     title = record.title
     if title is None and isinstance(record, COGXEntity):
@@ -478,7 +534,8 @@ def record_from_memory(memory: OMPMemory, *, external_system: str = "omp") -> CO
 
     semantic_kind = extension.get("semantic_kind")
     categories = list(extension.get("categories") or [])
-    tags = [tag for tag in memory.tags if tag != semantic_kind and tag not in categories]
+    derived_tags = {semantic_kind, extension.get("entity_type"), *categories}
+    tags = [tag for tag in memory.tags if tag not in derived_tags]
 
     kind = extension.get("kind")
     title = memory.title
@@ -559,19 +616,18 @@ def record_from_memory(memory: OMPMemory, *, external_system: str = "omp") -> CO
 
 
 def mark_dangling(memory: OMPMemory, identifiers: set[str]) -> OMPMemory:
-    """Mark the links and evidence a receiver cannot resolve (3.5.5).
+    """Mark the links and evidence that do not resolve within ``identifiers``.
 
-    A reference resolves when it names a memory of the same export; anything
-    else — a transcript turn, a URL, a memory left out of a selection — is
-    dangling from the receiver's side. A mark the exporter already set is
-    kept. References are never dropped.
+    A reference resolves when it names one of ``identifiers`` (the memories of
+    the same export); anything else — a transcript turn, a URL, a memory left
+    out of a selection — is dangling for whoever reads this memory. Marks are
+    recomputed, so an earlier export's mark never outlives it, and a reference
+    that resolves is left unmarked. References are never dropped.
     """
     for link in memory.links:
-        if link.dangling is None:
-            link.dangling = link.target not in identifiers
+        link.dangling = True if link.target not in identifiers else None
     for entry in memory.evidence:
-        if entry.dangling is None:
-            entry.dangling = entry.ref not in identifiers
+        entry.dangling = True if entry.ref not in identifiers else None
     return memory
 
 
@@ -601,19 +657,43 @@ def _relative_markdown_path(memory: OMPMemory) -> Path:
     return Path(_slug(memory.identifier) + ".md")
 
 
-def _index_markdown(entries: list[tuple[str, str]], exported_at: datetime) -> str:
-    """The root ``MEMORY.md`` of the markdown loading profile (3.6.6): a stub
-    memory whose body lists every deferred file one level down."""
+def _index_markdown(entries: list[tuple[str, str, str]], exported_at: datetime) -> str:
+    """The root ``MEMORY.md`` of the markdown loading profile: a stub memory
+    of its own, whose body lists every file and whose links name every
+    memory it lists (``entries`` are title, path, identifier)."""
     index = OMPMemory(
         identifier=OMP_INDEX_FILE,
         media_type="text/markdown",
         created_at=exported_at,
+        path=OMP_INDEX_FILE,
         title="Memory index",
         tags=["index"],
         stub=True,
-        body="\n".join(f"- [{title}]({path})" for title, path in entries) + "\n",
+        # It lists the memories, it is not derived from them: ``relates_to``.
+        links=[COGXLink(target=identifier, rel="relates_to") for _, _, identifier in entries],
+        body="\n".join(f"- [{title}]({path})" for title, path, _ in entries) + "\n",
     )
     return index.to_markdown()
+
+
+def prepare_omp_destination(destination: Path, overwrite: bool) -> None:
+    """Leave ``destination`` an empty folder, refusing a non-empty one unless
+    ``overwrite`` allows deleting it with everything in it."""
+    if destination.exists() and not destination.is_dir():
+        raise NotADirectoryError(f"OMP export destination {destination} is not a folder.")
+    if destination.exists() and any(destination.iterdir()):
+        if not overwrite:
+            raise FileExistsError(
+                f"OMP export destination {destination} is not empty. Pass "
+                "overwrite=True to delete it and everything in it before exporting."
+            )
+        if destination.is_symlink():
+            raise ValueError(
+                f"OMP export destination {destination} is a symbolic link; pass the "
+                "folder it points to for overwrite=True to delete it."
+            )
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True, exist_ok=True)
 
 
 def write_omp_export(
@@ -622,6 +702,7 @@ def write_omp_export(
     *,
     manifest: OMPManifest | None = None,
     layout: str = "jsonl",
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     """Write memories as an OMP export directory and return its counts.
 
@@ -630,11 +711,15 @@ def write_omp_export(
     root ``MEMORY.md`` index (unless a memory claims that path). Both write
     ``manifest.json`` last, with the profiles every memory meets and the
     media types present filled in from the memories themselves.
+
+    ``destination`` must be empty or absent: files left from an earlier
+    export would be read back as memories. ``overwrite=True`` deletes the
+    folder and everything in it first, files cognee did not write included.
     """
     if layout not in OMP_LAYOUTS:
         raise ValueError(f"Unknown OMP layout {layout!r}. Expected one of {OMP_LAYOUTS}.")
     destination = Path(destination)
-    destination.mkdir(parents=True, exist_ok=True)
+    prepare_omp_destination(destination, overwrite)
     manifest = manifest.model_copy() if manifest else OMPManifest()
     if manifest.exported_at is None:
         manifest.exported_at = datetime.now(timezone.utc)
@@ -643,7 +728,7 @@ def write_omp_export(
     minimal = audit = True
     media_types: set[str] = set()
     written: set[Path] = set()
-    index_entries: list[tuple[str, str]] = []
+    index_entries: list[tuple[str, str, str]] = []
     resolved_destination = destination.resolve()
     jsonl_handle = None
     if layout == "jsonl":
@@ -659,18 +744,22 @@ def write_omp_export(
                 jsonl_handle.write(_dumps(memory.interchange()) + "\n")
                 continue
             relative = _relative_markdown_path(memory)
+            if not (destination / relative).resolve().is_relative_to(resolved_destination):
+                relative = Path(_slug(memory.identifier) + ".md")
+            # Any name, the fallback included, is deduplicated within the folder.
             stem, suffix, bump = relative.with_suffix(""), relative.suffix, 1
             while relative in written:
                 relative = stem.with_name(f"{stem.name}-{bump}{suffix}")
                 bump += 1
             target = (destination / relative).resolve()
-            if not target.is_relative_to(resolved_destination):
-                relative = Path(_slug(memory.identifier) + ".md")
-                target = (destination / relative).resolve()
+            # ``path`` records the file's place in the export; it is not hashed.
+            memory = memory.model_copy(update={"path": relative.as_posix()})
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(memory.to_markdown(), encoding="utf-8")
             written.add(relative)
-            index_entries.append((memory.title or memory.identifier, relative.as_posix()))
+            index_entries.append(
+                (memory.title or memory.identifier, relative.as_posix(), memory.identifier)
+            )
     finally:
         if jsonl_handle is not None:
             jsonl_handle.close()
@@ -714,7 +803,11 @@ def read_omp_manifest(source: Any) -> OMPManifest | None:
 
 
 def _file_created_at(path: Path) -> datetime:
-    return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    """When the file was created, or last modified where the system does not
+    record creation (``st_birthtime`` is missing on Linux)."""
+    stat = path.stat()
+    seconds = getattr(stat, "st_birthtime", None)
+    return datetime.fromtimestamp(stat.st_mtime if seconds is None else seconds, tz=timezone.utc)
 
 
 def _memory_from_file(path: Path, root: Path | None = None) -> OMPMemory:
@@ -727,58 +820,86 @@ def _memory_from_file(path: Path, root: Path | None = None) -> OMPMemory:
     )
 
 
-def iter_omp_memories(source: Any) -> Iterator[OMPMemory]:
+def _read_one(where: str, on_unreadable, read, *args) -> Iterator[OMPMemory]:
+    """Yield the memory ``read(*args)`` returns. With ``on_unreadable``, one
+    that cannot be opened or is not a valid memory is reported and skipped
+    instead of raising."""
+    if on_unreadable is None:
+        yield read(*args)
+        return
+    try:
+        memory = read(*args)
+    except (OSError, TypeError, ValueError, yaml.YAMLError) as error:
+        on_unreadable(where, error)
+        return
+    yield memory
+
+
+def iter_omp_memories(
+    source: Any, on_unreadable: Callable[[str, Exception], None] | None = None
+) -> Iterator[OMPMemory]:
     """Stream the memories of an OMP export.
 
     ``source`` is an export directory (``memories.jsonl`` and/or ``.md``
     files, read in path order), a ``.jsonl`` file, a ``.json`` file holding
     one memory, a list of them or ``{"memories": [...]}``, a single ``.md``
     file, or the same shapes already parsed (a list or dict).
+
+    A memory that is not valid (a ``.md`` file, a ``.jsonl`` line, an entry
+    of a list) raises, unless ``on_unreadable`` is given: it is then called
+    with where the memory sat and the error, and the rest is still read.
     """
     if isinstance(source, (str, Path)):
         path = Path(source)
         if path.is_dir():
             jsonl = path / OMP_MEMORIES_FILE
             if jsonl.is_file():
-                yield from _iter_jsonl(jsonl)
+                yield from _iter_jsonl(jsonl, on_unreadable)
             for markdown in sorted(path.rglob("*.md")):
                 if markdown.is_file():
-                    yield _memory_from_file(markdown, path)
+                    where = markdown.relative_to(path).as_posix()
+                    yield from _read_one(where, on_unreadable, _memory_from_file, markdown, path)
             return
         if not path.is_file():
             raise FileNotFoundError(f"OMP export not found: {path}")
         suffix = path.suffix.lower()
         if suffix == ".jsonl":
-            yield from _iter_jsonl(path)
+            yield from _iter_jsonl(path, on_unreadable)
         elif suffix == ".md":
-            yield _memory_from_file(path)
+            yield from _read_one(path.name, on_unreadable, _memory_from_file, path)
         else:
-            yield from _iter_parsed(_loads(path.read_text(encoding="utf-8")))
+            data = _loads(path.read_text(encoding="utf-8"))
+            yield from _iter_parsed(data, on_unreadable, path.name)
         return
-    yield from _iter_parsed(source)
+    yield from _iter_parsed(source, on_unreadable)
 
 
-def _iter_jsonl(path: Path) -> Iterator[OMPMemory]:
+def _iter_jsonl(path: Path, on_unreadable=None) -> Iterator[OMPMemory]:
     with open(path, "r", encoding="utf-8") as handle:
-        for line in handle:
+        for number, line in enumerate(handle, start=1):
             line = line.strip()
             if line:
-                yield OMPMemory.model_validate(_loads(line))
+                where = f"{path.name}:{number}"
+                yield from _read_one(where, on_unreadable, _memory_from_json, line)
 
 
-def _iter_parsed(data: Any) -> Iterator[OMPMemory]:
+def _memory_from_json(line: str) -> OMPMemory:
+    return OMPMemory.model_validate(_loads(line))
+
+
+def _iter_parsed(data: Any, on_unreadable=None, where: str = "") -> Iterator[OMPMemory]:
     if isinstance(data, dict):
         for key in ("memories", "items", "results"):
             if isinstance(data.get(key), list):
                 data = data[key]
                 break
         else:
-            yield OMPMemory.model_validate(data)
+            yield from _read_one(where, on_unreadable, OMPMemory.model_validate, data)
             return
     if not isinstance(data, list):
         raise ValueError(
             "Unrecognized OMP export shape: expected a memory, a list, or a directory."
         )
-    for item in data:
-        if isinstance(item, dict):
-            yield OMPMemory.model_validate(item)
+    for index, item in enumerate(data):
+        item_where = f"{where}[{index}]"
+        yield from _read_one(item_where, on_unreadable, OMPMemory.model_validate, item)

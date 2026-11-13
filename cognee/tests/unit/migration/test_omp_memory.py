@@ -7,10 +7,13 @@ Pure tests: no databases, no LLM, no network.
 """
 
 import asyncio
+import hashlib
 import json
+import os
 from datetime import datetime, timezone
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from cognee.modules.engine.models import Entity
@@ -27,9 +30,11 @@ from cognee.modules.migration.cogx import (
     COGXScope,
     COGXTurn,
     COGXVersion,
+    omp_header_of,
+    parse_omp_header,
 )
 from cognee.modules.migration.export import ExportFacts, _write_omp
-from cognee.modules.migration.loader import translate_records
+from cognee.modules.migration.loader import data_item_from_record, translate_records
 from cognee.modules.migration.omp import (
     OMP_INDEX_FILE,
     OMP_MEMORIES_FILE,
@@ -100,6 +105,8 @@ ALICE = "11111111-1111-4111-8111-111111111111"
 BERLIN = "22222222-2222-4222-8222-222222222222"
 CHUNK = "44444444-4444-4444-8444-444444444444"
 DOC = "88888888-8888-4888-8888-888888888888"
+DATE = "99999999-9999-4999-8999-999999999999"
+PERSON = "55555555-5555-4555-8555-555555555555"
 TEXT = "Alice lives in Berlin."
 NO_FACTS = ExportFacts(edge_support={}, actors={})
 
@@ -114,8 +121,10 @@ def graph():
         (BERLIN, {"type": "Entity", "name": "Berlin", "description": "A city"}),
         (CHUNK, {"type": "DocumentChunk", "text": TEXT, "chunk_index": 0}),
         (DOC, {"type": "TextDocument", "name": "memory"}),  # structure, not a memory
+        (PERSON, {"type": "EntityType", "name": "Person"}),  # Alice's type, not a memory
     ]
     edges = [
+        (ALICE, PERSON, "is_a", {}),
         (CHUNK, ALICE, "contains", {}),
         (CHUNK, BERLIN, "contains", {}),
         (CHUNK, DOC, "is_part_of", {}),
@@ -149,6 +158,69 @@ class TestMemoryObject:
         assert memory.extension("x_rank") == {"by": "team", "value": 3}
         assert memory.interchange()["x_rank"] == {"by": "team", "value": 3}
         assert "x_rank" not in memory.runtime_view()
+
+    def test_timestamps_without_offset_are_utc(self):
+        naive = {"created_at": "2026-01-01T00:00:00", "valid_until": "2025-01-01T00:00:00"}
+        memory = OMPMemory.model_validate(
+            {"identifier": "m", "media_type": "text/plain", "body": "x", **naive}
+        )
+        assert memory.valid_until == datetime(2025, 1, 1, tzinfo=timezone.utc)
+        assert any("past valid_until" in note for note in memory.conformance().notes)
+        markdown = "---\nidentifier: m\ncreated_at: 2026-01-01 10:00:00\n---\n\nx"
+        assert OMPMemory.from_markdown(markdown).created_at.tzinfo is timezone.utc
+        assert parse_omp_header(naive)["valid_until"].tzinfo is timezone.utc
+
+    def test_checksum_hashes_its_fields_as_received(self):
+        received = "2026-01-01T10:00:00+00:00"
+        memory = OMPMemory.model_validate(
+            {"identifier": "m", "media_type": "text/plain", "body": "x", "created_at": received}
+            | {"version": 2}
+        )
+        hashed = f"m\n2\n{received}\ntext/plain\nx"
+        assert memory.compute_checksum() == "sha256:" + hashlib.sha256(hashed.encode()).hexdigest()
+        assert memory.interchange()["created_at"] == received  # written back as received
+
+    def test_cognee_writes_one_timestamp_spelling_and_its_checksum_round_trips(self):
+        when = datetime(2026, 1, 1, 10, 0, 0, 123456, tzinfo=timezone.utc)
+        memory = OMPMemory(identifier="m", media_type="text/plain", body="x", created_at=when)
+        memory.stamp_checksum()
+        assert memory.interchange()["created_at"] == "2026-01-01T10:00:00.123456Z"
+        assert OMPMemory.model_validate(memory.interchange()).verify_checksum() is True
+
+    def test_unquoted_front_matter_timestamps_verify(self):
+        hashed = "m\n2026-01-01 10:00:00\ntext/markdown\nx"
+        checksum = "sha256:" + hashlib.sha256(hashed.encode()).hexdigest()
+        markdown = (
+            f"---\nidentifier: m\ncreated_at: 2026-01-01 10:00:00\nchecksum: {checksum}\n---\n\nx"
+        )
+        assert OMPMemory.from_markdown(markdown).verify_checksum() is True
+
+    def test_yaml_timestamp_spellings_load_and_verify(self):
+        text = "2001-12-14 21:59:43.10 -5"
+        checksum = "sha256:" + hashlib.sha256(f"m\n{text}\ntext/markdown\nx".encode()).hexdigest()
+        markdown = f"---\nidentifier: m\ncreated_at: {text}\nchecksum: {checksum}\n---\n\nx"
+        memory = OMPMemory.from_markdown(markdown)
+        assert memory.created_at == datetime(2001, 12, 15, 2, 59, 43, 100000, tzinfo=timezone.utc)
+        assert memory.verify_checksum() is True
+
+    def test_nested_yaml_timestamp_spellings_load(self):
+        markdown = (
+            "---\nidentifier: m\ncreated_at: 2026-01-01T00:00:00Z\nprovenance:\n"
+            "  - {id: u, kind: human, at: 2001-12-14 21:59:43.10 -5}\n---\n\nx"
+        )
+        at = OMPMemory.from_markdown(markdown).provenance[0].at
+        assert at == datetime(2001, 12, 15, 2, 59, 43, 100000, tzinfo=timezone.utc)
+
+    def test_a_changed_timestamp_drops_its_received_text(self):
+        memory = OMPMemory.model_validate(
+            {"identifier": "m", "media_type": "text/plain", "body": "x"}
+            | {"created_at": "2026-01-01T10:00:00+00:00"}
+        )
+        changed = memory.model_copy(
+            update={"created_at": datetime(2030, 1, 1, tzinfo=timezone.utc)}
+        )
+        assert changed.interchange()["created_at"] == "2030-01-01T00:00:00.000000Z"
+        assert changed.compute_checksum() != memory.compute_checksum()
 
     def test_required_fields(self):
         with pytest.raises(ValidationError):
@@ -196,6 +268,7 @@ class TestMemoryObject:
             view
         )
         assert not {"checksum", "scope", "evidence", "weight", "protocol_version"} & set(view)
+        assert view["created_at"] == "2026-09-15T09:30:00.000000Z"  # one spelling for agents
         assert view["version"] == 2
         assert view["provenance"][0] == {
             "id": "user:jordan",
@@ -245,6 +318,22 @@ class TestMemoryObject:
 
 
 class TestRecordMapping:
+    def test_a_memory_title_survives_import(self):
+        memory = OMPMemory(
+            identifier="m", media_type="text/plain", body="x", created_at=WHEN, title="Q3 plan"
+        )
+        record = record_from_memory(memory)
+        assert parse_omp_header(omp_header_of(record))["title"] == "Q3 plan"
+        assert data_item_from_record(record).label == "Q3 plan"
+
+    def test_an_unknown_field_is_stored_as_stated(self):
+        unknown = {"x-tool": {"args": [], "opts": {}}}
+        memory = OMPMemory(
+            identifier="m", media_type="text/plain", body="x", created_at=WHEN, **unknown
+        )
+        header = omp_header_of(record_from_memory(memory))
+        assert header["extensions"] == unknown
+
     def test_foreign_memory_becomes_a_cogx_memory(self):
         memory = OMPMemory.model_validate(
             {**APPENDIX_A, "scope": ["team:platform", "user:jordan"], "x_rank": 3}
@@ -381,12 +470,20 @@ class TestRecordMapping:
         assert memory_from_record(bare).body == "e1 lives_in e2"
         assert memory_from_record(bare).media_type == "text/plain"
 
-    def test_mark_dangling_keeps_and_marks(self):
+    def test_dangling_marks_are_not_stored(self):
+        link = COGXLink(target="gone", rel="relates_to", dangling=True)
+        memory = OMPMemory(
+            identifier="m", media_type="text/plain", body="x", created_at=WHEN, links=[link]
+        )
+        header = omp_header_of(record_from_memory(memory))
+        assert header["links"] == [{"target": "gone", "rel": "relates_to"}]
+
+    def test_mark_dangling_recomputes_marks(self):
         memory = appendix_a()
+        memory.links[0].dangling = True  # an earlier export's mark
         mark_dangling(memory, {APPENDIX_A["identifier"]})
-        assert memory.links[0].dangling is False  # resolves within the export
+        assert memory.links[0].dangling is None  # resolves here: left unmarked
         assert memory.evidence[0].dangling is True  # a transcript turn lives outside the store
-        assert memory.evidence[1].dangling is True  # the exporter's own mark is kept
         assert len(memory.links) == 1 and len(memory.evidence) == 2  # nothing dropped
 
 
@@ -397,7 +494,7 @@ class TestExportAndImport:
         result = _write_omp(
             nodes, edges, destination, "ds", NO_FACTS, origin="cognee:ds", layout="jsonl"
         )
-        assert result == {"memories": 7, "profiles": ["minimal"], "layout": "jsonl"}
+        assert result == {"memories": 4, "profiles": ["minimal"], "layout": "jsonl"}
         assert (destination / OMP_MEMORIES_FILE).is_file()
 
         manifest = read_omp_manifest(destination)
@@ -406,16 +503,23 @@ class TestExportAndImport:
         assert manifest.profiles == ["minimal"]
         assert manifest.selection == "snapshot" and manifest.intent == "copy"
         assert manifest.media_types == ["text/plain"]
-        assert manifest.model_extra["memories"] == 7
+        assert manifest.model_extra["memories"] == 4
         assert "coverage" in manifest.model_extra["cognee"]
+        checksum_note = manifest.model_extra["cognee"]["coverage"]["checksum"]
+        assert checksum_note.startswith("sha256 over the memory's identifier")  # OMP's own rule
 
         memories = {memory.identifier: memory for memory in iter_omp_memories(destination)}
         assert DOC not in memories  # structure, not a memory
+        assert f"{CHUNK}:is_part_of:{DOC}" not in memories  # its edges are not facts
+        assert f"{CHUNK}:contains:{ALICE}" not in memories  # carried as a mentions link
         assert all(memory.verify_checksum() for memory in memories.values())
         assert all(memory.conformance().minimal for memory in memories.values())
         assert memories[ALICE].title == "Alice"
         assert memories[ALICE].version == COGXVersion(value=1)
         assert memories[ALICE].extension("cognee")["kind"] == "entity"
+        assert "Person" in memories[ALICE].tags  # the type, readable by any system
+        alice = record_from_memory(memories[ALICE])
+        assert alice.entity_type == "Person" and "Person" not in alice.tags
         assert memories[CHUNK].body == TEXT
         assert memories[CHUNK].links == [
             COGXLink(target=ALICE, rel="mentions"),
@@ -434,17 +538,120 @@ class TestExportAndImport:
         result = _write_omp(
             nodes, edges, destination, "ds", NO_FACTS, origin="cognee:ds", layout="markdown"
         )
-        assert result["layout"] == "markdown" and result["memories"] == 7
+        assert result["layout"] == "markdown" and result["memories"] == 4
         files = sorted(path.name for path in destination.glob("*.md"))
         assert OMP_INDEX_FILE in files and f"{ALICE}.md" in files
-        assert len(files) == 8  # seven memories plus the root index
+        assert len(files) == 5  # four memories plus the root index
         index = OMPMemory.from_markdown((destination / OMP_INDEX_FILE).read_text())
         assert index.stub is True and index.tags == ["index"]
+        assert index.path == OMP_INDEX_FILE  # the index is a memory of its own
+        assert COGXLink(target=ALICE, rel="relates_to") in index.links
         assert f"[Alice]({ALICE}.md)" in index.body
         memories = {memory.identifier: memory for memory in iter_omp_memories(destination)}
-        assert len(memories) == 8
+        assert len(memories) == 5
         assert memories[ALICE].links == [] and memories[ALICE].path == f"{ALICE}.md"
         assert memories[CHUNK].body == TEXT
+
+    def test_markdown_round_trip_verifies_and_states_each_files_place(self, tmp_path):
+        nodes, edges = graph()
+        destination = tmp_path / "ds_md"
+        _write_omp(nodes, edges, destination, "ds", NO_FACTS, origin="cognee:ds", layout="markdown")
+        source = OMPSource(destination, mode="preserve")
+        source.receipt = ImportReceipt()
+        collect(source)
+        assert source.receipt.integrity["failed"] == []
+        alice = OMPMemory.from_markdown((destination / f"{ALICE}.md").read_text())
+        assert alice.path == f"{ALICE}.md"  # stated in the file, not filled in on import
+
+    def test_an_unreadable_memory_is_rejected_and_the_rest_imported(self, tmp_path):
+        (tmp_path / "good.md").write_text("A plain note.")
+        (tmp_path / "bad.md").write_text("---\nkey: [unclosed\n---\n\nx")
+        source = OMPSource(tmp_path, mode="preserve")
+        source.receipt = ImportReceipt()
+        assert [record.external_id for record in collect(source)] == ["good.md"]
+        assert source.receipt.counts["rejected"] == 1
+        assert source.receipt.entries[0]["identifier"] == "bad.md"
+
+    def test_an_unreadable_memory_raises_without_a_receipt(self, tmp_path):
+        (tmp_path / "good.md").write_text("A plain note.")
+        (tmp_path / "bad.md").write_text("---\nkey: [unclosed\n---\n\nx")
+        with pytest.raises(yaml.YAMLError):
+            collect(OMPSource(tmp_path, mode="preserve"))
+
+    def test_an_unreadable_memory_in_a_json_export_is_rejected(self, tmp_path):
+        good = {"identifier": "good", "media_type": "text/plain", "body": "x", "created_at": WHEN}
+        bad = {"identifier": "bad", "media_type": "text/plain", "body": "x"}  # no created_at
+        path = tmp_path / "export.json"
+        path.write_text(json.dumps([good, bad], default=str))
+        source = OMPSource(path, mode="preserve")
+        source.receipt = ImportReceipt()
+        assert [record.external_id for record in collect(source)] == ["good"]
+        assert source.receipt.entries[0]["identifier"] == "export.json[1]"
+        assert "created_at" in source.receipt.entries[0]["reason"]  # names the failing field
+
+    def test_a_memory_that_cannot_become_a_record_is_rejected(self, tmp_path):
+        base = {"media_type": "text/plain", "body": "x", "created_at": "2026-01-01T00:00:00Z"}
+        bad = {**base, "identifier": "bad", "cognee": {"kind": "memory", "categories": [{"a": 1}]}}
+        path = tmp_path / "memories.jsonl"
+        path.write_text(json.dumps({**base, "identifier": "good"}) + "\n" + json.dumps(bad) + "\n")
+        source = OMPSource(path, mode="preserve")
+        source.receipt = ImportReceipt()
+        assert [record.external_id for record in collect(source)] == ["good"]
+        assert source.receipt.entries[0]["identifier"] == "bad"
+        assert source.receipt.integrity["unverified"] == 1  # the rejected one is not counted
+
+    def test_a_non_object_entry_in_a_json_export_is_rejected(self, tmp_path):
+        good = {"identifier": "good", "media_type": "text/plain", "body": "x", "created_at": WHEN}
+        path = tmp_path / "export.json"
+        path.write_text(json.dumps([good, "oops"], default=str))
+        source = OMPSource(path, mode="preserve")
+        source.receipt = ImportReceipt()
+        assert [record.external_id for record in collect(source)] == ["good"]
+        assert source.receipt.entries[0]["identifier"] == "export.json[1]"
+
+    def test_a_memory_that_cannot_be_opened_is_rejected(self, tmp_path):
+        (tmp_path / "good.md").write_text("A plain note.")
+        locked = tmp_path / "locked.md"
+        locked.write_text("a note this user may not read")
+        locked.chmod(0)
+        if os.access(locked, os.R_OK):
+            pytest.skip("file modes are not enforced for this user")
+        source = OMPSource(tmp_path, mode="preserve")
+        source.receipt = ImportReceipt()
+        assert [record.external_id for record in collect(source)] == ["good.md"]
+        assert source.receipt.entries[0]["identifier"] == "locked.md"
+
+    def test_export_marks_references_outside_the_export(self, tmp_path):
+        nodes, edges = graph()
+        stored = [{"target": "elsewhere", "rel": "relates_to"}]
+        stored.append({"target": BERLIN, "rel": "relates_to", "dangling": True})  # stale
+        nodes[0][1]["omp_header"] = json.dumps({"links": stored})  # Alice's stored header
+        destination = tmp_path / "ds_omp"
+        _write_omp(nodes, edges, destination, "ds", NO_FACTS, origin="cognee:ds", layout="jsonl")
+        alice = {m.identifier: m for m in iter_omp_memories(destination)}[ALICE]
+        assert [link.dangling for link in alice.links] == [True, None]
+
+    def test_chunks_do_not_inherit_their_documents_file_fields(self, tmp_path):
+        nodes, edges = graph()
+        header = {"path": "MEMORY.md", "stub": True, "title": "Index"}
+        header["links"] = [{"target": "old", "rel": "derived_from"}]
+        doc_properties = dict(nodes)[DOC]
+        doc_properties["external_metadata"] = json.dumps({"omp_header": json.dumps(header)})
+        destination = tmp_path / "ds_omp"
+        _write_omp(nodes, edges, destination, "ds", NO_FACTS, origin="cognee:ds", layout="jsonl")
+        chunk = {m.identifier: m for m in iter_omp_memories(destination)}[CHUNK]
+        assert chunk.title == "Index"  # describes the content, so it is inherited
+        assert chunk.path is None and chunk.stub is None
+        assert {link.rel for link in chunk.links} == {"mentions"}
+
+    def test_only_a_chunks_contains_edge_is_carried_as_a_mention(self, tmp_path):
+        nodes, edges = graph()
+        edges.append((CHUNK, ALICE, "cites", {}))  # a second edge to a mentioned entity
+        destination = tmp_path / "ds_omp"
+        _write_omp(nodes, edges, destination, "ds", NO_FACTS, origin="cognee:ds", layout="jsonl")
+        memories = {m.identifier for m in iter_omp_memories(destination)}
+        assert f"{CHUNK}:cites:{ALICE}" in memories
+        assert f"{CHUNK}:contains:{ALICE}" not in memories
 
     def test_markdown_export_keeps_files_inside_the_destination(self, tmp_path):
         destination = tmp_path / "out"
@@ -479,6 +686,42 @@ class TestExportAndImport:
         with pytest.raises(ValueError, match="layout"):
             write_omp_export([], destination, layout="xml")
 
+    def test_a_fallback_file_name_never_overwrites_another_memory(self, tmp_path):
+        def memory(identifier, path):
+            return OMPMemory(
+                identifier=identifier,
+                media_type="text/plain",
+                body=identifier,
+                created_at=WHEN,
+                path=path,
+            )
+
+        write_omp_export(
+            [memory("a", "abc.md"), memory("abc", "../x")], tmp_path / "out", layout="markdown"
+        )
+        assert (tmp_path / "out" / "abc.md").read_text().endswith("a")
+        assert (tmp_path / "out" / "abc-1.md").read_text().endswith("abc")
+
+    def test_export_refuses_a_non_empty_destination_unless_overwrite(self, tmp_path):
+        destination = tmp_path / "out"
+        destination.mkdir()
+        (destination / "stale.md").write_text("a memory deleted since the last export")
+        memory = OMPMemory(identifier="m", media_type="text/plain", body="x", created_at=WHEN)
+        with pytest.raises(FileExistsError, match="overwrite=True"):
+            write_omp_export([memory], destination)
+        write_omp_export([memory], destination, overwrite=True)
+        assert [found.identifier for found in iter_omp_memories(destination)] == ["m"]
+
+    def test_export_refuses_a_destination_that_is_not_a_plain_folder(self, tmp_path):
+        (tmp_path / "out.jsonl").write_text("a file")
+        with pytest.raises(NotADirectoryError, match="not a folder"):
+            write_omp_export([], tmp_path / "out.jsonl")
+        (tmp_path / "real").mkdir()
+        (tmp_path / "real" / "old.md").write_text("old")
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        with pytest.raises(ValueError, match="symbolic link"):
+            write_omp_export([], tmp_path / "link", overwrite=True)
+
     def test_omp_source_imports_a_cognee_export_with_a_receipt(self, tmp_path):
         nodes, edges = graph()
         destination = tmp_path / "ds_omp"
@@ -487,34 +730,68 @@ class TestExportAndImport:
         source = OMPSource(destination, mode="preserve")
         source.receipt = ImportReceipt()
         records = collect(source)
-        assert (
-            sorted(record.kind for record in records)
-            == ["document", "entity", "entity"] + ["fact"] * 4
-        )
+        assert sorted(record.kind for record in records) == ["document", "entity", "entity", "fact"]
         assert {record.external_system for record in records} == {"cognee:ds"}
-        assert source.receipt.integrity == {"verified": 7, "unverified": 0, "failed": []}
+        assert source.receipt.integrity == {"verified": 4, "unverified": 0, "failed": []}
         collect(source)  # a replay verifies nothing twice
-        assert source.receipt.integrity["verified"] == 7
+        assert source.receipt.integrity["verified"] == 4
         chunk = next(record for record in records if record.kind == "document")
-        assert all(link.dangling is False for link in chunk.links)
-        part_of = next(
-            record
-            for record in records
-            if record.kind == "fact" and record.predicate == "is_part_of"
-        )
-        assert [link.dangling for link in part_of.links] == [False, True]  # DOC was not exported
+        assert not any(link.dangling for link in chunk.links)
 
         translation = translate_records(records, "preserve", receipt=source.receipt)
         edges_out = [edge for batch in translation.graph_batches for edge in batch["edges"]]
         assert [edge[2] for edge in edges_out] == ["lives_in"]
         receipt = translation.receipt
-        # The chunk is a memory (a data item), not a graph node: the facts that
-        # point at it are omitted, kept on the receipt with their dangling refs.
-        assert translation.skipped_facts == 3
-        assert receipt.counts == {"accepted": 4, "transformed": 0, "omitted": 3, "rejected": 0}
-        assert {tuple(entry["refs"]) for entry in receipt.dangling} == {(CHUNK,), (CHUNK, DOC)}
+        # Only facts between exported memories were exported: none is omitted.
+        assert translation.skipped_facts == 0
+        assert receipt.counts == {"accepted": 4, "transformed": 0, "omitted": 0, "rejected": 0}
+        assert receipt.dangling == []
         # The receiving system assigned its own ids: the mapping is kept (3.5.2).
         assert receipt.identifier_map[ALICE] == str(Entity.id_for("Alice"))
+
+    def test_dates_are_stated_by_facts_not_memories(self, tmp_path):
+        nodes, edges = graph()
+        # No name, as on graphs built before SDK-827: the date is named by its text.
+        stamp = {"type": "Timestamp", "timestamp_str": "1867", "precision": "year"}
+        nodes.append((DATE, stamp))
+        born = {"edge_text": "Alice was born in 1867"}
+        edges += [(CHUNK, DATE, "contains", {}), (ALICE, DATE, "born_at", born)]
+        destination = tmp_path / "ds_omp"
+        _write_omp(nodes, edges, destination, "ds", NO_FACTS, origin="cognee:ds", layout="jsonl")
+        memories = {memory.identifier: memory for memory in iter_omp_memories(destination)}
+
+        assert DATE not in memories  # a value, not a memory
+        assert not any(link.target == DATE for link in memories[CHUNK].links)
+        assert "1867" in memories[CHUNK].extension("cognee")["subject"]  # dates are subjects
+        assert f"{CHUNK}:contains:{DATE}" not in memories
+        fact = memories[f"{ALICE}:born_at:{DATE}"]
+        assert fact.body == "Alice was born in 1867"
+        assert fact.links == [COGXLink(target=ALICE, rel="subject")]  # nothing dangles
+
+    def test_a_fact_with_a_missing_endpoint_is_omitted_on_the_receipt(self):
+        records = [
+            COGXEntity(external_id=ALICE, name="Alice"),
+            COGXFact(external_id="f", subject_ref=ALICE, predicate="lives_in", object_ref=BERLIN),
+        ]
+        translation = translate_records(records, "preserve", receipt=ImportReceipt())
+        assert translation.skipped_facts == 1 and translation.receipt.counts["omitted"] == 1
+        assert [entry["refs"] for entry in translation.receipt.dangling] == [[BERLIN]]
+
+    def test_re_derive_states_entity_types(self):
+        entity = COGXEntity(external_id=ALICE, name="Alice", entity_type="Person")
+        translation = translate_records([entity], "re-derive")
+        assert [item.data for item in translation.data_items] == ["Alice (Person)"]
+
+    def test_re_derive_names_a_facts_ends_when_it_has_no_text(self):
+        fact = COGXFact(
+            external_id="f",
+            subject_ref=ALICE,
+            predicate="born_at",
+            object_ref=DATE,
+            subject=["Alice", "1990"],
+        )
+        translation = translate_records([fact], "re-derive")
+        assert [item.data for item in translation.data_items] == ["Alice born_at 1990"]
 
     def test_omp_source_reads_a_markdown_folder(self, tmp_path):
         (tmp_path / "MEMORY.md").write_text("The user prefers concise answers.\n")
@@ -542,7 +819,7 @@ class TestExportAndImport:
         source.receipt = ImportReceipt()
         (record,) = collect(source)
         assert record.external_id == APPENDIX_A["identifier"]
-        assert record.links[0].dangling is False  # the target is the export's own memory
+        assert record.links[0].dangling is None  # the target is the export's own memory
         assert [entry.dangling for entry in record.evidence] == [True, True]
         # Appendix A's illustrative checksum does not match: reported, not rejected.
         assert source.receipt.integrity["failed"] == [APPENDIX_A["identifier"]]
@@ -640,8 +917,10 @@ class TestExportDatasetOMP:
         manifest = read_omp_manifest(tmp_path / "ds_omp")
         assert manifest.origin == f"cognee:{dataset.id}"
         assert manifest.model_extra["cognee"]["migration_revision"] == "some_slug"
-        assert manifest.model_extra["memories"] == 7
-        assert len(list(iter_omp_memories(tmp_path / "ds_omp"))) == 7
+        assert manifest.model_extra["memories"] == 4
+        assert len(list(iter_omp_memories(tmp_path / "ds_omp"))) == 4
+        asyncio.run(export_dataset("ds", format="omp", user=user, overwrite=True))  # again
+        assert len(list(iter_omp_memories(tmp_path / "ds_omp"))) == 4
 
         markdown = asyncio.run(
             export_dataset("ds", format="omp-markdown", destination=tmp_path / "md", user=user)
@@ -652,3 +931,29 @@ class TestExportDatasetOMP:
 
         with pytest.raises(ValueError, match="Unknown export format"):
             asyncio.run(export_dataset("ds", format="omp-yaml", user=user))
+
+    def test_an_occupied_folder_is_refused_before_the_graph_is_read(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+        from uuid import uuid4
+
+        import cognee.infrastructure.databases.graph as graph_module
+        import cognee.modules.data.methods as data_methods
+        from cognee.modules.migration.export import export_dataset
+
+        dataset = SimpleNamespace(id=uuid4(), owner_id=uuid4(), name="ds")
+
+        async def fake_get_authorized_existing_datasets(datasets, permission, user):
+            return [dataset]
+
+        async def graph_must_not_be_read():
+            raise AssertionError("the graph was read before the folder check")
+
+        monkeypatch.setattr(
+            data_methods, "get_authorized_existing_datasets", fake_get_authorized_existing_datasets
+        )
+        monkeypatch.setattr(graph_module, "get_graph_engine", graph_must_not_be_read)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "ds_omp").mkdir()
+        (tmp_path / "ds_omp" / "old.md").write_text("an earlier export")
+        with pytest.raises(FileExistsError):
+            asyncio.run(export_dataset("ds", format="omp", user=SimpleNamespace(id=uuid4())))

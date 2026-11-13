@@ -102,8 +102,14 @@ def render_episode(episode: COGXEpisode) -> str:
     return "\n".join(lines)
 
 
+def _entity_line(entity: COGXEntity) -> str:
+    """One entity as a line cognify re-reads: name, type when known, description."""
+    name = f"{entity.name} ({entity.entity_type})" if entity.entity_type else entity.name
+    return f"{name}: {entity.description}" if entity.description else name
+
+
 def _render_fact_line(fact: COGXFact) -> str:
-    line = fact.fact_text or f"{fact.subject_ref} {fact.predicate} {fact.object_ref}"
+    line = fact.readable_text()
     qualifiers = []
     if fact.valid_at:
         qualifiers.append(f"valid from {_iso(fact.valid_at)}")
@@ -141,7 +147,7 @@ def data_item_from_record(record: COGXRecord) -> DataItem | None:
         content = record.content
         if record.categories:
             content = f"{content}\nCategories: {', '.join(record.categories)}"
-        return _data_item_for(record, content)
+        return _data_item_for(record, content, record.title)
     if record.kind == "memory_block":
         return _data_item_for(record, f"{record.label}:\n{record.value}", record.label)
     return None
@@ -450,9 +456,9 @@ class _RecordTranslator:
             # is not lost, and let cognify re-extract it. Raw nodes carry no
             # standalone text and are intentionally dropped in this mode.
             receipt = result.receipt
-            described = [e for e in entities if e.description]
+            described = [e for e in entities if e.description or e.entity_type]
             if described:
-                lines = [f"{e.name}: {e.description}" for e in described]
+                lines = [_entity_line(e) for e in described]
                 digest = COGXEntity(
                     external_system=described[0].external_system,
                     external_id="entities-digest",

@@ -22,11 +22,21 @@ import json
 import math
 import re
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator
+import yaml
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    Field,
+    PlainSerializer,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 from typing_extensions import Self
 
 COGX_VERSION = "0.3"
@@ -52,7 +62,7 @@ def parse_timestamp(value: Any) -> datetime | None:
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return _assume_utc(value)
     if isinstance(value, (int, float)):
         # Heuristic: values past the year ~2603 in seconds are a finer epoch
         # unit (milli/micro/nanoseconds); scale down until plausible.
@@ -66,12 +76,51 @@ def parse_timestamp(value: Any) -> datetime | None:
         except (ValueError, OverflowError, OSError):
             return None
     if isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        parsed = _read_timestamp(value)  # the one text parser models use too
+        return _assume_utc(parsed) if isinstance(parsed, datetime) else None
     return None
+
+
+def _read_timestamp(value: Any) -> Any:
+    """Text read as YAML reads a timestamp, which takes spellings ISO 8601
+    parsers do not (``2001-12-14 21:59:43.10 -5``); a bare date is its
+    midnight, UTC. Anything YAML reads no timestamp in is left as given. ISO
+    text, the common case, is parsed directly: YAML's parser is far slower."""
+    if not isinstance(value, str):
+        return value
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+    try:
+        parsed = yaml.safe_load(value)
+    except (yaml.YAMLError, ValueError):  # ValueError: a date that cannot exist (month 13)
+        return value
+    if isinstance(parsed, datetime):
+        return parsed
+    if isinstance(parsed, date):
+        return datetime(parsed.year, parsed.month, parsed.day, tzinfo=timezone.utc)
+    return value
+
+
+def _assume_utc(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def format_timestamp(value: datetime) -> str:
+    """The one spelling of a timestamp: UTC, six fractional digits, ``Z``."""
+    return _assume_utc(value).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+# A model timestamp: text is read the YAML way first; one with no offset is read
+# as UTC, as parse_timestamp reads it, so aware and naive values never meet in
+# one comparison; JSON writes it as format_timestamp spells it.
+UTCDateTime = Annotated[
+    datetime,
+    BeforeValidator(_read_timestamp),
+    AfterValidator(_assume_utc),
+    PlainSerializer(format_timestamp, when_used="json"),
+]
 
 
 class COGXScope(BaseModel):
@@ -242,7 +291,7 @@ class COGXContributor(BaseModel):
     contribution: str | None = None
     ai_usage: AIUsage | None = None
     name: str | None = None
-    at: datetime | None = None
+    at: UTCDateTime | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -319,7 +368,7 @@ class COGXConfidence(BaseModel):
     """
 
     outcome: ConfidenceOutcome = "unverified"
-    verified_at: datetime | None = None
+    verified_at: UTCDateTime | None = None
     verified_by: Verifier | None = None
     score: float | None = None
     system: str | None = None
@@ -339,14 +388,11 @@ def normalize_legacy_fields(data: dict[str, Any]) -> dict[str, Any]:
     A 0.3 name already present wins over its legacy spelling. The COGX 0.1
     fact ``provenance`` was a list of source strings (the episodes a fact was
     extracted from): that is evidence, not authorship, so such strings move
-    to ``evidence`` as bare references with no relation stated.
+    to ``evidence`` as bare references with no relation stated. They move
+    first: a 0.2 fact carries them beside ``contributors``, which must then
+    find ``provenance`` empty to land there.
     """
     data = dict(data)
-    for legacy, current in LEGACY_FIELD_NAMES.items():
-        if legacy in data:
-            legacy_value = data.pop(legacy)
-            if data.get(current) in (None, [], ""):
-                data[current] = legacy_value
     provenance = data.get("provenance")
     if isinstance(provenance, list) and any(isinstance(item, str) for item in provenance):
         refs = [item for item in provenance if isinstance(item, str)]
@@ -354,6 +400,11 @@ def normalize_legacy_fields(data: dict[str, Any]) -> dict[str, Any]:
         evidence = list(data.get("evidence") or [])
         evidence.extend({"ref": ref} for ref in refs)
         data["evidence"] = evidence
+    for legacy, current in LEGACY_FIELD_NAMES.items():
+        if legacy in data:
+            legacy_value = data.pop(legacy)
+            if data.get(current) in (None, [], ""):
+                data[current] = legacy_value
     return data
 
 
@@ -361,8 +412,8 @@ class COGXRecordBase(BaseModel):
     external_system: str = "unknown"
     external_id: str
     scope: COGXScope = Field(default_factory=COGXScope)
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+    created_at: UTCDateTime | None = None
+    updated_at: UTCDateTime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     # OMP memory-object fields (draft v0.6, 1.3). ``external_id`` is the
@@ -376,8 +427,8 @@ class COGXRecordBase(BaseModel):
     stub: bool | None = None
     tags: list[str] = Field(default_factory=list)
     scope_tags: list[str] = Field(default_factory=list)  # OMP ``scope``: access-policy tags
-    valid_from: datetime | None = None
-    valid_until: datetime | None = None
+    valid_from: UTCDateTime | None = None
+    valid_until: UTCDateTime | None = None
     version: COGXVersion | None = None
     checksum: str | None = None  # stamped by the writer over the whole record
     provenance: list[COGXContributor] = Field(default_factory=list)
@@ -444,7 +495,7 @@ class COGXDocument(COGXRecordBase):
 class COGXTurn(BaseModel):
     role: str
     content: str
-    occurred_at: datetime | None = None
+    occurred_at: UTCDateTime | None = None
 
 
 class COGXEpisode(COGXRecordBase):
@@ -484,8 +535,16 @@ class COGXFact(COGXRecordBase):
     predicate: str
     object_ref: str
     fact_text: str | None = None
-    valid_at: datetime | None = None
-    invalid_at: datetime | None = None
+    valid_at: UTCDateTime | None = None
+    invalid_at: UTCDateTime | None = None
+
+    def readable_text(self) -> str:
+        """The fact for a reader: its text, else its triple, with the endpoint
+        names ``subject`` carries in place of their ids where it has them."""
+        if self.fact_text:
+            return self.fact_text
+        subject, obj = (list(self.subject) + [None, None])[:2]
+        return f"{subject or self.subject_ref} {self.predicate} {obj or self.object_ref}"
 
     def body_text(self) -> str | None:
         return self.fact_text
@@ -548,6 +607,7 @@ COGXRecord = (
 HEADER_FIELDS = (
     "protocol_version",
     "path",
+    "title",
     "media_type",
     "stub",
     "tags",
@@ -584,12 +644,24 @@ _HEADER_ADAPTERS: dict[str, TypeAdapter] = {
 }
 
 
+def _without_empty(value: Any) -> Any:
+    """``value`` with empty lists and dicts left out of every mapping in it."""
+    if isinstance(value, dict):
+        # Clean first, then filter: a mapping that empties out is dropped too.
+        cleaned = {key: _without_empty(item) for key, item in value.items()}
+        return {key: item for key, item in cleaned.items() if item not in ([], {})}
+    if isinstance(value, list):
+        return [_without_empty(item) for item in value]
+    return value
+
+
 def checksum_of(record: BaseModel) -> str:
     """Integrity hash of the exported record, metadata and body, minus the
     checksum itself (OMP 1.3 ``checksum``): "did it arrive intact?". Not the
-    body hash. Computed over the canonical JSON form (:func:`canonical_checksum`).
+    body hash. Computed over the canonical JSON form (:func:`canonical_checksum`),
+    empty fields left out so a field a later version adds never changes it.
     """
-    return canonical_checksum(record.model_dump(mode="json", exclude_none=True))
+    return canonical_checksum(_without_empty(record.model_dump(mode="json", exclude_none=True)))
 
 
 def verify_checksum(record: BaseModel) -> bool | None:
@@ -610,12 +682,20 @@ def omp_header_of(record: COGXRecordBase) -> dict[str, Any]:
     A record naming no earlier origin originates where it says it comes from
     (``external_system``/``external_id``): a Mem0 memory stays Mem0's after
     cognee exports it, since the export restamps both with cognee's own.
+
+    ``dangling`` marks are not stored: whether a reference resolves depends on
+    the export or the reader, so each export marks its own.
     """
+    # Empty fields are left out at the top level only: a field's own value (an
+    # unknown field in ``extensions`` included) is kept exactly as stated.
     header = {
         key: value
         for key, value in record.model_dump(mode="json", exclude_none=True).items()
         if key in HEADER_FIELDS and key not in RECORD_FIELDS and value not in ([], {})
     }
+    for key in ("links", "evidence"):
+        for entry in header.get(key, []):
+            entry.pop("dangling", None)
     if header.get("media_type") == "text/plain":
         del header["media_type"]  # the default every body gets; nothing to remember
     if "origin" not in header and record.external_system != "unknown":
@@ -720,7 +800,7 @@ class COGXManifest(BaseModel):
     protocol_version: str | None = None
     source_system: str = "unknown"
     origin: str | None = None
-    exported_at: datetime | None = None
+    exported_at: UTCDateTime | None = None
     selection: str = "snapshot"
     intent: str = "copy"
     profiles: list[str] = Field(default_factory=list)

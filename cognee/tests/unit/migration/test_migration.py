@@ -46,6 +46,14 @@ class TestParseTimestamp:
         parsed = parse_timestamp("2024-03-01T12:00:00Z")
         assert parsed == datetime(2024, 3, 1, 12, 0, tzinfo=timezone.utc)
 
+    def test_yaml_spelling_as_model_fields_read_it(self):
+        parsed = parse_timestamp("2001-12-14 21:59:43.10 -5")
+        assert parsed == datetime(2001, 12, 15, 2, 59, 43, 100000, tzinfo=timezone.utc)
+
+    def test_impossible_dates_are_no_timestamp(self):
+        assert parse_timestamp("2024-13-01") is None
+        assert parse_timestamp("2024-02-30 10:00:00") is None
+
     def test_epoch_seconds_and_milliseconds(self):
         seconds = parse_timestamp(1709294400)
         milliseconds = parse_timestamp(1709294400000)
