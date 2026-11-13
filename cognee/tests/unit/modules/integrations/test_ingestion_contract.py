@@ -60,6 +60,25 @@ def test_apollo_names_are_pinned_and_a_dlt_table_name():
     )
 
 
+def test_slack_names_are_pinned_and_a_dlt_table_name():
+    # Same rule as the Linear pin: the literal is deliberate. One resource is one channel,
+    # so the channel id is the scope, and the Cloud control plane only tracks tables that
+    # start with the provider prefix.
+    name = ingestion.resource_name("slack", CREDENTIAL, "C0123ABCD")
+    assert name == "slack_channel_02eaa4a14233ea3cb69a0f49"
+    assert name == name.lower() and set(name) <= set("abcdefghijklmnopqrstuvwxyz0123456789_")
+    assert len(name) <= 63
+    assert ingestion.source_factory("slack").__module__ == (
+        "cognee.tasks.ingestion.connectors.slack"
+    )
+
+
+def test_slack_service_is_built_from_the_connections_access_token():
+    from cognee.tasks.ingestion.connectors.slack import SlackClient
+
+    assert isinstance(ingestion.build_service("slack", "xoxb-a-bot-token"), SlackClient)
+
+
 def test_apollo_service_is_built_from_the_connections_api_key():
     from cognee.tasks.ingestion.connectors.apollo import ApolloClient
 
@@ -83,6 +102,57 @@ def test_asana_service_is_built_from_the_connections_access_token():
     from cognee.tasks.ingestion.connectors.asana import AsanaClient
 
     assert isinstance(ingestion.build_service("asana", "an-asana-access-token"), AsanaClient)
+
+
+def test_vercel_names_are_pinned_and_a_dlt_table_name():
+    # Same rule as the Linear pin: the literal is deliberate. One project is one scope (one
+    # source, one table), and the Cloud control plane only tracks tables that start with the
+    # provider prefix.
+    name = ingestion.resource_name("vercel", CREDENTIAL, "prj_web")
+    assert name == "vercel_873f73768f80dfb52a91ccf7"
+    assert name == name.lower() and set(name) <= set("abcdefghijklmnopqrstuvwxyz0123456789_")
+    assert len(name) <= 63
+    another_owner = SimpleNamespace(
+        user_id=UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), provider_account_id="acct-1"
+    )
+    assert ingestion.resource_name("vercel", another_owner, "prj_web") != name
+    assert ingestion.source_factory("vercel").__module__ == (
+        "cognee.tasks.ingestion.connectors.vercel"
+    )
+
+
+def test_vercel_service_built_from_an_oauth_access_token_sends_it_as_a_bearer_header(
+    monkeypatch,
+):
+    # Cloud hands the service builder the Vercel Integration's OAuth access token. The service
+    # alone must be enough for the source, and the token goes out as ``Authorization: Bearer``
+    # on the request requests really sends (after its own auth handling).
+    import requests
+
+    from cognee.tasks.ingestion.connectors.vercel import VercelClient
+
+    access_token = "vercel-oauth-access-token"
+    sent = []
+
+    class Answer:
+        status_code = 200
+        content = b'{"id": "prj_web", "name": "web", "accountId": "team_acme"}'
+
+    def send(self, request, **kwargs):
+        sent.append(request.headers.get("Authorization"))
+        return Answer()
+
+    monkeypatch.setattr(requests.sessions.Session, "send", send)
+    service = ingestion.build_service("vercel", access_token)
+    assert isinstance(service, VercelClient)
+    service.request("/v9/projects/{project}", ids={"project": "prj_web"})
+
+    assert sent == [f"Bearer {access_token}"]
+    assert access_token not in repr(service)
+    source = ingestion.source_factory("vercel")(
+        resource_name="vercel_x", project_id="prj_web", team_id="team_acme", service=service
+    )
+    assert source.name == "vercel_x"
 
 
 def test_onenote_names_are_pinned_and_a_dlt_table_name():
@@ -143,3 +213,39 @@ def test_importing_the_neutral_module_loads_no_provider_library():
         "assert not bad, bad"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_dropbox_names_are_pinned_and_a_valid_resource_name():
+    # Same rule as the Linear pin: the literal is deliberate. One selected folder is one scope,
+    # named by its Dropbox folder id so a rename keeps the table.
+    name = ingestion.resource_name("dropbox", CREDENTIAL, "id:folder-1")
+    assert name == "dropbox_85beb5eb5e658f00e364d3ab"
+    assert len(name) <= 63
+    assert ingestion.source_factory("dropbox").__module__ == (
+        "cognee.tasks.ingestion.connectors.dropbox"
+    )
+    # The pinned name is one dropbox_source accepts.
+    ingestion.source_factory("dropbox")(
+        folder_id="id:folder-1", account_id="dbid:A", resource_name=name, token="t"
+    )
+
+
+def test_dropbox_service_from_providers_sends_the_oauth_token_as_bearer():
+    import httpx
+
+    from cognee.tasks.ingestion.connectors.dropbox import DropboxAuthError, DropboxClient
+
+    token = "sl.cloud-oauth-access-token"
+    service = ingestion.build_service("dropbox", token)
+    assert isinstance(service, DropboxClient) and token not in repr(service)
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers["Authorization"])
+        return httpx.Response(401, json={"error": {".tag": "expired_access_token"}})
+
+    service._http = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(DropboxAuthError) as error:
+        service.rpc("users/get_current_account", None)
+    assert seen == [f"Bearer {token}"]
+    assert token not in f"{error.value} {error.value!r}"

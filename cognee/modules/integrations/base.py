@@ -32,6 +32,7 @@ from fastapi import Request
 from pydantic_settings import BaseSettings
 
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
+from cognee.modules.users.models import User
 
 
 class IntegrationSettings(BaseSettings):
@@ -71,6 +72,26 @@ class OAuthInstallation:
     scopes: str | None = None
     token_expires_at: datetime | None = None
     auth_type: str = "oauth2"
+
+
+class ResourceParentError(ValueError):
+    """A ``parent`` the resource picker cannot list under; the route answers 422."""
+
+
+class ResourceParentNotSupportedError(ResourceParentError):
+    """The provider lists all its resources at once and takes no ``parent``."""
+
+
+class ResourceParentNotFoundError(ResourceParentError):
+    """The ``parent`` names no listable resource at the provider; the route answers 404."""
+
+
+def refuse_parent(provider: str, parent: str | None) -> None:
+    """For a provider that lists everything at once: a ``parent`` is a client error."""
+    if parent is not None:
+        raise ResourceParentNotSupportedError(
+            f"{provider} lists all its resources at once and takes no parent"
+        )
 
 
 class OAuthIntegration(ABC):
@@ -114,15 +135,6 @@ class OAuthIntegration(ABC):
         for an adapter: build the dict unconditionally, writing a key with a
         null value rather than leaving it out, since an omitted key keeps its
         stored value; and do not expect to clear the metadata from here.
-        """
-
-    @abstractmethod
-    def state_signing_secret(self) -> str:
-        """The secret this provider's OAuth CSRF state is signed/verified with.
-
-        Often the same secret used to verify inbound webhooks (as with
-        Slack) — but doesn't have to be; a provider with no inbound webhooks
-        still needs a secret here.
         """
 
     @abstractmethod
@@ -181,14 +193,65 @@ class OAuthIntegration(ABC):
         return
 
     async def list_resources(
-        self, credential: IntegrationCredential
+        self, credential: IntegrationCredential, *, parent: str | None = None
     ) -> list[dict[str, Any]] | None:
-        """Return provider resources for a generic picker, or ``None``."""
+        """Return provider resources for a generic picker, or ``None``.
+
+        ``parent`` asks for one level of a tree: the resources directly inside it (``None``,
+        the top level). A provider that lists everything at once refuses a parent with
+        :class:`ResourceParentNotSupportedError` (:func:`refuse_parent`), before any request.
+        """
+        refuse_parent(self.provider, parent)
         return None
+
+    def invalid_resource_ids(self, resource_ids: list[str]) -> list[str]:
+        """The ids of a saved selection this provider can never sync, refused with a 422.
+
+        A shape check, made before the selection is stored: an id that can never be valid
+        would fail every later sync. Whether the resource exists is the sync's to find out.
+        """
+        return []
+
+    async def validate_resource_selection(
+        self, credential: IntegrationCredential, resource_ids: list[str]
+    ) -> None:
+        """Refuse a selection the provider cannot sync, before it is stored.
+
+        Default: accept. Raise :class:`ValueError` with a message safe to show the user
+        (the resource picker answers 422 with it); the sync must still check, since a
+        stored selection can predate a change at the provider.
+        """
+        return
 
     def dataset_name(self, credential: IntegrationCredential) -> str | None:
         """Return the provider dataset to delete on an opted-in disconnect."""
         return None
+
+    def data_deleted_after(self, credential: IntegrationCredential) -> datetime | None:
+        """When the data of a connection the provider ended is deleted, if that is scheduled.
+
+        Default ``None``: an ended connection keeps its data. Slack schedules a deletion 14
+        days after an uninstall; the connection status shows it so the page can warn the
+        owner before it happens.
+        """
+        return None
+
+    def data_deleted_at(self, credential: IntegrationCredential) -> datetime | None:
+        """When the scheduled deletion of an ended connection's data ran, if it did.
+
+        Default ``None``. With :meth:`data_deleted_after` it tells the owner whether the
+        data is about to go or is gone.
+        """
+        return None
+
+    async def forget_related_data(self, credential: IntegrationCredential, user: User) -> None:
+        """Delete what the provider's app stored for ``user`` outside ``dataset_name``.
+
+        Called on an opted-in disconnect, after the dataset is deleted. Default
+        no-op. Override where the app writes memory of its own (Slack's remembered
+        messages); delete only what ``user`` owns.
+        """
+        return
 
     async def revoke_remote(self, credential: IntegrationCredential) -> None:
         """Best-effort remote token revoke, called on disconnect.

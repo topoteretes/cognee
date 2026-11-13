@@ -223,3 +223,19 @@ connectors:
       cognee: "cognee/tasks/ingestion/connectors/onenote.py"
       cloud: null
     env_vars: []
+  - slug: dropbox
+    package: cognee-connector-dropbox
+    module: cognee_connector_dropbox
+    directory: connectors/dropbox
+    display_name: "Dropbox"
+    auth: oauth2
+    tier: 2
+    sources: [dropbox]
+    hosts:
+      cognee: false
+      cloud: false
+    status: ported
+    origin:
+      cognee: "cognee/tasks/ingestion/connectors/dropbox.py, cognee/modules/integrations/dropbox/client.py, cognee/modules/integrations/dropbox/dropbox_settings.py"
+      cloud: null
+    env_vars: [DROPBOX_CLIENT_ID, DROPBOX_CLIENT_SECRET, DROPBOX_REDIRECT_URI, DROPBOX_FRONTEND_BASE_URL, DROPBOX_STATE_SECRET, DROPBOX_MAX_FILE_SIZE_MB]

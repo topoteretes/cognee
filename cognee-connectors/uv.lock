@@ -38,6 +38,7 @@ enola-cli = { timestamp = "0001-01-01T00:00:00Z", span = "PT0S" }
 members = [
     "cognee-connector-apollo",
     "cognee-connector-asana",
+    "cognee-connector-dropbox",
     "cognee-connector-github",
     "cognee-connector-gmail",
     "cognee-connector-google",
@@ -942,6 +943,37 @@ requires-dist = [
 provides-extras = ["cognee"]
 
 [[package]]
+name = "cognee-connector-dropbox"
+version = "0.1.0"
+source = { editable = "connectors/dropbox" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "cognee-connectors-core", extra = ["dlt"] },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-settings", version = "2.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pydantic-settings", version = "2.16.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pypdf" },
+]
+
+[package.optional-dependencies]
+cognee = [
+    { name = "cognee" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.13.5,<4.0.0" },
+    { name = "cognee", marker = "extra == 'cognee'", specifier = ">=1.6.5,<2" },
+    { name = "cognee-connectors-core", extras = ["dlt"], editable = "core" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pydantic", specifier = ">=2.13" },
+    { name = "pydantic-settings", specifier = ">=2.7.0,!=2.12.*,!=2.13.*,!=2.14.0,!=2.14.1,<3" },
+    { name = "pypdf", specifier = ">=6.6.2,<7.0.0" },
+]
+provides-extras = ["cognee"]
+
+[[package]]
 name = "cognee-connector-github"
 version = "0.1.0"
 source = { editable = "connectors/github" }
@@ -1214,7 +1246,7 @@ provides-extras = ["cognee"]
 
 [[package]]
 name = "cognee-connectors-core"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "core" }
 dependencies = [
     { name = "aiohttp" },

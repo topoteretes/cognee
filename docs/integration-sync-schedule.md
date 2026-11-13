@@ -26,7 +26,10 @@ before.
   repositories, Linear team changes) and the first sync after connecting: they are
   dropped with an info log, not queued. Revoking on uninstall and Linear agent
   sessions are not syncs and still run. Pause does not hold the Linear worker that
-  continues a sync cut short by the rate limit or the request budget.
+  continues a sync cut short by the rate limit or the request budget. Slack's own
+  schedule (every 6 hours, 10 minutes after a cut run) and the sync a removed message
+  starts are held too, and saving a changed selection of a paused connection, for every
+  provider, keeps the selection for the first sync after the resume.
 - **Disconnect:** a connection's own policy stays when it is disconnected and
   applies again when the same owner reconnects it. Reconnected by another owner,
   the connection follows that owner's policies only.

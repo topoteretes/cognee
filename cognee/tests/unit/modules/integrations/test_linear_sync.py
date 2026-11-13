@@ -497,7 +497,7 @@ class _FakeClient:
         self.rate_limit = {"requests": 4000, "complexity": 1_000_000}
         type(self).tokens.append(token)
 
-    def execute(self, query, variables=None):
+    def execute(self, query, variables=None, **_):
         if type(self).tokens == ["old"]:
             raise source_module.LinearAuthError("rejected")
         return {"token": self.token}

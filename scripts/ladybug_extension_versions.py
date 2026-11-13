@@ -95,20 +95,25 @@ def supported_extension_dirs(candidates: list[str], requirement: str) -> list[st
     in_range = [d for d in versioned if satisfies(d[1:], requirement)]
 
     # Upper-bound clauses only — a dir failing these serves nothing we support.
-    uppers = [(op, bound) for op, bound in _clauses(requirement) if op in ("<=", "<")]
+    # An exact pin (==) is both the floor and the upper bound.
+    uppers = [(op, bound) for op, bound in _clauses(requirement) if op in ("<=", "<", "==")]
     below_floor = [
         d
         for d in versioned
         if d not in in_range
         and all(
-            {"<=": _version_tuple(d[1:]) <= b, "<": _version_tuple(d[1:]) < b}[op]
+            {
+                "<=": _version_tuple(d[1:]) <= b,
+                "<": _version_tuple(d[1:]) < b,
+                "==": _version_tuple(d[1:]) <= b,
+            }[op]
             for op, b in uppers
         )
     ]
     # The floor version's dir can trail below the floor (dirs lag package
-    # versions); when no dir matches the floor exactly, ship the newest one
-    # below it.
-    floors = [bound for op, bound in _clauses(requirement) if op == ">="]
+    # versions: ladybug 0.22.3 requests v0.22.0); when no dir matches the floor
+    # exactly, ship the newest one below it.
+    floors = [bound for op, bound in _clauses(requirement) if op in (">=", "==")]
     floor_has_exact_dir = any(_version_tuple(d[1:]) in floors for d in in_range)
     if below_floor and floors and not floor_has_exact_dir:
         in_range.insert(0, below_floor[-1])

@@ -19,11 +19,6 @@ class NotionSettings(IntegrationSettings):
     # same prefix, and that variable is not a setting of this integration.
     model_config = SettingsConfigDict(env_prefix="NOTION_", extra="ignore")
 
-    # Signs the OAuth state parameter, the only thing binding a callback to the user
-    # who started it. Notion sends no signed webhooks on this path.
-    # Env: NOTION_STATE_SECRET
-    state_secret: str = ""
-
 
 notion_settings = NotionSettings()
 

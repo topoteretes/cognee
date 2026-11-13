@@ -13,8 +13,8 @@ from cognee.modules.integrations.slack.response_url import (
     post_to_response_url,
 )
 
-# A well-formed response_url. Slack only ever issues /commands/ (slash commands)
-# and /actions/ (interactivity); anything else is not a response_url.
+# A well-formed response_url. Slack issues /commands/ (slash commands), /actions/
+# (interactivity) and /app/ or /app-actions/ (shortcuts); anything else is not one.
 _VALID = "https://hooks.slack.com/commands/T00000000/1111111111/abcdefghijklmnop"
 
 
@@ -36,6 +36,11 @@ async def test_never_raises_on_network_failure():
         _VALID,
         "https://hooks.slack.com/actions/T00000000/1111111111/abcdefghijklmnop",
         "https://HOOKS.SLACK.COM/commands/T0/1/a",
+        # A message shortcut's response_url, as Slack documents it (G55).
+        "https://hooks.slack.com/app-actions/T0MJR11A4/21974584944/yk1S9ndf35Q1flupVG5JbpM6",
+        # A message shortcut's response_url as Slack really sends it (seen live on
+        # 2026-11-12 for Remember this and Forget this): /app/, not /app-actions/.
+        "https://hooks.slack.com/app/T00000000/12345678901234/abcdefghijklmnopqrstuvwx",
     ],
 )
 def test_accepts_real_slack_response_urls(url):

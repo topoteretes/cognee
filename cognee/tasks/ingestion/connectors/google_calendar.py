@@ -76,6 +76,7 @@ from typing import Any
 from pydantic_settings import SettingsConfigDict
 
 from cognee.modules.integrations.google import GoogleAuthError, GoogleSettings
+from cognee.modules.integrations.google.api_retry import with_google_retries
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import dlt_utils
 from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR
@@ -90,7 +91,8 @@ DEFAULT_CALENDARS = ("primary",)
 SKIPPED_EVENT_TYPES = {"workingLocation"}
 # 250 is the largest maxResults Google accepts for events.list.
 PAGE_SIZE = 250
-# googleapiclient retries 429 and 5xx with exponential backoff this many times.
+# Retries per request on 429, 5xx, a rate-limit 403 and dropped connections, with
+# googleapiclient's backoff (see api_retry.py).
 NUM_RETRIES = 5
 ID_PREFIX = "gcal:"
 # Google's reasons for a 403 that is a quota rejection. Same list as gmail.py.
@@ -238,17 +240,22 @@ def _http_error() -> Any:
 
 
 def _execute(request: Any, check_active: Callable[[], None] | None) -> Any:
-    """Run one API request after the host's authorization checkpoint.
+    """Run one API request, retried as googleapiclient retries ``NUM_RETRIES`` times.
 
-    The checkpoint sits before the call and outside the ``try``, so a revoked
-    connection stops the sync between API calls and is never turned into a
-    calendar failure.  Google's HTTP errors become ``GoogleCalendarError``:
-    their own text contains the request URL, and with it the calendar id.
+    The host's checkpoint runs before the call and before every retry and backoff wait, so a
+    revoked connection stops the sync between API calls, without sleeping, and is never turned
+    into a calendar failure.
+    Google's HTTP errors become ``GoogleCalendarError``: their own text contains the request
+    URL, and with it the calendar id.
     """
     if check_active is not None:
         check_active()
     try:
-        return request.execute(num_retries=NUM_RETRIES)
+        return with_google_retries(
+            lambda: request.execute(num_retries=0),
+            num_retries=NUM_RETRIES,
+            check_active=check_active,
+        )
     except _http_error() as error:
         status = error.resp.status
         raise GoogleCalendarError(

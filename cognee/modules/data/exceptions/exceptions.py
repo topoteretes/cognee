@@ -2,6 +2,7 @@ from fastapi import status
 
 from cognee.exceptions import (
     CogneeConfigurationError,
+    CogneeSystemError,
     CogneeValidationError,
 )
 
@@ -84,3 +85,50 @@ class InvalidTableAttributeError(CogneeValidationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         super().__init__(message, name, status_code)
+
+
+class StoredFileNotRemovedError(CogneeSystemError):
+    """Cleaning up stored files that a document stopped using failed.
+
+    A document that changes content leaves its previous files without a row
+    pointing at them, and so does an update that staged content it did not
+    publish. Those files are removed on the spot, because nothing can find
+    them afterwards. When a removal fails the operation raises this instead
+    of returning: a stored file cognee cannot delete is never reported as a
+    success, and the file has to be removed by hand.
+
+    The message opens with ``outcome``, the state the document is in, since
+    the operation may well have taken effect before the removal failed. Every
+    file is tried before this is raised, and ``not_removed`` names each one that
+    could not be removed with its own error (``locations`` lists them); the
+    first of those errors is the ``__cause__``. A failure can come from the
+    removal or from the check that the files are unused, so the message asks
+    for that check before deleting by hand.
+    """
+
+    def __init__(
+        self,
+        not_removed: dict[str, str],
+        outcome: str,
+        name: str = "StoredFileNotRemovedError",
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ):
+        self.not_removed = dict(not_removed)
+        self.locations = list(self.not_removed)
+        self.outcome = outcome
+        listed = "; ".join(
+            f"{location} ({reason})" for location, reason in self.not_removed.items()
+        )
+        message = (
+            f"{outcome} Cleaning up stored files the document stopped using failed for "
+            f"{len(self.not_removed)} file(s): {listed}."
+        )
+        super().__init__(
+            message,
+            name,
+            status_code,
+            remediation=(
+                "Check those files. Any that no document points at will not be removed "
+                "later, so delete them from storage by hand."
+            ),
+        )

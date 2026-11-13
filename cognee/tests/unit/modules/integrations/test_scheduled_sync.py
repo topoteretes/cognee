@@ -49,9 +49,6 @@ class _FakeIntegration(OAuthIntegration):
     def parse_installation(self, token_response):
         raise NotImplementedError
 
-    def state_signing_secret(self):
-        return "secret"
-
     def frontend_base_url(self):
         return ""
 

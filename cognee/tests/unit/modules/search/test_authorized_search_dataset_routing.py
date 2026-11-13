@@ -6,7 +6,6 @@ from uuid import NAMESPACE_OID, uuid4, uuid5
 
 import pytest
 
-from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.search.dataset_routing import DatasetRoutingConfig, DatasetRoutingDecision
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
@@ -77,7 +76,7 @@ def lane(monkeypatch):
 
 async def _search(lane, **kwargs):
     return await lane.search_mod.authorized_search(
-        query_type=SearchType.CHUNKS,
+        query_type=kwargs.pop("query_type", SearchType.CHUNKS),
         query_text="q",
         user=types.SimpleNamespace(id=uuid4(), tenant_id=None),
         **kwargs,
@@ -170,7 +169,8 @@ async def test_an_unnarrowed_decision_keeps_every_dataset(lane):
 
 
 @pytest.mark.asyncio
-async def test_routed_datasets_come_best_first_then_unindexed(lane):
+async def test_an_unindexed_dataset_is_not_searched_when_the_routed_one_finds_something(lane):
+    """SDK-1516: the routed dataset answers, so the unindexed one is never searched."""
     lane.readable = [_dataset("a"), _dataset("b"), _dataset("c")]
     a, b, c = (dataset.id for dataset in lane.readable)
     lane.decision = DatasetRoutingDecision(
@@ -180,7 +180,28 @@ async def test_routed_datasets_come_best_first_then_unindexed(lane):
 
     await _search(lane)
 
-    assert lane.fan_out_calls == [[c, a]]
+    assert lane.fan_out_calls == [[c]]
+
+
+@pytest.mark.asyncio
+async def test_an_unindexed_dataset_is_searched_when_the_routed_one_finds_nothing(lane):
+    """The answer may live only in a dataset the index never saw: the widening
+    pass reaches it, with every other dataset routing skipped."""
+    lane.readable = [_dataset("a"), _dataset("b"), _dataset("c")]
+    a, b, c = lane.readable
+    lane.decision = DatasetRoutingDecision(
+        candidates=(a.id, b.id, c.id),
+        routed=(c.id,),
+        unindexed=(a.id,),
+        scores={c.id: 0.1, b.id: 0.5},
+    )
+    lane.responses = [[_payload(c)], [_payload(a, ["only here"]), _payload(b)]]
+
+    out = await _search(lane)
+
+    assert lane.fan_out_calls == [[c.id], [a.id, b.id]]
+    assert lane.widening_flags == [False, True]
+    assert [payload.dataset_id for payload in out] == [a.id, b.id, c.id]
 
 
 @pytest.mark.asyncio
@@ -323,17 +344,17 @@ async def test_an_empty_row_result_without_a_context_counts_as_nothing_found(lan
 
 
 @pytest.mark.asyncio
-async def test_a_code_seed_the_routed_dataset_cannot_resolve_widens(lane):
-    """The fan-out softens a seed miss per dataset only when it searches several;
-    routed to one, the miss escapes and must widen rather than fail the call."""
+async def test_a_code_search_is_never_routed(lane):
+    """A code dataset never gets routing rows, and CODE over a dataset without a
+    code graph returns an empty result, not nothing: routed to a document
+    dataset, the search would never reach the code dataset."""
     lane.decision = _narrowed(lane)
     a, b = lane.readable
-    lane.responses = [CodeSeedNotFoundError("no such symbol"), [_payload(a, ["fact"])]]
 
-    out = await _search(lane)
+    await _search(lane, query_type=SearchType.CODE)
 
-    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
-    assert [payload.dataset_id for payload in out] == [a.id]
+    assert lane.route_calls == []
+    assert lane.fan_out_calls == [[a.id, b.id]]
 
 
 @pytest.mark.asyncio
