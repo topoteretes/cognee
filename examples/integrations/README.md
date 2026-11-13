@@ -2,8 +2,8 @@
 
 Connectors pull data from external sources (Gmail, Slack, Notion, Google Drive,
 Google Calendar, Confluence, …) into cognee memory. **Gmail, Google Drive, Google Calendar,
-Linear, Notion, Apollo, Asana, Dropbox, OneNote, Slack and Obsidian ship in the SDK**; install the Google extras for their client libraries
-and DLT (Linear, Notion, Apollo, Asana, Dropbox, OneNote, Slack and Obsidian need none). Other connectors are distributed under [topoteretes/cognee-community](https://github.com/topoteretes/cognee-community).
+Linear, Notion, Apollo, Asana, Dropbox, OneNote, Slack, Obsidian and Vercel ship in the SDK**; install the Google extras for their client libraries
+and DLT (Linear, Notion, Apollo, Asana, Dropbox, OneNote, Slack, Obsidian and Vercel need none). Other connectors are distributed under [topoteretes/cognee-community](https://github.com/topoteretes/cognee-community).
 
 Every connector is built on cognee's **DLT ingestion subsystem**, so they all share
 the same guarantees instead of each reinventing ingestion:
@@ -36,6 +36,7 @@ Install from PyPI; you do **not** need to clone the community monorepo to use th
 | Dropbox | bundled, no extra |
 | OneNote | bundled, no extra |
 | Obsidian (local vault, SDK only) | bundled, no extra |
+| Vercel | bundled, no extra |
 
 ## Quickstart (Gmail)
 
@@ -71,8 +72,9 @@ privacy notes: [Gmail](../../cognee/tasks/ingestion/connectors/gmail.md),
 [Asana](../../cognee/tasks/ingestion/connectors/asana.md),
 [Dropbox](../../cognee/tasks/ingestion/connectors/dropbox.md),
 [OneNote](../../cognee/tasks/ingestion/connectors/onenote.md),
-[Slack](../../cognee/tasks/ingestion/connectors/slack.md) and
-[Obsidian](../../cognee/tasks/ingestion/connectors/obsidian.md). The other connectors are documented
+[Slack](../../cognee/tasks/ingestion/connectors/slack.md),
+[Obsidian](../../cognee/tasks/ingestion/connectors/obsidian.md) and
+[Vercel](../../cognee/tasks/ingestion/connectors/vercel.md). The other connectors are documented
 in their community packages.
 
 ## Writing a new connector

@@ -104,6 +104,57 @@ def test_asana_service_is_built_from_the_connections_access_token():
     assert isinstance(ingestion.build_service("asana", "an-asana-access-token"), AsanaClient)
 
 
+def test_vercel_names_are_pinned_and_a_dlt_table_name():
+    # Same rule as the Linear pin: the literal is deliberate. One project is one scope (one
+    # source, one table), and the Cloud control plane only tracks tables that start with the
+    # provider prefix.
+    name = ingestion.resource_name("vercel", CREDENTIAL, "prj_web")
+    assert name == "vercel_873f73768f80dfb52a91ccf7"
+    assert name == name.lower() and set(name) <= set("abcdefghijklmnopqrstuvwxyz0123456789_")
+    assert len(name) <= 63
+    another_owner = SimpleNamespace(
+        user_id=UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), provider_account_id="acct-1"
+    )
+    assert ingestion.resource_name("vercel", another_owner, "prj_web") != name
+    assert ingestion.source_factory("vercel").__module__ == (
+        "cognee.tasks.ingestion.connectors.vercel"
+    )
+
+
+def test_vercel_service_built_from_an_oauth_access_token_sends_it_as_a_bearer_header(
+    monkeypatch,
+):
+    # Cloud hands the service builder the Vercel Integration's OAuth access token. The service
+    # alone must be enough for the source, and the token goes out as ``Authorization: Bearer``
+    # on the request requests really sends (after its own auth handling).
+    import requests
+
+    from cognee.tasks.ingestion.connectors.vercel import VercelClient
+
+    access_token = "vercel-oauth-access-token"
+    sent = []
+
+    class Answer:
+        status_code = 200
+        content = b'{"id": "prj_web", "name": "web", "accountId": "team_acme"}'
+
+    def send(self, request, **kwargs):
+        sent.append(request.headers.get("Authorization"))
+        return Answer()
+
+    monkeypatch.setattr(requests.sessions.Session, "send", send)
+    service = ingestion.build_service("vercel", access_token)
+    assert isinstance(service, VercelClient)
+    service.request("/v9/projects/{project}", ids={"project": "prj_web"})
+
+    assert sent == [f"Bearer {access_token}"]
+    assert access_token not in repr(service)
+    source = ingestion.source_factory("vercel")(
+        resource_name="vercel_x", project_id="prj_web", team_id="team_acme", service=service
+    )
+    assert source.name == "vercel_x"
+
+
 def test_onenote_names_are_pinned_and_a_dlt_table_name():
     # Same rule as the Linear pin: the literal is deliberate. One notebook is one scope, and
     # the Cloud control plane only tracks tables that start with the provider prefix.

@@ -84,6 +84,12 @@ def _slack_service(access_token: str) -> Any:
     return build_slack_service(access_token)
 
 
+def _vercel_service(access_token: str) -> Any:
+    from cognee.tasks.ingestion.connectors.vercel import build_vercel_service
+
+    return build_vercel_service(access_token)
+
+
 _PROVIDERS: dict[str, _Provider] = {
     "google_drive": _Provider(
         prefix="google_drive_files",
@@ -147,6 +153,12 @@ _PROVIDERS: dict[str, _Provider] = {
         source_module="cognee.tasks.ingestion.connectors.slack",
         source_name="slack_source",
         service_builder=_slack_service,
+    ),
+    "vercel": _Provider(
+        prefix="vercel",
+        source_module="cognee.tasks.ingestion.connectors.vercel",
+        source_name="vercel_source",
+        service_builder=_vercel_service,
     ),
 }
 

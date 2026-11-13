@@ -1,7 +1,7 @@
 """SDK-bundled data sources for incremental, deletion-aware ingestion.
 
 Install ``cognee[gmail]``, ``cognee[google-drive]`` or ``cognee[google-calendar]`` for the
-Google dependencies; the Apollo, Asana, Dropbox, Linear, Notion, Obsidian, OneNote and Slack sources need
+Google dependencies; the Apollo, Asana, Dropbox, Linear, Notion, Obsidian, OneNote, Slack and Vercel sources need
 none.
 Importing this package does not load DLT or client libraries, authenticate, or start ingestion.
 Other connectors remain available in cognee-community.
@@ -18,6 +18,7 @@ from .notion import notion_source
 from .obsidian import obsidian_source
 from .onenote import list_onenote_notebooks, onenote_source
 from .slack import build_slack_service, slack_source
+from .vercel import build_vercel_service, vercel_source
 
 __all__ = [
     "apollo_source",
@@ -30,6 +31,7 @@ __all__ = [
     "build_gmail_service_from_access_token",
     "build_linear_service",
     "build_slack_service",
+    "build_vercel_service",
     "dropbox_account_id",
     "dropbox_source",
     "gmail_source",
@@ -41,4 +43,5 @@ __all__ = [
     "obsidian_source",
     "onenote_source",
     "slack_source",
+    "vercel_source",
 ]
