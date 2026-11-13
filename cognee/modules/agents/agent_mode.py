@@ -4,7 +4,8 @@ When COGNEE_AGENT_MODE=true, the server tracks how many agent connections
 have registered via the /register endpoint. A background watchdog thread
 starts on the first registration and checks every 60 seconds whether
 any connections remain. If the count drops to zero the watchdog sends
-SIGTERM, shutting the server down gracefully.
+SIGTERM, shutting the server down gracefully. If the process is still
+alive after a few more idle ticks, it is killed outright.
 
 This is designed for ephemeral deployments where an external
 orchestrator spins up a Cognee server for one or more agents. Each
@@ -49,11 +50,31 @@ _lock = threading.Lock()
 _active_count = 0
 _active_connection_ids: set[str] = set()
 _watchdog_started = False
+_idle_ticks = 0
+
+# Idle ticks after the SIGTERM tick before the watchdog stops waiting for a
+# graceful shutdown and kills the process.
+_SHUTDOWN_GRACE_TICKS = 3
 
 
 def _shutdown_server():
-    logger.info("No active agent connections remaining — shutting down server")
-    os.kill(os.getpid(), signal.SIGTERM)
+    global _idle_ticks
+
+    if _idle_ticks == 0:
+        logger.info("No active agent connections remaining — shutting down server")
+        os.kill(os.getpid(), signal.SIGTERM)
+    elif _idle_ticks == _SHUTDOWN_GRACE_TICKS + 1:
+        logger.warning(
+            "Server is still running %d watchdog ticks after SIGTERM — shutdown is stuck, "
+            "forcing exit",
+            _idle_ticks,
+        )
+        kill_signal = getattr(signal, "SIGKILL", None)
+        if kill_signal is not None:
+            os.kill(os.getpid(), kill_signal)
+        else:
+            os._exit(1)
+    _idle_ticks += 1
 
 
 def _watchdog():
@@ -61,15 +82,19 @@ def _watchdog():
     timer.daemon = True
     timer.start()
 
+    global _idle_ticks
+
     with _lock:
         count = _active_count
+        if count > 0:
+            _idle_ticks = 0
 
     if count <= 0:
         _shutdown_server()
 
 
 async def register_agent(user: User, request: RegisterAgentRequest) -> AgentConnection:
-    global _active_count, _watchdog_started
+    global _active_count, _idle_ticks, _watchdog_started
 
     from cognee.modules.agents.operations import register_agent_from_request
 
@@ -81,6 +106,7 @@ async def register_agent(user: User, request: RegisterAgentRequest) -> AgentConn
 
         _active_connection_ids.add(connection.id)
         _active_count += 1
+        _idle_ticks = 0
         count = _active_count
 
         if is_agent_mode_enabled() and not _watchdog_started:
