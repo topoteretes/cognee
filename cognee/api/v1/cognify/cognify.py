@@ -11,7 +11,11 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import resolve_chunk_size
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.cognify.chunking_tasks import build_chunking_tasks, resolve_chunks_per_batch
+from cognee.modules.cognify.chunking_tasks import (
+    build_chunking_tasks,
+    build_registered_chunk_tasks,
+    resolve_chunks_per_batch,
+)
 from cognee.modules.cognify.config import (
     GLINER_DEMO_EXTRACTOR,
     ensure_extractor_runtime,
@@ -696,10 +700,15 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunks_per_batch = resolve_chunks_per_batch(chunks_per_batch)
 
     # EXTRACT: classify raw Data items into typed Document objects, then split
-    # them into semantic text chunks. needs_llm=False marks the tasks that
-    # never call the LLM; the run's need is the union over the tasks, so the
-    # LLM connection probe runs exactly when some task in the list will use it.
-    tasks = list(build_chunking_tasks(chunker, await resolve_chunk_size(chunk_size)))
+    # them into semantic text chunks (followed by any tasks plugins registered
+    # to run on the chunks). needs_llm=False marks the tasks that never call
+    # the LLM; the run's need is the union over the tasks, so the LLM
+    # connection probe runs exactly when some task in the list will use it.
+    tasks = list(
+        build_chunking_tasks(
+            chunker, await resolve_chunk_size(chunk_size), chunks_per_batch=chunks_per_batch
+        )
+    )
     if early_chunk_indexing:
         # The indexing pipeline (get_indexing_tasks) stored and embedded these
         # very chunks before this run; find them in the vector store so the
@@ -751,15 +760,22 @@ async def get_indexing_tasks(
     as the cognify task lists' does, so both runs cut the same chunks and the
     cognify run finds them in the store instead of embedding them again. The
     temporal hints are left out: nothing here reads them, and the cognify run
-    computes its own when it re-chunks.
+    computes its own when it re-chunks. The tasks plugins registered to run on
+    the chunks run here too, so they see every chunk before it is stored.
     """
+    chunks_per_batch = resolve_chunks_per_batch(chunks_per_batch)
     return [
-        *build_chunking_tasks(chunker, await resolve_chunk_size(chunk_size), temporal_hints=False),
+        *build_chunking_tasks(
+            chunker,
+            await resolve_chunk_size(chunk_size),
+            temporal_hints=False,
+            chunks_per_batch=chunks_per_batch,
+        ),
         # LOAD: chunk and document nodes to the graph, chunk text to the vector
         # store. From here on the dataset is searchable at chunk level.
         Task(
             index_chunks_for_search,
-            task_config={"batch_size": resolve_chunks_per_batch(chunks_per_batch)},
+            task_config={"batch_size": chunks_per_batch},
             needs_llm=False,
         ),
     ]
@@ -776,7 +792,9 @@ async def get_dlt_tasks(
     No LLM tasks: each manifest row becomes one DocumentChunk (vector-indexed
     by add_data_points) and the graph structure comes from the relational
     schema via extract_dlt_source_edges. ``config`` is the one cognify resolved:
-    its ontology resolver and authoritative sources align the tables.
+    its ontology resolver and authoritative sources align the tables. The tasks
+    plugins registered to run on the chunks run on the row chunks before
+    anything stores them.
     """
     from cognee.tasks.ingestion.extract_dlt_source_edges import extract_dlt_source_edges
     from cognee.tasks.ingestion.purge_stale_dlt_source_artifacts import (
@@ -802,6 +820,8 @@ async def get_dlt_tasks(
             chunker=TextChunker,
             needs_llm=False,
         ),
+        # The tasks plugins registered to run on the chunks (register_chunk_task).
+        *build_registered_chunk_tasks(chunks_per_batch),
         # LOAD: persist row chunks and embeddings to graph/vector DBs
         Task(
             add_data_points,

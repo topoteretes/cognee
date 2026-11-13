@@ -19,7 +19,9 @@ import pytest
 
 import cognee.api.v1.update.update  # bind the real submodule
 from cognee.api.v1.update.incremental import RefusalReason
+from cognee.modules.cognify import register_chunk_task, unregister_chunk_task
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
+from cognee.modules.pipelines.tasks.task import Task
 from cognee.tasks.ingestion.data_item import DataItem
 
 update_module = sys.modules["cognee.api.v1.update.update"]
@@ -328,3 +330,54 @@ async def test_the_extractor_is_resolved_once_and_forwarded_to_both_paths():
         incremental.assert_not_awaited()
         assert cognify_mock.await_args.kwargs["extractor"] == "gliner_demo"
         assert runtime.await_count == 2
+
+
+async def screen_chunks(chunks):
+    return chunks
+
+
+async def test_registered_chunk_tasks_skip_the_incremental_path():
+    """The chunk-level engine extracts fresh chunks without a task list, so the
+    tasks plugins register to run on every chunk would never see them. The
+    rebuild's cognify() runs them."""
+    data_id, dataset_id = uuid4(), uuid4()
+    incremental = AsyncMock()
+    cognify_mock = AsyncMock(return_value=_full_result(dataset_id))
+
+    register_chunk_task("screen", lambda **kwargs: Task(screen_chunks, needs_llm=False))
+    try:
+        with _patches(data_id, incremental, _full_result(dataset_id), cognify=cognify_mock):
+            result = await update_module.update(
+                data_id=data_id,
+                data="new content",
+                dataset_id=dataset_id,
+                user=SimpleNamespace(id=uuid4()),
+            )
+    finally:
+        unregister_chunk_task("screen")
+
+    incremental.assert_not_called()
+    cognify_mock.assert_awaited_once()
+    assert result["status"] == "full_rebuild"
+    assert result["fallback"]["reason"] is RefusalReason.CHUNK_TASKS_REGISTERED
+
+
+async def test_a_chunk_task_factory_that_adds_nothing_keeps_the_incremental_path():
+    data_id, dataset_id = uuid4(), uuid4()
+    incremental = AsyncMock(return_value=_engine_summary())
+
+    register_chunk_task("switched_off", lambda **kwargs: [])
+    try:
+        with _patches(data_id, incremental, _full_result(dataset_id)):
+            result = await update_module.update(
+                data_id=data_id,
+                data="new content",
+                dataset_id=dataset_id,
+                user=SimpleNamespace(id=uuid4()),
+            )
+    finally:
+        unregister_chunk_task("switched_off")
+
+    incremental.assert_awaited_once()
+    assert result["status"] == "incremental"
+    assert result["fallback"] is None

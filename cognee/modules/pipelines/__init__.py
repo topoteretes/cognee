@@ -3,7 +3,8 @@
 Every ingestion or enrichment flow (``cognify``, ``improve``/``memify``, the code
 graph, custom pipelines) is a list of tasks executed by the runner in this
 package. Task implementations live in ``cognee/tasks/``; this package only
-knows how to run them.
+knows how to run them. Plugins add tasks to cognify's lists right after
+chunking with ``register_chunk_task`` (``cognee.modules.cognify``).
 
 Four things named "task" -- do not confuse them
 ------------------------------------------------

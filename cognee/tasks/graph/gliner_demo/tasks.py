@@ -2,9 +2,10 @@
 
 ``get_gliner_demo_tasks`` returns the complete task list
 ``classify_documents -> prepare_gliner_schema -> extract_chunks_from_documents ->
-index_chunks_for_search -> extract_graph_and_summarize_with_gliner ->
-add_data_points`` (the early chunk write is dropped when
-``EARLY_CHUNK_INDEXING`` is off). Run it with
+(tasks registered with register_chunk_task) -> find_indexed_chunks ->
+extract_graph_and_summarize_with_gliner -> add_data_points`` (the lookup of
+chunks the indexing pipeline stored is dropped when ``EARLY_CHUNK_INDEXING``
+is off). Run it with
 ``cognee.run_custom_pipeline(tasks=..., dataset=..., pipeline_name="cognify_pipeline")``;
 the pipeline loads the dataset's Data records itself, exactly as ``cognify()`` does.
 
@@ -429,9 +430,12 @@ async def get_gliner_demo_tasks(
     )
 
     # The chunking step the indexing pipeline uses too, so both runs cut the
-    # same chunks; the schema is sketched from the classified documents.
-    classify_task, chunk_task = build_chunking_tasks(chunker, max_chunk_size)
-    tasks = [classify_task, schema_task, chunk_task]
+    # same chunks and pass them to the same registered chunk tasks; the schema
+    # is sketched from the classified documents.
+    classify_task, *chunk_step = build_chunking_tasks(
+        chunker, max_chunk_size, chunks_per_batch=chunks_per_batch
+    )
+    tasks = [classify_task, schema_task, *chunk_step]
     if early_chunk_indexing:
         # Same as the LLM route (SDK-397): the indexing pipeline stored these
         # chunks before this run; add_data_points skips re-embedding them.
