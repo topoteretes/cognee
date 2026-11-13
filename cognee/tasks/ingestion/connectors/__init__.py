@@ -42,3 +42,6 @@ __all__ = [
     "onenote_source",
     "slack_source",
 ]
+from .klaviyo import klaviyo_source
+
+__all__.append("klaviyo_source")
