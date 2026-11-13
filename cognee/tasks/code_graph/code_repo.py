@@ -162,10 +162,10 @@ def _is_skipped_path(relative_path: Path) -> bool:
 # git with LFS downloads off, so a repository's LFS documents arrive as pointers;
 # ingesting one would store the pointer text as if it were the document.
 _LFS_POINTER = re.compile(
-    rb"version https://git-lfs\.github\.com/spec/v1\n"
-    rb"(?:ext-\d+-\w+ sha256:[0-9a-f]{64}\n)*"
-    rb"oid sha256:[0-9a-f]{64}\n"
-    rb"size \d+\n?"
+    rb"version https://git-lfs\.github\.com/spec/v1\r?\n"
+    rb"(?:ext-\d+-\w+ sha256:[0-9a-f]{64}\r?\n)*"
+    rb"oid sha256:[0-9a-f]{64}\r?\n"
+    rb"size \d+\r?\n?"
 )
 _LFS_POINTER_MAX_BYTES = 1024
 
