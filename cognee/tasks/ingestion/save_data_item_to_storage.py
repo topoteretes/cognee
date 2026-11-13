@@ -12,6 +12,7 @@ from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.operations.remote_caller import is_remote_caller
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.path_shape import is_path_only_string
 from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
 from cognee.tasks.web_scraper.utils import fetch_page_content
 
@@ -101,9 +102,13 @@ def _caller_file_uri(data_item: str) -> str | None:
     """The existing file a caller's string names, or None when it is text.
 
     With the gate closed the disk is never asked, so no reply can reveal
-    whether a path exists (``screen_server_paths`` has refused explicit paths).
+    whether a path exists. A string that is only a path is refused by its shape,
+    as ``screen_server_paths`` refuses it at the entry, so one that reached here
+    unscreened (a custom pipeline) fails loudly instead of becoming text.
     """
     if not local_file_paths_accepted():
+        if is_path_only_string(data_item):
+            require_server_path_access()
         return None
     return _resolve_local_file_uri(data_item)
 

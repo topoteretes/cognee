@@ -171,34 +171,29 @@ def test_the_refusal_says_how_to_allow_paths(
 
 
 @pytest.mark.asyncio
-async def test_api_never_reads_a_file_outside_the_data_root(fresh_settings, tmp_path):
-    """Below the entry screen a bare path is never looked up: it is stored as its
-    own text, never as the file. A file:// URL is refused."""
+async def test_api_refuses_a_file_outside_the_data_root(fresh_settings, tmp_path):
+    """Below the entry screen too, a path is refused by its shape, never looked up."""
     fresh_settings()
     outside = tmp_path / "flag.txt"
     outside.write_text("not for callers")
 
     with remote_caller_scope():
-        stored = await save_data_item_to_storage_detailed(str(outside))
-        with pytest.raises(IngestionError, match="not accepted"):
-            await save_data_item_to_storage_detailed(outside.as_uri())
-
-    assert stored.file_path != outside.as_uri()
+        for path in (str(outside), outside.as_uri()):
+            with pytest.raises(IngestionError, match="not accepted"):
+                await save_data_item_to_storage_detailed(path)
 
 
 @pytest.mark.asyncio
-async def test_api_never_reads_a_path_into_cognees_own_data_root(fresh_settings, data_root):
-    """Another user's upload lives here; a caller naming it is treated like any path."""
+async def test_api_refuses_a_path_into_cognees_own_data_root(fresh_settings, data_root):
+    """Another user's upload lives here; a caller naming it is refused like any path."""
     fresh_settings()
     upload = data_root / "text_abc.txt"
     upload.write_text("someone else's upload")
 
     with remote_caller_scope():
-        stored = await save_data_item_to_storage_detailed(str(upload))
-        with pytest.raises(IngestionError, match="not accepted"):
-            await save_data_item_to_storage_detailed(upload.as_uri())
-
-    assert stored.file_path != upload.as_uri()
+        for path in (str(upload), upload.as_uri()):
+            with pytest.raises(IngestionError, match="not accepted"):
+                await save_data_item_to_storage_detailed(path)
 
 
 @pytest.mark.asyncio
@@ -223,15 +218,18 @@ async def test_sdk_passes_an_s3_object_through(fresh_settings):
 
 
 @pytest.mark.asyncio
-async def test_api_never_lists_a_directory(fresh_settings, tmp_path):
-    """Gate closed, the folder is not looked up: its name goes on as a string."""
+async def test_api_refuses_a_directory_before_listing_it(fresh_settings, tmp_path):
+    """Gate closed, the folder path is refused by its shape: never looked up or listed."""
     fresh_settings()
     folder = tmp_path / "project"
     folder.mkdir()
     (folder / "a.txt").write_text("a")
 
-    with remote_caller_scope():
-        assert await resolve_data_directories([str(folder)]) == [str(folder)]
+    with (
+        remote_caller_scope(),
+        pytest.raises(IngestionError, match="not accepted"),
+    ):
+        await resolve_data_directories([str(folder)])
 
     with operation_origin_scope(ORIGIN_SDK):
         assert await resolve_data_directories([str(folder)]) == [str(folder / "a.txt")]

@@ -11,7 +11,6 @@ a string as a local file never ask the disk either. With the gate open nothing
 changes.
 """
 
-import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -19,6 +18,7 @@ from urllib.parse import urlparse
 
 from cognee.tasks.ingestion.create_dlt_source import is_connection_string
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.path_shape import is_path_only_string
 from cognee.tasks.ingestion.save_data_item_to_storage import (
     local_file_paths_accepted,
     require_server_path_access,
@@ -81,32 +81,3 @@ def _is_text(text: str) -> bool:
     if is_path_only_string(text):
         require_server_path_access()
     return True
-
-
-# How a path begins: a root or home (/, \, ~), ./ or ../, or a drive (C:\ or C:/).
-_PATH_START = re.compile(r"[/\\~]|\.\.?[/\\]|[A-Za-z]:[/\\]")
-
-
-def is_path_only_string(text: str) -> bool:
-    """Whether ``text`` is nothing but a path, judged by its shape alone.
-
-    One token after stripping (whitespace inside, newlines included, makes it
-    prose) that is explicitly a path: it starts like one (a root, ``~``, ``./``,
-    ``../`` or a drive) and holds a separator after its first character
-    (``/etc/passwd``, ``~/notes``, ``./a``, ``C:\\data``), or it is a hidden
-    file at the root (``/.env``). A string wrapped in one pair of matching
-    quotes is unquoted first and may then hold spaces, though not line breaks:
-    ``"C:\\Secret Folder"``. Anything less explicit is text, since it cannot be
-    told from a word: ``/start``, ``~30%``, ``CI/CD``, ``12/25/2024``, a bare
-    name such as ``notes.txt``, and a relative path such as ``docs/../x``.
-    """
-    token = text.strip()
-    if len(token) > 1 and token[0] == token[-1] and token[0] in "\"'":
-        token = token[1:-1]
-        if any(char in "\r\n" for char in token):
-            return False
-    elif any(char.isspace() for char in token):
-        return False
-    if token.startswith("/."):
-        return True
-    return bool(_PATH_START.match(token)) and any(sep in token[1:] for sep in "/\\")

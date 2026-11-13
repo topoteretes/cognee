@@ -6,6 +6,7 @@ from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
+from cognee.tasks.ingestion.path_shape import is_path_only_string
 from cognee.tasks.ingestion.save_data_item_to_storage import (
     local_file_paths_accepted,
     require_server_path_access,
@@ -15,7 +16,10 @@ from cognee.tasks.ingestion.save_data_item_to_storage import (
 def _resolve_existing_local_path(item: str) -> Path | None:
     if not local_file_paths_accepted():
         # Gate closed: the disk is never asked, so no reply reveals whether a
-        # path exists (screen_server_paths has refused explicit paths).
+        # path exists. A string that is only a path is refused by its shape, as
+        # the entry screen refuses it, so an unscreened one fails loudly.
+        if is_path_only_string(item):
+            require_server_path_access()
         return None
     try:
         return resolve_local_path(item, must_exist=True)

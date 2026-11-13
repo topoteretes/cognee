@@ -13,7 +13,8 @@ import pytest
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.operations import remote_caller_scope
 from cognee.tasks.ingestion.data_item import DataItem
-from cognee.tasks.ingestion.screen_server_paths import is_path_only_string, screen_server_paths
+from cognee.tasks.ingestion.path_shape import is_path_only_string
+from cognee.tasks.ingestion.screen_server_paths import screen_server_paths
 
 storage = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
 

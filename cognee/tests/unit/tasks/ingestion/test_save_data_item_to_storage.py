@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from cognee.modules.ingestion import StoredFile
+from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
 
 # The package __init__ rebinds the name ``save_data_item_to_storage`` to the
@@ -63,13 +64,11 @@ async def test_windows_style_paths_do_not_crash_and_fall_back_to_text(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_absolute_path_is_text_whether_or_not_it_exists_when_gate_disabled(
-    tmp_path, monkeypatch
-):
+async def test_path_is_refused_whether_or_not_it_exists_when_gate_disabled(tmp_path, monkeypatch):
     # With ACCEPT_LOCAL_FILE_PATH off the disk is never asked, so an existing
-    # file and a missing one get the same answer: text. That is what keeps a
-    # reply from revealing whether a path exists; explicit paths are refused
-    # earlier, by screen_server_paths at the entry.
+    # file and a missing one get the same answer: refused by their shape. That
+    # keeps a reply from revealing whether a path exists, and a path that
+    # skipped the entry screen still fails loudly. A note is still text.
     existing = tmp_path / "note.txt"
     existing.write_text("hello", encoding="utf-8")
     save_mock = AsyncMock(return_value=StoredFile(file_path="text-file-path"))
@@ -77,9 +76,9 @@ async def test_absolute_path_is_text_whether_or_not_it_exists_when_gate_disabled
     monkeypatch.setattr(mod.settings, "accept_local_file_path", False)
 
     for item in (str(existing), "/no/such/file.txt"):
-        save_mock.reset_mock()
-        assert await save_data_item_to_storage(item) == "text-file-path"
-        save_mock.assert_awaited_once_with(item)
+        with pytest.raises(IngestionError, match="not accepted"):
+            await save_data_item_to_storage(item)
+    assert await save_data_item_to_storage("/remember to call Bob") == "text-file-path"
 
 
 @pytest.mark.asyncio
