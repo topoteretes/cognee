@@ -411,6 +411,16 @@ def _build_canonical_entity(
     props.pop("is_a", None)
     props["name"] = canonical["name"]
     props["id"] = canonical["id"]
+    # Graph stores that cannot hold nested maps (Neo4j) persist dict-valued
+    # properties as JSON strings; get_graph_data() returns them verbatim, and
+    # Entity.from_dict then rejects `metadata` with a dict_type error — which
+    # silently skipped this rebuild for every canonical. Decode before validating.
+    metadata = props.get("metadata")
+    if isinstance(metadata, str):
+        try:
+            props["metadata"] = json.loads(metadata)
+        except ValueError:
+            props.pop("metadata", None)
 
     unioned = _union_descriptions([canonical] + duplicates)
     if unioned is not None:
