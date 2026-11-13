@@ -57,7 +57,8 @@ _ESCAPES = re.compile(
     r"\x1b\[[0-?]*[ -/]*[@-~]"
     r"|\x1b\][^\x07\x1b\n]*(?:\x07|\x1b\\)"
     r"|\x1b[ -/]+[0-~]"
-    r"|\x1b[0-Z\\^-~]"
+    # ESC then any of 0x30-0x7E but [ and ], which open CSI and OSC above.
+    r"|\x1b[0-9:;<=>?@A-Z\\^_`a-z{|}~]"
 )
 # Control characters other than tab and newline. A NUL makes Postgres refuse the whole load.
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
