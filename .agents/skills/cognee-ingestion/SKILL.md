@@ -155,6 +155,11 @@ or a remote instance.
   `cognee.update(data_id=..., data=..., dataset_id=...)`, which re-extracts
   only the changed chunks and keeps the document's id. Identical content is
   a no-op.
+- **Re-remembering does not move content to another node set.** To regroup a
+  document already in memory, call
+  `cognee.update(data_id=..., data=None, dataset_id=..., node_set=["new"])`:
+  it replaces the node set list (`[]` clears it) in place, with no LLM call,
+  re-chunking or re-embedding, and answers `metadata_updated` (or `unchanged`).
 - **`content_type` is strict.** Only `None`, `"skills"`, or `"code"`.
   `"code"` rejects `session_id` and needs repository paths or git URLs;
   `"skills"` ingests into the target dataset like any other call (default

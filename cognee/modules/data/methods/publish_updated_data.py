@@ -122,6 +122,51 @@ async def publish_updated_data(
         await session.commit()
 
 
+def with_node_set(external_metadata, node_set: list[str]) -> dict:
+    """``external_metadata`` carrying ``node_set`` the way ingestion stores it.
+
+    A non-empty list sits under ``"node_set"``; an empty one removes the key.
+    Every other key is kept. Metadata that is not a dict counts as empty.
+    """
+    metadata = dict(external_metadata) if isinstance(external_metadata, dict) else {}
+    if node_set:
+        metadata["node_set"] = list(node_set)
+    else:
+        metadata.pop("node_set", None)
+    return metadata
+
+
+def has_node_set(data: Data, node_set: list[str]) -> bool:
+    """Whether the row already records exactly ``node_set``, in both of its copies."""
+    stored = data.external_metadata if isinstance(data.external_metadata, dict) else {}
+    return data.node_set == (
+        json.dumps(node_set) if node_set else None
+    ) and stored == with_node_set(stored, node_set)
+
+
+async def publish_node_set(data_id: UUID, node_set: list[str]) -> None:
+    """Replace the row's node set, and nothing else, in one transaction.
+
+    Both copies move together, as ingestion writes them: the ``node_set`` column
+    (``json.dumps(list)``, or NULL when empty) and ``external_metadata["node_set"]``
+    (absent when empty), which a later full cognify rebuilds NodeSet tags from.
+    Label, other metadata, hashes, stored files and pipeline stamps are untouched.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        data_point = (
+            await session.execute(select(Data).filter(Data.id == data_id))
+        ).scalar_one_or_none()
+        if data_point is None:
+            raise ValueError(f"data row {data_id} disappeared before publish")
+
+        data_point.node_set = json.dumps(node_set) if node_set else None
+        data_point.external_metadata = with_node_set(data_point.external_metadata, node_set)
+
+        await session.merge(data_point)
+        await session.commit()
+
+
 async def mark_data_processed(
     data_id: UUID,
     dataset_id: UUID,

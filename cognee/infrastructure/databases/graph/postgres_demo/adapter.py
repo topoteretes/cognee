@@ -416,6 +416,29 @@ class PostgresDemoAdapter(GraphDBInterface):
             await session.execute(statement, rows)
             await session.commit()
 
+    async def update_node(self, node_id: str, values: dict[str, Any]) -> bool:
+        """Merge *values* into an existing node's JSONB properties.
+
+        A ``properties || patch`` of the named keys only: name, type, every
+        other property and the provenance columns are untouched. Returns False
+        when the node does not exist or *values* is empty.
+        """
+        if not isinstance(node_id, str) or not node_id or not values:
+            return False
+        statement = text("""
+            UPDATE graph_node
+            SET properties = COALESCE(properties, '{}'::jsonb) || CAST(:values AS jsonb),
+                updated_at = now()
+            WHERE id = :id
+            RETURNING id
+        """)
+        patch = json.dumps(sanitize_relational_payload(dict(values)), cls=JSONEncoder)
+        async with self._write_session() as session:
+            result = await session.execute(statement, {"id": node_id, "values": patch})
+            updated = result.first() is not None
+            await session.commit()
+        return updated
+
     async def delete_node(self, node_id: str) -> None:
         """Delete one node. Delegates to delete_nodes."""
         await self.delete_nodes([node_id])
