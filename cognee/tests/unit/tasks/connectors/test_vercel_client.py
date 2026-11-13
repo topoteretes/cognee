@@ -268,6 +268,9 @@ def test_a_netrc_entry_for_the_host_never_replaces_the_bearer_token(monkeypatch,
         b"null",
         b"",
     ],
+    # Named ids: pytest puts the test id in PYTEST_CURRENT_TEST, and the 200 000 byte body as
+    # an id is longer than Windows allows in an environment variable.
+    ids=["latin-1", "utf-16-bom", "too-deep", "null", "empty"],
 )
 def test_a_200_that_is_not_utf8_json_is_a_response_error(monkeypatch, body):
     client, _, _ = _client(monkeypatch, Resp(200, body))
