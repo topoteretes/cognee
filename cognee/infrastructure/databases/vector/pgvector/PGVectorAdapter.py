@@ -515,6 +515,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         return collection_name in self._metadata.tables
 
+    async def list_collections(self) -> list[str]:
+        async with self.engine.connect() as connection:
+            return await connection.run_sync(lambda conn: inspect(conn).get_table_names())
+
     async def delete_collection(self, collection_name: str) -> None:
         """Drop the table for ``collection_name``; a missing table is not an error.
 
@@ -534,10 +538,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
-    async def create_collection(self, collection_name: str, payload_schema=None):
+    async def create_collection(
+        self, collection_name: str, payload_schema=None, *, vector_size=None
+    ):
         """Create the pgvector table for `collection_name` if it does not already exist."""
         data_point_types = get_type_hints(DataPoint)
-        vector_size = self.embedding_engine.get_vector_size()
+        if vector_size is None:
+            vector_size = self.embedding_engine.get_vector_size()
 
         if not await self.has_collection(collection_name):
             async with self.VECTOR_DB_LOCK:
@@ -864,6 +871,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         collection_name: str,
         points: list[dict],
         payload_schema: type[BaseModel] | None = None,
+        *,
+        vector_size: int | None = None,
     ) -> None:
         """Upsert caller-provided vectors without invoking the embedding engine.
 
@@ -879,7 +888,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if not points:
             return
 
-        vector_size = self.embedding_engine.get_vector_size()
+        if vector_size is None:
+            vector_size = self.embedding_engine.get_vector_size()
         # Every check runs before the table exists, so a rejected call creates nothing.
         row_list = sorted(
             (
@@ -894,8 +904,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
 
         if not await self.has_collection(collection_name):
-            await self.create_collection(collection_name, payload_schema=payload_schema)
+            await self.create_collection(
+                collection_name, payload_schema=payload_schema, vector_size=vector_size
+            )
         table = await self.get_table(collection_name)
+        if table.c.vector.type.dim != vector_size:
+            raise ValueError(f"Collection vector size does not match {vector_size}")
 
         async with self.get_async_session() as session:
             for start_index in range(0, len(row_list), QUERY_BATCH_SIZE):

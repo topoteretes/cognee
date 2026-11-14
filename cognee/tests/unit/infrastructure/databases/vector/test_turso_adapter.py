@@ -86,6 +86,21 @@ async def test_has_collection_lifecycle(adapter):
 
 
 @pytest.mark.asyncio
+async def test_raw_width_override_and_native_collection_catalog(adapter):
+    from uuid import uuid4
+
+    point = {"id": uuid4(), "vector": [1.0, 0.0], "payload": {"text": "copied"}}
+    await adapter.upsert_raw_vectors("Two_text", [point], vector_size=2)
+    await adapter.create_collection("Four_text")
+    assert {name.lower() for name in await adapter.list_collections()} == {"two_text", "four_text"}
+    [row] = await adapter.retrieve("Two_text", [str(point["id"])], include_vector=True)
+    assert row.payload["vector"] == [1.0, 0.0]
+    with pytest.raises(ValueError, match="expected size 3"):
+        await adapter.upsert_raw_vectors("Invalid_text", [point], vector_size=3)
+    assert not await adapter.has_collection("Invalid_text")
+
+
+@pytest.mark.asyncio
 async def test_create_data_points_and_search_ordering(adapter):
     docs = _docs()
     await adapter.create_data_points("DocumentChunk_text", docs)
