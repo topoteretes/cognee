@@ -113,7 +113,9 @@ async def update(
                  external_metadata={}) clears them; a value replaces them (the call's
                  and the item's node_set together, as on add). Passing any of them runs
                  the full rebuild, since the chunk-level path does not touch document
-                 metadata.
+                 metadata. To move a document to a different node set WITHOUT
+                 re-extracting it (no LLM, no re-chunk, no re-embed), use
+                 ``change_node_set`` instead — update() always rebuilds.
         vector_db_config: Optional configuration for vector database (for custom setups).
                  Chunk-level incremental updates do not support per-call config
                  forwarding: when provided, the update runs full ingestion
