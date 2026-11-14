@@ -710,18 +710,81 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         reraise=True,
     )
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
-        """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict."""
-        data_point_types = get_type_hints(DataPoint)
+        """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict.
+
+        Only the rows an upsert would write are embedded: a re-run over data already
+        stored would otherwise embed every row and then write none of them.
+        """
         if not await self.has_collection(collection_name):
             await self.create_collection(
                 collection_name=collection_name,
                 payload_schema=type(data_points[0]),
             )
 
-        data_vectors = await self.embed_data(
-            [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
-        )
+        rows, texts = self._data_point_rows(data_points)
 
+        # Which rows would an upsert write at all? Asked in a short read of its own, so no
+        # transaction stays open across the embedding request. The write classifies
+        # again inside its transaction, which settles anything that changed meanwhile;
+        # a row found unchanged here and deleted before that write is not written by this
+        # call, as if the call had completed before the delete. A changed row whose text
+        # is the same is embedded too, although the upsert keeps its stored vector.
+        async with self.get_async_session() as session:
+            missing, changed = await self._classify(session, collection_name, rows)
+        written_ids = {row["id"] for row in missing + changed}
+        to_write = [row for row in rows if row["id"] in written_ids]
+        if not to_write:
+            return
+
+        vectors = await self.embed_data([texts[row["id"]] for row in to_write])
+        for row, vector in zip(to_write, vectors, strict=True):
+            row["vector"] = vector
+        await self._write_data_point_rows(collection_name, to_write)
+
+    @staticmethod
+    def _data_point_rows(data_points: list[DataPoint]) -> tuple[list[dict], dict]:
+        """One ``id``/``payload`` row per id, in ``_row_order``, and each id's text to embed.
+
+        Postgres raises "cannot affect row a second time" if the same id appears twice in
+        one INSERT ... ON CONFLICT DO UPDATE, and entity extraction may emit same-UUID5
+        rows in one batch. The last duplicate's payload and text win, with the
+        duplicates' belongs_to_set arrays unioned so a tag that only appears on one
+        duplicate isn't dropped (mirrors the in-batch tag merge in
+        Neo4jAdapter.add_nodes). The rows are written in ``_row_order`` so concurrent
+        batches cannot deadlock.
+        """
+        rows_by_id: dict = {}
+        texts: dict = {}
+        for data_point in data_points:
+            # Strip NUL bytes: the json column accepts \u0000 on insert, but
+            # the payload::jsonb casts in search/merge queries reject it.
+            payload = sanitize_relational_payload(serialize_data(data_point.model_dump()))
+            existing = rows_by_id.get(data_point.id)
+            if existing is not None:
+                existing_tags = (existing["payload"] or {}).get("belongs_to_set") or []
+                incoming_tags = (payload or {}).get("belongs_to_set") or []
+                if existing_tags or incoming_tags:
+                    merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
+                    payload = {**(payload or {}), "belongs_to_set": merged_tags}
+            rows_by_id[data_point.id] = {"id": data_point.id, "payload": payload}
+            texts[data_point.id] = DataPoint.get_embeddable_data(data_point)
+        rows = sorted(rows_by_id.values(), key=lambda row: _row_order(row["id"]))
+        return rows, texts
+
+    async def _write_data_point_rows(self, collection_name: str, rows: list[dict]) -> None:
+        """Write ``rows`` (``id``, ``payload``, ``vector``), locking only the rows it changes.
+
+        ``ON CONFLICT DO UPDATE`` locks every conflicting row until commit, even when
+        its ``WHERE`` is false, so an id many concurrent writers share (the same entity
+        extracted from many documents) queued every writer behind every other one,
+        although nearly all of them changed nothing. So only the rows that need it
+        take a row lock: a lock-free classify drops the unchanged rows, the missing
+        ones are inserted with ``DO NOTHING`` (which locks no existing row), and only
+        what is left goes through the upsert. All inserts of the call precede all its
+        upserts, each phase in ``_row_order``: a writer waiting for another's insert
+        holds no updated row's lock yet, so the two phases form no wait cycle.
+        """
+        data_point_types = get_type_hints(DataPoint)
         vector_size = self.embedding_engine.get_vector_size()
 
         class PGVectorDataPoint(Base):
@@ -742,68 +805,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             payload = Column(JSON)
             vector = Column(self.Vector(vector_size))
 
-            def __init__(self, id, payload, vector):
-                self.id = id
-                self.payload = payload
-                self.vector = vector
-
-        pgvector_data_points = []
-
-        for data_index, data_point in enumerate(data_points):
-            pgvector_data_points.append(
-                PGVectorDataPoint(
-                    id=data_point.id,
-                    vector=data_vectors[data_index],
-                    # Strip NUL bytes: the json column accepts \u0000 on insert, but
-                    # the payload::jsonb casts in search/merge queries reject it.
-                    payload=sanitize_relational_payload(serialize_data(data_point.model_dump())),
-                )
-            )
-
-        def to_dict(obj):
-            """Dump a mapped PGVectorDataPoint row to a plain column→value dict."""
-            return {
-                column.key: getattr(obj, column.key) for column in inspect(obj).mapper.column_attrs
-            }
-
-        # Dedup by id within the batch — with ON CONFLICT DO UPDATE,
-        # Postgres raises "cannot affect row a second time" if the same
-        # id appears twice in one INSERT. The prior ON CONFLICT DO NOTHING
-        # path silently tolerated duplicates, so entity extraction may
-        # still emit same-UUID5 rows in one batch. Union the duplicates'
-        # belongs_to_set arrays before collapsing so a tag that only
-        # appears on one duplicate isn't dropped (mirrors the in-batch
-        # tag merge in Neo4jAdapter.add_nodes). The rows are then written
-        # in ``_row_order`` so concurrent batches cannot deadlock.
-        deduped_by_id: dict = {}
-        for dp in pgvector_data_points:
-            existing = deduped_by_id.get(dp.id)
-            if existing is None:
-                deduped_by_id[dp.id] = dp
-                continue
-            existing_payload = existing.payload or {}
-            incoming_payload = dp.payload or {}
-            existing_tags = existing_payload.get("belongs_to_set") or []
-            incoming_tags = incoming_payload.get("belongs_to_set") or []
-            if existing_tags or incoming_tags:
-                merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
-                dp.payload = {**incoming_payload, "belongs_to_set": merged_tags}
-            deduped_by_id[dp.id] = dp
-        pgvector_data_points = sorted(deduped_by_id.values(), key=lambda dp: _row_order(dp.id))
-
-        point_dicts = [to_dict(data_point) for data_point in pgvector_data_points]
-
-        # ``ON CONFLICT DO UPDATE`` locks every conflicting row until commit, even when
-        # its ``WHERE`` is false, so an id many concurrent writers share (the same entity
-        # extracted from many documents) queued every writer behind every other one,
-        # although nearly all of them changed nothing. So only the rows that need it
-        # take a row lock: a lock-free classify drops the unchanged rows, the missing
-        # ones are inserted with ``DO NOTHING`` (which locks no existing row), and only
-        # what is left goes through the upsert. All inserts of the call precede all its
-        # upserts, each phase in ``_row_order``: a writer waiting for another's insert
-        # holds no updated row's lock yet, so the two phases form no wait cycle.
         async with self.get_async_session() as session:
-            missing, changed = await self._classify(session, collection_name, point_dicts)
+            missing, changed = await self._classify(session, collection_name, rows)
 
             inserted_ids: set = set()
             for batch in _batches(missing):
