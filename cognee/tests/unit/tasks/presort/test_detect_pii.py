@@ -86,6 +86,25 @@ async def test_detect_pii_deterministic(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_detect_pii_reads_utf16_file(tmp_path):
+    """Regression for #6563: a UTF-16 (BOM) text file's PII was silently skipped.
+
+    scan_folder rejected it as binary on its null bytes, and even forced text the
+    sample was decoded as UTF-8, so the regexes saw ``j\x00a\x00n\x00e``. The file
+    must now report the email it holds, just like its UTF-8 twin.
+    """
+    path = tmp_path / "contact_utf16.txt"
+    path.write_text("Contact: jane.doe@example.com\n", encoding="utf-16")
+    record = FileRecord(
+        path=str(path), name=path.name, extension="txt", is_text=True, size_bytes=1
+    )
+
+    findings = await detect_pii([record])
+
+    assert {finding.category for finding in findings} == {"email_address"}
+
+
+@pytest.mark.asyncio
 async def test_detect_pii_llm_layer(tmp_path):
     record = _text_record(tmp_path, "medical_notes.txt", "patient history follows")
 

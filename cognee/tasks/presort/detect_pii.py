@@ -20,6 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from cognee.infrastructure.files.utils.decode_text_sample import decode_text_sample
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.shared.logging_utils import get_logger
@@ -180,7 +181,12 @@ class PiiAssessment(BaseModel):
 def _read_sample(record: FileRecord, max_sample_bytes: int) -> str | None:
     try:
         with open(record.path, "rb") as file:
-            return file.read(max_sample_bytes).decode("utf-8", errors="replace")
+            # BOM-aware: a UTF-16/UTF-32 file decoded as UTF-8 would hand the
+            # regexes interleaved null bytes (``j\x00a\x00n\x00e``) instead of
+            # text, so no PII would match. is_text_content now admits these
+            # files; decoding them by their BOM is what makes the scan see the
+            # characters.
+            return decode_text_sample(file.read(max_sample_bytes))
     except OSError as error:
         record.warnings.append(f"could not read sample for PII scan: {error}")
         return None
