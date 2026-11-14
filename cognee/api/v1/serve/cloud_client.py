@@ -43,6 +43,48 @@ def remote_graph_schema(graph_model: Any) -> dict | None:
     return graph_model_to_graph_schema(graph_model)
 
 
+def _split_data_items(data: Any) -> tuple[Any, list[str | None], list[dict | None]]:
+    """Unwrap ``DataItem`` wrappers for a remote remember.
+
+    Returns the contents to upload plus each item's ``label`` and
+    ``external_metadata``, in upload order: the /remember route takes those as
+    JSON arrays and pairs them with the uploads by position. Data without any
+    ``DataItem`` comes back unchanged, with empty lists.
+    """
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    items = data if isinstance(data, list) else [data]
+    if not any(isinstance(item, DataItem) for item in items):
+        return data, [], []
+
+    contents: list[Any] = []
+    labels: list[str | None] = []
+    metadata: list[dict | None] = []
+    for item in items:
+        if not isinstance(item, DataItem):
+            contents.append(item)
+            labels.append(None)
+            metadata.append(None)
+            continue
+        if item.node_set:
+            # The route only takes a call-level node_set; dropping the item's
+            # own tags would silently file it under the wrong node sets.
+            raise ValueError(
+                "A per-item DataItem.node_set is not supported while connected to a "
+                "remote Cognee instance. Pass node_set= to remember() instead."
+            )
+        if not isinstance(item.data, str) and not hasattr(item.data, "read"):
+            # Anything else is not uploaded, which would shift every later label.
+            raise TypeError(
+                "remember() over serve() accepts DataItems wrapping text or a file "
+                f"object; got {type(item.data)}"
+            )
+        contents.append(item.data)
+        labels.append(item.label)
+        metadata.append(item.external_metadata)
+    return contents, labels, metadata
+
+
 def _node_type_name(node_type: Any) -> str | None:
     """The ``node_type`` wire form: the class name, or None for the NodeSet default.
 
@@ -204,6 +246,16 @@ class CloudClient:
             form.add_field("content_type", str(content_type_kw))
         if kwargs.get("import_mode") is not None:
             form.add_field("import_mode", str(kwargs["import_mode"]))
+        for tag in kwargs.get("node_set") or []:
+            if tag:
+                form.add_field("node_set", str(tag))
+
+        if content_type_kw not in ("code", "skills"):
+            data, labels, metadata = _split_data_items(data)
+            if any(labels):
+                form.add_field("labels", json.dumps(labels))
+            if any(metadata):
+                form.add_field("external_metadata", json.dumps(metadata))
 
         # Code repos travel as spec strings in the 'raw_data' form field —
         # the server clones git URLs itself and reads local paths from its own
