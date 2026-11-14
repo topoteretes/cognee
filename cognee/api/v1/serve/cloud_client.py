@@ -204,6 +204,14 @@ class CloudClient:
             form.add_field("content_type", str(content_type_kw))
         if kwargs.get("import_mode") is not None:
             form.add_field("import_mode", str(kwargs["import_mode"]))
+        if kwargs.get("node_set"):
+            for tag in kwargs["node_set"]:
+                if tag:
+                    form.add_field("node_set", str(tag))
+        if kwargs.get("labels") is not None:
+            form.add_field("labels", json.dumps(kwargs["labels"]))
+        if kwargs.get("external_metadata") is not None:
+            form.add_field("external_metadata", json.dumps(kwargs["external_metadata"]))
 
         # Code repos travel as spec strings in the 'raw_data' form field —
         # the server clones git URLs itself and reads local paths from its own
