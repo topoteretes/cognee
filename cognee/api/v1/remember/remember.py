@@ -49,6 +49,11 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 from cognee.modules.pipelines.utils import iter_ingestion_entries
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.save_data_item_to_storage import (
+    local_file_paths_accepted,
+    require_server_path_access,
+)
+from cognee.tasks.ingestion.screen_server_paths import screen_server_paths
 
 logger = get_logger("remember")
 
@@ -197,6 +202,8 @@ def _should_auto_presort(data, dataset_name, dataset_id, session_id, kwargs) -> 
         return False
     if session_id is not None or dataset_id is not None or kwargs.get("content_type"):
         return False
+    if not local_file_paths_accepted():
+        return False  # a server path: add() decides it without a lookup
 
     from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
@@ -239,7 +246,11 @@ def _maybe_presort_report(data) -> "PresortReport | None":
 
     if looks_like_presort_report(data):
         return PresortReport.from_json(data) if isinstance(data, dict) else data
-    if isinstance(data, (str, Path)) and str(data).endswith(REPORT_FILE_SUFFIX):
+    if (
+        isinstance(data, (str, Path))
+        and str(data).endswith(REPORT_FILE_SUFFIX)
+        and local_file_paths_accepted()  # else a server path, decided by add() unread
+    ):
         from cognee.modules.presort.local_paths import resolve_presort_path
 
         candidate = resolve_presort_path(data)
@@ -1367,6 +1378,8 @@ async def remember(
                 "dry_run='presort' scans the local filesystem and is not supported while "
                 "connected to a remote Cognee instance. Call cognee.disconnect() first."
             )
+        # A presort scans a server folder: the same gate as any server path.
+        require_server_path_access()
 
         from cognee.modules.presort import run_presort
 
@@ -2155,6 +2168,13 @@ async def _remember_inner(
 
     if remaining:
         raise TypeError(f"Unexpected keyword arguments: {', '.join(remaining)}")
+
+    if not session_id:
+        # Permanent memory: decide caller strings before anything is written, so a
+        # refused path leaves no dataset or operation record behind. add() screens
+        # again; a screened item passes through unchanged. Session memory stores
+        # text and never reads a path.
+        data = screen_server_paths(data)
 
     # Ensure database is initialized (same as add() does internally).
     # Must run before get_default_user() which queries the DB.
