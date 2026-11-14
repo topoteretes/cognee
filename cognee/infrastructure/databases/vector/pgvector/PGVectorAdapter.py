@@ -70,9 +70,25 @@ _HNSW_HALFVEC_MAX_DIMENSIONS = 4000
 # collection is left unindexed and searched by the exact scan, as before.
 _HNSW_MIN_PGVECTOR = (0, 5, 0)
 _HALFVEC_MIN_PGVECTOR = (0, 7, 0)
-# An HNSW scan returns at most hnsw.ef_search rows (default 40); pgvector caps the
-# setting at 1,000, so a larger limit keeps the exact full scan.
-_HNSW_DEFAULT_EF_SEARCH = 40
+# Links per node (m) and build-time candidate list (ef_construction) of new HNSW
+# indexes. pgvector's defaults are m = 16 and ef_construction = 64; only m is changed.
+# With many concurrent writers the index insert dominates a write, and its cost grows
+# with m: every new row is linked to up to 2*m neighbours on the base layer, and each of
+# those rewrites its own neighbour list. Measured locally on 99,328 stored text
+# embeddings of 3072 dimensions, inserted by 24 concurrent connections into an indexed
+# table: 36.6 s with m = 8 against 80.3 s with m = 16. The price is recall: 0.951 against
+# 0.974 (recall@10 against an exact scan, 200 queries, ef_search 40), which searching
+# more candidates buys back, see _HNSW_DEFAULT_EF_SEARCH. Existing indexes are not rebuilt
+# (CREATE INDEX IF NOT EXISTS) and keep the parameters they were built with.
+_HNSW_M = 8
+_HNSW_EF_CONSTRUCTION = 64
+# An HNSW scan examines hnsw.ef_search candidates and returns at most that many rows.
+# Searches use at least 100 (pgvector's own default is 40). In the measurement above that
+# gives an index with m = 8 a recall@10 of 0.971, where m = 16 had 0.974 at 40, for a
+# median query of 4.8 ms against 2.9 ms; an index built with m = 16 reaches 0.989 at 100.
+# A larger limit raises the setting. pgvector caps it at 1,000, so a limit above that
+# keeps the exact full scan.
+_HNSW_DEFAULT_EF_SEARCH = 100
 _HNSW_MAX_EF_SEARCH = 1000
 # Postgres truncates identifiers to NAMEDATALEN - 1 bytes, with only a NOTICE.
 _PG_MAX_IDENTIFIER_BYTES = 63
@@ -182,7 +198,8 @@ def hnsw_index_statement(
         return None
     return (
         f'CREATE INDEX IF NOT EXISTS "{hnsw_index_name(table_name)}" '
-        f'ON "{table_name}" USING hnsw ({indexed} {operator_class})'
+        f'ON "{table_name}" USING hnsw ({indexed} {operator_class}) '
+        f"WITH (m = {_HNSW_M}, ef_construction = {_HNSW_EF_CONSTRUCTION})"
     )
 
 
