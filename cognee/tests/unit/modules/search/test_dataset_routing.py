@@ -3,6 +3,7 @@
 No database anywhere: the relational lookup and the vector engine are stubbed.
 """
 
+import re
 import types
 from importlib import import_module
 from uuid import UUID, uuid4
@@ -26,6 +27,12 @@ from cognee.tasks.summarization.models import GlobalContextSummary
 index_module = import_module("cognee.modules.search.dataset_routing.index")
 route_module = import_module("cognee.modules.search.dataset_routing.route")
 store_module = import_module("cognee.modules.search.dataset_routing.store")
+model_utils_module = import_module(
+    "cognee.infrastructure.databases.utils.ensure_embedding_model_matches"
+)
+
+TEST_MODEL, TEST_DIMENSIONS = "test-model", 2
+TEST_COLLECTION = store_module.dataset_route_collection_name(TEST_MODEL, TEST_DIMENSIONS)
 
 
 async def _route(query, dataset_ids, top_k=1, distance_cutoff=0.8, tie_margin=0.001):
@@ -36,7 +43,7 @@ async def _route(query, dataset_ids, top_k=1, distance_cutoff=0.8, tie_margin=0.
 class FakeEngine:
     """Records every call; ``scores`` maps row id -> cosine distance for score_by_ids.
 
-    It has no ``search``: the routing rows of every tenant share one collection,
+    It has no ``search``: the routing rows of every tenant share a collection,
     so the read path must address rows by id, and a free search over the
     collection fails here.
     """
@@ -46,14 +53,12 @@ class FakeEngine:
         scores=None,
         existing=None,
         score_error=None,
-        stored_width=None,
         collection_exists=True,
         embed_error=None,
     ):
         self.scores = scores or {}
         self.existing = existing or {}
         self.score_error = score_error
-        self.stored_width = stored_width  # what the store's vector columns hold; None = empty
         self.collection_exists = collection_exists
         self.embed_error = embed_error
         self.created, self.deleted, self.scored_ids, self.embedded = [], [], [], []
@@ -70,14 +75,14 @@ class FakeEngine:
         return [[0.1, 0.2] for _ in texts]
 
     async def has_collection(self, collection_name):
-        assert collection_name == DATASET_ROUTE_COLLECTION
+        assert collection_name == TEST_COLLECTION
         return self.collection_exists
 
-    async def get_stored_vector_size(self):
-        return self.stored_width
+    async def existing_collections(self, collection_names):
+        return list(collection_names)
 
     async def score_by_ids(self, collection_name, data_point_ids, query_vector):
-        assert collection_name == DATASET_ROUTE_COLLECTION
+        assert collection_name == TEST_COLLECTION
         self.scored_ids.extend(data_point_ids)
         if self.score_error is not None:
             raise self.score_error
@@ -88,7 +93,7 @@ class FakeEngine:
         ]
 
     async def retrieve(self, collection_name, data_point_ids):
-        assert collection_name == DATASET_ROUTE_COLLECTION
+        assert collection_name == TEST_COLLECTION
         return [
             ScoredResult(id=UUID(row_id), score=0, payload={"text": self.existing[row_id]})
             for row_id in data_point_ids
@@ -96,14 +101,14 @@ class FakeEngine:
         ]
 
     async def delete_data_points(self, collection_name, data_point_ids):
-        assert collection_name == DATASET_ROUTE_COLLECTION
+        assert collection_name.startswith("DatasetRoute")
         self.deleted.extend(data_point_ids)
 
     async def create_data_points(self, collection_name, data_points):
         raise AssertionError("the routing mirror must copy vectors, never embed its rows")
 
     async def upsert_raw_vectors(self, collection_name, points, payload_schema=None):
-        assert collection_name == DATASET_ROUTE_COLLECTION
+        assert collection_name == TEST_COLLECTION
         # No schema: the rows are index rows, copied from the dataset's store as stored.
         assert payload_schema is None
         for point in points:
@@ -123,10 +128,18 @@ def _patch(monkeypatch, engine, documents, access_control=True):
     async def fake_engine():
         return engine
 
+    def fake_collection():
+        return TEST_COLLECTION
+
+    async def fake_registry_collections():
+        return []
+
     for module in (index_module, route_module):
         monkeypatch.setattr(module, "get_dataset_route_engine", fake_engine)
         monkeypatch.setattr(module, "get_data_ids_by_dataset", fake_data_ids)
+        monkeypatch.setattr(module, "dataset_route_collection", fake_collection)
     monkeypatch.setattr(index_module, "backend_access_control_enabled", lambda: access_control)
+    monkeypatch.setattr(index_module, "_registry_route_collections", fake_registry_collections)
 
 
 class FakeIndexStore:
@@ -320,36 +333,26 @@ async def test_an_unreachable_routing_store_warns_and_leaves_every_dataset_searc
 
 
 @pytest.mark.asyncio
-async def test_a_routing_collection_of_another_width_turns_routing_off(monkeypatch, caplog):
-    """EMBEDDING_MODEL changed without a prune: the search covers every dataset, as before
-    routing, and the store is never asked to compare vectors it cannot."""
+async def test_the_configured_model_names_the_collection_the_read_path_scores(monkeypatch):
+    """The rows of one model live in its own collection: the read path checks and
+    scores only the collection of the configured model, so another model's rows
+    are never ranked against this query."""
     a, b = uuid4(), uuid4()
-    engine = FakeEngine(scores={}, stored_width=3)
+    engine = FakeEngine(scores={})
     _patch(monkeypatch, engine, {a: [], b: []})
+    seen = []
 
-    with caplog.at_level("WARNING", logger="dataset_routing"):
-        decision = await _route("q", [a, b], top_k=1)
+    async def spy_has_collection(collection_name):
+        seen.append(collection_name)
+        return False
 
-    assert decision.routed == ()
-    assert decision.unindexed == (a, b)
-    assert decision.narrowed is False
-    assert engine.embedded == [] and engine.scored_ids == []
-    assert "3-dimensional" in caplog.text and "produces 2" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_an_adapter_without_a_width_probe_is_not_checked(monkeypatch):
-    class EngineWithoutProbe(FakeEngine):
-        get_stored_vector_size = None  # Turso and community adapters have no probe
-
-    a, b = uuid4(), uuid4()
-    engine = EngineWithoutProbe(scores={})
-    _patch(monkeypatch, engine, {a: [], b: []})
+    engine.has_collection = spy_has_collection
 
     decision = await _route("q", [a, b], top_k=1)
 
-    assert decision.unindexed == (a, b)
-    assert engine.embedded == ["q"]
+    assert seen == [TEST_COLLECTION]
+    assert decision.unindexed == (a, b) and decision.narrowed is False
+    assert engine.embedded == [] and engine.scored_ids == []
 
 
 @pytest.mark.asyncio
@@ -476,14 +479,20 @@ async def test_sync_ignores_rows_whose_ids_recall_cannot_derive(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_sync_writes_nothing_into_a_collection_of_another_width(monkeypatch):
+async def test_sync_writes_into_the_collection_of_the_model_that_built_the_dataset(monkeypatch):
+    """The strict collection asserts on the engine are the test: a build under the
+    configured model mirrors into that model's collection, never another's."""
     dataset_id, doc = uuid4(), uuid4()
-    engine = FakeEngine(existing={}, stored_width=3)
+    engine = FakeEngine()
     _patch(monkeypatch, engine, {dataset_id: [doc]})
-    root = _summary(dataset_id, create_root_summary_id(str(dataset_id)), "root", is_root=True)
+    (root_id,) = dataset_route_ids(dataset_id, [])
+    root = _summary(dataset_id, UUID(root_id), "root", is_root=True)
 
-    assert await sync_dataset_routes(str(dataset_id), [root], FakeIndexStore({})) == 0
-    assert engine.created == [] and engine.deleted == []
+    assert (
+        await sync_dataset_routes(str(dataset_id), [root], FakeIndexStore({root_id: [0.1, 0.2]}))
+        == 1
+    )
+    assert len(engine.created) == 1
 
 
 @pytest.mark.asyncio
@@ -553,7 +562,33 @@ async def test_removing_a_dataset_deletes_its_root_and_every_bucket(monkeypatch)
 
     await remove_dataset_routes(a, [doc_a])
 
-    assert engine.deleted == [UUID(row_id) for row_id in dataset_route_ids(a, [doc_a])]
+    # The fake reports every candidate collection as existing, so the deletion
+    # ran against the configured model's and the legacy one alike.
+    row_ids = {UUID(row_id) for row_id in dataset_route_ids(a, [doc_a])}
+    assert set(engine.deleted) == row_ids
+    assert len(engine.deleted) == 2 * len(row_ids)
+
+
+@pytest.mark.asyncio
+async def test_removing_a_dataset_covers_the_collections_of_every_recorded_model(monkeypatch):
+    """A dataset moved across models carries rows in each model's collection; the
+    deletion runs against the registry's collections too, not just the current one."""
+    from cognee.modules.search.dataset_routing import remove_dataset_routes
+
+    async def registry_collections():
+        return [store_module.dataset_route_collection_name("old-model", 2)]
+
+    a, doc_a = uuid4(), uuid4()
+    engine = FakeEngine()
+    _patch(monkeypatch, engine, {a: [doc_a]})
+    monkeypatch.setattr(index_module, "_registry_route_collections", registry_collections)
+
+    await remove_dataset_routes(a, [doc_a])
+
+    row_ids = {UUID(row_id) for row_id in dataset_route_ids(a, [doc_a])}
+    assert set(engine.deleted) == row_ids
+    # legacy + current + the registry's old model
+    assert len(engine.deleted) == 3 * len(row_ids)
 
 
 @pytest.mark.asyncio
@@ -576,7 +611,7 @@ async def test_removing_a_document_deletes_its_bucket_and_the_root_not_the_other
 
 
 @pytest.mark.asyncio
-async def test_prune_drops_the_collection_rather_than_emptying_it(monkeypatch):
+async def test_prune_drops_every_routing_collection_rather_than_emptying_them(monkeypatch):
     from cognee.modules.search.dataset_routing import prune_dataset_routes
 
     engine = FakeEngine()
@@ -584,8 +619,30 @@ async def test_prune_drops_the_collection_rather_than_emptying_it(monkeypatch):
 
     await prune_dataset_routes()
 
-    assert engine.dropped == [DATASET_ROUTE_COLLECTION]
+    # The legacy collection an upgraded deployment still holds, plus the
+    # configured model's own.
+    assert set(engine.dropped) == {DATASET_ROUTE_COLLECTION, TEST_COLLECTION}
     assert engine.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_prune_drops_the_collections_of_models_no_longer_configured(monkeypatch):
+    from cognee.modules.search.dataset_routing import prune_dataset_routes
+
+    async def registry_collections():
+        return [store_module.dataset_route_collection_name("old-model", 2)]
+
+    engine = FakeEngine()
+    _patch(monkeypatch, engine, {})
+    monkeypatch.setattr(index_module, "_registry_route_collections", registry_collections)
+
+    await prune_dataset_routes()
+
+    assert set(engine.dropped) == {
+        DATASET_ROUTE_COLLECTION,
+        TEST_COLLECTION,
+        store_module.dataset_route_collection_name("old-model", 2),
+    }
 
 
 @pytest.mark.asyncio
@@ -653,6 +710,80 @@ async def test_route_engine_embeds_with_the_deployment_settings_not_a_per_call_o
     llm_token = llm_config.set(override)
     try:
         assert (await get_dataset_route_engine()).name == "routing-engine"
+        # The caller's own context keeps its override.
+        assert embedding_config.get() is override and llm_config.get() is override
+    finally:
+        llm_config.reset(llm_token)
+        embedding_config.reset(embedding_token)
+
+    assert seen == [(None, None)]
+
+
+# --- per-model collections ----------------------------------------------------
+
+
+def test_collection_names_are_deterministic_and_model_specific():
+    small = store_module.dataset_route_collection_name("openai/text-embedding-3-small", 1536)
+    assert small == store_module.dataset_route_collection_name(
+        "openai/text-embedding-3-small", 1536
+    )
+    # Another width, another model, a different collection each.
+    assert small != store_module.dataset_route_collection_name(
+        "openai/text-embedding-3-large", 3072
+    )
+    assert small != store_module.dataset_route_collection_name("other/text-embedding-3-small", 1536)
+
+
+def test_collection_names_are_storage_safe_and_bounded():
+    """Postgres caps identifiers at 63 bytes, and adapters accept the same charset."""
+    name = store_module.dataset_route_collection_name("openai/text-embedding-3-small", 1536)
+    assert name.startswith("DatasetRoute_text__")
+    assert re.fullmatch(r"[\w-]+", name)
+    assert len(name) <= 63
+    sprawling = store_module.dataset_route_collection_name("org/" + "x" * 120, 384)
+    assert len(sprawling) <= 63
+
+
+def test_collection_names_keep_sanitized_and_truncated_models_apart():
+    # "model/a" and "model_a" reduce to the same readable part; the digest of
+    # the full pair is what keeps their collections apart.
+    assert store_module.dataset_route_collection_name("model/a", 384) != (
+        store_module.dataset_route_collection_name("model_a", 384)
+    )
+    assert store_module.dataset_route_collection_name("org/" + "a" * 60, 384) != (
+        store_module.dataset_route_collection_name("org/" + "a" * 61, 384)
+    )
+
+
+def test_a_model_without_a_name_shares_no_collection():
+    assert store_module.dataset_route_collection_name(None, 384) != (
+        store_module.dataset_route_collection_name("unknown", 384)
+    )
+
+
+def test_the_route_collection_resolves_the_deployment_model_not_a_per_call_override(monkeypatch):
+    """The rows are mirrored under the deployment's model: naming the collection
+    after a caller's override would score it against a collection the writes
+    never filled."""
+    from cognee.context_global_variables import embedding_config, llm_config
+
+    seen = []
+
+    def fake_record():
+        seen.append((embedding_config.get(), llm_config.get()))
+        return {
+            model_utils_module.MODEL_KEY: "deployed-model",
+            model_utils_module.DIMENSIONS_KEY: 512,
+        }
+
+    monkeypatch.setattr(model_utils_module, "embedding_model_record", fake_record)
+    override = types.SimpleNamespace(model="per-call-model")
+    embedding_token = embedding_config.set(override)
+    llm_token = llm_config.set(override)
+    try:
+        assert store_module.dataset_route_collection() == (
+            store_module.dataset_route_collection_name("deployed-model", 512)
+        )
         # The caller's own context keeps its override.
         assert embedding_config.get() is override and llm_config.get() is override
     finally:
@@ -738,28 +869,3 @@ async def test_no_database_is_created_without_access_control_or_outside_pgvector
     )
     await store_module.ensure_default_store()
     assert created == []
-
-
-@pytest.mark.asyncio
-async def test_routing_width_check_awaits_the_engines_vector_size():
-    """A worker-backed engine's size is awaited, never asked with the blocking call."""
-    from cognee.modules.search.dataset_routing.store import routing_width_matches
-
-    class SelfSizingEmbedder:
-        async def resolve_vector_size(self):
-            return 4
-
-        def get_vector_size(self):  # would block the event loop on a remote worker
-            raise AssertionError("get_vector_size() must not be called from async code")
-
-    class Store:
-        embedding_engine = SelfSizingEmbedder()
-
-        def __init__(self, stored):
-            self.stored = stored
-
-        async def get_stored_vector_size(self):
-            return self.stored
-
-    assert await routing_width_matches(Store(4)) is True
-    assert await routing_width_matches(Store(8)) is False

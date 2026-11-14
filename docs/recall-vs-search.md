@@ -33,27 +33,31 @@ Source of truth: `cognee/api/v1/recall/recall.py` and `cognee/api/v1/search/sear
 
 Dataset routing is not on this list because it lives one level down, in the authorized
 search both functions share: with no `datasets`/`dataset_ids` and more than one readable
-dataset, every readable dataset is scored against the query on the routing collection (each
-dataset's global context index root and document buckets, mirrored into the deployment's
-default vector store by the `global_context_index` improve stage) and only the best
+dataset, every readable dataset the configured embedding model can serve is scored against
+the query on that model's routing collection (each dataset's global context index root and
+document buckets, mirrored into the deployment's default vector store by the
+`global_context_index` improve stage; one collection per model and width) and only the best
 `DATASET_ROUTING_TOP_K` (default 1) are searched. A dataset's score is its best row, so a
 specific question is carried by the one document that matches and a broad one by the root.
 Scores are cosine distances (0 is identical text): a dataset farther than
 `DATASET_ROUTING_DISTANCE_CUTOFF` (default 0.8) is not searched, and when no dataset is within
-it every readable dataset is, so a question no dataset knows about is not answered from
+it every candidate is, so a question no dataset knows about is not answered from
 whichever is nearest; datasets within `DATASET_ROUTING_TIE_MARGIN` (default 0.001) of the
 last routed one are tied and all searched. Every unscoped search logs each dataset's distance
 at info, which is what the cutoff is tuned against (it depends on the embedding model). A
 dataset with no index rows is not searched next to a routed one; with no dataset routed,
-every readable dataset is searched. A routed search that retrieves nothing (judged on the
+every candidate is searched. A routed search that retrieves nothing (judged on the
 retrieval context, not on the completion, which is written even over an empty context) is
 widened to the datasets routing skipped, and one that hits only datasets without searchable
-memory is repeated over every readable dataset. An explicit dataset scope is never routed,
-and neither is a `CODE` search: a code dataset never has index rows. Needs backend access control (one store per dataset) and one
-embedding model across the deployment: the rows reuse the vectors the index build stored
-(nothing is embedded twice), the query is embedded with the `.env` model, and when
-the routing collection was built with another width (`EMBEDDING_MODEL` changed without a
-prune) routing logs a warning and steps aside, so the search covers every readable dataset.
+memory is repeated over every candidate. An explicit dataset scope is never routed, and
+neither is a `CODE` search: a code dataset never has index rows. Datasets recorded with
+another embedding model are excluded before anything is embedded, from the candidates, the
+search and the widening alike; each model's rows live in its own collection, the rows reuse
+the vectors the index build stored (nothing is embedded twice), and the query is embedded
+with the `.env` model, so an `EMBEDDING_MODEL` switch (or datasets kept on different
+models) routes among the configured model's datasets at once, without a rebuild or a
+prune. Naming a dataset explicitly bypasses all of this and fails on the model guard when
+its model is not the configured one. Needs backend access control (one store per dataset).
 There is no off switch: an unscoped search is always routed.
 
 ## When to call search() directly

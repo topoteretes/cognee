@@ -1,17 +1,19 @@
-"""Keep the routing collection equal to the index rows search can address.
+"""Keep the routing collections equal to the index rows search can address.
 
 A dataset's routing rows are the global context index rows whose ids derive
 from the relational database: its root (``create_root_summary_id``) and one
 bucket per document (``create_document_bucket_id``, keyed by ``Data.id``).
 ``sync_dataset_routes`` runs after every index build and reconciles that set
-against what the build computed: it writes the rows whose text is new or
-changed and deletes the rest. It can only address rows whose document still
-has a ``Data`` row, so deletion removes rows itself, while their ids are still
-derivable: ``remove_dataset_routes`` with the deleted documents, which also
-takes the root, since the root names every document and the index drops its
-own root at the same time; ``prune_dataset_routes`` drops the whole
-collection, so a prune followed by an embedding model change starts from a
-clean table.
+against what the build computed in the dataset's own collection -- the one of
+the model that built it (the dataset context guard has already refused a
+build under a model that cannot serve the dataset, so the configured record
+names it): it writes the rows whose text is new or changed and deletes the
+rest. It can only address rows whose document still has a ``Data`` row, so
+deletion removes rows itself, while their ids are still derivable:
+``remove_dataset_routes`` with the deleted documents, which also takes the
+root, since the root names every document and the index drops its own root at
+the same time; ``prune_dataset_routes`` drops every routing collection, so a
+prune starts from a clean store.
 
 Nothing here runs with backend access control off. Every dataset then shares
 one store, so there is nothing to route between, and the rows would land in
@@ -28,8 +30,9 @@ from cognee.shared.logging_utils import get_logger
 
 from .store import (
     DATASET_ROUTE_COLLECTION,
+    dataset_route_collection,
+    dataset_route_collection_name,
     get_dataset_route_engine,
-    routing_width_matches,
 )
 
 if TYPE_CHECKING:
@@ -71,24 +74,24 @@ async def sync_dataset_routes(
     missing from the collection, for instance after an upgrade that found the
     graph index already built, is written on the next build. A summary whose id
     the read path cannot derive (an ``llm``-method bucket) is not mirrored.
-    Nothing is written while the collection's vector width differs from the
-    configured model's; the rows wait for a prune.
 
     The rows are not embedded again: ``index_engine`` is the dataset's own
     vector store, where the index build just embedded these summaries, and the
     rows it stored for them are copied as they are, vector and payload, so a
     routing row is the index row of every other ``<Type>_<field>`` collection
     (the adapter's ``IndexSchema``; ``upsert_raw_vectors`` with no payload
-    schema stores that shape). One embedding model for the deployment is what
-    makes the copy correct, and it is the assumption routing rests on anyway
-    (the width check above is its guard).
+    schema stores that shape). One model per collection is what makes the copy
+    correct: the build runs under the model the dataset's guard admitted, and
+    that model's collection is where its rows belong. Rows of a model the
+    dataset has moved away from keep the collection they were built under,
+    where nothing scores them: the read path only addresses the ids of
+    datasets the configured model can serve (``candidates.py``).
     """
     if not backend_access_control_enabled():
         return 0
 
     engine = await get_dataset_route_engine()
-    if not await routing_width_matches(engine):
-        return 0
+    collection = dataset_route_collection()
 
     documents = await get_data_ids_by_dataset([UUID(dataset_id)])
     addressable = set(dataset_route_ids(dataset_id, documents.get(UUID(dataset_id), [])))
@@ -96,19 +99,19 @@ async def sync_dataset_routes(
 
     existing = {
         str(row.id): (row.payload or {}).get("text")
-        for row in await engine.retrieve(DATASET_ROUTE_COLLECTION, list(addressable))
+        for row in await engine.retrieve(collection, list(addressable))
     }
     stale = [UUID(row_id) for row_id in existing if row_id not in wanted]
     changed = [
         summary for row_id, summary in wanted.items() if existing.get(row_id) != summary.text
     ]
     if stale:
-        await engine.delete_data_points(DATASET_ROUTE_COLLECTION, stale)
+        await engine.delete_data_points(collection, stale)
     if changed:
         rows = await _index_rows(index_engine, dataset_id, changed)
         try:
             await engine.upsert_raw_vectors(
-                DATASET_ROUTE_COLLECTION,
+                collection,
                 [
                     {
                         "id": summary.id,
@@ -168,38 +171,105 @@ async def _index_rows(
 
 
 async def remove_dataset_routes(dataset_id: UUID | str, document_ids: list[UUID | str]) -> None:
-    """Delete the dataset's root row and the bucket rows of the given documents.
+    """Delete the dataset's root row and the bucket rows of the given documents, in every routing collection.
 
     Called with one document when it, or its memory, is deleted, and with all
     of them when the dataset is. The root goes either way: its text names every
     document, so the index drops it with any of them. After a document deletion
     the index writes a ``from_entities`` root again at once and mirrors it here
     (``rebuild_document_index_root``); the buckets wait for the next build.
-    """
-    if not backend_access_control_enabled():
-        return
-    await (await get_dataset_route_engine()).delete_data_points(
-        DATASET_ROUTE_COLLECTION,
-        [UUID(row_id) for row_id in dataset_route_ids(dataset_id, document_ids)],
-    )
 
-
-async def prune_dataset_routes() -> None:
-    """Drop the routing collection; for ``prune_system``.
-
-    The collection's vector width is fixed when it is created, so emptying it
-    would leave a prune followed by an ``EMBEDDING_MODEL`` change unable to
-    write; dropping it lets the next index build create it at the new width.
+    The rows may sit in any collection a build ever mirrored them into, so the
+    deletion runs against all of them (``_all_route_collections``): deleting
+    from a collection that does not exist is a no-op.
     """
     if not backend_access_control_enabled():
         return
     engine = await get_dataset_route_engine()
+    row_ids = [UUID(row_id) for row_id in dataset_route_ids(dataset_id, document_ids)]
+    for collection in await _all_route_collections(engine):
+        await engine.delete_data_points(collection, row_ids)
+
+
+async def prune_dataset_routes() -> None:
+    """Drop every routing collection; for ``prune_system``.
+
+    A collection's vector width is fixed when it is created, so emptying it
+    would leave a prune followed by an ``EMBEDDING_MODEL`` change unable to
+    write; dropping every collection lets the next index build create the
+    configured model's at the new width.
+    """
+    if not backend_access_control_enabled():
+        return
+    engine = await get_dataset_route_engine()
+    warned = False
+    for collection in await _all_route_collections(engine):
+        try:
+            await engine.delete_collection(collection)
+        except NotImplementedError:
+            if not warned:
+                logger.warning(
+                    "The %s vector adapter cannot drop a collection; the dataset routing "
+                    "collections were left in place.",
+                    type(engine).__name__,
+                )
+                warned = True
+
+
+async def _all_route_collections(engine) -> list[str]:
+    """Every collection routing rows could live in, the ones that exist.
+
+    The configured model's collection, every collection the registry's rows
+    name (a dataset carries the model that built it, so the distinct records
+    are the models this deployment has ever built with), and the pre-per-model
+    collection an upgraded deployment still holds. A dataset whose rows were
+    mirrored before its model left the registry has none left: its ids die
+    with its ``Data`` rows, so no read can ever reach those rows again. A
+    registry that cannot be read (a prune before any database was created,
+    a store that is down) leaves the known names: the rows a deletion would
+    miss there are unreachable through routing anyway.
+    """
+    names = [DATASET_ROUTE_COLLECTION, dataset_route_collection()]
     try:
-        await engine.delete_collection(DATASET_ROUTE_COLLECTION)
-    except NotImplementedError:
-        logger.warning(
-            "The %s vector adapter cannot drop a collection; the dataset routing "
-            "collection %s was left in place.",
-            type(engine).__name__,
-            DATASET_ROUTE_COLLECTION,
+        names += await _registry_route_collections()
+    except Exception:
+        logger.debug(
+            "The recorded embedding models could not be read; cleaning the routing "
+            "collections the configuration names.",
+            exc_info=True,
         )
+    deduped = list(dict.fromkeys(names))
+    try:
+        return await engine.existing_collections(deduped)
+    except Exception:
+        logger.debug(
+            "Routing collections could not be listed; deleting in all of them.", exc_info=True
+        )
+        return deduped
+
+
+async def _registry_route_collections() -> list[str]:
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import (
+        DIMENSIONS_KEY,
+        MODEL_KEY,
+    )
+    from cognee.modules.users.models import DatasetDatabase
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        rows = (await session.scalars(select(DatasetDatabase))).all()
+
+    names = []
+    for row in rows:
+        info = row.vector_database_connection_info or {}
+        model = info.get(MODEL_KEY)
+        if model is None:
+            # A legacy row records a width only; no collection was named for it.
+            continue
+        name = dataset_route_collection_name(model, info.get(DIMENSIONS_KEY))
+        if name not in names:
+            names.append(name)
+    return names
