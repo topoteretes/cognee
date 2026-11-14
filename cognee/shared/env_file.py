@@ -120,6 +120,13 @@ def load_env_file() -> str | None:
         _resolved = resolve_env_file()
         if _resolved is not None:
             dotenv.load_dotenv(_resolved, override=True)
+        # litellm runs a bare load_dotenv() on import unless LITELLM_MODE is set.
+        # That search starts from litellm's own package directory, so with a
+        # virtualenv inside a project it reaches that project's .env, and loads
+        # it even when COGNEE_ENV_FILE names another file. Set after loading so
+        # a LITELLM_MODE in the resolved file, or already in the environment,
+        # still wins.
+        os.environ.setdefault("LITELLM_MODE", "PRODUCTION")
         _loaded = True
     return _resolved
 
