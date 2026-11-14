@@ -18,6 +18,8 @@ import cognee
 from cognee import SearchType
 from cognee.tasks.ingestion.data_item import DataItem
 
+QUERY = "What did Acme order from Northwind, when is delivery due, and where is Northwind based?"
+
 
 def document(source_id, title, text):
     return DataItem(text, external_metadata={"source_id": source_id, "title": title})
@@ -43,7 +45,7 @@ async def main():
     await cognee.remember(DOCUMENTS, self_improvement=False)
 
     context_single_search = await cognee.recall(
-        query_text="What did Acme order from Northwind, when is delivery due, and where is Northwind based?",
+        query_text=QUERY,
         query_type=SearchType.HYBRID_COMPLETION,
         only_context=True,
         retriever_specific_config=LIMITS,
@@ -51,7 +53,7 @@ async def main():
     print(context_single_search)
 
     context_decomposed = await cognee.recall(
-        query_text="What did Acme order from Northwind, when is delivery due, and where is Northwind based?",
+        query_text=QUERY,
         query_type=SearchType.HYBRID_COMPLETION_DECOMPOSITION,
         only_context=True,
         retriever_specific_config={**LIMITS, "max_subqueries": 3},
@@ -59,7 +61,7 @@ async def main():
     print(context_decomposed)
 
     answer = await cognee.recall(
-        query_text="What did Acme order from Northwind, when is delivery due, and where is Northwind based?",
+        query_text=QUERY,
         query_type=SearchType.HYBRID_COMPLETION_DECOMPOSITION,
         include_references=True,
         retriever_specific_config={
