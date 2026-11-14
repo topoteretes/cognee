@@ -7,6 +7,11 @@ insert of a collection behind a lock; the live test
 ``cognee/tests/integration/test_pgvector_concurrent_writes_live.py`` shows both the
 deadlock and its absence against Postgres. These tests pin the order the statements
 carry, with a fake session.
+
+``create_data_points`` writes in two phases (see the comment in it): new rows with
+``ON CONFLICT DO NOTHING``, then the rows that would change with ``ON CONFLICT DO
+UPDATE``; the fake session answers the lock-free classify query from a given set of
+existing ids.
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ from contextlib import asynccontextmanager
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import JSON, Column, MetaData, String, Table
+from sqlalchemy import JSON, Column, MetaData, String, Table, TextClause
 from sqlalchemy.dialects import postgresql
 
 pytest.importorskip("asyncpg")
@@ -44,13 +49,34 @@ class _Embeddings:
         return [[0.1, 0.2, 0.3] for _ in texts]
 
 
+class _Result:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def tuples(self):
+        return self
+
+    def all(self):
+        return self.rows
+
+    def scalars(self):
+        return [row[0] for row in self.rows]
+
+
 class _Session:
-    """Records the ids of every multi-row insert, in the order the statement carries."""
+    """Records the ids of every multi-row insert, in the order the statement carries.
 
-    def __init__(self, log):
+    The classify query reports an id in ``changed`` as an existing row the upsert would
+    change, any other id as missing; every missing row is inserted.
+    """
+
+    def __init__(self, log, changed):
         self.log = log
+        self.changed = changed
 
-    async def execute(self, statement):
+    async def execute(self, statement, params=None):
+        if isinstance(statement, TextClause):
+            return _Result([(i, i not in self.changed) for i in params["ids"]])
         compiled = statement.compile(dialect=postgresql.dialect())
         ids = [
             value
@@ -59,13 +85,15 @@ class _Session:
             )
             if key.startswith("id_m")
         ]
-        self.log.append(ids)
+        kind = "upsert" if "DO UPDATE" in str(compiled) else "insert"
+        self.log.append((kind, ids))
+        return _Result([(i,) for i in ids])
 
     async def commit(self):
         pass
 
 
-def _adapter(log):
+def _adapter(log, changed=frozenset()):
     adapter = object.__new__(PGVectorAdapter)
     adapter.embedding_engine = _Embeddings()
     adapter.Vector = Vector
@@ -77,7 +105,7 @@ def _adapter(log):
 
     @asynccontextmanager
     async def get_async_session():
-        yield _Session(log)
+        yield _Session(log, changed)
 
     def no_lock(name):
         raise AssertionError("an insert must not take the collection lock")
@@ -103,7 +131,25 @@ async def test_create_data_points_writes_rows_in_row_order():
     await _adapter(log).create_data_points("Point_text", points)
 
     assert len(log) == 1
-    assert [str(i) for i in log[0]] == sorted(str(i) for i in ids)
+    kind, written = log[0]
+    assert kind == "insert"
+    assert [str(i) for i in written] == sorted(str(i) for i in ids)
+
+
+@pytest.mark.asyncio
+async def test_create_data_points_inserts_new_rows_before_upserting_changed_ones():
+    """All new rows go first through ``DO NOTHING``, then only the changed rows through
+    ``DO UPDATE``, each statement in row order; nothing else is written."""
+    log = []
+    ids = _ids_in_reverse_order(6)
+    changed = frozenset(ids[::2])
+    points = [_Point(id=point_id, text=str(point_id)) for point_id in ids]
+
+    await _adapter(log, changed).create_data_points("Point_text", points)
+
+    assert [kind for kind, _ in log] == ["insert", "upsert"]
+    assert [str(i) for i in log[0][1]] == sorted(str(i) for i in ids if i not in changed)
+    assert [str(i) for i in log[1][1]] == sorted(str(i) for i in changed)
 
 
 @pytest.mark.asyncio
@@ -126,7 +172,7 @@ async def test_upsert_raw_vectors_writes_rows_in_row_order():
     )
 
     assert len(log) == 1
-    assert log[0] == sorted(str(i) for i in ids)
+    assert log[0] == ("upsert", sorted(str(i) for i in ids))
 
 
 def test_row_order_is_the_uuid_btree_order():
