@@ -240,3 +240,4 @@ cognee/tests/e2e/keyless/.crash_run/
 
 # Local benchmark / eval run artifacts (BEAM and LoCoMo default output dirs)
 temp/
+.aider*
