@@ -102,36 +102,40 @@ async def _capture_llm_call_after(
     if not capture_enabled():
         return await coro
 
-    call = {
-        "model": get_llm_context_config().llm_model,
-        "framework": framework,
-        "response_type": getattr(response_model, "__name__", str(response_model)),
-        "system_prompt": system_prompt,
-        "text_input": text_input,
-        "started_at": datetime.now(timezone.utc),
-    }
+    model = get_llm_context_config().llm_model
+    started_at = datetime.now(timezone.utc)
     started = time.perf_counter()
+
+    def record(
+        output: Any,
+        status: str,
+        error_class: str | None = None,
+        tokens_in: int | None = None,
+        tokens_out: int | None = None,
+    ) -> None:
+        capture_llm_call(
+            started_at=started_at,
+            duration_ms=(time.perf_counter() - started) * 1000,
+            model=model,
+            framework=framework,
+            response_type=getattr(response_model, "__name__", str(response_model)),
+            system_prompt=system_prompt,
+            text_input=text_input,
+            output=output,
+            status=status,
+            error_class=error_class,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+        )
+
     try:
         result = await coro
     except Exception as error:
-        capture_llm_call(
-            **call,
-            duration_ms=(time.perf_counter() - started) * 1000,
-            output=None,
-            status="error",
-            error_class=type(error).__name__,
-        )
+        record(None, "error", error_class=type(error).__name__)
         raise
 
     tokens_in, tokens_out = _exact_usage_from_result(result)
-    capture_llm_call(
-        **call,
-        duration_ms=(time.perf_counter() - started) * 1000,
-        output=result,
-        status="ok",
-        tokens_in=tokens_in,
-        tokens_out=tokens_out,
-    )
+    record(result, "ok", tokens_in=tokens_in, tokens_out=tokens_out)
     return result
 
 
