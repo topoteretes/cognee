@@ -137,7 +137,7 @@ def test_chunk_id_comes_from_the_enclosing_chunk_scope(capture_env):
 
     async def extract(chunk_id):
         with chunk_scope(chunk_id):
-            await asyncio.sleep(0)  # interleave with the other chunk's call
+            await asyncio.sleep(0)
             _capture(text_input=str(chunk_id))
 
     async def run():
@@ -187,7 +187,7 @@ def test_a_directory_that_is_not_an_absolute_local_path_is_rejected(capture_env,
 def test_capture_never_raises_into_the_caller(capture_env):
     capture_env(ENABLED="true", DIRECTORY="relative/llm_calls")
 
-    _capture()  # a bad directory is logged, not raised
+    _capture()
 
     assert llm_calls._writer is None
 
@@ -236,8 +236,6 @@ def test_capture_returns_while_the_writer_is_stuck_on_disk(capture_env, monkeypa
     _capture()
     assert write_started.wait(5), "the writer thread never reached the disk"
 
-    # The writer thread is now stuck inside write(). Capture more calls on another
-    # thread, so a regression that makes callers wait fails here instead of hanging.
     caller = threading.Thread(target=lambda: [_capture() for _ in range(100)])
     caller.start()
     caller.join(timeout=5)

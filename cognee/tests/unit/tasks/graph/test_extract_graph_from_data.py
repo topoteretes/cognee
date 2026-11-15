@@ -644,7 +644,6 @@ async def test_default_prompt_renders_hints_and_custom_prompt_is_verbatim():
     assert custom == "MINE"
 
 
-# --- LLM call capture: each chunk's call is tagged with its chunk id ---------
 
 
 @pytest.mark.asyncio
@@ -662,7 +661,7 @@ async def test_each_chunk_extraction_call_sees_only_its_own_chunk_id(mock_integr
     seen = {}
 
     async def fake_extract(text, *args, **kwargs):
-        await asyncio.sleep(0)  # let the gathered chunks interleave
+        await asyncio.sleep(0)
         seen[text] = current_chunk_id.get()
         return KnowledgeGraph(nodes=[], edges=[])
 

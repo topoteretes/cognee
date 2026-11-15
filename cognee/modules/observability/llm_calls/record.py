@@ -30,14 +30,10 @@ class LLMCallRecord(BaseModel):
     started_at: datetime
     duration_ms: float
 
-    # Where the call came from.
     stage: str | None
     run_id: UUID | None
-    # The document chunk the call is about, for calls made once per chunk
-    # (graph extraction); joins the record to the chunk and its document.
     chunk_id: UUID | None = None
 
-    # The call.
     model: str | None
     framework: str
     response_type: str
@@ -46,13 +42,11 @@ class LLMCallRecord(BaseModel):
     tokens_in: int | None = None
     tokens_out: int | None = None
 
-    # Always present, content or not.
     system_prompt_sha256: str
     system_prompt_chars: int
     text_input_chars: int
     output_chars: int | None
 
-    # Present only with content included.
     content_included: bool
     system_prompt: str | None = None
     text_input: str | None = None

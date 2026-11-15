@@ -261,8 +261,6 @@ async def extract_graph_from_data(
         temporal_hints = _temporal_hints_for(data_chunks)
 
         async def extract_chunk_graph(chunk, hints):
-            # Tags the chunk's LLM call for LLM call capture; set per coroutine so
-            # the gathered chunks never see each other's id.
             with chunk_scope(chunk.id):
                 return await extract_content_graph(
                     chunk.text,

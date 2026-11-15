@@ -20,7 +20,6 @@ class LLMCallCaptureConfig(BaseSettings):
 
     enabled: bool = False
     include_content: bool = False
-    # Empty means <DATA_ROOT_DIRECTORY>/llm_calls, resolved by get_llm_call_capture_config.
     directory: str = ""
 
     model_config = SettingsConfigDict(env_prefix="LLM_CALL_CAPTURE_", extra="ignore")

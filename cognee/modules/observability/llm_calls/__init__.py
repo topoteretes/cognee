@@ -28,7 +28,6 @@ logger = get_logger("llm_call_capture")
 
 _writer: JsonlWriter | None = None
 
-# The document chunk the LLM calls in this context are about; None outside a chunk_scope.
 current_chunk_id: ContextVar[UUID | None] = ContextVar("llm_call_chunk_id", default=None)
 
 
