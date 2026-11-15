@@ -644,8 +644,6 @@ async def test_default_prompt_renders_hints_and_custom_prompt_is_verbatim():
     assert custom == "MINE"
 
 
-
-
 @pytest.mark.asyncio
 @patch.object(egd_module, "integrate_chunk_graphs", new_callable=AsyncMock)
 async def test_each_chunk_extraction_call_sees_only_its_own_chunk_id(mock_integrate):
