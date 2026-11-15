@@ -183,6 +183,101 @@ def test_a_shard_holds_at_least_one_item(rows):
         ShardedExecutor(_Backend(rows), 0)
 
 
+# ---- shards cut by the size of their items ----
+
+
+def _sized(*sizes, kind="document"):
+    return [
+        SimpleNamespace(id=uuid4(), kind=kind, pipeline_status={}, data_size=size) for size in sizes
+    ]
+
+
+def _sizes(shards):
+    return [[item.data_size for item in shard] for shard in shards]
+
+
+def test_shards_cut_by_size_hold_what_fits_under_the_maximum():
+    """A worker's work is bounded by what it has to read: the largest item first,
+    each into the shard it fills up most, however many items that makes a shard."""
+    items = _sized(20, 60, 10, 50, 30, 40)
+
+    stays, shards = plan_shards(items, None, _is_document, max_shard_bytes=100)
+
+    assert stays == []
+    assert _sizes(shards) == [[60, 40], [50, 30, 20], [10]]
+    assert sorted(item.id for shard in shards for item in shard) == sorted(i.id for i in items)
+
+
+def test_an_item_larger_than_the_maximum_or_of_unknown_size_is_a_shard_by_itself():
+    """Nothing is split or left out: an item over the maximum still goes to a worker,
+    alone, and so does one whose size is not known (it cannot be shown to fit)."""
+    large, unknown = _sized(250)[0], _items(1)[0]
+    stored_without_a_size = _sized(None)[0]
+    rest = _sized(70, 30)
+
+    stays, shards = plan_shards(
+        [*rest, unknown, large, stored_without_a_size], None, _is_document, max_shard_bytes=100
+    )
+
+    assert stays == []
+    assert shards == [[large], [unknown], [stored_without_a_size], rest]
+
+
+def test_a_run_that_fits_one_shard_by_size_stays_in_this_process():
+    items = _sized(40, 30, 20)
+
+    assert plan_shards(items, None, _is_document, max_shard_bytes=100) == (items, [])
+
+
+def test_only_items_a_worker_can_run_are_cut_by_size():
+    documents, repositories = _sized(60, 60, 60), _sized(500, 500, kind="repository")
+    mixed = [documents[0], *repositories, *documents[1:]]
+
+    stays, shards = plan_shards(mixed, None, _is_document, max_shard_bytes=100)
+
+    assert stays == repositories
+    assert shards == [[item] for item in documents]
+
+    # Only what a worker can run counts towards "more than one shard".
+    few = _sized(60) + _sized(500, 500, kind="repository")
+    assert plan_shards(few, None, _is_document, max_shard_bytes=100) == (few, [])
+
+
+@pytest.mark.parametrize(
+    "arguments, message",
+    [
+        ({}, "exactly one of shard_size and max_shard_bytes"),
+        (
+            {"shard_size": 10, "max_shard_bytes": 100},
+            "exactly one of shard_size and max_shard_bytes",
+        ),
+        ({"max_shard_bytes": 0}, "max_shard_bytes must be at least 1"),
+    ],
+)
+def test_shards_are_cut_by_number_or_by_size_never_both(rows, arguments, message):
+    with pytest.raises(ValueError, match=message):
+        ShardedExecutor(_Backend(rows), **arguments)
+
+
+@pytest.mark.asyncio
+async def test_a_run_cut_by_size_hands_out_its_shards_and_counts_their_items(run_spec, rows):
+    spec = run_spec()
+    items = _sized(60, 50, 40, 30, 20, 10)
+    backend, item_run = _Backend(rows), _item_run()
+
+    entries = await ShardedExecutor(backend, max_shard_bytes=100).run_items(spec, items, item_run)
+
+    by_size = {item.data_size: item.id for item in items}
+    assert rows.shards == [
+        Shard(spec=spec, data_ids=[by_size[60], by_size[40]]),
+        Shard(spec=spec, data_ids=[by_size[50], by_size[30], by_size[20]]),
+        Shard(spec=spec, data_ids=[by_size[10]]),
+    ]
+    assert sorted(str(entry["data_id"]) for entry in entries) == sorted(str(i.id) for i in items)
+    # Each shard counts the items it holds as progress, not a fixed number.
+    assert [call.args[0] for call in item_run.record_progress.await_args_list] == [2, 3, 1]
+
+
 # ---- what a run's items become ----
 
 
