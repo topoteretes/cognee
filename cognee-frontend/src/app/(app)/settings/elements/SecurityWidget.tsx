@@ -1,5 +1,7 @@
 "use client";
 
+import { uiPath } from "@/modules/config/uiBasePath";
+
 import { trackPageEvent } from "@/modules/analytics";
 import isCloudEnvironment from "@/utils/isCloudEnvironment";
 import styles from "../SettingsPage.module.css";
@@ -23,7 +25,7 @@ export default function SecurityWidget() {
         <h3 className={styles.label}>Session</h3>
         <p className={styles.subtitle}>Sign out of your account on this device.</p>
         <a
-          href={cloud ? "/api/signout" : "/api/local-signout"}
+          href={uiPath(cloud ? "/api/signout" : "/api/local-signout")}
           className={styles.logout}
           onClick={() => trackPageEvent({ pageName: "Settings", eventName: "sign_out" })}
         >

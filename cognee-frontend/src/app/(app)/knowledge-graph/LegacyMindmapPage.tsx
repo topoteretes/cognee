@@ -1,5 +1,7 @@
 "use client";
 
+import { uiPath } from "@/modules/config/uiBasePath";
+
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
@@ -93,7 +95,7 @@ export default function KnowledgeGraphPage() {
 
     const fetchViz = cogniInstance
       ? cogniInstance.fetch(`/v1/visualize?dataset_id=${datasetId}`, { timeoutMs: VISUALIZE_TIMEOUT_MS })
-      : global.fetch(`/api/visualize?dataset_id=${datasetId}`, { credentials: "include" });
+      : global.fetch(uiPath(`/api/visualize?dataset_id=${datasetId}`), { credentials: "include" });
 
     fetchViz
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); })

@@ -31,6 +31,8 @@ COPY . .
 
 # This one genuinely belongs at build time: the cloud shell is dead code in the
 # open-source image, so there is nothing to configure per container.
+ARG NEXT_PUBLIC_UI_BASE_PATH=""
+ENV NEXT_PUBLIC_UI_BASE_PATH=${NEXT_PUBLIC_UI_BASE_PATH}
 ENV NEXT_PUBLIC_IS_CLOUD_ENVIRONMENT=false
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -70,6 +72,8 @@ ENV HOSTNAME=0.0.0.0
 # backend directly, so this is the address as seen from the browser, never a
 # compose service name.
 ENV COGNEE_BACKEND_URL=""
+ARG NEXT_PUBLIC_UI_BASE_PATH=""
+ENV NEXT_PUBLIC_UI_BASE_PATH=${NEXT_PUBLIC_UI_BASE_PATH}
 
 RUN addgroup -g 1001 -S nodejs \
  && adduser -u 1001 -S nextjs -G nodejs
@@ -91,7 +95,7 @@ EXPOSE 3000
 # that proves both that the server is up and that COGNEE_BACKEND_URL resolved.
 # node:22 has a global fetch, so the runtime image needs no curl.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/runtime-config').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+(process.env.NEXT_PUBLIC_UI_BASE_PATH||'')+'/api/runtime-config').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "server.js"]

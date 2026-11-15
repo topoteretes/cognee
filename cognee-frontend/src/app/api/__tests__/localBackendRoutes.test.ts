@@ -65,5 +65,16 @@ it("logs out against the runtime backend", async () => {
     method: "POST", headers: { cookie: "session=test" },
   });
   expect(response.status).toBe(307);
-  expect(response.headers.get("location")).toBe("http://ui.test/local-login");
+  expect(response.headers.get("location")).toBe("/local-login");
+});
+
+it.each(["", "/cognee", "/tools/cognee"])("keeps signout inside %s even if the backend is unavailable", async (base) => {
+  process.env.NEXT_PUBLIC_UI_BASE_PATH = base;
+  fetchMock.mockRejectOnce(new Error("backend unavailable"));
+  const response = await signout(request({ cookie: "fastapiusersauth=test" }));
+  expect(response.status).toBe(307);
+  expect(response.headers.get("location")).toBe(`${base}/local-login`);
+  expect((response as unknown as { cookies: { set: jest.Mock } }).cookies.set).toHaveBeenCalledWith(
+    "fastapiusersauth", "", { maxAge: 0, path: "/" },
+  );
 });

@@ -1,3 +1,4 @@
+import { uiPath } from "@/modules/config/uiBasePath";
 import { NextResponse } from "next/server";
 
 import { getServerBackendUrl } from "@/modules/config/serverRuntimeConfig";
@@ -17,7 +18,10 @@ export async function GET(request: Request) {
   }
 
   // Clear the fastapiusersauth cookie and redirect to local login
-  const response = NextResponse.redirect(new URL("/local-login", request.url));
+  const response = new NextResponse(null, {
+    status: 307,
+    headers: { Location: uiPath("/local-login") },
+  });
   response.cookies.set("fastapiusersauth", "", {
     maxAge: 0,
     path: "/",

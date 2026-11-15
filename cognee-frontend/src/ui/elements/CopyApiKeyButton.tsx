@@ -1,4 +1,5 @@
 "use client";
+import { uiPath } from "@/modules/config/uiBasePath";
 
 import { IconButton } from "@/ui/elements";
 import { notifications } from "@mantine/notifications";
@@ -25,7 +26,7 @@ export default function CopyApiKeyButton({
       <Image
         width={28}
         height={28}
-        src={"/images/icons/copy.svg"}
+        src={uiPath("/images/icons/copy.svg")}
         alt={"Copy"}
       />
     </IconButton>

@@ -1,5 +1,7 @@
 "use client";
 
+import { uiPath } from "@/modules/config/uiBasePath";
+
 import { useState, type ReactElement } from "react";
 import Image from "next/image";
 
@@ -121,7 +123,7 @@ function StatusLineLoupe(): ReactElement {
       aria-hidden="true"
     >
       <Image
-        src="/visuals/claude-code-statusline.png"
+        src={uiPath("/visuals/claude-code-statusline.png")}
         alt=""
         width={SHOT_W}
         height={SHOT_H}
@@ -147,7 +149,7 @@ export function StatusLineScreenshot(): ReactElement {
   return (
     <div style={{ position: "relative", width: "100%", lineHeight: 0 }}>
       <Image
-        src="/visuals/claude-code-statusline.png"
+        src={uiPath("/visuals/claude-code-statusline.png")}
         alt="A Claude Code window with the Cognee status line in the bottom-left corner"
         width={SHOT_W}
         height={SHOT_H}

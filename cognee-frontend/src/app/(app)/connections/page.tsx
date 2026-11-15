@@ -1,4 +1,5 @@
 "use client";
+import { uiPath } from "@/modules/config/uiBasePath";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -232,7 +233,7 @@ export default function ConnectionsPage() {
   }
 
   if (loading || isInitializing) {
-    return <><TrackPageView page="Connections" /><div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", background: "#FFFFFF" }}><video src="/videos/mascot-waiting.mp4" autoPlay loop muted playsInline style={{ width: 200, height: "auto" }} /></div></>;
+    return <><TrackPageView page="Connections" /><div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", background: "#FFFFFF" }}><video src={uiPath("/videos/mascot-waiting.mp4")} autoPlay loop muted playsInline style={{ width: 200, height: "auto" }} /></div></>;
   }
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [

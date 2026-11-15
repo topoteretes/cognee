@@ -1,3 +1,4 @@
+import { uiPath } from "@/modules/config/uiBasePath";
 import { redirect } from "next/navigation";
 
 export default function handleServerErrors(
@@ -9,7 +10,7 @@ export default function handleServerErrors(
     // Local mode: redirect to local login on auth failures
     if ((response.status === 401 || response.status === 403) && !useCloud) {
       if (typeof window !== "undefined") {
-        window.location.href = "/local-login";
+        window.location.href = uiPath("/local-login");
       }
       return reject(new Error("Session expired"));
     }

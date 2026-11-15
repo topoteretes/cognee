@@ -1,4 +1,5 @@
 "use client";
+import { uiPath } from "@/modules/config/uiBasePath";
 
 import { useState } from "react";
 import { Flex, Text, Title, TextInput, PasswordInput, Button } from "@mantine/core";
@@ -55,7 +56,7 @@ export default function LocalSignInForm() {
         return;
       }
 
-      window.location.href = "/";
+      window.location.href = uiPath("/");
     } catch (err) {
       if (err instanceof TypeError) {
         setError(

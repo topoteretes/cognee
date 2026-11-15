@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
   // and this one omits is not inherited but removed, which is the CLO-703
   // defect one directory above the tree the deletion guard watches.
   output: "standalone",
+  basePath: process.env.NEXT_PUBLIC_UI_BASE_PATH ?? "",
 
   // Local mode is the only mode in the OSS build, and the flags have to be
   // baked in here rather than shipped as a .env.local: the public repo

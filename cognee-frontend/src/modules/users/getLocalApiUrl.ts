@@ -1,3 +1,4 @@
+import { uiPath } from "@/modules/config/uiBasePath";
 import { readRuntimeConfig, stripTrailingSlash } from "@/modules/config/runtimeConfig";
 
 const DEFAULT_LOCAL_API_PORT = "8000";
@@ -8,7 +9,7 @@ export function getLocalApiUrl(): string {
   // only host it can reach, and the OAuth install-nonce cookie has to be set on the host
   // the provider's callback arrives on.
   if (process.env.NEXT_PUBLIC_API_SAME_ORIGIN === "true" && typeof window !== "undefined") {
-    return window.location.origin;
+    return window.location.origin + uiPath("/").slice(0, -1);
   }
 
   // Runtime config wins: it is the only source a published Docker image can

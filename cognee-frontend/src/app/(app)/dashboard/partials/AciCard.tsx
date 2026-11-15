@@ -1,5 +1,7 @@
 "use client";
 
+import { uiPath } from "@/modules/config/uiBasePath";
+
 import React from "react";
 import { isAgentIntegrationKey } from "@/modules/agents/getAgentConnections";
 import { agentStatusText } from "@/app/(app)/dashboard/agentNodes";
@@ -170,6 +172,6 @@ function buildLogoNode(key: AciAgentKey, name: string): React.ReactElement {
       </svg>
     );
   }
-  const src = key === "claude-code" ? "/visuals/logos/claude.svg" : key === "codex" ? "/visuals/logos/codex.svg" : "/visuals/logos/openclaw.svg";
+  const src = key === "claude-code" ? uiPath("/visuals/logos/claude.svg") : key === "codex" ? uiPath("/visuals/logos/codex.svg") : uiPath("/visuals/logos/openclaw.svg");
   return <img src={src} alt={name} style={{ height: LOGO_H, width: "auto", maxWidth: 72, objectFit: "contain" }} />;
 }

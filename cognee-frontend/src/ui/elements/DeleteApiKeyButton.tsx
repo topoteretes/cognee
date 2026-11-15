@@ -1,4 +1,5 @@
 "use client";
+import { uiPath } from "@/modules/config/uiBasePath";
 
 import { startTransition, useActionState } from "react";
 import { IconButton } from "@/ui/elements";
@@ -45,7 +46,7 @@ export default function DeleteApiKeyButton({
         {isLoading ? (
           <LoadingIndicator />
         ) : (
-          <Image width={28} height={28} src={"/images/icons/x.svg"} alt={"X"} />
+          <Image width={28} height={28} src={uiPath("/images/icons/x.svg")} alt={"X"} />
         )}
       </IconButton>
     </>
