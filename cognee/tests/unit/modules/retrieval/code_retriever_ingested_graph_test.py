@@ -28,11 +28,9 @@ from cognee.modules.retrieval.code_retriever import (
 )
 from cognee.tasks.code_graph.enola import parse_enola_snapshot
 from cognee.tasks.code_graph.extract_code_graph import (
-    add_code_graph_data_points,
-    add_code_graph_edges,
     build_code_graph_edges,
-    extract_code_graph,
     fact_node_id,
+    load_code_graph,
 )
 
 graph_engine_module = importlib.import_module(
@@ -397,9 +395,7 @@ async def _ingest(
     engine = LadybugAdapter(db_path=str(directory / "graph.lbug"))
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
     monkeypatch.setattr(code_retriever_module, "get_graph_engine", AsyncMock(return_value=engine))
-    data_points = await extract_code_graph(repo_path=REPO_PATH, snapshot_dir=snapshot_dir)
-    state = await add_code_graph_data_points(data_points)
-    await add_code_graph_edges(state, repo_path=REPO_PATH, snapshot_dir=snapshot_dir)
+    await load_code_graph(repo_path=REPO_PATH, snapshot_dir=snapshot_dir)
     invalidate_code_graph_snapshot_cache(all_entries=True)
     return engine
 

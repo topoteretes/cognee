@@ -18,14 +18,14 @@ import pytest
 
 from cognee.tasks.code_graph.enola import parse_enola_snapshot
 from cognee.tasks.code_graph.extract_code_graph import (
-    add_code_graph_data_points,
-    add_code_graph_edges,
     build_code_graph_edges,
-    extract_code_graph,
     fact_node_id,
+    load_code_graph,
     map_facts_to_data_points,
 )
 from cognee.tasks.code_graph.models import CodeFlow, CodeGraphEntity, CodeRepository
+from cognee.tests.utils.code_graph_load import extracted_points, load_with_node_writes_mocked
+from cognee.tests.utils.graph_stream import stream_through_get_graph_data
 
 enola_module = importlib.import_module("cognee.tasks.code_graph.enola")
 graph_engine_module = importlib.import_module(
@@ -221,6 +221,7 @@ def _write_snapshot(tmp_path, facts, flows=None):
 def _mock_engine(monkeypatch, nodes=(), edges=()):
     engine = AsyncMock()
     engine.get_graph_data.return_value = (list(nodes), list(edges))
+    stream_through_get_graph_data(engine)
     engine.get_node.return_value = None
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
     monkeypatch.setattr(
@@ -765,8 +766,8 @@ async def test_stale_flows_are_swept_and_retagged_like_other_code_nodes(monkeypa
     existing_edges = [(checkout, serve, "flow_stage", {})]
     engine = _mock_engine(monkeypatch, existing_nodes, existing_edges)
 
-    await add_code_graph_edges(
-        ["sentinel"],
+    await load_with_node_writes_mocked(
+        monkeypatch,
         repo_path=f"/repos/{REPO}",
         snapshot_dir=DOCS_AND_FLOWS_DIR,
         node_set=["new-team"],
@@ -806,14 +807,12 @@ async def test_real_ladybug_stores_docs_and_flows_with_their_edges(tmp_path, mon
     )
     repo_path = f"/repos/{REPO}"
 
-    data_points = await extract_code_graph(repo_path=repo_path, snapshot_dir=DOCS_AND_FLOWS_DIR)
-    state = await add_code_graph_data_points(data_points)
-    await add_code_graph_edges(state, repo_path=repo_path, snapshot_dir=DOCS_AND_FLOWS_DIR)
+    await load_code_graph(repo_path=repo_path, snapshot_dir=DOCS_AND_FLOWS_DIR)
 
-    # 13 facts and 3 flows, all new.
-    assert state.node_delta["nodes_added"] == 16
     nodes, edges = await engine.get_graph_data()
     stored = {(properties["type"], properties["name"]): properties for _id, properties in nodes}
+    # 13 facts and 3 flows, all new.
+    assert stored[("CodeRepository", REPO)]["last_delta"]["nodes_added"] == 16
     flow = _fixture_flows()[0]
     checkout = stored[("CodeFlow", "POST /checkout")]
     assert (checkout["kind"], checkout["repo"], checkout["enola_id"]) == ("flow", REPO, flow["id"])
