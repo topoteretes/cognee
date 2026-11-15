@@ -1,4 +1,5 @@
 import json
+import threading
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ from cognee.modules.observability.llm_calls import (
     flush_llm_call_capture,
     get_llm_call_capture_config,
 )
+from cognee.modules.observability.llm_calls import writer as writer_module
 from cognee.modules.operations.usage_accumulator import parent_run_scope
 
 SYSTEM_PROMPT = "Extract a knowledge graph from the text."
@@ -176,3 +178,47 @@ def test_a_write_error_stops_the_writer_without_raising(capture_env):
 
     assert llm_calls._writer._failed is True
     assert llm_calls._writer._discarded >= 1
+
+
+def test_capture_returns_while_the_writer_is_stuck_on_disk(capture_env, monkeypatch):
+    """A disk write that never finishes must not hold up the LLM calls being captured."""
+    directory = capture_env(ENABLED="true", DIRECTORY=str(capture_env()))
+    write_started, release_disk = threading.Event(), threading.Event()
+    real_open = open
+
+    class StuckFile:
+        """A file whose write() blocks until the test releases it, like a hung disk."""
+
+        def __init__(self, path):
+            self._file = real_open(path, "a", encoding="utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            self._file.close()
+
+        def write(self, text):
+            write_started.set()
+            release_disk.wait()
+            self._file.write(text)
+
+        def flush(self):
+            self._file.flush()
+
+    monkeypatch.setattr(writer_module, "open", lambda path, *a, **k: StuckFile(path), raising=False)
+
+    _capture()
+    assert write_started.wait(5), "the writer thread never reached the disk"
+
+    # The writer thread is now stuck inside write(). Capture more calls on another
+    # thread, so a regression that makes callers wait fails here instead of hanging.
+    caller = threading.Thread(target=lambda: [_capture() for _ in range(100)])
+    caller.start()
+    caller.join(timeout=5)
+    stuck = caller.is_alive()
+
+    release_disk.set()
+    caller.join()
+    assert not stuck, "capture_llm_call waited on the disk write"
+    assert len(_records(directory)) == 101
