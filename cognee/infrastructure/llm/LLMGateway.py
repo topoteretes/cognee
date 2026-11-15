@@ -1,4 +1,6 @@
+import time
 from collections.abc import Coroutine
+from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -82,6 +84,57 @@ async def _record_session_usage_after(
     return result
 
 
+async def _capture_llm_call_after(
+    coro: Coroutine,
+    *,
+    text_input: str,
+    system_prompt: str,
+    response_model: Any,
+    framework: str,
+) -> T:
+    """Run the LLM coroutine and record it for LLM call capture, failed calls included.
+
+    A no-op wrapper while capture is off. Capture never raises, and an error
+    from the call is re-raised unchanged after it is recorded.
+    """
+    from cognee.modules.observability.llm_calls import capture_enabled, capture_llm_call
+
+    if not capture_enabled():
+        return await coro
+
+    call = {
+        "model": get_llm_context_config().llm_model,
+        "framework": framework,
+        "response_type": getattr(response_model, "__name__", str(response_model)),
+        "system_prompt": system_prompt,
+        "text_input": text_input,
+        "started_at": datetime.now(timezone.utc),
+    }
+    started = time.perf_counter()
+    try:
+        result = await coro
+    except Exception as error:
+        capture_llm_call(
+            **call,
+            duration_ms=(time.perf_counter() - started) * 1000,
+            output=None,
+            status="error",
+            error_class=type(error).__name__,
+        )
+        raise
+
+    tokens_in, tokens_out = _exact_usage_from_result(result)
+    capture_llm_call(
+        **call,
+        duration_ms=(time.perf_counter() - started) * 1000,
+        output=result,
+        status="ok",
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+    )
+    return result
+
+
 async def _fail_fast_on_quota(coro: Coroutine) -> T:
     """Convert provider quota/billing exhaustion into an actionable error.
 
@@ -159,7 +212,13 @@ class LLMGateway:
 
         # Wrap so usage is recorded against any active session tracker.
         # No-op when no tracker is installed.
-        return _fail_fast_on_quota(_record_session_usage_after(inner, text_input=text_input))
+        return _capture_llm_call_after(
+            _fail_fast_on_quota(_record_session_usage_after(inner, text_input=text_input)),
+            text_input=text_input,
+            system_prompt=system_prompt,
+            response_model=response_model,
+            framework=framework,
+        )
 
     @staticmethod
     def supports_answer_streaming() -> bool:

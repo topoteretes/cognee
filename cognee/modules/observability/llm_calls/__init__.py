@@ -16,7 +16,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
+from typing import Any
 from uuid import UUID
+
+from pydantic import BaseModel
 
 from cognee.shared.logging_utils import get_logger
 
@@ -54,6 +57,26 @@ def _get_writer(directory: str) -> JsonlWriter:
     return _writer
 
 
+def capture_enabled() -> bool:
+    """Whether capture is on. Never raises.
+
+    A capture that is on but misconfigured reads as on, so ``capture_llm_call``
+    runs and logs why it cannot record.
+    """
+    try:
+        return get_llm_call_capture_config().enabled
+    except ValueError:
+        return True
+
+
+def _as_text(output: Any) -> str | None:
+    if output is None or isinstance(output, str):
+        return output
+    if isinstance(output, BaseModel):
+        return output.model_dump_json()
+    return str(output)
+
+
 def capture_llm_call(
     *,
     started_at: datetime,
@@ -63,7 +86,7 @@ def capture_llm_call(
     response_type: str,
     system_prompt: str,
     text_input: str,
-    output: str | None,
+    output: Any,
     status: str,
     error_class: str | None = None,
     tokens_in: int | None = None,
@@ -71,8 +94,8 @@ def capture_llm_call(
 ) -> None:
     """Record one LLM call when capture is on. Never raises.
 
-    ``output`` is the call's result as text, or None when the call raised
-    (``status="error"`` with its ``error_class``).
+    ``output`` is the call's result (text, or a pydantic model, recorded as its
+    JSON), or None when the call raised (``status="error"`` with its ``error_class``).
     """
     try:
         config = get_llm_call_capture_config()
@@ -86,7 +109,7 @@ def capture_llm_call(
             include_content=config.include_content,
             system_prompt=system_prompt,
             text_input=text_input,
-            output=output,
+            output=_as_text(output),
             started_at=started_at,
             duration_ms=duration_ms,
             stage=current_pipeline_stage.get(),
@@ -114,6 +137,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "LLMCallCaptureConfig",
     "LLMCallRecord",
+    "capture_enabled",
     "capture_llm_call",
     "chunk_scope",
     "current_chunk_id",
