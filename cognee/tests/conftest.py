@@ -20,9 +20,6 @@ import os
 
 os.environ.setdefault("TELEMETRY_DISABLED", "1")
 
-from cognee.shared.logging_utils import get_logger
-
-logger = get_logger()
 collect_ignore = ["test_subprocess_rss.py"]
 
 
@@ -37,6 +34,12 @@ def pytest_sessionfinish(session, exitstatus):
     """
     import multiprocessing
 
+    try:
+        from cognee.shared.logging_utils import get_logger
+        logger = get_logger()
+    except Exception:
+        logger = None
+
     reaped = []
     for child in multiprocessing.active_children():
         try:
@@ -44,7 +47,8 @@ def pytest_sessionfinish(session, exitstatus):
             child.join(timeout=5)
             reaped.append(child.pid)
         except Exception:
-            logger.debug("Ignoring exception in pytest_sessionfinish", exc_info=True)
+            if logger is not None:
+                logger.debug("Ignoring exception in pytest_sessionfinish", exc_info=True)
     if reaped:
         # Say so: a worker alive here outlived every test that could have
         # closed it. The per-test guard in unit/infrastructure/databases/
