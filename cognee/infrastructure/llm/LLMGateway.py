@@ -13,6 +13,7 @@ from cognee.infrastructure.llm.config import (
 from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.retry_config import raise_if_quota_error
 from cognee.infrastructure.llm.types import TranscriptionReturnType
+from cognee.modules.observability.llm_calls import capture_enabled, capture_llm_call
 from cognee.shared.logging_utils import get_logger
 
 T = TypeVar("T", bound="BaseModel | str")
@@ -97,8 +98,6 @@ async def _capture_llm_call_after(
     A no-op wrapper while capture is off. Capture never raises, and an error
     from the call is re-raised unchanged after it is recorded.
     """
-    from cognee.modules.observability.llm_calls import capture_enabled, capture_llm_call
-
     if not capture_enabled():
         return await coro
 

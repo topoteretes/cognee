@@ -132,7 +132,7 @@ async def test_nothing_is_recorded_while_capture_is_off(gateway, monkeypatch):
     def fail(**kwargs):
         raise AssertionError("capture_llm_call must not run while capture is off")
 
-    monkeypatch.setattr(llm_calls, "capture_llm_call", fail)
+    monkeypatch.setattr(llm_gateway_module, "capture_llm_call", fail)
     gateway(FakeClient(result=Person(name="Alan Turing")))
 
     result = await LLMGateway.acreate_structured_output("text", "prompt", Person)
