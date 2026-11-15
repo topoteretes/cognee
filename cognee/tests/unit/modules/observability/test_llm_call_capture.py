@@ -1,3 +1,4 @@
+import asyncio
 import json
 import threading
 from datetime import datetime, timezone
@@ -9,6 +10,7 @@ from cognee.context_global_variables import current_pipeline_stage
 from cognee.modules.observability import llm_calls
 from cognee.modules.observability.llm_calls import (
     capture_llm_call,
+    chunk_scope,
     flush_llm_call_capture,
     get_llm_call_capture_config,
 )
@@ -127,6 +129,29 @@ def test_stage_and_run_come_from_the_current_context(capture_env):
     assert first["run_id"] == str(run_id)
     assert second["stage"] is None
     assert second["run_id"] is None
+
+
+def test_chunk_id_comes_from_the_enclosing_chunk_scope(capture_env):
+    directory = capture_env(ENABLED="true", INCLUDE_CONTENT="true", DIRECTORY=str(capture_env()))
+    first_chunk, second_chunk = uuid4(), uuid4()
+
+    async def extract(chunk_id):
+        with chunk_scope(chunk_id):
+            await asyncio.sleep(0)  # interleave with the other chunk's call
+            _capture(text_input=str(chunk_id))
+
+    async def run():
+        await asyncio.gather(extract(first_chunk), extract(second_chunk))
+
+    asyncio.run(run())
+    _capture(text_input="outside")
+
+    chunk_by_input = {r["text_input"]: r["chunk_id"] for r in _records(directory)}
+    assert chunk_by_input == {
+        str(first_chunk): str(first_chunk),
+        str(second_chunk): str(second_chunk),
+        "outside": None,
+    }
 
 
 def test_failed_call_is_recorded_with_its_error_class(capture_env):

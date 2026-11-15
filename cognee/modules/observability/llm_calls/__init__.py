@@ -3,15 +3,20 @@
 ``capture_llm_call()`` turns one call into an ``LLMCallRecord`` and hands it to
 a background writer. It is a no-op unless ``LLM_CALL_CAPTURE_ENABLED=true``, and
 it never raises: capture is observability, so a failure is logged and the LLM
-call it describes is unaffected. The stage and run the call belongs to are read
-from the current context, so callers pass only what they know about the call.
+call it describes is unaffected. The stage, run and chunk the call belongs to are
+read from the current context, so callers pass only what they know about the call;
+a task that makes one LLM call per chunk wraps each in ``chunk_scope(chunk.id)``.
 
 Records are local JSONL files (see ``writer``); shipping them anywhere else is
 a deployment's choice, not this module's.
 """
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
+from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
 
@@ -22,6 +27,24 @@ from .writer import JsonlWriter
 logger = get_logger("llm_call_capture")
 
 _writer: JsonlWriter | None = None
+
+# The document chunk the LLM calls in this context are about; None outside a chunk_scope.
+current_chunk_id: ContextVar[UUID | None] = ContextVar("llm_call_chunk_id", default=None)
+
+
+@contextmanager
+def chunk_scope(chunk_id: UUID) -> Iterator[None]:
+    """Tag the LLM calls made inside this block with the chunk they are about.
+
+    Set it inside the per-chunk coroutine, not around an ``asyncio.gather`` of
+    them: each gathered coroutine runs in its own copy of the context, so the
+    chunks never see each other's id.
+    """
+    token = current_chunk_id.set(chunk_id)
+    try:
+        yield
+    finally:
+        current_chunk_id.reset(token)
 
 
 def _get_writer(directory: str) -> JsonlWriter:
@@ -69,6 +92,7 @@ def capture_llm_call(
             duration_ms=duration_ms,
             stage=current_pipeline_stage.get(),
             run_id=get_parent_run_id(),
+            chunk_id=current_chunk_id.get(),
             model=model,
             framework=framework,
             response_type=response_type,
@@ -92,6 +116,8 @@ __all__ = [
     "LLMCallCaptureConfig",
     "LLMCallRecord",
     "capture_llm_call",
+    "chunk_scope",
+    "current_chunk_id",
     "flush_llm_call_capture",
     "get_llm_call_capture_config",
 ]

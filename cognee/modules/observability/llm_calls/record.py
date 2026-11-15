@@ -33,6 +33,9 @@ class LLMCallRecord(BaseModel):
     # Where the call came from.
     stage: str | None
     run_id: UUID | None
+    # The document chunk the call is about, for calls made once per chunk
+    # (graph extraction); joins the record to the chunk and its document.
+    chunk_id: UUID | None = None
 
     # The call.
     model: str | None
