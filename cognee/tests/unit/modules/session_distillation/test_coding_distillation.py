@@ -442,6 +442,24 @@ def test_rows_to_delete_lets_the_newest_session_date_win():
     assert rows_to_delete([undated, newer, stored], {new_id: ""}) == [undated, newer]
 
 
+def test_rows_to_delete_compares_session_dates_as_times_not_as_text():
+    def row(date):
+        return SimpleNamespace(id=uuid4(), system_metadata={"session_date": date})
+
+    new_id = uuid4()
+    # 07:00 UTC is later than 08:00 at +02:00, although it sorts first as text.
+    later = row("2026-11-16T07:00:00+00:00")
+    stored = SimpleNamespace(id=new_id, system_metadata={})
+    assert rows_to_delete([later, stored], {new_id: "2026-11-16T08:00:00+02:00"}) == [stored]
+    # A bare date against a timestamp of the day before.
+    earlier = row("2026-11-15T23:59:00+00:00")
+    assert rows_to_delete([earlier, stored], {new_id: "2026-11-16"}) == [earlier]
+    # A date that is not ISO-8601 counts as no date: the lesson just stored wins.
+    unreadable = row("Nov 20, 2026")
+    assert rows_to_delete([unreadable, stored], {new_id: "2026-11-16"}) == [unreadable]
+    assert rows_to_delete([later, stored], {new_id: "2026-11-9"}) == [later]
+
+
 def test_mentioned_files_keep_original_casing():
     statement = "README.md and src/Parser.py are read by run_tests.sh (e.g. v1.2.3 is not a file)."
     assert mentioned_files(statement) == ["README.md", "src/Parser.py", "run_tests.sh"]

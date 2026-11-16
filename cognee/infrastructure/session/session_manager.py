@@ -305,14 +305,15 @@ class SessionManager:
         """
         if not self.is_auto_feedback_enabled():
             return
-        # Coding distillation (DISTILLATION_MODE=coding) extracts once per unit of
-        # work from improve(), with tool inputs and the final answer: the per-trace
-        # and per-window passes would only produce the vague lessons it replaces.
-        from cognee.modules.improve.config import coding_distillation_enabled
-
-        if coding_distillation_enabled():
-            return
         try:
+            # Coding distillation (DISTILLATION_MODE=coding) extracts once per unit of
+            # work from improve(), with tool inputs and the final answer: the per-trace
+            # and per-window passes would only produce the vague lessons it replaces.
+            # Read inside the try: an invalid improve setting must not fail the write.
+            from cognee.modules.improve.config import coding_distillation_enabled
+
+            if coding_distillation_enabled():
+                return
             from cognee.infrastructure.session.agent_context_extraction import (
                 extract_live_agent_context,
                 extract_pending_agent_context,

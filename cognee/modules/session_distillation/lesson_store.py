@@ -28,8 +28,10 @@ last wins.
 
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import NAMESPACE_OID, UUID, uuid5
 
+from cognee.infrastructure.session.coding_turns import parse_event_time
 from cognee.modules.data.models import Data
 from cognee.modules.engine.models.node_set import parse_node_set_names
 from cognee.modules.improve.constants import SESSION_LEARNINGS_NODE_SET
@@ -179,8 +181,13 @@ def pitfall_sessions(rows: list, session_id: str) -> list[str]:
 # -- Replacement ---------------------------------------------------------------------
 
 
-def _session_date(row) -> str:
-    return str(_metadata(row).get("session_date") or "")
+def session_date(value) -> datetime | None:
+    """A lesson's ``session_date`` as a point in time, None when absent or not ISO-8601.
+
+    The value is the client's own ``date`` string, so it is parsed before two of them
+    are compared: as text, a date and a timestamp, or two offsets, do not order by time.
+    """
+    return parse_event_time(str(value or ""))
 
 
 def rows_to_delete(existing: list, stored: dict[UUID, str]) -> list:
@@ -189,14 +196,15 @@ def rows_to_delete(existing: list, stored: dict[UUID, str]) -> list:
     The newest session date wins: when an existing row of another session is dated
     later than the lesson just stored, that row stays and the just-stored rows go,
     together with every other row; otherwise the just-stored rows stay and every
-    other row goes. Without a date on both sides the just-stored rows win.
+    other row goes. Without a readable date on both sides the just-stored rows win.
     """
-    stored_date = max(stored.values(), default="")
+    stored_date = max(filter(None, map(session_date, stored.values())), default=None)
     others = [row for row in existing if row.id not in stored]
-    newer = [row for row in others if stored_date and _session_date(row) > stored_date]
+    dated = [(session_date(_metadata(row).get("session_date")), row) for row in others]
+    newer = [(date, row) for date, row in dated if stored_date and date and date > stored_date]
     if newer:
-        newest_date = max(_session_date(row) for row in newer)
-        keep = {row.id for row in newer if _session_date(row) == newest_date}
+        newest_date = max(date for date, _ in newer)
+        keep = {row.id for date, row in newer if date == newest_date}
         return [row for row in existing if row.id not in keep]
     return others
 

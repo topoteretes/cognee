@@ -280,6 +280,31 @@ class TestSessionManager:
         pending_spy.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_add_agent_trace_step_survives_an_invalid_improve_setting(
+        self, sm, mock_cache, monkeypatch
+    ):
+        """The mode is read from the improve config; a setting it refuses (a misspelled
+        DISTILLATION_MODE) must not fail a trace write that is already stored."""
+        import cognee.modules.improve.config as improve_config
+
+        def refuse():
+            raise ValueError("distillation_mode: Input should be '' or 'coding'")
+
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
+        monkeypatch.setattr(improve_config, "coding_distillation_enabled", refuse)
+
+        trace_id = await sm.add_agent_trace_step(
+            user_id="u1",
+            origin_function="Edit",
+            status="success",
+            session_id="s1",
+            generate_feedback_with_llm=False,
+        )
+
+        assert trace_id
+        mock_cache.append_agent_trace_step.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_add_agent_trace_step_skips_extraction_when_disabled(
         self, sm, mock_cache, monkeypatch
     ):
