@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 import cognee
 from cognee.api.v1.search import SearchType
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.exceptions import ExternalSchemaReferenceError
 from cognee.shared.graph_model_utils import graph_model_to_graph_schema
@@ -54,9 +55,14 @@ RUST_TEXT = (
 )
 
 
-async def node_types_by_name() -> dict[str, set[str]]:
-    graph_engine = await get_graph_engine()
-    nodes, _edges = await graph_engine.get_graph_data()
+async def node_types_by_name(dataset_name: str) -> dict[str, set[str]]:
+    """Node names by type in one dataset's graph, which has its own database under
+    backend access control."""
+    datasets = await cognee.datasets.list_datasets()
+    dataset = next(dataset for dataset in datasets if dataset.name == dataset_name)
+    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+        graph_engine = await get_graph_engine()
+        nodes, _edges = await graph_engine.get_graph_data()
     found: dict[str, set[str]] = {}
     for _node_id, properties in nodes:
         found.setdefault(properties.get("type"), set()).add(str(properties.get("name", "")))
@@ -84,7 +90,7 @@ async def main():
     # cognify() with the schema dict.
     await cognee.add(PYTHON_TEXT, dataset_name="schema_cognify")
     await cognee.cognify(datasets=["schema_cognify"], graph_model=graph_model_schema)
-    assert_language_graph(await node_types_by_name(), "python")
+    assert_language_graph(await node_types_by_name("schema_cognify"), "python")
     print("cognify(graph_model=<schema dict>) built ProgrammingLanguage nodes.")
 
     # remember() with the same dict, which it hands on to cognify() unchanged.
@@ -94,7 +100,7 @@ async def main():
         graph_model=graph_model_schema,
         self_improvement=False,
     )
-    assert_language_graph(await node_types_by_name(), "rust")
+    assert_language_graph(await node_types_by_name("schema_remember"), "rust")
     print("remember(graph_model=<schema dict>) built ProgrammingLanguage nodes.")
 
     # A schema that cannot be built is refused before remember() stores anything.

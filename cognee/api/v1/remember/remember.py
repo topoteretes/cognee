@@ -1161,8 +1161,10 @@ async def remember(
     drop_deprecated_temporal_cognify(kwargs)
     # A graph_model schema is checked here, before add() stores anything: in background
     # mode add() and cognify() run after this call returns. cognify() still receives the
-    # caller's graph_model as given and builds its own class from it.
-    graph_model_class = resolve_graph_model(kwargs.get("graph_model"))
+    # caller's graph_model as given and builds its own class from it. A typed MemoryEntry
+    # never reaches cognify(), so its graph_model is not read and not checked.
+    if not isinstance(data, MEMORY_ENTRY_TYPES):
+        graph_model_class = resolve_graph_model(kwargs.get("graph_model"))
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The

@@ -32,6 +32,7 @@ from cognee.shared.exceptions import (
 from cognee.shared.graph_model_utils import (
     EDGE_KEY,
     FROM_IDENTITY_KEY,
+    SchemaGenerationError,
     graph_model_to_graph_schema,
     resolve_graph_model,
 )
@@ -103,6 +104,36 @@ INVALID_SCHEMAS = [
     ("not_an_object", lambda: [1, 2], InvalidGraphSchemaError, "JSON schema object"),
     ("empty_object", dict, InvalidGraphSchemaError, "top-level 'title'"),
     ("no_title", _without_title, InvalidGraphSchemaError, "top-level 'title'"),
+    (
+        "snake_title",
+        lambda: {**_schema(), "title": "staff_graph"},
+        InvalidGraphSchemaError,
+        "PascalCase",
+    ),
+    (
+        "spaced_title",
+        lambda: {**_schema(), "title": "Staff Graph"},
+        InvalidGraphSchemaError,
+        "PascalCase",
+    ),
+    (
+        "defs_not_object",
+        lambda: {**_schema(), "$defs": 5},
+        InvalidGraphSchemaError,
+        "must be an object",
+    ),
+    (
+        "enum_root",
+        lambda: {"title": "Graph", "type": "string", "enum": ["a", "b"]},
+        InvalidGraphSchemaError,
+        "root must be an object",
+    ),
+    (
+        "string_root",
+        lambda: {"title": "Graph", "type": "string"},
+        InvalidGraphSchemaError,
+        "root must be an object",
+    ),
     ("external_ref", _external_ref, ExternalSchemaReferenceError, "/etc/passwd"),
     ("unresolved_edge", _unresolved_edge, UnresolvedSchemaReferenceError, "Ghost"),
     ("unresolved_identity", _unresolved_identity, UnresolvedSchemaReferenceError, "Ghost"),
@@ -138,6 +169,18 @@ def test_none_is_the_default_model():
 @pytest.mark.parametrize("model", [KnowledgeGraph, StaffGraph])
 def test_a_class_is_returned_as_given(model):
     assert resolve_graph_model(model) is model
+
+
+class NotAModel:
+    name: str
+
+
+@pytest.mark.parametrize("model", [NotAModel, dict])
+def test_a_class_that_is_not_a_pydantic_model_is_a_typed_400(model):
+    with pytest.raises(InvalidGraphSchemaError, match="not a Pydantic model") as raised:
+        resolve_graph_model(model)
+
+    assert raised.value.status_code == 400
 
 
 def test_a_schema_builds_the_class_it_describes():
@@ -178,14 +221,24 @@ def test_building_is_repeatable_and_leaves_the_schema_alone():
     assert schema == snapshot
 
 
-def test_a_generator_failure_becomes_a_typed_400():
+def test_a_generator_refusal_becomes_a_typed_400():
+    refusal = SchemaGenerationError("boom")
     with (
-        patch("cognee.shared.graph_model_utils.generate", side_effect=RuntimeError("boom")),
+        patch("cognee.shared.graph_model_utils.generate", side_effect=refusal),
         pytest.raises(InvalidGraphSchemaError, match="boom") as raised,
     ):
         resolve_graph_model(_schema())
 
-    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert raised.value.__cause__ is refusal
+
+
+def test_any_other_build_failure_stays_a_server_error():
+    """A fault on cognee's side is not reported as the caller's bad schema."""
+    with (
+        patch("cognee.shared.graph_model_utils.generate", side_effect=RuntimeError("bug")),
+        pytest.raises(RuntimeError, match="bug"),
+    ):
+        resolve_graph_model(_schema())
 
 
 # ----- cognify(): both forms give the same run -----
@@ -349,6 +402,16 @@ async def test_remember_refuses_an_invalid_schema_before_storing(
     local_remember.setup.assert_not_awaited()
     local_remember.add.assert_not_awaited()
     local_remember.cognify.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_remember_does_not_check_the_schema_of_a_typed_entry(local_remember):
+    """A typed entry never reaches cognify(), so its graph_model is not read."""
+    entry = remember_mod.QAEntry(question="Who works with Ada?", answer="Grace.")
+    with patch.object(remember_mod, "_remember_entry", AsyncMock()) as remember_entry:
+        await remember_mod.remember(entry, session_id="s1", graph_model=_without_title())
+
+    remember_entry.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -26,11 +26,11 @@ import types
 from typing import Annotated, Any, Literal, cast
 
 from datamodel_code_generator import DataModelType, GenerateConfig, InputFileType, generate
+from datamodel_code_generator import Error as SchemaGenerationError
 from pydantic import BaseModel
 from pydantic._internal._core_utils import CoreSchemaOrField, is_core_schema
 from pydantic.json_schema import GenerateJsonSchema, models_json_schema
 
-from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.engine import DataPoint, Edge, FromIdentity
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.exceptions import (
@@ -79,29 +79,38 @@ def resolve_graph_model(graph_model: type[BaseModel] | dict[str, Any] | None) ->
     JSON schema (what ``POST /cognify`` and ``POST /remember`` take, and what
     ``graph_model_to_graph_schema`` produces) and is built into a class here. This is the
     one place a schema becomes a class on the way into a run, so every schema passes the
-    ``$ref`` guards of ``graph_schema_to_graph_model``. Any schema the converter cannot
-    build raises a ``CogneeValidationError`` (HTTP 400), so a caller can tell a bad
-    schema from every other failure.
+    ``$ref`` guards of ``graph_schema_to_graph_model``. A bad schema (a malformed title or
+    ``$defs``, a reference those guards refuse, one the generator rejects) raises a
+    ``CogneeValidationError`` (HTTP 400); any other failure is a server error.
     """
     if graph_model is None:
         return KnowledgeGraph
     if isinstance(graph_model, type):
+        if not issubclass(graph_model, BaseModel):
+            raise InvalidGraphSchemaError(
+                f"graph_model class {graph_model.__name__!r} is not a Pydantic model."
+            )
         return graph_model
     if not isinstance(graph_model, dict):
         raise InvalidGraphSchemaError(
             "graph_model must be a model class or a JSON schema object, "
             f"got {type(graph_model).__name__}."
         )
-    if not isinstance(graph_model.get("title"), str):
+    title = graph_model.get("title")
+    # The generator renames any other title (my_model -> MyModel), and the root class
+    # could then not be found under it.
+    if not isinstance(title, str) or not re.fullmatch(r"[A-Z][A-Za-z0-9]*", title):
         raise InvalidGraphSchemaError(
-            "graph_model schema needs a top-level 'title' naming its root class."
+            "graph_model schema needs a top-level 'title' naming its root class in "
+            f"PascalCase (letters and digits, starting with a capital), got {title!r}."
         )
+    if not isinstance(graph_model.get("$defs", {}), dict):
+        raise InvalidGraphSchemaError("graph_model schema's '$defs' must be an object.")
     try:
         return graph_schema_to_graph_model(graph_model)
-    except CogneeValidationError:
-        raise
-    except Exception as error:
-        # The generator's own errors are untyped; they all mean the schema is unusable.
+    except SchemaGenerationError as error:
+        # The generator refusing the schema. Any other error is a fault on this side and
+        # stays a server error, never a 400 that blames the caller's schema.
         raise InvalidGraphSchemaError(
             f"graph_model could not be built from the schema: {error}"
         ) from error
@@ -147,6 +156,10 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> type[BaseModel]:
 
     # Extract the generated graph model class from the module's namespace
     graph_model = namespace[pydantic_json_schema["title"]]
+    # A root that is not an object (an enum, a string, an array) is generated as an Enum
+    # or RootModel, which cannot hold a graph.
+    if not (isinstance(graph_model, type) and issubclass(graph_model, DataPoint)):
+        raise InvalidGraphSchemaError("graph_model schema's root must be an object.")
     # Rebuild the DataPoint class first
     namespace["DataPoint"].model_rebuild()
     # Then rebuild the graph model to ensure it properly inherits from the updated DataPoint class
