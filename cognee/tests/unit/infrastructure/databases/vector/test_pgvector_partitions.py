@@ -2,6 +2,10 @@
 
 import pytest
 
+# The adapter imports asyncpg and pgvector, which only the postgres extra installs.
+pytest.importorskip("asyncpg")
+pytest.importorskip("pgvector")
+
 from cognee.infrastructure.databases.vector.config import VectorConfig
 from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
     _VECTOR_COLLECTIONS_SQL,
