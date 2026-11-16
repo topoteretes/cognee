@@ -55,6 +55,7 @@ on:
           - cognee-connector-notion
           - cognee-connector-obsidian
           - cognee-connector-onenote
+          - cognee-connector-pubmed
           - cognee-connector-slack
 
 # Minimal default permissions (OSSF Scorecard: Token-Permissions). The release
