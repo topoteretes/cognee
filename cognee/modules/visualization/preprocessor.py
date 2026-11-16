@@ -176,10 +176,6 @@ def is_distilled_learning_node(node_info) -> bool:
     return _DISTILLED_LEARNING_NODE_SET in _node_set_names(node_info)
 
 
-# Minimum number of structural edges between the same (source_stage,
-# target_stage, relation) for the view to render them as a single bundle
-# ribbon instead of individual lines.
-DEFAULT_BUNDLE_MIN = 5
 
 
 # ── Helpers reused by orchestrator and views ─────────────────────────────────
