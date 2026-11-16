@@ -6,7 +6,8 @@ is `main` plus whatever is under test. Dev services deploy `dev`, prod deploys `
 
 ## Overlay (what differs from upstream)
 
-- `railway.api.toml` — API service: builds upstream's `Dockerfile`, `/health` check.
+- `railway.api.toml` — API service: builds `Dockerfile.railway`, `/health` check.
+- `Dockerfile.railway`, `scripts/railway-dockerfile.sh` — upstream's Dockerfile minus BuildKit cache mounts, which Railway rejects without an id. Rerun the script after every upstream sync.
 - `railway.mcp.toml`, `Dockerfile.mcp` — MCP service, built on the published `cognee/cognee-mcp` image.
 - `docs/railway.md` — this file.
 
