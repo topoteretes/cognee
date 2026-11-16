@@ -101,9 +101,7 @@ async def test_a_legacy_row_is_completed_from_the_store_once_then_checked(store)
         await ensure_embedding_model_matches(row)
 
     store["engine"].get_stored_vector_size.assert_awaited_once()
-    ensure_mod._record_embedding_model.assert_awaited_once_with(
-        row, {MODEL_KEY: None, DIMENSIONS_KEY: 384}
-    )
+    ensure_mod._record_embedding_model.assert_awaited_once_with(row, {DIMENSIONS_KEY: 384})
     # The model that built a legacy row is unknown; the message still says the width.
     assert "an earlier embedding model (384 dimensions)" in raised.value.message
     assert "384-dimensional model" in raised.value.remediation
@@ -127,6 +125,37 @@ async def test_a_store_without_a_width_reader_is_left_alone(store):
     await ensure_embedding_model_matches(_row())
 
     ensure_mod._record_embedding_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "info", [{}, {MODEL_KEY: None}, {DIMENSIONS_KEY: 3072}, {MODEL_KEY: None, DIMENSIONS_KEY: 3072}]
+)
+async def test_populated_legacy_dataset_adopts_model_after_matching_width(store, info):
+    row = _row(**info)
+    store["engine"] = SimpleNamespace(get_stored_vector_size=AsyncMock(return_value=3072))
+    await ensure_embedding_model_matches(row)
+    assert ensure_mod._record_embedding_model.await_args.args == (row, LARGE)
+    assert store["engine"].get_stored_vector_size.await_count == (
+        0 if DIMENSIONS_KEY in info else 1
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", [None, "known-model"])
+async def test_mismatching_legacy_width_never_assigns_configured_model(store, model):
+    row = _row(**{MODEL_KEY: model, DIMENSIONS_KEY: 384})
+    with pytest.raises(EmbeddingDimensionMismatchError):
+        await ensure_embedding_model_matches(row)
+    ensure_mod._record_embedding_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_known_model_without_width_is_preserved(store):
+    row = _row(**{MODEL_KEY: "known-model"})
+    store["engine"] = SimpleNamespace(get_stored_vector_size=AsyncMock(return_value=3072))
+    await ensure_embedding_model_matches(row)
+    ensure_mod._record_embedding_model.assert_awaited_once_with(row, {DIMENSIONS_KEY: 3072})
 
 
 def _lancedb_adapter(tables):
@@ -289,6 +318,17 @@ async def test_creation_records_the_model_and_prune_clears_it(monkeypatch):
         # A runtime-only value must never be persisted by the record step
         # (pgvector injects credentials into this dict after loading).
         row.vector_database_connection_info = {**cleared, "password": "runtime-secret"}
+        monkeypatch.setattr(
+            ensure_mod,
+            "get_vector_engine_async",
+            AsyncMock(
+                return_value=SimpleNamespace(get_stored_vector_size=AsyncMock(return_value=3072))
+            ),
+        )
+        await ensure_embedding_model_matches(row)
+        adopted = await _info()
+        assert adopted[MODEL_KEY] == LARGE[MODEL_KEY] and adopted[DIMENSIONS_KEY] == 3072
+        assert "password" not in adopted
         await ensure_mod._record_embedding_model(row, {MODEL_KEY: "m", DIMENSIONS_KEY: 7})
         persisted = await _info()
         assert persisted[DIMENSIONS_KEY] == 7

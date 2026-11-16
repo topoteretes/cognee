@@ -148,6 +148,8 @@ class VectorDBInterface(Protocol):
         collection_name: str,
         points: list[dict],
         payload_schema: Any | None = None,
+        *,
+        vector_size: int | None = None,
     ) -> None:
         """
         Upsert already-computed vectors into the specified collection.
@@ -162,7 +164,7 @@ class VectorDBInterface(Protocol):
         re-embedding its text: pass the payload that call returned, minus ``"vector"``.
         The points are checked (``validate_raw_vector_points``) before the collection is
         created or anything is written: a missing id, a vector that is not a list of the
-        destination engine's width, or a payload that is not a dict raises ``ValueError``
+        destination width, or a payload that is not a dict raises ``ValueError``
         and leaves the store untouched; the same id twice in one call is written once,
         last point wins, with the two ``belongs_to_set`` lists unioned.
         The payload is stored in the shape an ingested row of ``payload_schema`` has
@@ -171,8 +173,14 @@ class VectorDBInterface(Protocol):
         ``<Type>_<field>`` collection ``index_data_points`` writes), so a row read from
         one of those lands in another as it was. Adapters that do not support raw vector
         writes should raise NotImplementedError.
+        ``vector_size`` overrides the configured width for precomputed copies into
+        collections of another model; omitted, the engine's width remains the default.
         """
         raise NotImplementedError("upsert_raw_vectors is not implemented for this adapter")
+
+    async def list_collections(self) -> list[str]:
+        """Enumerate collection names from the store catalog, including historical tables."""
+        raise NotImplementedError("list_collections is not implemented for this adapter")
 
     @abstractmethod
     async def retrieve(

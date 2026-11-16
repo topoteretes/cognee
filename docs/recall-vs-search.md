@@ -32,28 +32,47 @@ Source of truth: `cognee/api/v1/recall/recall.py` and `cognee/api/v1/search/sear
    Pydantic model and returns it in the result's `structured` field.
 
 Dataset routing is not on this list because it lives one level down, in the authorized
-search both functions share: with no `datasets`/`dataset_ids` and more than one readable
-dataset, every readable dataset is scored against the query on the routing collection (each
+search both functions share: with no `datasets`/`dataset_ids`, readable datasets are first
+filtered by their registry's embedding model and width, before any dataset store is opened.
+Only matches to the deployment configuration participate; zero candidates return no graph
+results and one is searched without routing. With at least two candidates, each is scored
+against the model-and-width-specific routing collection (each
 dataset's global context index root and document buckets, mirrored into the deployment's
 default vector store by the `global_context_index` improve stage) and only the best
 `DATASET_ROUTING_TOP_K` (default 1) are searched. A dataset's score is its best row, so a
 specific question is carried by the one document that matches and a broad one by the root.
 Scores are cosine distances (0 is identical text): a dataset farther than
 `DATASET_ROUTING_DISTANCE_CUTOFF` (default 0.8) is not searched, and when no dataset is within
-it every readable dataset is, so a question no dataset knows about is not answered from
+it every eligible dataset is, so a question no dataset knows about is not answered from
 whichever is nearest; datasets within `DATASET_ROUTING_TIE_MARGIN` (default 0.001) of the
 last routed one are tied and all searched. Every unscoped search logs each dataset's distance
 at info, which is what the cutoff is tuned against (it depends on the embedding model). A
 dataset with no index rows is not searched next to a routed one; with no dataset routed,
-every readable dataset is searched. A routed search that retrieves nothing (judged on the
+every eligible dataset is searched. A routed search that retrieves nothing (judged on the
 retrieval context, not on the completion, which is written even over an empty context) is
-widened to the datasets routing skipped, and one that hits only datasets without searchable
-memory is repeated over every readable dataset. An explicit dataset scope is never routed,
-and neither is a `CODE` search: a code dataset never has index rows. Needs backend access control (one store per dataset) and one
-embedding model across the deployment: the rows reuse the vectors the index build stored
-(nothing is embedded twice), the query is embedded with the `.env` model, and when
-the routing collection was built with another width (`EMBEDDING_MODEL` changed without a
-prune) routing logs a warning and steps aside, so the search covers every readable dataset.
+widened only to eligible datasets not already searched, and one that hits only datasets
+without searchable memory is repeated over the eligible candidates. Missing collections,
+unsupported scoring, and routing failures never restore incompatible datasets. A failed
+registry identity read propagates. An explicit dataset scope is never routed; its existing
+dimension mismatch check still applies. `CODE` skips scoring but still filters eligibility.
+Needs backend access control (one store per dataset); shared search with it off is unchanged.
+
+The routing collection is `DatasetRoute_text__<stable-model-digest>_<width>`. Each dataset's
+index is copied into its recorded collection, reusing precomputed vectors, so switching
+models reuses already-built collections without a rebuild or prune. Scores from different
+models are never compared, including models of the same width. Routing identity and the
+query embedder use deployment settings, never per-call embedding overrides. The legacy
+unsuffixed collection is never scored or relabeled; normal index reconciliation populates
+the new collections and removes a moved dataset's addressable rows from other collections.
+
+Datasets with no recorded model remain candidates if their recorded width matches or is
+unknown; missing registry rows initialize normally. On first width-compatible use, legacy
+datasets adopt the configured model as a compatibility assumption, not proof of the original
+model. A width mismatch raises without assigning a model, and unavailable stored-width
+readers leave provenance unknown. New dataset provisioning records model and width directly.
+Forget and document deletion remove derived rows from every historical or legacy routing
+collection (with the existing document-root rebuild). Vector-enabled `prune_system()` drops
+all routing collections discovered in the store, leaving unrelated collections alone.
 There is no off switch: an unscoped search is always routed.
 
 ## When to call search() directly

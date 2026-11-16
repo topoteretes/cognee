@@ -43,6 +43,7 @@ def lane(monkeypatch):
         responses=[[]],  # one per fan-out call, in order; the last one repeats
         access_control=True,
         config=DatasetRoutingConfig(_env_file=None),
+        eligible=None,
     )
 
     async def fake_readable(datasets, permission_type, user):
@@ -65,10 +66,17 @@ def lane(monkeypatch):
         )
         return state.decision
 
+    async def fake_eligible(ids):
+        return ids if state.eligible is None else [id for id in ids if id in state.eligible]
+
+    monkeypatch.setattr(
+        "cognee.modules.search.dataset_routing.store.eligible_dataset_ids", fake_eligible
+    )
+
     monkeypatch.setattr(search_mod, "get_authorized_existing_datasets", fake_readable)
     monkeypatch.setattr(search_mod, "search_in_datasets_context", fake_fan_out)
     monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: state.access_control)
-    monkeypatch.setattr(routing_pkg, "route_datasets", fake_route)
+    monkeypatch.setattr(routing_pkg, "route_candidates", fake_route)
     monkeypatch.setattr(routing_pkg, "get_dataset_routing_config", lambda: state.config)
     state.search_mod = search_mod
     return state
@@ -99,6 +107,48 @@ async def test_unscoped_search_covers_only_the_routed_dataset(lane):
     assert lane.route_calls == [("q", [a.id, b.id], 1, 0.8, 0.001)]
     assert lane.fan_out_calls == [[b.id]]
     assert [payload.dataset_id for payload in out] == [b.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", [0, 1])
+async def test_eligibility_filters_before_fan_out_even_without_routing(lane, count):
+    lane.eligible = [dataset.id for dataset in lane.readable[:count]]
+    assert await _search(lane) == []
+    assert lane.route_calls == []
+    assert lane.fan_out_calls == ([lane.eligible] if count else [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first", ["empty", "no_data", "unindexed", "cutoff"])
+async def test_routing_fan_out_and_retries_stay_inside_eligible_candidates(lane, first):
+    a, b = lane.readable
+    excluded = _dataset("another-model")
+    lane.readable.append(excluded)
+    lane.eligible = [a.id, b.id]
+    lane.decision = DatasetRoutingDecision(
+        candidates=(a.id, b.id), routed=(b.id,), unindexed=(), scores={b.id: 0.1}
+    )
+    if first in ("unindexed", "cutoff"):
+        lane.decision = DatasetRoutingDecision(
+            candidates=(a.id, b.id),
+            routed=(),
+            unindexed=(a.id, b.id),
+            scores={a.id: 0.9} if first == "cutoff" else {},
+        )
+        lane.responses = [[_payload(a, ["hit"])]]
+    else:
+        lane.responses = [
+            NoDataError() if first == "no_data" else [_payload(b)],
+            [_payload(a, ["hit"])],
+        ]
+    await _search(lane)
+    assert all(excluded.id not in call for call in lane.fan_out_calls)
+    assert lane.route_calls[0][1] == lane.eligible
+    assert lane.fan_out_calls == (
+        [[a.id, b.id]]
+        if first in ("unindexed", "cutoff")
+        else [[b.id], [a.id, b.id] if first == "no_data" else [a.id]]
+    )
 
 
 @pytest.mark.asyncio

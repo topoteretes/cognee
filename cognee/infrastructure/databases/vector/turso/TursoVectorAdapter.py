@@ -277,9 +277,12 @@ class TursoVectorAdapter(VectorDBInterface):
             self._known_collections.add(collection_name)
         return exists
 
-    async def create_collection(self, collection_name: str, payload_schema=None):
+    async def create_collection(
+        self, collection_name: str, payload_schema=None, *, vector_size=None
+    ):
         """Create the table for ``collection_name`` if it does not exist."""
-        vector_size = self.embedding_engine.get_vector_size()
+        if vector_size is None:
+            vector_size = self.embedding_engine.get_vector_size()
 
         if not await self.has_collection(collection_name):
             await self._execute(
@@ -313,6 +316,9 @@ class TursoVectorAdapter(VectorDBInterface):
             fetch=True,
         )
         return [row[0] for row in rows or [] if not row[0].startswith(_ENGINE_TABLE_PREFIXES)]
+
+    async def list_collections(self) -> list[str]:
+        return [name for name in await self.get_table_names() if await self._is_collection(name)]
 
     # ------------------------------------------------------------------ #
     # Writes
@@ -470,6 +476,8 @@ class TursoVectorAdapter(VectorDBInterface):
         collection_name: str,
         points: list[dict],
         payload_schema: type[BaseModel] | None = None,
+        *,
+        vector_size: int | None = None,
     ) -> None:
         """Upsert caller-provided vectors without invoking the embedding engine.
 
@@ -485,7 +493,8 @@ class TursoVectorAdapter(VectorDBInterface):
         if not points:
             return
 
-        vector_size = self.embedding_engine.get_vector_size()
+        if vector_size is None:
+            vector_size = self.embedding_engine.get_vector_size()
         # Every check runs before the table exists, so a rejected call creates nothing.
         rows: dict[str, dict[str, Any]] = {
             row_id: {
@@ -496,7 +505,9 @@ class TursoVectorAdapter(VectorDBInterface):
         }
 
         if not await self.has_collection(collection_name):
-            await self.create_collection(collection_name, payload_schema=payload_schema)
+            await self.create_collection(
+                collection_name, payload_schema=payload_schema, vector_size=vector_size
+            )
 
         await retry_on_conflict(
             lambda: asyncio.to_thread(self._upsert_rows, collection_name, rows, replace_vector=True)

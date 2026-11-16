@@ -276,6 +276,14 @@ async def authorized_search(
             embedding_config=embedding_config,
         )
 
+    if dataset_ids is None and backend_access_control_enabled():
+        from cognee.modules.search.dataset_routing.store import eligible_dataset_ids
+
+        eligible = set(await eligible_dataset_ids([dataset.id for dataset in search_datasets]))
+        search_datasets = [dataset for dataset in search_datasets if dataset.id in eligible]
+        if not search_datasets:
+            return []
+
     routed_datasets = await _route_datasets(query_type, query_text, dataset_ids, search_datasets)
     if routed_datasets is None:
         return await _search(search_datasets)
@@ -295,7 +303,7 @@ async def authorized_search(
     except NoDataError as error:
         logger.info(
             "Dataset routing picked datasets that cannot answer (%s); "
-            "searching every readable dataset.",
+            "searching every eligible dataset.",
             type(error).__name__,
         )
         return await _search(search_datasets)
@@ -324,7 +332,7 @@ async def _route_datasets(
     """The datasets an unscoped search covers after routing, or None to cover them all.
 
     Routing applies only when the caller named no dataset, more than one is
-    readable, backend access control gives each its own store, and the search
+    eligible, backend access control gives each its own store, and the search
     is not CODE. A code dataset has no chunks, so it never gets routing rows,
     and a CODE operation over a dataset without a code graph returns an empty
     result rather than nothing: routed elsewhere, a CODE search would never
@@ -333,9 +341,10 @@ async def _route_datasets(
     by the widening pass when the routed datasets retrieve nothing, so a
     backlog of datasets the global context index never saw does not turn every
     unscoped search into a search of all of them. With no dataset routed, every
-    readable dataset is searched.
+    eligible dataset is searched. ``authorized_search`` already filtered registry
+    identities, so an unnarrowed decision never restores excluded readable datasets.
     """
-    from cognee.modules.search.dataset_routing import get_dataset_routing_config, route_datasets
+    from cognee.modules.search.dataset_routing import get_dataset_routing_config, route_candidates
 
     if (
         query_type is SearchType.CODE
@@ -346,7 +355,7 @@ async def _route_datasets(
         return None
 
     config = get_dataset_routing_config()
-    decision = await route_datasets(
+    decision = await route_candidates(
         query_text,
         [dataset.id for dataset in search_datasets],
         config.top_k,
@@ -361,7 +370,7 @@ async def _route_datasets(
     )
     if decision.fanned_out:
         logger.info(
-            "Dataset routing: no dataset was given and none of the %d readable datasets is "
+            "Dataset routing: no dataset was given and none of the %d eligible datasets is "
             "within the distance cutoff %.3f (%s); searching all of them. "
             "Pass datasets=[...] to search a specific one.",
             len(search_datasets),
@@ -371,7 +380,7 @@ async def _route_datasets(
         return None
     if not decision.narrowed:
         logger.info(
-            "Dataset routing: no dataset was given; searching all %d readable datasets "
+            "Dataset routing: no dataset was given; searching all %d eligible datasets "
             "(%d without a routing index yet%s).",
             len(search_datasets),
             len(decision.unindexed),
@@ -382,7 +391,7 @@ async def _route_datasets(
     routed = [by_id[dataset_id] for dataset_id in decision.dataset_ids]
     logger.info(
         "Dataset routing: no dataset was given; searching %s, the best %s of the %d "
-        "readable datasets for this query (%s)%s. Pass datasets=[...] to search a specific one.",
+        "eligible datasets for this query (%s)%s. Pass datasets=[...] to search a specific one.",
         ", ".join(f"'{by_id[dataset_id].name}'" for dataset_id in decision.routed),
         "match"
         if len(decision.routed) == 1

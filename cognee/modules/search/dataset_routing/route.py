@@ -25,7 +25,12 @@ from cognee.modules.data.methods.get_data_ids_by_dataset import get_data_ids_by_
 from cognee.shared.logging_utils import get_logger
 
 from .index import dataset_route_ids
-from .store import DATASET_ROUTE_COLLECTION, get_dataset_route_engine, routing_width_matches
+from .store import (
+    dataset_route_collection,
+    deployment_embedding_record,
+    eligible_dataset_ids,
+    get_dataset_route_engine,
+)
 
 logger = get_logger("dataset_routing")
 
@@ -81,26 +86,44 @@ async def route_datasets(
     (or lost it), so routing knows nothing about it: it is left to the search's
     widening pass when another dataset is routed, and searched with every other
     candidate when none is. An
-    adapter that cannot score rows by id, or a routing collection built with
-    another embedding width, leaves every dataset unindexed. So does a
+    adapter that cannot score rows by id leaves every candidate unindexed. So does a
     deployment with no routing collection at all, before the query is
     embedded: a search type that needs no embedding (CODE, lexical, Cypher)
     must not start needing one for a routing step that cannot narrow anything.
     Any failure on the way to a score, a routing store that cannot be reached,
-    a relational read that fails, a query that cannot be embedded, is a
-    warning and leaves every dataset unindexed too, for the same reason:
+    a document-id read that fails, a query that cannot be embedded, is a
+    warning and leaves every eligible dataset unindexed too, for the same reason:
     routing is a narrowing, never the search itself, and before it existed
     no search depended on the default store.
+    Registry eligibility and deployment identity are resolved before scoring;
+    their failures propagate rather than permitting an unfiltered search.
     """
+    candidates = await eligible_dataset_ids(dataset_ids)
+    return await route_candidates(query_text, candidates, top_k, distance_cutoff, tie_margin)
+
+
+async def route_candidates(
+    query_text: str,
+    dataset_ids: list[UUID],
+    top_k: int,
+    distance_cutoff: float,
+    tie_margin: float,
+) -> DatasetRoutingDecision:
+    """Score an already-authorized, model-compatible candidate snapshot."""
     if top_k < 1:
         raise ValueError("Dataset routing needs top_k >= 1.")
     candidates = tuple(dataset_ids)
+    if len(candidates) < 2:
+        return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
+    identity = await deployment_embedding_record()
     try:
-        return await _score_candidates(query_text, candidates, top_k, distance_cutoff, tie_margin)
+        return await _score_candidates(
+            query_text, candidates, top_k, distance_cutoff, tie_margin, identity
+        )
     except Exception:
         logger.warning(
             "Dataset routing is off for this search: the query could not be scored against "
-            "the routing collection. Searching every readable dataset.",
+            "the routing collection. Searching every eligible dataset.",
             exc_info=True,
         )
         return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
@@ -112,11 +135,13 @@ async def _score_candidates(
     top_k: int,
     distance_cutoff: float,
     tie_margin: float,
+    identity: dict,
 ) -> DatasetRoutingDecision:
     engine = await get_dataset_route_engine()
-    if not await engine.has_collection(DATASET_ROUTE_COLLECTION):
-        return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
-    if not await routing_width_matches(engine):
+    collection = dataset_route_collection(
+        identity["embedding_model"], identity["embedding_dimensions"]
+    )
+    if not await engine.has_collection(collection):
         return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
 
     documents = await get_data_ids_by_dataset(list(candidates))
@@ -127,9 +152,7 @@ async def _score_candidates(
 
     query_vector = (await engine.embedding_engine.embed_text([query_text]))[0]
     try:
-        scored = await engine.score_by_ids(
-            DATASET_ROUTE_COLLECTION, list(dataset_by_row), query_vector
-        )
+        scored = await engine.score_by_ids(collection, list(dataset_by_row), query_vector)
     except CollectionNotFoundError:
         scored = []
     except NotImplementedError:
