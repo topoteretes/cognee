@@ -223,3 +223,19 @@ connectors:
       cognee: "cognee/tasks/ingestion/connectors/onenote.py"
       cloud: null
     env_vars: []
+  - slug: bamboohr
+    package: cognee-connector-bamboohr
+    module: cognee_connector_bamboohr
+    directory: connectors/bamboohr
+    display_name: "BambooHR"
+    auth: api_key
+    tier: null
+    sources: [bamboohr]
+    hosts:
+      cognee: true
+      cloud: false
+    status: ported
+    origin:
+      cognee: null
+      cloud: null
+    env_vars: []
