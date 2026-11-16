@@ -247,6 +247,57 @@ class TestRepeatedErrors:
         traces = [_edit_failure(path), _trace("Read", params={"file_path": path})]
         assert group_repeated_errors(traces) == []
 
+    def test_a_shell_command_that_only_reads_the_file_is_not_a_fix(self):
+        path = f"{REPO}/src/app.py"
+        look = _trace("Bash", params={"command": "grep -n foo src/app.py | head -5"})
+        show = _trace("Bash", params={"command": f"cat {path} && git status"})
+        fix = _trace("Edit", params={"file_path": path})
+        (group,) = group_repeated_errors([_edit_failure(path), look, show, fix])
+        assert group.fix is fix
+        assert group_repeated_errors([_edit_failure(path), look, show]) == []
+
+    def test_a_shell_command_that_rewrites_the_file_is_a_fix(self):
+        path = f"{REPO}/src/app.py"
+        for command in (
+            "sed -i '' 's/a/b/' src/app.py",
+            "cd src && printf x > ./app.py",
+            f"python rewrite.py {path}",
+        ):
+            rewrite = _trace("Bash", params={"command": command})
+            (group,) = group_repeated_errors([_edit_failure(path), rewrite])
+            assert group.fix is rewrite, command
+
+    def test_a_file_whose_name_contains_the_failed_files_name_is_not_a_fix(self):
+        path = f"{REPO}/src/app.py"
+        for command in ("sed -i '' 's/a/b/' tests/test_app.py", "printf x > other/app.py"):
+            other = _trace("Bash", params={"command": command})
+            assert group_repeated_errors([_edit_failure(path), other]) == [], command
+
+    def test_a_long_problem_and_error_leave_room_for_the_fix(self):
+        path = f"{REPO}/src/services/billing/invoice_renderer.py"
+        failing = {"file_path": path, "old_string": "a" * 300, "new_string": "b" * 300}
+        fix = "sed -i '' 's/render_total/render_sum/' src/services/billing/invoice_renderer.py"
+        long_error = "String not found: " + "x" * 400
+        traces = [
+            _trace("Edit", status="error", params=failing, error=long_error),
+            _trace("Bash", params={"command": fix}),
+        ]
+        ((_, candidate),) = build_failure_candidates(group_repeated_errors(traces), REPO)
+        assert len(candidate.content) <= cue.MAX_CONTEXT_CONTENT_CHARS
+        assert candidate.content.startswith("[state-key: pitfall:Edit:string-not-found:py] Edit ")
+        # Each of the three long parts keeps its start; none takes the room of another.
+        assert ' failed with "string not found: x' in candidate.content
+        assert "\" → Bash sed -i '' 's/render_total/render_sum/' src/services/" in candidate.content
+
+    def test_fit_parts_shares_the_room_and_keeps_short_parts_whole(self):
+        assert cue.fit_parts(["ab", "c" * 50, "d" * 50], 42) == [
+            "ab",
+            "c" * 19 + "…",
+            "d" * 19 + "…",
+        ]
+        assert cue.fit_parts(["ab", "cd"], 10) == ["ab", "cd"]
+        assert cue.fit_parts(["abc", "def"], 0) == ["", ""]
+
     def test_unfixed_repeated_group_produces_no_candidate(self):
         groups = group_repeated_errors([_edit_failure(), _edit_failure()])
         assert len(groups) == 1 and not groups[0].fixed

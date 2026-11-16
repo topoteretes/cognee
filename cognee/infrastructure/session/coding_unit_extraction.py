@@ -78,7 +78,14 @@ from cognee.infrastructure.session.session_context_models import (
 )
 from cognee.infrastructure.session.session_node_set import get_session_node_set
 from cognee.infrastructure.session.session_persist_watermark import StateRowWatermark
-from cognee.infrastructure.session.trace_phases import PhaseBlock, split_into_parts
+from cognee.infrastructure.session.trace_phases import (
+    CHANGE,
+    VERIFY,
+    PhaseBlock,
+    segment_phase,
+    split_into_parts,
+    split_shell_command,
+)
 from cognee.modules.agent_memory.sanitization import sanitize_value
 from cognee.modules.preflight import llm_available
 from cognee.shared.logging_utils import get_logger
@@ -122,6 +129,8 @@ _SHELL_WRAPPERS = frozenset({"sudo", "env", "time", "nohup"})
 _SHELL_NO_PROGRAM = frozenset({"cd", "export", "source", "set", "echo", "sleep", "exit", "true"})
 _SHELL_CHAIN_RE = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
 _WORD_RE = re.compile(r"[a-z0-9_]{2,}")
+# A run of characters a path is written with, as it stands in a command or a script.
+_PATH_TOKEN_RE = re.compile(r"[\w./~+-]+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,15 +303,31 @@ def pitfall_key(group: ErrorGroup) -> str:
     return f"{key}:{qualifier}" if qualifier else key
 
 
+def _names_file(text: str, path: str) -> bool:
+    """``text`` holds ``path`` as a whole path: in full, or by its trailing components
+    (``src/app.py``, ``app.py``). ``test_app.py`` does not name ``app.py``."""
+    for token in _PATH_TOKEN_RE.findall(text):
+        token = token.removeprefix("./")
+        if token and (path == token or path.endswith("/" + token)):
+            return True
+    return False
+
+
 def _changes_file(entry, path: str) -> bool:
-    """A change tool on the file, or a shell command that names it (a script rewriting it)."""
+    """A change tool on the file, or a shell segment that names it and is not read-only.
+
+    A segment that only reads (``grep``, ``cat``, a filter after a pipe) is never the
+    fix. One that runs a program on the file counts like one that writes it: whether
+    ``python rewrite.py app.py`` rewrote the file cannot be read off the command.
+    """
     if not path:
         return False
     if entry.origin_function in CHANGE_TOOLS:
         return trace_file(entry) == path
-    command = trace_command(entry)
-    basename = path.rsplit("/", 1)[-1]
-    return bool(command) and (path in command or basename in command)
+    return any(
+        segment_phase(segment, after_pipe) in (CHANGE, VERIFY) and _names_file(segment, path)
+        for segment, after_pipe in split_shell_command(trace_command(entry))
+    )
 
 
 def _program_segment(command: str) -> list[str]:
@@ -398,6 +423,19 @@ def render_error_groups(groups: list[ErrorGroup], repo_root: str = "") -> str:
     return "\n".join(lines)
 
 
+def fit_parts(parts: list[str], budget: int) -> list[str]:
+    """``parts`` clipped to ``budget`` characters in all, the room shared evenly: a part
+    shorter than its share leaves the rest of it to the longer ones."""
+    fitted = list(parts)
+    remaining = max(budget, 0)
+    by_length = sorted(range(len(parts)), key=lambda index: len(parts[index]))
+    for position, index in enumerate(by_length):
+        share = remaining // (len(parts) - position)
+        fitted[index] = _clip(parts[index], share) if share else ""
+        remaining -= len(fitted[index])
+    return fitted
+
+
 def build_failure_candidates(
     groups: list[ErrorGroup], repo_root: str = ""
 ) -> list[tuple[str, CandidateFailureLessonUpdate]]:
@@ -405,19 +443,26 @@ def build_failure_candidates(
 
     The content is deterministic for a group, so the applier's exact-content dedup makes
     a repeated run link the same entry instead of creating another. The candidate model
-    cuts the content at ``MAX_CONTEXT_CONTENT_CHARS``.
+    cuts the content at ``MAX_CONTEXT_CONTENT_CHARS``, so the problem, the error and
+    what worked share that room (``fit_parts``): a long command or error line never
+    pushes the fix out.
     """
     candidates = []
     for group in groups:
         if not group.fixed:
             continue
         failure = group.failures[0]
-        problem = f"{group.tool} {render_trace_input(failure, repo_root)}".strip()
-        worked = f"{group.fix.origin_function} {render_trace_input(group.fix, repo_root)}".strip()
-        content = (
-            f"{STATE_KEY_PREFIX}{pitfall_key(group)}] {problem} failed with "
-            f'"{group.error_line}" → {worked}'
+        key = f"{STATE_KEY_PREFIX}{pitfall_key(group)}] "
+        failed_with, arrow = ' failed with "', '" → '
+        problem, error_line, worked = fit_parts(
+            [
+                f"{group.tool} {render_trace_input(failure, repo_root)}".strip(),
+                group.error_line,
+                f"{group.fix.origin_function} {render_trace_input(group.fix, repo_root)}".strip(),
+            ],
+            MAX_CONTEXT_CONTENT_CHARS - len(key) - len(failed_with) - len(arrow),
         )
+        content = f"{key}{problem}{failed_with}{error_line}{arrow}{worked}"
         candidates.append(
             (
                 failure.trace_id,
