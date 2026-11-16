@@ -1,0 +1,4 @@
+FROM cognee/cognee-mcp:main
+
+ENTRYPOINT ["sh", "-lc"]
+CMD ["exec /app/.venv/bin/cognee-mcp --host 0.0.0.0 --port ${PORT:-8000} --transport ${TRANSPORT_MODE:-sse} ${API_URL:+--api-url ${API_URL}} ${SERVE_URL:+--serve-url ${SERVE_URL}}"]
