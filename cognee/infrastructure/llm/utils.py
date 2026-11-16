@@ -270,6 +270,14 @@ async def determine_embedding_dimensions(detected_dimensions: int) -> None:
     from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
 
     embedding_config = get_embedding_config()
+    if embedding_config.embedding_dimensions is None:
+        embedding_engine = (await get_vector_engine_async()).embedding_engine
+        if hasattr(embedding_engine, "configured_dimensions"):
+            # The engine learns its vector size itself (embedding_worker) and
+            # already holds it. Writing it into the config would make the next
+            # get_embedding_engine() build a second engine (it is cached by its
+            # arguments) that takes the learned size for EMBEDDING_DIMENSIONS.
+            return
     if embedding_config.embedding_dimensions != detected_dimensions:
         embedding_config.embedding_dimensions = detected_dimensions
 

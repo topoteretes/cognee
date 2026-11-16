@@ -90,6 +90,67 @@ async def delete_ontology_and_check_it_is_gone(data_directory_path: str, user) -
     )
 
 
+async def update_and_forget_leave_no_stored_object(
+    dataset_name: str, text: str, data_directory_path: str, user
+) -> None:
+    """An update removes the version it replaced from the bucket, and forget removes the rest.
+
+    forget() deletes the objects a Data row points at, so an object no row points at would
+    stay in the bucket for good, with the content of a document the user updated or deleted.
+    """
+
+    def object_key(location: str) -> str:
+        return location.split(data_directory_path, 1)[1].lstrip("/")
+
+    async def stored_objects() -> set[str]:
+        storage = get_file_storage(data_directory_path)
+        return set(await storage.list_files(str(user.id), recursive=True))
+
+    dataset_id = next(
+        dataset.id
+        for dataset in await cognee.datasets.list_datasets(user)
+        if dataset.name == dataset_name
+    )
+    # The text document is the one whose original lives in the bucket; the PDF's is a local file.
+    [row] = [
+        row
+        for row in await cognee.datasets.list_data(dataset_id, user)
+        if row.original_data_location.startswith(data_directory_path)
+    ]
+    replaced = object_key(row.raw_data_location)
+    before = await stored_objects()
+    assert replaced in before, f"The document's stored text is not listed on S3: {before}"
+
+    result = await cognee.update(
+        data_id=row.id,
+        data=text + "\nLLMs are trained on large text corpora.",
+        dataset_id=dataset_id,
+        user=user,
+    )
+    assert result["status"] in ("incremental", "full_rebuild"), result
+
+    data_id = row.id
+    [updated] = [
+        row for row in await cognee.datasets.list_data(dataset_id, user) if row.id == data_id
+    ]
+    current = object_key(updated.raw_data_location)
+    after_update = await stored_objects()
+    assert current != replaced, "The update did not store new content"
+    assert current in after_update, f"The updated document's text is not on S3: {after_update}"
+    assert replaced not in after_update, (
+        f"The version the update replaced is still an object on S3: {after_update}"
+    )
+    assert len(after_update) == len(before), (
+        f"The update left extra objects on S3: {sorted(after_update - before)}"
+    )
+
+    await cognee.forget(data_id=row.id, dataset_id=dataset_id, user=user)
+    after_forget = await stored_objects()
+    assert after_forget == before - {replaced}, (
+        f"forget() left the document's objects on S3: {sorted(after_forget - before)}"
+    )
+
+
 async def main():
     bucket_name = os.getenv("STORAGE_BUCKET_NAME")
     test_run_id = uuid4()
@@ -163,6 +224,8 @@ async def main():
     history = await get_history(user.id)
 
     assert len(history) == 6, "Search history is not correct."
+
+    await update_and_forget_leave_no_stored_object(dataset_name, text, data_directory_path, user)
 
     # Assert local data files are cleaned properly
     await cognee.prune.prune_data()

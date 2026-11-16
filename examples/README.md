@@ -55,6 +55,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 ### Retrieval
 | Script | Demonstrates |
 |---|---|
+| [`hybrid_decomposition.py`](guides/hybrid_decomposition.py) | Context-primed hybrid decomposition for multi-part questions, with a configurable planning prompt |
 | [`truth_subspace_reranking.py`](guides/truth_subspace_reranking.py) | Teaching retrieval a preference — truth-weighted reranking on/off |
 | [`temporal_recall.py`](guides/temporal_recall.py) | Time-bounded queries with `SearchType.TEMPORAL` |
 | [`references_example.py`](guides/references_example.py) | `include_references` — answers with evidence |
@@ -84,9 +85,12 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
 | [`code_graph_example.py`](guides/code_graph_example.py) | Code-graph pipeline + `SearchType.CODE` |
 | [`gmail.py`](guides/gmail.py) | Ingest Gmail with the bundled SDK connector, incremental sync and delete propagation (needs `cognee[gmail]`) |
+| [`dropbox.py`](guides/dropbox.py) | Sync one Dropbox folder by its folder id with the bundled SDK connector (no extra) |
 | [`google_drive.py`](guides/google_drive.py) | Ingest a Drive folder with the bundled SDK connector (needs `cognee[google-drive]`) |
 | [`google_calendar.py`](guides/google_calendar.py) | Ingest a Google Calendar with the bundled SDK connector, incremental sync through Google's sync token (needs `cognee[google-calendar]`) |
+| [`slack.py`](guides/slack.py) | Ingest a Slack channel with the bundled SDK connector: a thread is one document and the messages without replies of one day are one document, a new message re-renders only its thread or day, and a deleted message is forgotten when the next sync walks the whole channel |
 | [`obsidian.py`](guides/obsidian.py) | Ingest a local Obsidian vault with the bundled SDK connector: an edited note replaces its old version and a deleted note is forgotten on the next sync |
+| [`vercel.py`](guides/vercel.py) | Ingest one Vercel project's deployments with the bundled SDK connector and ask which deploy failed and why; a deployment deleted at Vercel is forgotten on the next sync (needs a Vercel token) |
 | [`presort_downloads.py`](guides/presort_downloads.py) | Presorting a messy folder before ingestion: `remember(dry_run="presort")`, then ingest the report |
 
 ### Visualization

@@ -48,6 +48,7 @@ from cognee.modules.retrieval.utils.completion import (
     generate_completion_batch,
 )
 from cognee.modules.retrieval.utils.conflict_context import attach_chunk_conflicts
+from cognee.modules.retrieval.utils.document_sources import name_chunk_documents
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -208,6 +209,8 @@ class HybridRetriever(BaseRetriever):
         await attach_chunk_conflicts(
             chunk_objects.get("chunks", []), graph_engine=self._unified_engine.graph
         )
+        if self.include_references:
+            await name_chunk_documents(chunk_objects.get("chunks", []))
         return HybridCandidates(
             chunks=chunk_objects["chunks"],
             chunk_summaries=chunk_objects["chunk_summaries"],

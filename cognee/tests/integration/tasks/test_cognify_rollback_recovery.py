@@ -726,7 +726,8 @@ async def test_startup_recovery_finds_a_run_buried_under_a_newer_completed_run(
     clean_test_environment,
 ):
     """An abandoned run must be closed even when a newer run of the same pipeline on
-    the same dataset completed after it: "newest row per dataset" would hide it."""
+    the same dataset completed after it: "newest row per dataset" would hide it.
+    Closing it must not replace the newer run as the dataset's newest row either."""
     user = await get_default_user()
     dataset = await create_authorized_dataset("recovery_buried_run_dataset", user)
 
@@ -794,8 +795,10 @@ async def test_startup_recovery_finds_a_run_buried_under_a_newer_completed_run(
         PipelineRunStatus.DATASET_PROCESSING_STARTED,
         PipelineRunStatus.DATASET_PROCESSING_ERRORED,
     ]
-    assert rows[-1].pipeline_run_id == abandoned_run_id
-    assert rows[-1].error_class == "AbandonedPipelineRunError"
+    closing_row = [row for row in rows if row.pipeline_run_id == abandoned_run_id][-1]
+    assert closing_row.error_class == "AbandonedPipelineRunError"
+    # Closed beneath the newer run: the dataset's newest row is still that run's.
+    assert rows[-1].pipeline_run_id == completed_run_id
     assert by_run[completed_run_id] == [
         PipelineRunStatus.DATASET_PROCESSING_STARTED,
         PipelineRunStatus.DATASET_PROCESSING_COMPLETED,

@@ -35,7 +35,7 @@ Design
   state it reached and reports it in ``cognee_sync_stats`` (``failed_rate_limit``).
   It never raises or sleeps for these: ``dlt`` rolls the state of a failed run
   back, so a team too big for one hour of quota would never finish, and sleeping
-  would hold the process-wide staging lock.
+  would hold its dataset's staging lock.
 * **Token** is a plain access token. This source never refreshes it. It lives in
   the client object only; errors carry codes, never response bodies.
 

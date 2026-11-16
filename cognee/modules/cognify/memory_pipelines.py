@@ -64,6 +64,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 from cognee.modules.pipelines.operations.pipeline import drive_marking_held, run_pipeline
 from cognee.modules.pipelines.operations.run_tasks import close_run_with_cause
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
+from cognee.modules.provenance.tracking import LEDGER_RUN_ID
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
 
@@ -277,7 +278,16 @@ async def _dataset_chain(
         if selected:
             _push_stage_progress(started, 0, len(selected))
             try:
-                indexed = await _run_indexing(indexing_tasks, {**run_params, "data": selected})
+                # The ledger row of an item the indexing run stores first names
+                # the cognify run: the one callers follow and roll back.
+                indexed = await _run_indexing(
+                    indexing_tasks,
+                    {
+                        **run_params,
+                        "data": selected,
+                        "extras": {LEDGER_RUN_ID: started.pipeline_run_id},
+                    },
+                )
             except Exception as error:
                 # Extraction would hit the same failure after re-reading the
                 # whole dataset (a failed item raises only when the cognify

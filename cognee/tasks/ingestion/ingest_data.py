@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.files.stored_file_claims import holding_stored_files
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
@@ -19,6 +20,7 @@ from cognee.modules.data.methods import (
     load_or_create_datasets,
     resolve_data_id,
 )
+from cognee.modules.data.methods.remove_unreferenced_files import remove_unreferenced_files
 from cognee.modules.data.models import Data
 from cognee.modules.engine.models.node_set import (
     NodeSet,
@@ -255,10 +257,11 @@ async def ingest_data(
 
         new_datapoints = []
         existing_data_points = []
-        # Originals replaced by a content-changed update: under content-
-        # addressed keys the old object is not overwritten, so it is reclaimed
-        # after the commit once nothing references it.
-        replaced_original_locations = []
+        # Stored files that re-ingested rows stop pointing at (the original and
+        # the text derived from it): a new file does not overwrite the old one
+        # unless it has the same name, so each is reclaimed after the commit
+        # once nothing references it.
+        replaced_locations = []
 
         if not isinstance(data, list):
             # Convert data to a list as we work with lists further down.
@@ -511,9 +514,15 @@ async def ingest_data(
                 new_content_hash = original_file_metadata["content_hash"]
                 content_changed = str(data_point.content_hash) != str(new_content_hash)
 
-                new_original_location = original_file_metadata["file_path"]
-                if content_changed and data_point.original_data_location != new_original_location:
-                    replaced_original_locations.append(data_point.original_data_location)
+                # The row is about to point at these two files. A file it points
+                # at now and will not afterwards is released after the commit:
+                # the stored original, and the text a loader derived from it.
+                for replaced, current in (
+                    (data_point.original_data_location, original_file_metadata["file_path"]),
+                    (data_point.raw_data_location, cognee_storage_file_path),
+                ):
+                    if replaced != current:
+                        replaced_locations.append(replaced)
 
                 # Rows are dataset-scoped (the startup migration backfills
                 # legacy rows). A row of another dataset can only reach this
@@ -643,10 +652,10 @@ async def ingest_data(
             _time.monotonic() - _loop4_start,
         )
 
-        # After the commit, the updated rows point at their new originals; the
-        # replaced objects are removed unless another row still shares them.
-        for replaced_location in replaced_original_locations:
-            await db_engine.remove_data_file_if_unreferenced(replaced_location)
+        # After the commit, the updated rows point at their new files; the
+        # replaced ones are removed unless another row still shares them. A
+        # file that cannot be removed raises, saying the new content is stored.
+        await remove_unreferenced_files(replaced_locations, "The new content was stored.")
 
         _elapsed = _time.monotonic() - _store_start
         logger.info("cognee-core store_to_dataset finished in %.3f seconds", _elapsed)
@@ -660,11 +669,16 @@ async def ingest_data(
     # same-content race there can produce two rows, which under document
     # semantics are simply two documents. File writes are content-addressed,
     # so re-running is idempotent.
-    try:
-        return await store_data_to_dataset(
-            data, dataset_name, user, node_set, dataset_id, preferred_loaders
-        )
-    except IntegrityError:
-        return await store_data_to_dataset(
-            data, dataset_name, user, node_set, dataset_id, preferred_loaders
-        )
+    #
+    # The files stored here are claimed until their rows commit, so a removal
+    # in another dataset cannot take one in between (joins the item's scope
+    # when a pipeline runs this task).
+    async with holding_stored_files():
+        try:
+            return await store_data_to_dataset(
+                data, dataset_name, user, node_set, dataset_id, preferred_loaders
+            )
+        except IntegrityError:
+            return await store_data_to_dataset(
+                data, dataset_name, user, node_set, dataset_id, preferred_loaders
+            )

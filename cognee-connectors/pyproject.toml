@@ -42,6 +42,7 @@ cognee-connector-google-calendar = { workspace = true }
 cognee-connector-slack = { workspace = true }
 cognee-connector-apollo = { workspace = true }
 cognee-connector-asana = { workspace = true }
+cognee-connector-dropbox = { workspace = true }
 cognee-connector-obsidian = { workspace = true }
 cognee-connector-onenote = { workspace = true }
 

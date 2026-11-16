@@ -196,7 +196,7 @@ notebooks or other apps of the same user share the 400.
 Graph does not send `Retry-After` for OneNote, so a 429, 500, 502, 503 or 504 is retried up to
 five attempts in total with a 1, 2, 4, 8 second fallback; a `Retry-After` header is honoured when
 present. The total sleep of a whole sync is capped at `RETRY_WAIT_BUDGET_SECONDS` (60), because
-the walk runs under cognee's process-wide staging lock; once it is spent, the next wait stops the
+the walk runs under its dataset's staging lock; once it is spent, the next wait stops the
 run cleanly (`failed_rate_limit` for a 429) and the sync resumes next time. Redirects are never followed and every
 URL, a paging link included, must be `https://graph.microsoft.com/v1.0/me/onenote/...`.
 

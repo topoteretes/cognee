@@ -28,7 +28,7 @@ from cognee.tasks.ingestion.dlt_utils import (
 _BASE = "https://graph.microsoft.com/v1.0/me/onenote"
 _RENDERER_VERSION = 2
 # One run may sleep at most this long in total across all its retries. The walk runs under
-# cognee's process-wide dlt staging lock, so a longer wait stops the run instead.
+# its dataset's dlt staging lock, so a longer wait stops the run instead.
 RETRY_WAIT_BUDGET_SECONDS = 60
 _ATTEMPTS = 5
 _RETRY_STATUSES = (429, 500, 502, 503, 504)

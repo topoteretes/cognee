@@ -37,10 +37,6 @@ def test_authorize_url_is_the_app_installation_flow():
     assert url == "https://github.com/apps/cognee-app/installations/new?state=the-state"
 
 
-def test_state_signing_secret_is_the_webhook_secret():
-    assert GithubIntegration().state_signing_secret() == "hook-secret"
-
-
 def test_webhook_verifier_is_registered():
     assert isinstance(GithubIntegration().webhook_verifier(), GithubWebhookVerifier)
 

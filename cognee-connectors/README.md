@@ -27,7 +27,7 @@
 
 Data-source connectors for [cognee](https://github.com/topoteretes/cognee), the open-source
 AI memory platform. One package per source (Notion, Linear, GitHub, Slack, Google Drive, Gmail,
-Google Calendar, Apollo, Asana, Obsidian, OneNote) turns that source's records into documents in
+Google Calendar, Apollo, Asana, Dropbox, Obsidian, OneNote) turns that source's records into documents in
 cognee memory — incrementally, with forget-on-delete — and carries the source's OAuth contract
 so a cognee server or Cognee Cloud can connect it. Every connector is its own PyPI package built
 on the shared contract `cognee-connectors-core`; cognee itself is a development dependency of
@@ -43,6 +43,7 @@ this workspace and never a runtime dependency of a connector
 | --- | --- | --- | --- | --- | --- | --- |
 | [Apollo](connectors/apollo) | [`cognee-connector-apollo`](https://pypi.org/project/cognee-connector-apollo/) | api_key | `apollo` | ✅ | — | ported |
 | [Asana](connectors/asana) | [`cognee-connector-asana`](https://pypi.org/project/cognee-connector-asana/) | api_key | `asana` | ✅ | — | ported |
+| [Dropbox](connectors/dropbox) | [`cognee-connector-dropbox`](https://pypi.org/project/cognee-connector-dropbox/) | oauth2 | `dropbox` | — | — | ported |
 | [GitHub](connectors/github) | [`cognee-connector-github`](https://pypi.org/project/cognee-connector-github/) | oauth2 | — | ✅ | — | ported |
 | [Gmail](connectors/gmail) | [`cognee-connector-gmail`](https://pypi.org/project/cognee-connector-gmail/) | oauth2 | `gmail` | ✅ | — | ported |
 | [Google](connectors/google) | [`cognee-connector-google`](https://pypi.org/project/cognee-connector-google/) | oauth2 | — | — | — | ported |

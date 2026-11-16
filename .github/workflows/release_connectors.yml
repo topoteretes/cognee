@@ -46,6 +46,7 @@ on:
           - cognee-connectors-core
           - cognee-connector-apollo
           - cognee-connector-asana
+          - cognee-connector-dropbox
           - cognee-connector-github
           - cognee-connector-gmail
           - cognee-connector-google
