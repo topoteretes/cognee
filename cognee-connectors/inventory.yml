@@ -223,3 +223,19 @@ connectors:
       cognee: "cognee/tasks/ingestion/connectors/onenote.py"
       cloud: null
     env_vars: []
+  - slug: todoist
+    package: cognee-connector-todoist
+    module: cognee_connector_todoist
+    directory: connectors/todoist
+    display_name: "Todoist"
+    auth: api_key
+    tier: null
+    sources: [todoist]
+    hosts:
+      cognee: true
+      cloud: false
+    status: ported
+    origin:
+      cognee: null
+      cloud: null
+    env_vars: []
