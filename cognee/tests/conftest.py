@@ -17,8 +17,20 @@ from collection so pytest doesn't crash trying to run it.
 """
 
 import os
+import sys
+import types
 
 os.environ.setdefault("TELEMETRY_DISABLED", "1")
+
+# Guard against environments where python-dotenv is not installed
+try:
+    import dotenv  # noqa: F401
+except ImportError:
+    dummy_dotenv = types.ModuleType("dotenv")
+    dummy_dotenv.load_dotenv = lambda *args, **kwargs: False
+    dummy_dotenv.find_dotenv = lambda *args, **kwargs: ""
+    dummy_dotenv.dotenv_values = lambda *args, **kwargs: {}
+    sys.modules["dotenv"] = dummy_dotenv
 
 from cognee.shared.logging_utils import get_logger
 

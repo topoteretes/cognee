@@ -223,3 +223,19 @@ connectors:
       cognee: "cognee/tasks/ingestion/connectors/onenote.py"
       cloud: null
     env_vars: []
+  - slug: ansible
+    package: cognee-connector-ansible
+    module: cognee_connector_ansible
+    directory: connectors/ansible
+    display_name: "Ansible"
+    auth: local
+    tier: null
+    sources: [ansible]
+    hosts:
+      cognee: true
+      cloud: false
+    status: planned
+    origin:
+      cognee: null
+      cloud: null
+    env_vars: []
