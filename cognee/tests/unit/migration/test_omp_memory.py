@@ -298,6 +298,13 @@ class TestMemoryObject:
         assert memory.media_type == "text/markdown"
         assert memory.created_at == WHEN
         assert memory.body == "The user prefers concise answers.\n"
+
+    def test_unquoted_numbers_in_front_matter_read_as_text(self):
+        memory = OMPMemory.from_markdown(
+            "---\nidentifier: 42\ntags: [2024, q3]\n---\n\nbody", created_at=WHEN
+        )
+        assert memory.identifier == "42"
+        assert memory.tags == ["2024", "q3"]
         conformance = memory.conformance()
         assert conformance.profiles == ["minimal"]
         assert any("author unknown" in note for note in conformance.notes)
@@ -702,6 +709,17 @@ class TestExportAndImport:
         assert (tmp_path / "out" / "abc.md").read_text().endswith("a")
         assert (tmp_path / "out" / "abc-1.md").read_text().endswith("abc")
 
+    def test_file_names_differing_only_in_case_are_kept_apart(self, tmp_path):
+        memories = [
+            OMPMemory(
+                identifier=name, media_type="text/plain", body=name, created_at=WHEN, path=name
+            )
+            for name in ("Notes.md", "notes.md")
+        ]
+        write_omp_export(memories, tmp_path / "out", layout="markdown")
+        assert (tmp_path / "out" / "Notes.md").read_text().endswith("Notes.md")
+        assert (tmp_path / "out" / "notes-1.md").read_text().endswith("notes.md")
+
     def test_export_refuses_a_non_empty_destination_unless_overwrite(self, tmp_path):
         destination = tmp_path / "out"
         destination.mkdir()
@@ -721,6 +739,13 @@ class TestExportAndImport:
         (tmp_path / "link").symlink_to(tmp_path / "real")
         with pytest.raises(ValueError, match="symbolic link"):
             write_omp_export([], tmp_path / "link", overwrite=True)
+
+    def test_overwrite_never_deletes_the_working_directory(self, tmp_path, monkeypatch):
+        (tmp_path / "keep.txt").write_text("not an export")
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(ValueError, match="working or home"):
+            write_omp_export([], ".", overwrite=True)
+        assert (tmp_path / "keep.txt").exists()
 
     def test_omp_source_imports_a_cognee_export_with_a_receipt(self, tmp_path):
         nodes, edges = graph()

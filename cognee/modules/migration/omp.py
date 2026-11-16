@@ -137,7 +137,8 @@ class OMPMemory(BaseModel):
     travel under one ``cognee`` key (see :func:`memory_from_record`).
     """
 
-    model_config = ConfigDict(extra="allow")
+    # Hand-written front matter often leaves numbers unquoted (``identifier: 42``).
+    model_config = ConfigDict(extra="allow", coerce_numbers_to_str=True)
 
     identifier: str
     media_type: str
@@ -692,6 +693,12 @@ def prepare_omp_destination(destination: Path, overwrite: bool) -> None:
                 f"OMP export destination {destination} is a symbolic link; pass the "
                 "folder it points to for overwrite=True to delete it."
             )
+        resolved = destination.resolve()
+        if Path.cwd().is_relative_to(resolved) or resolved == Path.home():
+            raise ValueError(
+                f"OMP export destination {destination} holds the working or home "
+                "directory; overwrite=True will not delete it."
+            )
         shutil.rmtree(destination)
     destination.mkdir(parents=True, exist_ok=True)
 
@@ -727,7 +734,7 @@ def write_omp_export(
     count = 0
     minimal = audit = True
     media_types: set[str] = set()
-    written: set[Path] = set()
+    written: set[str] = set()  # case-folded relative paths
     index_entries: list[tuple[str, str, str]] = []
     resolved_destination = destination.resolve()
     jsonl_handle = None
@@ -746,9 +753,10 @@ def write_omp_export(
             relative = _relative_markdown_path(memory)
             if not (destination / relative).resolve().is_relative_to(resolved_destination):
                 relative = Path(_slug(memory.identifier) + ".md")
-            # Any name, the fallback included, is deduplicated within the folder.
+            # Any name, the fallback included, is deduplicated within the folder,
+            # ignoring case: macOS and Windows file names are case-insensitive.
             stem, suffix, bump = relative.with_suffix(""), relative.suffix, 1
-            while relative in written:
+            while relative.as_posix().casefold() in written:
                 relative = stem.with_name(f"{stem.name}-{bump}{suffix}")
                 bump += 1
             target = (destination / relative).resolve()
@@ -756,7 +764,7 @@ def write_omp_export(
             memory = memory.model_copy(update={"path": relative.as_posix()})
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(memory.to_markdown(), encoding="utf-8")
-            written.add(relative)
+            written.add(relative.as_posix().casefold())
             index_entries.append(
                 (memory.title or memory.identifier, relative.as_posix(), memory.identifier)
             )
@@ -764,7 +772,7 @@ def write_omp_export(
         if jsonl_handle is not None:
             jsonl_handle.close()
 
-    if layout == "markdown" and Path(OMP_INDEX_FILE) not in written:
+    if layout == "markdown" and OMP_INDEX_FILE.casefold() not in written:
         (destination / OMP_INDEX_FILE).write_text(
             _index_markdown(index_entries, manifest.exported_at), encoding="utf-8"
         )
