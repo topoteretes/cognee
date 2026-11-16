@@ -219,10 +219,16 @@ async def _report_unhandled_exceptions(request, call_next):
 @app.middleware("http")
 async def _stamp_operation_origin(request, call_next):
     # Operations executed for this request record origin="api" in
-    # pipeline_runs. ContextVars set here propagate into the handler task.
-    from cognee.modules.operations import ORIGIN_API, operation_origin_scope
+    # pipeline_runs, and run as a remote caller's, which closes the
+    # server-side path and database gates. ContextVars set here propagate
+    # into the handler task.
+    from cognee.modules.operations import (
+        ORIGIN_API,
+        operation_origin_scope,
+        remote_caller_scope,
+    )
 
-    with operation_origin_scope(ORIGIN_API):
+    with operation_origin_scope(ORIGIN_API), remote_caller_scope():
         return await call_next(request)
 
 

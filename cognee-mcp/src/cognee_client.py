@@ -9,17 +9,18 @@ This module provides a unified interface for interacting with Cognee, supporting
 import asyncio
 import base64
 import hashlib
+import io
 import json
 import mimetypes
 import os
 import sys
-import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 import httpx
+from starlette.datastructures import UploadFile
 
 from cognee.shared.logging_utils import get_logger
 
@@ -215,18 +216,21 @@ class CogneeClient:
         """
         if content_base64:
             return CogneeClient._file_upload(filename, content_base64)
-        if isinstance(data, (str, Path)) and os.path.isfile(data):
+        if isinstance(data, (str, Path)):
             # The file is read here, on the MCP host, so it has to pass the same
-            # guards direct-mode ingestion applies to this string: a path outside
-            # COGNEE_ALLOWED_LOCAL_FILE_ROOTS is stored as text, and with
-            # ACCEPT_LOCAL_FILE_PATH=false a local file is refused outright.
+            # guards direct-mode ingestion applies to this string. With the gate
+            # closed, screen_server_paths refuses a server path without a lookup
+            # and anything else is text; open, an existing file inside
+            # COGNEE_ALLOWED_LOCAL_FILE_ROOTS is uploaded as the file.
             from cognee.tasks.ingestion.save_data_item_to_storage import (
                 _resolve_local_file_uri,
-                require_server_path_access,
+                local_file_paths_accepted,
             )
+            from cognee.tasks.ingestion.screen_server_paths import screen_server_paths
 
-            if _resolve_local_file_uri(data) is not None:
-                require_server_path_access()
+            if not local_file_paths_accepted():
+                screen_server_paths(data)
+            elif os.path.isfile(data) and _resolve_local_file_uri(data) is not None:
                 return CogneeClient._path_upload(data)
         return CogneeClient._text_upload(data)
 
@@ -771,13 +775,11 @@ class CogneeClient:
                         "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_files)
                     }
 
-                tmp_dir = None
                 if content_base64:
+                    # An upload, like the API's: never a path on this server,
+                    # which a network caller (sse/http) would be refused.
                     safe_name, raw_bytes = self._decode_upload(filename, content_base64)
-                    tmp_dir = tempfile.mkdtemp(prefix="cognee_upload_")
-                    remember_data = os.path.join(tmp_dir, safe_name)
-                    with open(remember_data, "wb") as f:
-                        f.write(raw_bytes)
+                    remember_data = UploadFile(file=io.BytesIO(raw_bytes), filename=safe_name)
                 else:
                     remember_data = data
 
@@ -796,18 +798,7 @@ class CogneeClient:
                 if node_set:
                     kwargs["node_set"] = list(node_set)
 
-                try:
-                    result = await self.cognee.remember(**kwargs)
-                finally:
-                    if tmp_dir is not None:
-                        try:
-                            os.unlink(remember_data)
-                        except OSError:
-                            pass
-                        try:
-                            os.rmdir(tmp_dir)
-                        except OSError:
-                            pass
+                result = await self.cognee.remember(**kwargs)
 
                 return {
                     "status": getattr(result, "status", "completed"),

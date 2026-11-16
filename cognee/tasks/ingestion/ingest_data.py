@@ -37,7 +37,10 @@ from cognee.shared.logging_utils import get_logger
 from .carried_source import find_carried_source
 from .data_item import DataItem
 from .data_item_to_text_file import data_item_to_text_file
-from .save_data_item_to_storage import save_data_item_to_storage_detailed
+from .save_data_item_to_storage import (
+    local_file_paths_accepted,
+    save_data_item_to_storage_detailed,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle: pipelines imports this package
     from cognee.modules.pipelines.models import PipelineContext
@@ -146,7 +149,7 @@ def _source_uri_from_input(data_item: Any) -> str | None:
     its original URL would otherwise be lost. File and object-storage locators
     are preserved as well; ordinary text input deliberately returns ``None``.
     """
-    literal_text = False
+    literal_text = cognee_path = False
     if isinstance(data_item, DataItem):
         metadata = data_item.external_metadata
         if isinstance(metadata, dict):
@@ -154,12 +157,18 @@ def _source_uri_from_input(data_item: Any) -> str | None:
             if isinstance(explicit, str) and explicit.strip():
                 return explicit.strip()
         literal_text = data_item.literal_text
+        cognee_path = data_item.cognee_path
         data_item = data_item.data
 
     if isinstance(data_item, str) and not literal_text:
         parsed = urlparse(data_item)
         if parsed.scheme.lower() in {"http", "https", "s3", "file"}:
             return data_item
+        if not local_file_paths_accepted() and not cognee_path:
+            # Gate closed: the disk is never asked about a caller's string, so the
+            # recorded source cannot reveal whether a path exists. A path cognee
+            # produced (a cloned repository's file) is its own and keeps its source.
+            return None
         try:
             path = Path(data_item)
             if path.is_absolute() or path.is_file():
