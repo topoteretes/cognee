@@ -1467,13 +1467,13 @@ async def remember(
             )
 
         from cognee.infrastructure.llm import resolve_chunk_size
-        from cognee.modules.chunking.TextChunker import TextChunker
+        from cognee.modules.chunking.chunker_registry import get_default_chunker
         from cognee.modules.cognify.estimator import estimate_remember_dry_run
         from cognee.shared.data_models import KnowledgeGraph
 
         return await estimate_remember_dry_run(
             data,
-            chunker=chunker or TextChunker,
+            chunker=chunker or get_default_chunker(),
             chunk_size=await resolve_chunk_size(chunk_size),
             graph_model=kwargs.get("graph_model") or KnowledgeGraph,
             custom_prompt=custom_prompt,
@@ -2148,9 +2148,9 @@ async def _remember_inner(
     from cognee.api.v1.cognify import cognify
 
     if chunker is None:
-        from cognee.modules.chunking.TextChunker import TextChunker
+        from cognee.modules.chunking.chunker_registry import get_default_chunker
 
-        chunker = TextChunker
+        chunker = get_default_chunker()
 
     # Route kwargs to add(), cognify(), or both
     remaining = dict(kwargs)

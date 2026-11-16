@@ -10,6 +10,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingCo
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import resolve_chunk_size
 from cognee.infrastructure.llm.config import LLMConfig
+from cognee.modules.chunking.chunker_registry import get_default_chunker
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.chunking_tasks import build_chunking_tasks, resolve_chunks_per_batch
 from cognee.modules.cognify.config import (
@@ -138,7 +139,7 @@ async def cognify(
     datasets: str | list[str] | list[UUID] | None = None,
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
-    chunker=TextChunker,
+    chunker=None,
     chunk_size: int | None = None,
     chunks_per_batch: int | None = None,
     config: Config = None,
@@ -221,7 +222,8 @@ async def cognify(
         chunker: Text chunking strategy (TextChunker, LangchainChunker).
                 - TextChunker: Paragraph-based chunking (default, most reliable)
                 - LangchainChunker: Recursive character splitting with overlap
-                Determines how documents are segmented for processing.
+                Determines how documents are segmented for processing. None uses the
+                chunker DEFAULT_CHUNKER names (TextChunker when unset).
         ontology_file_path: Optional path, or comma-separated paths, to the ontology
                     used for both extraction schema planning and graph integration.
         chunk_size: Maximum tokens per chunk. Auto-calculated based on LLM if None.
@@ -452,6 +454,9 @@ async def cognify(
             run_in_background=run_in_background,
             graph_model=graph_model,
         )
+
+    if chunker is None:
+        chunker = get_default_chunker()
 
     # After the argument checks and the remote route: a cognify that raises above,
     # or runs remotely, must not install anything locally. Awaited, so the pipeline
