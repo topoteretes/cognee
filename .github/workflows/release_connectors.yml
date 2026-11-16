@@ -52,6 +52,7 @@ on:
           - cognee-connector-google-calendar
           - cognee-connector-google-drive
           - cognee-connector-linear
+          - cognee-connector-mixpanel
           - cognee-connector-notion
           - cognee-connector-obsidian
           - cognee-connector-onenote

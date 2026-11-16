@@ -49,6 +49,7 @@ this workspace and never a runtime dependency of a connector
 | [Google Calendar](connectors/google-calendar) | [`cognee-connector-google-calendar`](https://pypi.org/project/cognee-connector-google-calendar/) | oauth2 | `google_calendar` | ✅ | — | ported |
 | [Google Drive](connectors/google-drive) | [`cognee-connector-google-drive`](https://pypi.org/project/cognee-connector-google-drive/) | oauth2 | `google_drive` | ✅ | — | ported |
 | [Linear](connectors/linear) | [`cognee-connector-linear`](https://pypi.org/project/cognee-connector-linear/) | oauth2 | `linear` | ✅ | — | ported |
+| Mixpanel | `cognee-connector-mixpanel` | api_key | `mixpanel` | ✅ | — | planned |
 | [Notion](connectors/notion) | [`cognee-connector-notion`](https://pypi.org/project/cognee-connector-notion/) | oauth2 | `notion` | ✅ | — | ported |
 | [Obsidian](connectors/obsidian) | [`cognee-connector-obsidian`](https://pypi.org/project/cognee-connector-obsidian/) | local | `obsidian` | ✅ | — | ported |
 | [OneNote](connectors/onenote) | [`cognee-connector-onenote`](https://pypi.org/project/cognee-connector-onenote/) | api_key | `onenote` | ✅ | — | ported |
