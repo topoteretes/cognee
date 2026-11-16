@@ -223,3 +223,19 @@ connectors:
       cognee: "cognee/tasks/ingestion/connectors/onenote.py"
       cloud: null
     env_vars: []
+  - slug: arxiv
+    package: cognee-connector-arxiv
+    module: cognee_connector_arxiv
+    directory: connectors/arxiv
+    display_name: "arXiv"
+    auth: local
+    tier: null
+    sources: [arxiv]
+    hosts:
+      cognee: true
+      cloud: false
+    status: planned
+    origin:
+      cognee: null
+      cloud: null
+    env_vars: []
