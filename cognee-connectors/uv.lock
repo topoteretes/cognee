@@ -37,6 +37,7 @@ enola-cli = { timestamp = "0001-01-01T00:00:00Z", span = "PT0S" }
 [manifest]
 members = [
     "cognee-connector-apollo",
+    "cognee-connector-arxiv",
     "cognee-connector-asana",
     "cognee-connector-github",
     "cognee-connector-gmail",
@@ -901,6 +902,28 @@ wheels = [
 name = "cognee-connector-apollo"
 version = "0.1.0"
 source = { editable = "connectors/apollo" }
+dependencies = [
+    { name = "cognee-connectors-core", extra = ["dlt"] },
+    { name = "requests" },
+]
+
+[package.optional-dependencies]
+cognee = [
+    { name = "cognee" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cognee", marker = "extra == 'cognee'", specifier = ">=1.6.5,<2" },
+    { name = "cognee-connectors-core", extras = ["dlt"], editable = "core" },
+    { name = "requests", specifier = ">=2.26.0,<3" },
+]
+provides-extras = ["cognee"]
+
+[[package]]
+name = "cognee-connector-arxiv"
+version = "0.1.0"
+source = { editable = "connectors/arxiv" }
 dependencies = [
     { name = "cognee-connectors-core", extra = ["dlt"] },
     { name = "requests" },

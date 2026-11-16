@@ -42,6 +42,7 @@ this workspace and never a runtime dependency of a connector
 | Connector | Package | Auth | Sources | cognee server | Cloud | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | [Apollo](connectors/apollo) | [`cognee-connector-apollo`](https://pypi.org/project/cognee-connector-apollo/) | api_key | `apollo` | ✅ | — | ported |
+| arXiv | `cognee-connector-arxiv` | local | `arxiv` | ✅ | — | planned |
 | [Asana](connectors/asana) | [`cognee-connector-asana`](https://pypi.org/project/cognee-connector-asana/) | api_key | `asana` | ✅ | — | ported |
 | [GitHub](connectors/github) | [`cognee-connector-github`](https://pypi.org/project/cognee-connector-github/) | oauth2 | — | ✅ | — | ported |
 | [Gmail](connectors/gmail) | [`cognee-connector-gmail`](https://pypi.org/project/cognee-connector-gmail/) | oauth2 | `gmail` | ✅ | — | ported |
