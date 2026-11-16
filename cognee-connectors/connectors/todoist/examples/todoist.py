@@ -53,7 +53,7 @@ async def main() -> None:
             "Pass your Todoist API token as the first argument or set TODOIST_API_KEY."
         )
 
-    await cognee.prune_data()
+    await cognee.prune.prune_data()
 
     await cognee.remember(
         todoist_source(resource_name="todoist_account", access_token=token),
