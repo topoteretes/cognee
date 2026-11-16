@@ -100,8 +100,8 @@ _RETRIES = 3
 # The single-request listings of each definition kind: the Query API path, the API base
 # it lives on, and whether the project id goes in the query string.
 _LISTINGS = {
-    "annotations": ("/annotations", "query", False),
-    "cohorts": ("/cohorts/list", "query", False),
+    "annotations": ("/annotations", "query", True),
+    "cohorts": ("/cohorts/list", "query", True),
     "funnels": ("/funnels/list", "query", True),
     "schemas": ("/projects/{project_id}/schemas", "app", False),
 }
@@ -319,7 +319,9 @@ class MixpanelClient:
             payload = response.json()
         except ValueError:
             payload = None
-        if not isinstance(payload, dict):
+        # Mixpanel answers some Query API listings (annotations, cohorts, funnels)
+        # with a bare JSON array, not an object.
+        if not isinstance(payload, (dict, list)):
             raise MixpanelAPIError(f"Mixpanel sent an unreadable answer for {path}")
         return payload
 

@@ -141,12 +141,19 @@ def test_a_403_names_the_endpoint_the_credential_cannot_call(monkeypatch):
         client.request("GET", "/funnels/list", params={"project_id": "1"})
 
 
-@pytest.mark.parametrize("payload", [ValueError("not json"), "plain text", [1, 2]])
-def test_a_200_without_a_json_object_is_an_error_not_an_empty_listing(monkeypatch, payload):
+@pytest.mark.parametrize("payload", [ValueError("not json"), "plain text"])
+def test_a_200_without_a_json_answer_is_an_error_not_an_empty_listing(monkeypatch, payload):
     client, _, _ = _client(monkeypatch, _Response(200, payload))
 
     with pytest.raises(MixpanelAPIError, match="unreadable"):
         client.request("GET", "/cohorts/list")
+
+
+def test_a_200_json_array_answer_is_returned_as_is(monkeypatch):
+    # Mixpanel's /annotations, /cohorts/list and /funnels/list answer with a bare array.
+    client, _, _ = _client(monkeypatch, _Response(200, [{"id": 1}, {"id": 2}]))
+
+    assert client.request("GET", "/cohorts/list") == [{"id": 1}, {"id": 2}]
 
 
 def test_server_errors_and_network_failures_are_retried(monkeypatch):
