@@ -79,7 +79,6 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 ### Ingestion
 | Script | Demonstrates |
 |---|---|
-| [`dlt_column_search.py`](guides/dlt_column_search.py) | Ingest Chinook and scope `GRAPH_COMPLETION` to a `SchemaColumn` named `table:column` |
 | [`web_url_content_ingestion_example.py`](guides/web_url_content_ingestion_example.py) | Ingesting a URL with `preferred_loaders` (needs network) |
 | [`multimedia_audio_image_processing_example.py`](guides/multimedia_audio_image_processing_example.py) | Audio + image ingestion (bundled assets) |
 | [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
