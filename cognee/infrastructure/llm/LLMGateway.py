@@ -133,8 +133,12 @@ async def _capture_llm_call_after(
         record(None, "error", error_class=type(error).__name__)
         raise
 
-    tokens_in, tokens_out = _exact_usage_from_result(result)
-    record(result, "ok", tokens_in=tokens_in, tokens_out=tokens_out)
+    try:
+        tokens_in, tokens_out = _exact_usage_from_result(result)
+        record(result, "ok", tokens_in=tokens_in, tokens_out=tokens_out)
+    except Exception:
+        logger.warning("LLM call capture failed", exc_info=True)
+
     return result
 
 
