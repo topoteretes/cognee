@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import JSONResponse
-from pydantic import Field, field_validator
+from pydantic import Field
 from starlette.status import (
     WS_1000_NORMAL_CLOSURE,
     WS_1008_POLICY_VIOLATION,
@@ -14,7 +14,6 @@ from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO
 from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
-from cognee.modules.chunking.chunker_registry import get_chunker, validate_chunker_name
 from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_dataset
 from cognee.modules.graph.methods import get_formatted_graph_data
@@ -117,20 +116,6 @@ class CognifyPayloadDTO(InDTO):
         examples=[20],
         description="Maximum number of data items to process concurrently within a dataset.",
     )
-    chunker: str | None = Field(
-        default=None,
-        examples=[None],
-        description=(
-            "Name of the chunker that splits the documents: a built-in one (TextChunker, "
-            "LangchainChunker, CsvChunker, JsonListChunker) or one this server registered. "
-            "Leave null for the server's default (DEFAULT_CHUNKER, else TextChunker)."
-        ),
-    )
-
-    @field_validator("chunker")
-    @classmethod
-    def chunker_is_registered(cls, name: str | None) -> str | None:
-        return name if name is None else validate_chunker_name(name)
 
 
 def get_cognify_router() -> APIRouter:
@@ -175,7 +160,6 @@ def get_cognify_router() -> APIRouter:
           a size from the configured LLM and embedding limits.
         - **ontology_key** (Optional[List[str]]): Reference to one or more previously uploaded ontology files to use for knowledge graph construction.
         - **chunks_per_batch** (Optional[int]): Number of chunks to process per task batch in Cognify. Uses the pipeline default when omitted.
-        - **chunker** (Optional[str]): Name of a registered chunker. Uses the server's default when omitted.
         - **data_per_batch** (Optional[int]): Maximum number of data items to process concurrently within a dataset. Defaults to 20.
 
         ## Response
@@ -265,7 +249,6 @@ def get_cognify_router() -> APIRouter:
                 chunk_size=payload.chunk_size,
                 chunks_per_batch=payload.chunks_per_batch,
                 data_per_batch=payload.data_per_batch,
-                chunker=get_chunker(payload.chunker) if payload.chunker else None,
                 # HTTP contract: clients poll run status from the returned run
                 # info (and /datasets/status); an errored run is a valid
                 # response body here, not an exception.
