@@ -5,7 +5,8 @@ stores ``halfvec``, indexed on the column up to 4,000 dimensions (pgvector's HNS
 halfvec). A collection created by an earlier release with a ``vector`` column keeps it:
 pgvector indexes ``vector`` up to 2,000 dimensions, so a wider one is indexed through a
 halfvec cast, and the search must order by that same expression for the planner to use the
-index. The adapter requires pgvector 0.7.0, the first release with halfvec.
+index. The adapter requires pgvector 0.7.0, the first release with halfvec. New indexes are
+built with 8 links per node (``m``) instead of pgvector's 16, see ``_HNSW_M``.
 """
 
 import pytest
@@ -20,6 +21,8 @@ from sqlalchemy import Column, MetaData, String, Table
 from sqlalchemy.dialects import postgresql
 
 from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
+    _HNSW_EF_CONSTRUCTION,
+    _HNSW_M,
     _indexed_distance,
     _indexed_type,
     hnsw_index_name,
@@ -29,13 +32,18 @@ from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
 from cognee.modules.migrations.versions import pgvector_hnsw_indexes
 
 CURRENT = (0, 8, 0)
+BUILD_PARAMETERS = f" WITH (m = {_HNSW_M}, ef_construction = {_HNSW_EF_CONSTRUCTION})"
+
+
+def test_new_indexes_get_eight_links_per_node():
+    assert (_HNSW_M, _HNSW_EF_CONSTRUCTION) == (8, 64)
 
 
 @pytest.mark.parametrize("dimensions", [8, 1536, 3072, 4000])
 def test_a_halfvec_column_is_indexed_on_the_column(dimensions):
     assert hnsw_index_statement("Entity_name", dimensions, column_type="halfvec") == (
         'CREATE INDEX IF NOT EXISTS "Entity_name_vector_hnsw" '
-        'ON "Entity_name" USING hnsw (vector halfvec_cosine_ops)'
+        'ON "Entity_name" USING hnsw (vector halfvec_cosine_ops)' + BUILD_PARAMETERS
     )
 
 
@@ -46,7 +54,7 @@ def test_a_halfvec_column_pgvector_cannot_index_gets_no_index():
 def test_a_small_vector_column_is_indexed_on_the_column():
     assert hnsw_index_statement("Entity_name", 1536, column_type="vector") == (
         'CREATE INDEX IF NOT EXISTS "Entity_name_vector_hnsw" '
-        'ON "Entity_name" USING hnsw (vector vector_cosine_ops)'
+        'ON "Entity_name" USING hnsw (vector vector_cosine_ops)' + BUILD_PARAMETERS
     )
 
 
@@ -54,6 +62,7 @@ def test_a_large_vector_column_is_indexed_through_a_halfvec_cast():
     assert hnsw_index_statement("Entity_name", 3072, column_type="vector") == (
         'CREATE INDEX IF NOT EXISTS "Entity_name_vector_hnsw" '
         'ON "Entity_name" USING hnsw ((vector::halfvec(3072)) halfvec_cosine_ops)'
+        + BUILD_PARAMETERS
     )
 
 
@@ -129,13 +138,20 @@ def test_search_orders_by_the_indexed_expression():
 @pytest.mark.parametrize("dimensions", [1536, 3072, 4097])
 @pytest.mark.parametrize("table_name", ["Entity_name", "B" * 70])
 def test_migration_statements_match_the_adapter(version, dimensions, table_name):
-    # The migration carries a frozen copy; it must build the index the adapter builds for
-    # the collections it sees, which are ``vector`` columns only (its catalog query reads
-    # no other type, so a ``halfvec`` collection is left to the adapter).
+    """The migration carries a frozen copy of the statement; it builds the same index the
+    adapter builds (name, expression, operator class), for the collections it sees, which
+    are ``vector`` columns only (its catalog query reads no other type, so a ``halfvec``
+    collection is left to the adapter).
+
+    The two differ only in the build parameters: the adapter adds ``WITH (m, ef_construction)``
+    and the frozen copy builds with pgvector's defaults. That is fine because both only
+    create an index where none exists (``IF NOT EXISTS``): an index the migration built
+    is searched exactly like the adapter's, and the adapter never rebuilds it.
+    """
     assert "t.typname = 'vector'" in pgvector_hnsw_indexes._COLLECTIONS_SQL
-    assert pgvector_hnsw_indexes._frozen_index_statement(
-        table_name, dimensions, version
-    ) == hnsw_index_statement(table_name, dimensions, column_type="vector")
+    frozen = pgvector_hnsw_indexes._frozen_index_statement(table_name, dimensions, version)
+    adapter = hnsw_index_statement(table_name, dimensions, column_type="vector")
+    assert (None if frozen is None else frozen + BUILD_PARAMETERS) == adapter
     assert pgvector_hnsw_indexes._frozen_index_name(table_name) == hnsw_index_name(table_name)
 
 
@@ -210,7 +226,7 @@ def _build_transaction(log):
     return log[start + 1 : log.index("COMMIT")]
 
 
-def _assert_serial_build_in_raised_memory(statements):
+def _assert_serial_build_in_raised_memory(statements, index_statement):
     # Docker caps /dev/shm at 64 MB; a parallel build at the raised maintenance_work_mem
     # needs a shared segment of that size and fails, so the build must be serial, and the
     # settings must come before the CREATE INDEX in its own transaction (SET LOCAL).
@@ -220,7 +236,7 @@ def _assert_serial_build_in_raised_memory(statements):
             "WHERE name = 'maintenance_work_mem' AND setting::bigint < :target_kb"
         ),
         "SET LOCAL max_parallel_maintenance_workers = 0",
-        hnsw_index_statement("Entity_name", 3072, column_type="vector"),
+        index_statement,
     ]
 
 
@@ -229,14 +245,20 @@ async def test_adapter_rebuild_runs_a_serial_build_with_raised_memory():
     engine = _Engine()
     result = await _adapter_with(engine).run_migrations()
     assert result == {"hnsw_index_checked": ["Entity_name"], "hnsw_index_failed": []}
-    _assert_serial_build_in_raised_memory(_build_transaction(engine.log))
+    _assert_serial_build_in_raised_memory(
+        _build_transaction(engine.log),
+        hnsw_index_statement("Entity_name", 3072, column_type="vector"),
+    )
 
 
 @pytest.mark.asyncio
 async def test_migration_runs_a_serial_build_with_raised_memory():
     engine = _Engine()
     await pgvector_hnsw_indexes.migrate(SimpleNamespace(vector_engine=_adapter_with(engine)))
-    _assert_serial_build_in_raised_memory(_build_transaction(engine.log))
+    _assert_serial_build_in_raised_memory(
+        _build_transaction(engine.log),
+        pgvector_hnsw_indexes._frozen_index_statement("Entity_name", 3072, CURRENT),
+    )
 
 
 class _VersionConnection:
