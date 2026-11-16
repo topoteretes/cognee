@@ -43,6 +43,7 @@ this workspace and never a runtime dependency of a connector
 | --- | --- | --- | --- | --- | --- | --- |
 | [Apollo](connectors/apollo) | [`cognee-connector-apollo`](https://pypi.org/project/cognee-connector-apollo/) | api_key | `apollo` | ✅ | — | ported |
 | [Asana](connectors/asana) | [`cognee-connector-asana`](https://pypi.org/project/cognee-connector-asana/) | api_key | `asana` | ✅ | — | ported |
+| [BambooHR](connectors/bamboohr) | [`cognee-connector-bamboohr`](https://pypi.org/project/cognee-connector-bamboohr/) | api_key | `bamboohr` | ✅ | — | ported |
 | [GitHub](connectors/github) | [`cognee-connector-github`](https://pypi.org/project/cognee-connector-github/) | oauth2 | — | ✅ | — | ported |
 | [Gmail](connectors/gmail) | [`cognee-connector-gmail`](https://pypi.org/project/cognee-connector-gmail/) | oauth2 | `gmail` | ✅ | — | ported |
 | [Google](connectors/google) | [`cognee-connector-google`](https://pypi.org/project/cognee-connector-google/) | oauth2 | — | — | — | ported |

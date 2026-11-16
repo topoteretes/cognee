@@ -38,6 +38,7 @@ enola-cli = { timestamp = "0001-01-01T00:00:00Z", span = "PT0S" }
 members = [
     "cognee-connector-apollo",
     "cognee-connector-asana",
+    "cognee-connector-bamboohr",
     "cognee-connector-github",
     "cognee-connector-gmail",
     "cognee-connector-google",
@@ -923,6 +924,28 @@ provides-extras = ["cognee"]
 name = "cognee-connector-asana"
 version = "0.1.0"
 source = { editable = "connectors/asana" }
+dependencies = [
+    { name = "cognee-connectors-core", extra = ["dlt"] },
+    { name = "requests" },
+]
+
+[package.optional-dependencies]
+cognee = [
+    { name = "cognee" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cognee", marker = "extra == 'cognee'", specifier = ">=1.6.5,<2" },
+    { name = "cognee-connectors-core", extras = ["dlt"], editable = "core" },
+    { name = "requests", specifier = ">=2.26.0,<3" },
+]
+provides-extras = ["cognee"]
+
+[[package]]
+name = "cognee-connector-bamboohr"
+version = "0.1.0"
+source = { editable = "connectors/bamboohr" }
 dependencies = [
     { name = "cognee-connectors-core", extra = ["dlt"] },
     { name = "requests" },
