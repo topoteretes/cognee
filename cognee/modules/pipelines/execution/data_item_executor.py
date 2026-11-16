@@ -56,7 +56,7 @@ class DataItemExecutor(Protocol):
     """Runs the data items of a run ``run_tasks`` owns.
 
     Only a run that may leave its process reaches an executor (see
-    ``portable_spec``): an incremental one, among other things.
+    ``portable_spec``). Which of its items may is the executor's to say.
 
     Returns one entry per item, in any order. For an item it handed back, the
     entry ``item_run.run_in_process`` returned. For an item that ran elsewhere,
@@ -114,11 +114,10 @@ def portable_spec(
       too. With backend access control every process binds a dataset's own
       stores; without it, a store configuration a call set for this context is
       known to this process alone;
-    - the run is incremental. Only then does a completion stamp mean "this item
-      is done", which is all the rollback has to go by when the executor fails
-      without results. A run that is not incremental reprocesses stamped items
-      and stamps none;
     - what it would send survives JSON.
+
+    Which items of such a run may leave is the executor's to say, by what the
+    item is and whether the run is incremental (``ShardedExecutor``).
     """
     portable = getattr(task_resolver, "portable", None)
     if (
@@ -127,7 +126,6 @@ def portable_spec(
         or embedding_config is not None
         or context_llm_config.get() is not None
         or context_embedding_config.get() is not None
-        or not (run.incremental_loading or run.data_cache)
         or (
             not backend_access_control_enabled()
             and (

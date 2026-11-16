@@ -15,9 +15,9 @@ from .messages import (
     PipelineRunSpec,
     RunSettings,
     Shard,
+    ShardItem,
     ShardResult,
     count_usage,
-    result_entries,
 )
 from .sharded_executor import (
     WORKER_LOST,
@@ -26,9 +26,11 @@ from .sharded_executor import (
     plan_shards,
 )
 from .task_resolvers import (
+    RegisteredTasks,
     build_task_resolver,
     portable_item_check,
     register_task_resolver_factory,
+    registered_tasks,
 )
 
 __all__ = [
@@ -40,8 +42,10 @@ __all__ = [
     "ItemOutcome",
     "ItemRun",
     "PipelineRunSpec",
+    "RegisteredTasks",
     "RunSettings",
     "Shard",
+    "ShardItem",
     "ShardResult",
     "ShardedExecutor",
     "WorkerBackend",
@@ -52,7 +56,7 @@ __all__ = [
     "portable_item_check",
     "portable_spec",
     "register_task_resolver_factory",
-    "result_entries",
+    "registered_tasks",
     "run_items_with",
     "set_data_item_executor",
     "split_completed",

@@ -1,9 +1,9 @@
-"""``run_tasks`` hands a portable, incremental run's data items to the registered executor.
+"""``run_tasks`` hands a portable run's data items to the registered executor.
 
 The run stays one logical run whoever executes its items: ``run_tasks`` keeps
 the run record, the rollback and the terminal status. A run that is not
-portable, not incremental, or cannot be described in JSON never reaches the
-executor. What the rollback is told differs by who ran the items: every result
+portable, or cannot be described in JSON, never reaches the executor; whether a
+run is incremental is the executor's to weigh, per item. What the rollback is told differs by who ran the items: every result
 when the executor returns them, nothing when it fails, because a partial list
 would read as "the run completed only these".
 """
@@ -25,12 +25,13 @@ from cognee.modules.pipelines.execution import (
     ERRORED,
     ItemOutcome,
     PipelineRunSpec,
+    RegisteredTasks,
     ShardResult,
     build_task_resolver,
     count_usage,
     data_item_executor,
     register_task_resolver_factory,
-    result_entries,
+    registered_tasks,
     set_data_item_executor,
     split_completed,
     task_resolvers,
@@ -50,6 +51,19 @@ class _PortableResolver:
 
     def __call__(self, data_item):
         return ["TASKS"]
+
+
+def _entries(outcomes, spec, source_of=None):
+    """The run entries of ``outcomes``, as an executor builds them: one per
+    outcome, naming where its item came from as ``source_of`` (by id) says."""
+    run = {
+        "pipeline_run_id": spec.pipeline_run_id,
+        "dataset_id": spec.dataset_id,
+        "dataset_name": "ds",
+    }
+    return [
+        outcome.to_entry(run, (source_of or {}).get(outcome.data_id, {})) for outcome in outcomes
+    ]
 
 
 class _RecordingExecutor:
@@ -72,11 +86,12 @@ class _RecordingExecutor:
         outcomes = [
             ItemOutcome(
                 status=self.status_for(item),
+                index=index,
                 data_id=item.id,
                 error_class="ExtractionError" if self.status_for(item) == ERRORED else None,
                 error_message="bad file" if self.status_for(item) == ERRORED else None,
             )
-            for item in remote
+            for index, item in enumerate(remote)
         ]
         await item_run.record_progress(len(remote))
         local_results = await item_run.run_in_process(local) if local else []
@@ -85,7 +100,7 @@ class _RecordingExecutor:
         shard = ShardResult(outcomes=outcomes, tokens_in=7, tokens_out=3, embedding_tokens=11)
         count_usage(shard)
         self.source_of = {item.id: item_run.source_fields(item) for item in remote}
-        return local_results + result_entries(shard.outcomes, spec, "ds", self.source_of)
+        return local_results + _entries(shard.outcomes, spec, self.source_of)
 
 
 @pytest.fixture(autouse=True)
@@ -227,10 +242,6 @@ async def test_portable_incremental_run_goes_to_the_executor(monkeypatch, runner
     [
         pytest.param(["TASKS"], {}, id="a plain task list"),
         pytest.param(lambda item: ["TASKS"], {}, id="a resolver that does not describe itself"),
-        # It reprocesses stamped items and stamps none, so a completion stamp says
-        # nothing about this run, and the stamps are all the rollback has when an
-        # executor fails without results.
-        pytest.param(_PortableResolver(), {"incremental_loading": False}, id="not incremental"),
         # A per-call configuration holds credentials, which do not travel.
         pytest.param(_PortableResolver(), {"llm_config": SimpleNamespace()}, id="llm config"),
         pytest.param(
@@ -255,6 +266,26 @@ async def test_run_another_process_could_not_run_stays_in_process(
 
     assert executor.calls == []
     assert in_process.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_portable_run_that_is_not_incremental_reaches_the_executor(
+    monkeypatch, runner_plumbing
+):
+    """Which items of a run may leave is the executor's to say, by what each item
+    is and whether the run is incremental (``worker_can_be_given``), so the run
+    reaches it described as not incremental."""
+    dataset, _, in_process = _setup(monkeypatch, runner_plumbing)
+    executor = _RecordingExecutor()
+    set_data_item_executor(executor)
+    items = _items(2)
+
+    await _drive(dataset, _PortableResolver(), items, incremental_loading=False)
+
+    in_process.assert_not_awaited()
+    [(spec, sent_items)] = executor.calls
+    assert sent_items == items
+    assert (spec.incremental_loading, spec.data_cache) == (False, False)
 
 
 @pytest.mark.asyncio
@@ -327,8 +358,11 @@ async def test_progress_reported_several_items_at_a_time_is_written_when_it_cros
             # tick, 7 passes 5 without landing on it, 100 ends the run.
             for count in (3, 1, 3, 93):
                 await item_run.record_progress(count)
-            done = [ItemOutcome(status=COMPLETED, data_id=item.id) for item in data_items]
-            return result_entries(done, spec, "ds", {})
+            done = [
+                ItemOutcome(status=COMPLETED, index=index, data_id=item.id)
+                for index, item in enumerate(data_items)
+            ]
+            return _entries(done, spec)
 
     set_data_item_executor(_ReportingExecutor())
 
@@ -348,7 +382,7 @@ class _AnsweringExecutor:
         shard = ShardResult(
             outcomes=self.answer(data_items), tokens_in=0, tokens_out=0, embedding_tokens=0
         )
-        return result_entries(shard.outcomes, spec, "ds", {})
+        return _entries(shard.outcomes, spec)
 
 
 @pytest.mark.asyncio
@@ -374,7 +408,8 @@ async def test_an_executor_must_answer_for_every_item_exactly_once(
     set_data_item_executor(
         _AnsweringExecutor(
             lambda items: [
-                ItemOutcome(status=COMPLETED, data_id=data_id(items, index)) for index in answered
+                ItemOutcome(status=COMPLETED, index=at, data_id=data_id(items, index))
+                for at, index in enumerate(answered)
             ]
         )
     )
@@ -405,9 +440,10 @@ async def test_a_budget_rejection_in_another_process_is_raised_as_the_typed_erro
     set_data_item_executor(
         _AnsweringExecutor(
             lambda items: [
-                ItemOutcome(status=COMPLETED, data_id=items[0].id),
+                ItemOutcome(status=COMPLETED, index=0, data_id=items[0].id),
                 ItemOutcome(
                     status=ERRORED,
+                    index=1,
                     data_id=items[1].id,
                     error_class="LLMPaymentRequiredError",
                     error_message="LLM budget exhausted",
@@ -569,9 +605,9 @@ def test_a_workers_outcomes_become_run_entries_and_its_usage_is_counted_by_itsel
     ids = [uuid4(), uuid4(), uuid4()]
     result = ShardResult(
         outcomes=[
-            ItemOutcome(COMPLETED, ids[0]),
-            ItemOutcome(ALREADY_COMPLETED, ids[1]),
-            ItemOutcome(ERRORED, ids[2], error_class="ValueError", error_message="nope"),
+            ItemOutcome(COMPLETED, 0, ids[0]),
+            ItemOutcome(ALREADY_COMPLETED, 1, ids[1]),
+            ItemOutcome(ERRORED, 2, ids[2], error_class="ValueError", error_message="nope"),
         ],
         tokens_in=5,
         tokens_out=2,
@@ -580,7 +616,7 @@ def test_a_workers_outcomes_become_run_entries_and_its_usage_is_counted_by_itsel
     source_of = {ids[0]: {"data_name": "a", "data_location": None}}
 
     with operation_usage_scope() as usage:
-        entries = result_entries(result.outcomes, spec, "ds", source_of)
+        entries = _entries(result.outcomes, spec, source_of)
         # Building the entries counts nothing: usage is counted once, by itself.
         assert (usage.tokens_in, usage.tokens_out, usage.embedding_tokens) == (0, 0, 0)
         count_usage(result)
@@ -598,7 +634,9 @@ def test_a_workers_outcomes_become_run_entries_and_its_usage_is_counted_by_itsel
     assert type(entries[2]["error"]).__name__ == "ValueError"
     assert str(entries[2]["error"]) == "nope"
     # What an item row stores of an entry, and what it is read back as.
-    assert [ItemOutcome.from_entry(entry) for entry in entries] == result.outcomes
+    assert [
+        ItemOutcome.from_entry(entry, index) for index, entry in enumerate(entries)
+    ] == result.outcomes
 
 
 @pytest.mark.asyncio
@@ -644,3 +682,84 @@ async def test_resolver_is_rebuilt_from_its_registered_factory(monkeypatch):
     assert resolver(object()) == [f"tasks for {user.id} at 256"]
     with pytest.raises(KeyError, match="no_such_resolver"):
         await build_task_resolver("no_such_resolver", {}, user)
+
+
+@pytest.mark.asyncio
+async def test_a_factory_may_return_the_one_task_list_every_item_runs(monkeypatch):
+    monkeypatch.setattr(task_resolvers, "_factories", {})
+    user = SimpleNamespace(id=uuid4())
+
+    async def factory(*, user, chunk_size):
+        return [f"tasks for {user.id} at {chunk_size}"]
+
+    register_task_resolver_factory("test_plain_list", factory)
+
+    resolver = await build_task_resolver("test_plain_list", {"chunk_size": 256}, user)
+
+    assert resolver(object()) == resolver("another item") == [f"tasks for {user.id} at 256"]
+
+
+@pytest.mark.asyncio
+async def test_registered_tasks_are_built_here_and_say_how_another_process_rebuilds_them(
+    monkeypatch,
+):
+    """Both processes build a run's tasks from one registered factory: the owner
+    through ``registered_tasks``, which is portable by the same name and
+    arguments a worker rebuilds them from."""
+    monkeypatch.setattr(task_resolvers, "_factories", {})
+    user = SimpleNamespace(id=uuid4())
+
+    async def factory(*, user, chunk_size):
+        return ["TASKS"]
+
+    register_task_resolver_factory("test_registered", factory)
+
+    tasks = await registered_tasks("test_registered", user, chunk_size=256)
+
+    assert isinstance(tasks, RegisteredTasks)
+    assert tasks.portable == ("test_registered", {"chunk_size": 256})
+    assert tasks(object()) == ["TASKS"]
+    # A plain list knows no item it cannot run elsewhere.
+    assert tasks.portable_item(object()) is True
+
+    class _KnowsDocumentsOnly:
+        def __call__(self, item):
+            return ["TASKS"]
+
+        def portable_item(self, item):
+            return item == "document"
+
+    async def picky_factory(*, user):
+        return _KnowsDocumentsOnly()
+
+    register_task_resolver_factory("test_picky", picky_factory)
+    picky = await registered_tasks("test_picky", user)
+    assert (picky.portable_item("document"), picky.portable_item("repository")) == (True, False)
+
+    with pytest.raises(KeyError, match="test_unregistered"):
+        await registered_tasks("test_unregistered", user)
+
+
+@pytest.mark.asyncio
+async def test_a_run_given_registered_tasks_goes_to_the_executor(monkeypatch, runner_plumbing):
+    monkeypatch.setattr(task_resolvers, "_factories", {})
+
+    async def factory(*, user, chunk_size):
+        return ["TASKS"]
+
+    register_task_resolver_factory("test_registered_run", factory)
+    dataset, _, in_process = _setup(monkeypatch, runner_plumbing)
+    executor = _RecordingExecutor()
+    set_data_item_executor(executor)
+    items = _items(2)
+
+    tasks = await registered_tasks("test_registered_run", SimpleNamespace(id=uuid4()), chunk_size=1)
+    await _drive(dataset, tasks, items)
+
+    in_process.assert_not_awaited()
+    [(spec, sent_items)] = executor.calls
+    assert sent_items == items
+    assert (spec.task_resolver, spec.task_resolver_args) == (
+        "test_registered_run",
+        {"chunk_size": 1},
+    )
