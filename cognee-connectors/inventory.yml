@@ -223,3 +223,19 @@ connectors:
       cognee: "cognee/tasks/ingestion/connectors/onenote.py"
       cloud: null
     env_vars: []
+  - slug: mixpanel
+    package: cognee-connector-mixpanel
+    module: cognee_connector_mixpanel
+    directory: connectors/mixpanel
+    display_name: "Mixpanel"
+    auth: api_key
+    tier: null
+    sources: [mixpanel]
+    hosts:
+      cognee: true
+      cloud: false
+    status: planned
+    origin:
+      cognee: null
+      cloud: null
+    env_vars: []

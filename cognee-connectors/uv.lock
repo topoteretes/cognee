@@ -44,6 +44,7 @@ members = [
     "cognee-connector-google-calendar",
     "cognee-connector-google-drive",
     "cognee-connector-linear",
+    "cognee-connector-mixpanel",
     "cognee-connector-notion",
     "cognee-connector-obsidian",
     "cognee-connector-onenote",
@@ -1112,6 +1113,28 @@ requires-dist = [
     { name = "cognee-connectors-core", extras = ["dlt"], editable = "core" },
     { name = "pydantic", specifier = ">=2.13" },
     { name = "requests", specifier = ">=2.32.3,<3" },
+]
+provides-extras = ["cognee"]
+
+[[package]]
+name = "cognee-connector-mixpanel"
+version = "0.1.0"
+source = { editable = "connectors/mixpanel" }
+dependencies = [
+    { name = "cognee-connectors-core", extra = ["dlt"] },
+    { name = "requests" },
+]
+
+[package.optional-dependencies]
+cognee = [
+    { name = "cognee" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cognee", marker = "extra == 'cognee'", specifier = ">=1.6.5,<2" },
+    { name = "cognee-connectors-core", extras = ["dlt"], editable = "core" },
+    { name = "requests", specifier = ">=2.26.0,<3" },
 ]
 provides-extras = ["cognee"]
 
