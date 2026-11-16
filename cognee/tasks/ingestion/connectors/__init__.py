@@ -9,6 +9,7 @@ Other connectors remain available in cognee-community.
 
 from .apollo import apollo_source, build_apollo_service
 from .asana import asana_source, build_asana_service
+from .bluesky import bluesky_source
 from .gmail import build_gmail_service_from_access_token, gmail_source
 from .google_calendar import build_calendar_service_from_access_token, google_calendar_source
 from .google_drive import build_drive_service_from_access_token, google_drive_source
@@ -21,6 +22,7 @@ from .slack import build_slack_service, slack_source
 __all__ = [
     "apollo_source",
     "asana_source",
+    "bluesky_source",
     "build_apollo_service",
     "build_asana_service",
     "build_calendar_service_from_access_token",
