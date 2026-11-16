@@ -52,6 +52,7 @@ this workspace and never a runtime dependency of a connector
 | [Notion](connectors/notion) | [`cognee-connector-notion`](https://pypi.org/project/cognee-connector-notion/) | oauth2 | `notion` | ✅ | — | ported |
 | [Obsidian](connectors/obsidian) | [`cognee-connector-obsidian`](https://pypi.org/project/cognee-connector-obsidian/) | local | `obsidian` | ✅ | — | ported |
 | [OneNote](connectors/onenote) | [`cognee-connector-onenote`](https://pypi.org/project/cognee-connector-onenote/) | api_key | `onenote` | ✅ | — | ported |
+| [PubMed](connectors/pubmed) | [`cognee-connector-pubmed`](https://pypi.org/project/cognee-connector-pubmed/) | api_key | `pubmed` | ✅ | — | ported |
 | [Slack](connectors/slack) | [`cognee-connector-slack`](https://pypi.org/project/cognee-connector-slack/) | oauth2 | — | ✅ | — | ported |
 <!-- inventory:end -->
 

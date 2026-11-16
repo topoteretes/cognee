@@ -44,6 +44,7 @@ cognee-connector-apollo = { workspace = true }
 cognee-connector-asana = { workspace = true }
 cognee-connector-obsidian = { workspace = true }
 cognee-connector-onenote = { workspace = true }
+cognee-connector-pubmed = { workspace = true }
 
 [dependency-groups]
 # cognee is a development dependency of the workspace, not of any package: the
