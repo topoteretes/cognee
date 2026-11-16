@@ -314,7 +314,7 @@ async def invalidate_agent_connections_for_dataset(
     ds_id_str = str(dataset_id)
     session_id_set = {s for s in session_ids if s}
     affected_users: set[UUID] = {
-         UUID(str(u)) if not isinstance(u, UUID) else u for u in user_ids if u is not None
+        UUID(str(u)) if not isinstance(u, UUID) else u for u in user_ids if u is not None
     }
     invalidated = 0
 
@@ -326,9 +326,7 @@ async def invalidate_agent_connections_for_dataset(
                 continue
             remaining_ds = [d for d in conn.datasets if d.id != ds_id_str]
             new_status = (
-                "inactive"
-                if (had_session or (had_ds and not remaining_ds))
-                else conn.status
+                "inactive" if (had_session or (had_ds and not remaining_ds)) else conn.status
             )
             _registered_agent_connections[conn_id] = conn.model_copy(
                 update={"datasets": remaining_ds, "status": new_status}
@@ -354,16 +352,20 @@ async def invalidate_agent_connections_for_dataset(
                     existing_config = config.get("configuration", {})
                     agents = existing_config.get("agents", {})
                     changed = False
-                    for cid, cdata in list(agents.items()):
+                    for cdata in list(agents.values()):
                         if not isinstance(cdata, dict):
                             continue
                         ds_list = cdata.get("datasets") or []
-                        had_ds = any(isinstance(d, dict) and d.get("id") == ds_id_str for d in ds_list)
+                        had_ds = any(
+                            isinstance(d, dict) and d.get("id") == ds_id_str for d in ds_list
+                        )
                         had_sess = bool(cdata.get("session_id") in session_id_set)
                         if not had_ds and not had_sess:
                             continue
                         rem_ds = [
-                            d for d in ds_list if not (isinstance(d, dict) and d.get("id") == ds_id_str)
+                            d
+                            for d in ds_list
+                            if not (isinstance(d, dict) and d.get("id") == ds_id_str)
                         ]
                         cdata["datasets"] = rem_ds
                         if had_sess or (had_ds and not rem_ds):

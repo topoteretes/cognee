@@ -42,10 +42,13 @@ logger = get_logger("invalidate_sessions")
 
 
 async def invalidate_sessions_for_dataset(dataset_id: UUID) -> dict:
-    """Delete every session attributed to the dataset from the session cache.
+    """Delete every session attributed to the dataset from the session cache and DB.
 
     Used by dataset-level deletes (``forget(dataset=...)``, ``empty_dataset``),
-    where all session content derives from data that is now gone.
+    where all session content derives from data that is now gone. Routes cleanup
+    through ``delete_sessions(..., datasets_being_deleted=[dataset_id])`` so the
+    deletion holds each session's improve claim and turn lock before removing
+    cache entries, Q&A vectors, and relational session rows.
     """
     session_manager = get_session_manager()
     if not session_manager.is_available:
@@ -53,31 +56,39 @@ async def invalidate_sessions_for_dataset(dataset_id: UUID) -> dict:
 
     sessions = await list_sessions_for_dataset(dataset_id)
     deleted = 0
-    for user_id, session_id in sessions:
-        try:
-            if await session_manager.delete_session(user_id=str(user_id), session_id=session_id):
-                deleted += 1
-        except Exception as error:
-            logger.warning(
-                "Session invalidation: failed to delete session %s for user %s (non-fatal): %s",
-                session_id,
-                user_id,
-                error,
-                exc_info=True,
-            )
-
     if sessions:
         try:
-            from .delete_session import _delete_session_rows
+            from cognee.context_global_variables import graph_db_config, vector_db_config
+            from cognee.infrastructure.files.storage.config import file_storage_config
 
-            normalized_pairs = [
-                (UUID(str(uid)) if not isinstance(uid, UUID) else uid, sid)
+            from .delete_session import delete_sessions
+
+            normalized_sessions = [
+                (uid if isinstance(uid, UUID) else UUID(str(uid)), sid)
                 for uid, sid in sessions
+                if sid
             ]
-            await _delete_session_rows(normalized_pairs)
+            if normalized_sessions:
+                # Dataset-level delete callers run inside the deleted dataset's
+                # database context. Reset per-dataset store ContextVars while
+                # delete_sessions runs so its global-store vector detag reaches
+                # the global store (not the dataset being deleted) and any
+                # surviving-dataset detags do not overwrite the caller's context.
+                vector_token = vector_db_config.set(None)
+                graph_token = graph_db_config.set(None)
+                storage_token = file_storage_config.set(None)
+                try:
+                    deleted = await delete_sessions(
+                        normalized_sessions,
+                        datasets_being_deleted=[dataset_id],
+                    )
+                finally:
+                    vector_db_config.reset(vector_token)
+                    graph_db_config.reset(graph_token)
+                    file_storage_config.reset(storage_token)
         except Exception as error:
-            logger.debug(
-                "Session invalidation: relational session row cleanup skipped for dataset %s: %s",
+            logger.warning(
+                "Session invalidation: failed to delete session(s) for dataset %s (non-fatal): %s",
                 dataset_id,
                 error,
                 exc_info=True,

@@ -205,6 +205,18 @@ async def test_invalidate_sessions_for_dataset_deletes_attributed_sessions(sessi
             return_value=session_manager,
         ),
         patch(
+            "cognee.modules.session_lifecycle.delete_session.get_session_manager",
+            return_value=session_manager,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.delete_session.backend_access_control_enabled",
+            return_value=False,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.delete_session._delete_session_rows",
+            new=AsyncMock(return_value=set()),
+        ),
+        patch(
             "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
             new=AsyncMock(return_value=[(USER_ID, SESSION_ID)]),
         ),
@@ -348,13 +360,22 @@ async def test_session_delete_failure_is_nonfatal(session_manager):
             return_value=session_manager,
         ),
         patch(
+            "cognee.modules.session_lifecycle.delete_session.get_session_manager",
+            return_value=session_manager,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.delete_session.backend_access_control_enabled",
+            return_value=False,
+        ),
+        patch(
             "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
             new=AsyncMock(return_value=[(USER_ID, SESSION_ID)]),
         ),
-        patch.object(session_manager, "delete_session", failing),
+        patch.object(session_manager, "delete_sessions", failing),
     ):
         result = await invalidate_sessions_for_dataset(dataset_id)
 
+    failing.assert_awaited_once()
     assert result == {"sessions_considered": 1, "sessions_deleted": 0}
 
 
@@ -689,51 +710,353 @@ async def test_strict_cleanup_fails_on_an_unreadable_session_context(
 
 
 @pytest.mark.asyncio
-async def test_invalidate_sessions_for_dataset_cleans_session_rows_and_agent_connections(session_manager):
+async def test_invalidate_sessions_for_dataset_cleans_session_rows_and_agent_connections(
+    session_manager,
+):
+    from datetime import datetime, timezone
     from uuid import UUID
 
+    from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.agents.registry import (
         clear_registered_agent_connections,
         list_registered_agent_connections,
         register_agent_connection,
     )
+    from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
 
     dataset_id = uuid4()
     user_uuid = UUID(USER_ID)
+    now = datetime.now(timezone.utc)
     await _seed_qa(session_manager, "qa_1", used_node_ids=["node_a"])
     clear_registered_agent_connections()
 
-    with patch("cognee.modules.agents.registry._persist_agent_connection", new=AsyncMock()):
-        await register_agent_connection(
-            agent_session_name="claude_live_session",
-            connection_type="claude_code",
-            memory_mode="hybrid",
-            user_id=user_uuid,
-            session_id=SESSION_ID,
-            datasets=[{"id": str(dataset_id), "name": "demo_ds", "role": "read_write", "type": "dataset"}],
+    engine = get_relational_engine()
+    async with engine.engine.begin() as conn:
+        await conn.run_sync(SessionRecord.metadata.create_all)
+    async with engine.get_async_session() as db_session:
+        db_session.add(
+            SessionRecord(
+                session_id=SESSION_ID,
+                user_id=user_uuid,
+                dataset_id=dataset_id,
+                status="running",
+                started_at=now,
+                last_activity_at=now,
+            )
         )
+        db_session.add(
+            SessionModelUsage(
+                session_id=SESSION_ID,
+                user_id=user_uuid,
+                model="gpt-4o-mini",
+                kind="llm",
+                tokens_in=10,
+                tokens_out=5,
+                cost_usd=0.001,
+                updated_at=now,
+            )
+        )
+        await db_session.commit()
 
-    mock_delete_rows = AsyncMock(return_value={(user_uuid, SESSION_ID)})
-    with (
-        patch(
-            "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
-            return_value=session_manager,
-        ),
-        patch(
-            "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
-            new=AsyncMock(return_value=[(user_uuid, SESSION_ID)]),
-        ),
-        patch(
-            "cognee.modules.session_lifecycle.delete_session._delete_session_rows",
-            new=mock_delete_rows,
-        ),
-    ):
-        result = await invalidate_sessions_for_dataset(dataset_id)
+    try:
+        with patch("cognee.modules.agents.registry._persist_agent_connection", new=AsyncMock()):
+            await register_agent_connection(
+                agent_session_name="claude_live_session",
+                connection_type="claude_code",
+                memory_mode="hybrid",
+                user_id=user_uuid,
+                session_id=SESSION_ID,
+                datasets=[
+                    {
+                        "id": str(dataset_id),
+                        "name": "demo_ds",
+                        "role": "read_write",
+                        "type": "dataset",
+                    }
+                ],
+            )
 
-    assert result == {"sessions_considered": 1, "sessions_deleted": 1}
-    mock_delete_rows.assert_awaited_once_with([(user_uuid, SESSION_ID)])
-    conns = list_registered_agent_connections()
-    assert len(conns) == 1
-    assert conns[0].datasets == []
-    assert conns[0].status == "inactive"
-    clear_registered_agent_connections()
+        with (
+            patch(
+                "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+                return_value=session_manager,
+            ),
+            patch(
+                "cognee.modules.session_lifecycle.delete_session.get_session_manager",
+                return_value=session_manager,
+            ),
+            patch(
+                "cognee.modules.session_lifecycle.delete_session.backend_access_control_enabled",
+                return_value=False,
+            ),
+        ):
+            result = await invalidate_sessions_for_dataset(dataset_id)
+
+        assert result == {"sessions_considered": 1, "sessions_deleted": 1}
+        assert await session_manager.get_session(user_id=USER_ID, session_id=SESSION_ID) == []
+        async with engine.get_async_session() as db_session:
+            assert await db_session.get(SessionRecord, (SESSION_ID, user_uuid)) is None
+            assert (
+                await db_session.get(SessionModelUsage, (SESSION_ID, user_uuid, "gpt-4o-mini"))
+                is None
+            )
+
+        conns = list_registered_agent_connections()
+        assert len(conns) == 1
+        assert conns[0].datasets == []
+        assert conns[0].status == "inactive"
+    finally:
+        clear_registered_agent_connections()
+        async with engine.get_async_session() as db_session:
+            usage = await db_session.get(SessionModelUsage, (SESSION_ID, user_uuid, "gpt-4o-mini"))
+            if usage:
+                await db_session.delete(usage)
+            record = await db_session.get(SessionRecord, (SESSION_ID, user_uuid))
+            if record:
+                await db_session.delete(record)
+            await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_invalidate_sessions_for_dataset_waits_for_improve_and_turn_locks(session_manager):
+    """Dataset session invalidation routes through delete_sessions, so an in-flight
+    improve() claim or session_turn_lock finishes writing before the delete runs
+    and cannot resurrect cache entries or relational rows afterwards (#6557)."""
+    from datetime import datetime, timezone
+    from uuid import UUID
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.infrastructure.locks import (
+        acquire_improve_lock_many,
+        release_improve_lock_many,
+        session_turn_lock,
+    )
+    from cognee.infrastructure.locks.session_lock import improve_lock_keys
+    from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
+
+    dataset_id = uuid4()
+    user_uuid = UUID(USER_ID)
+    now = datetime.now(timezone.utc)
+    engine = get_relational_engine()
+    async with engine.engine.begin() as conn:
+        await conn.run_sync(SessionRecord.metadata.create_all)
+
+    await _seed_qa(session_manager, "qa_initial", used_node_ids=["node_a"])
+    async with engine.get_async_session() as db_session:
+        db_session.add(
+            SessionRecord(
+                session_id=SESSION_ID,
+                user_id=user_uuid,
+                dataset_id=dataset_id,
+                status="running",
+                started_at=now,
+                last_activity_at=now,
+            )
+        )
+        await db_session.commit()
+
+    claim_keys = improve_lock_keys([SESSION_ID], user_uuid)
+    try:
+        with (
+            patch(
+                "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+                return_value=session_manager,
+            ),
+            patch(
+                "cognee.modules.session_lifecycle.delete_session.get_session_manager",
+                return_value=session_manager,
+            ),
+            patch(
+                "cognee.modules.session_lifecycle.delete_session.backend_access_control_enabled",
+                return_value=False,
+            ),
+        ):
+            # 1) Hold the session's improve claim while dataset invalidation starts.
+            await acquire_improve_lock_many(claim_keys)
+            claimed = True
+            try:
+                invalidate_task = asyncio.create_task(invalidate_sessions_for_dataset(dataset_id))
+                await asyncio.sleep(0.05)
+                assert not invalidate_task.done()
+
+                # Simulate an in-flight improve/sync writing cache + usage before releasing.
+                await _seed_qa(session_manager, "qa_during_improve", used_node_ids=["node_a"])
+                async with engine.get_async_session() as db_session:
+                    db_session.add(
+                        SessionModelUsage(
+                            session_id=SESSION_ID,
+                            user_id=user_uuid,
+                            model="gpt-4o",
+                            kind="llm",
+                            tokens_in=20,
+                            tokens_out=10,
+                            cost_usd=0.01,
+                            updated_at=now,
+                        )
+                    )
+                    await db_session.commit()
+            finally:
+                if claimed:
+                    await release_improve_lock_many(claim_keys)
+
+            result = await asyncio.wait_for(invalidate_task, timeout=5)
+            assert result == {"sessions_considered": 1, "sessions_deleted": 1}
+            assert await session_manager.get_session(user_id=USER_ID, session_id=SESSION_ID) == []
+            async with engine.get_async_session() as db_session:
+                assert await db_session.get(SessionRecord, (SESSION_ID, user_uuid)) is None
+                assert (
+                    await db_session.get(SessionModelUsage, (SESSION_ID, user_uuid, "gpt-4o"))
+                    is None
+                )
+
+            # 2) Hold the per-session turn lock while dataset invalidation starts.
+            turn_session = f"{SESSION_ID}_turn"
+            async with engine.get_async_session() as db_session:
+                db_session.add(
+                    SessionRecord(
+                        session_id=turn_session,
+                        user_id=user_uuid,
+                        dataset_id=dataset_id,
+                        status="running",
+                        started_at=now,
+                        last_activity_at=now,
+                    )
+                )
+                await db_session.commit()
+
+            async with session_turn_lock(str(user_uuid), turn_session):
+                turn_invalidate = asyncio.create_task(invalidate_sessions_for_dataset(dataset_id))
+                await asyncio.sleep(0.05)
+                assert not turn_invalidate.done()
+                await session_manager._cache.create_qa_entry(
+                    USER_ID,
+                    turn_session,
+                    question="in-flight turn",
+                    context="ctx",
+                    answer="ans",
+                    qa_id="qa_in_flight_turn",
+                )
+
+            turn_result = await asyncio.wait_for(turn_invalidate, timeout=5)
+            assert turn_result == {"sessions_considered": 1, "sessions_deleted": 1}
+            assert await session_manager.get_session(user_id=USER_ID, session_id=turn_session) == []
+            async with engine.get_async_session() as db_session:
+                assert await db_session.get(SessionRecord, (turn_session, user_uuid)) is None
+    finally:
+        async with engine.get_async_session() as db_session:
+            usage = await db_session.get(SessionModelUsage, (SESSION_ID, user_uuid, "gpt-4o"))
+            if usage:
+                await db_session.delete(usage)
+            for sid in (SESSION_ID, f"{SESSION_ID}_turn"):
+                row = await db_session.get(SessionRecord, (sid, user_uuid))
+                if row:
+                    await db_session.delete(row)
+            await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_invalidate_sessions_for_dataset_skips_deleted_dataset_store_and_preserves_context(
+    session_manager,
+):
+    """delete_sessions receives datasets_being_deleted=[dataset_id], so the deleted
+    dataset's vector store is skipped while surviving readable datasets and the
+    global store are cleaned without clobbering the caller's dataset ContextVars."""
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from uuid import UUID
+
+    from cognee.context_global_variables import graph_db_config, vector_db_config
+    from cognee.infrastructure.files.storage.config import file_storage_config
+
+    dataset_id = uuid4()
+    surviving_dataset_id = uuid4()
+    user_uuid = UUID(USER_ID)
+    await _seed_qa(session_manager, "qa_1", used_node_ids=["node_a"])
+
+    entered_datasets: list[UUID] = []
+    global_vector_configs_seen: list[dict | None] = []
+
+    @asynccontextmanager
+    async def fake_dataset_context(ds_id, uid):
+        entered_datasets.append(ds_id)
+        vector_db_config.set({"vector_db_name": f"vec_{ds_id}"})
+        graph_db_config.set({"graph_database_name": f"graph_{ds_id}"})
+        file_storage_config.set({"data_root_directory": f"root_{ds_id}"})
+        yield
+
+    async def record_global_detag(pairs):
+        list(pairs)
+        global_vector_configs_seen.append(vector_db_config.get())
+
+    dataset_detag = AsyncMock()
+    readable = [SimpleNamespace(id=dataset_id), SimpleNamespace(id=surviving_dataset_id)]
+    caller_vec = {"vector_db_name": f"vec_{dataset_id}"}
+    caller_graph = {"graph_database_name": f"graph_{dataset_id}"}
+    caller_storage = {"data_root_directory": f"root_{dataset_id}"}
+
+    from cognee.modules.session_lifecycle import delete_session as delete_session_mod
+
+    vec_tok = vector_db_config.set(caller_vec)
+    graph_tok = graph_db_config.set(caller_graph)
+    storage_tok = file_storage_config.set(caller_storage)
+    try:
+        with (
+            patch(
+                "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+                return_value=session_manager,
+            ),
+            patch(
+                "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
+                new=AsyncMock(return_value=[(user_uuid, SESSION_ID)]),
+            ),
+            patch.object(delete_session_mod, "get_session_manager", return_value=session_manager),
+            patch.object(delete_session_mod, "backend_access_control_enabled", return_value=True),
+            patch.object(
+                delete_session_mod,
+                "get_user",
+                new=AsyncMock(return_value=SimpleNamespace(id=user_uuid)),
+            ),
+            patch.object(
+                delete_session_mod,
+                "get_all_user_permission_datasets",
+                new=AsyncMock(return_value=readable),
+            ),
+            patch.object(
+                delete_session_mod,
+                "_recorded_datasets",
+                new=AsyncMock(return_value={(user_uuid, SESSION_ID): dataset_id}),
+            ),
+            patch.object(
+                delete_session_mod,
+                "_existing_datasets",
+                new=AsyncMock(return_value={dataset_id}),
+            ),
+            patch.object(
+                delete_session_mod,
+                "set_database_global_context_variables",
+                fake_dataset_context,
+            ),
+            patch.object(delete_session_mod, "delete_session_qa_vectors", dataset_detag),
+            patch.object(
+                delete_session_mod,
+                "_delete_session_rows",
+                new=AsyncMock(return_value={(user_uuid, SESSION_ID)}),
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
+                side_effect=record_global_detag,
+            ),
+        ):
+            result = await invalidate_sessions_for_dataset(dataset_id)
+
+        assert result == {"sessions_considered": 1, "sessions_deleted": 1}
+        assert entered_datasets == [surviving_dataset_id]
+        assert global_vector_configs_seen == [None]
+        assert set(dataset_detag.await_args.args[0]) == {(USER_ID, SESSION_ID)}
+        assert vector_db_config.get() == caller_vec
+        assert graph_db_config.get() == caller_graph
+        assert file_storage_config.get() == caller_storage
+    finally:
+        vector_db_config.reset(vec_tok)
+        graph_db_config.reset(graph_tok)
+        file_storage_config.reset(storage_tok)
