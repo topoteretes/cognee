@@ -213,6 +213,22 @@ async def test_a_graph_model_built_from_a_schema_travels_as_its_schema():
 
 
 @pytest.mark.asyncio
+async def test_a_graph_model_given_as_a_schema_travels_as_a_schema():
+    """``cognify()`` builds a schema it is given into a class, and another
+    process builds that class from its schema again: what decides is the model
+    the call resolved, not the dict it was given."""
+    resolver, default_tasks_kwargs = await _resolver_of(
+        graph_model=graph_model_to_graph_schema(PeopleGraph)
+    )
+
+    _, args = resolver.portable
+    assert resolver.stays_because is None
+    assert args["graph_model_schema"] == graph_model_to_graph_schema(
+        default_tasks_kwargs["graph_model"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_graph_model_written_in_python_keeps_the_run_in_its_process():
     """Its schema does not build the class it was (a field with a default comes
     back optional), so another process would extract with another model."""
