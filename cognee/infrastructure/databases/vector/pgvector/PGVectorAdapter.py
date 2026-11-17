@@ -157,7 +157,8 @@ PgvectorVersion = tuple[int, ...]
 # Collection tables in the engine's current schema (the dataset's own schema in
 # shared-database mode): a ``vector`` column of pgvector's ``vector`` or ``halfvec``
 # type, with that type's name and its ``atttypmod``, the declared dimension count (-1
-# when undeclared).
+# when undeclared). A partitioned collection is its parent table ('p'); its partitions
+# are not collections.
 _VECTOR_COLLECTIONS_SQL = """
 SELECT c.relname, t.typname, a.atttypmod
 FROM pg_attribute a
@@ -165,7 +166,8 @@ JOIN pg_class c ON c.oid = a.attrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_type t ON t.oid = a.atttypid
 WHERE n.nspname = current_schema()
-  AND c.relkind = 'r'
+  AND c.relkind IN ('r', 'p')
+  AND NOT c.relispartition
   AND a.attname = 'vector'
   AND t.typname IN ('vector', 'halfvec')
   AND NOT a.attisdropped
@@ -211,6 +213,30 @@ def hnsw_index_name(table_name: str) -> str:
     digest = hashlib.sha1(table_name.encode()).hexdigest()[:12]
     prefix = table_name.encode()[:40].decode(errors="ignore")
     return f"{prefix}_{digest}_hnsw"
+
+
+def partition_name(table_name: str, remainder: int) -> str:
+    """Name of one hash partition of a collection's table: ``<collection>_p<remainder>``.
+
+    Hashed like ``hnsw_index_name`` past 63 bytes, so the partitions of two long
+    collection names never truncate to the same name.
+    """
+    name = f"{table_name}_p{remainder}"
+    if len(name.encode()) <= _PG_MAX_IDENTIFIER_BYTES:
+        return name
+    digest = hashlib.sha1(table_name.encode()).hexdigest()[:12]
+    prefix = table_name.encode()[:40].decode(errors="ignore")
+    return f"{prefix}_{digest}_p{remainder}"
+
+
+# The partitions of partitioned tables, as (schema, table). Reflection lists them as
+# tables of their own, but they are part of their parent's collection.
+_PARTITIONS_SQL = """
+SELECT n.nspname, c.relname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relispartition
+"""
 
 
 def _stored_type(vector_column) -> str:
@@ -362,6 +388,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         relational_db = get_relational_engine()
         relational_config = get_relational_config()
         vector_config = get_vectordb_config()
+        # How many hash partitions a collection created by this adapter gets
+        # (PGVECTOR_COLLECTION_PARTITIONS, see ``create_collection``).
+        self.collection_partitions: int = vector_config.pgvector_collection_partitions
 
         # Resolve effective pool_args for any new PGVector engine we create:
         # 1. Explicit VECTOR_POOL_ARGS always wins.
@@ -480,14 +509,25 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         back to the base (all non-system schemas) when not schema-pinned.
         """
         if not self.schema:
-            return await super().get_table_names()
+            table_names = await super().get_table_names()
+        else:
+            table_names = []
+            async with self.engine.begin() as connection:
+                metadata = MetaData()
+                await connection.run_sync(metadata.reflect, schema=self.schema)
+                table_names.extend(metadata.tables.keys())
 
-        table_names: list[str] = []
-        async with self.engine.begin() as connection:
-            metadata = MetaData()
-            await connection.run_sync(metadata.reflect, schema=self.schema)
-            table_names.extend(metadata.tables.keys())
-        return table_names
+        # A partitioned collection is listed once, as its parent table. Reflection keys
+        # are "schema.table", or a bare "table" in the connection's default schema.
+        async with self.engine.connect() as connection:
+            partitions = (await connection.execute(text(_PARTITIONS_SQL))).all()
+            default_schema = (await connection.execute(text("SELECT current_schema()"))).scalar()
+        hidden = {f"{schema}.{name}" for schema, name in partitions}
+        return [
+            name
+            for name in table_names
+            if (name if "." in name else f"{default_schema}.{name}") not in hidden
+        ]
 
     async def delete_database(self):
         """Drop this dataset's tables, scoped to its schema when pinned.
@@ -777,8 +817,22 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
     async def create_collection(self, collection_name: str, payload_schema=None):
-        """Create the pgvector table for `collection_name` if it does not already exist."""
+        """Create the pgvector table for `collection_name` if it does not already exist.
+
+        With ``PGVECTOR_COLLECTION_PARTITIONS`` above 1 the table is hash-partitioned
+        by ``id`` into that many partitions, and Postgres builds the HNSW index once
+        per partition. Concurrent inserts are then spread over that many index graphs
+        instead of meeting on the pages of one, which is what limits many writers of
+        one collection. The price is on the read side: a search reads every
+        partition's index. The setting only decides how a new collection is created;
+        an existing one keeps its layout and is read and written the same either way.
+        """
         vector_size = self.embedding_engine.get_vector_size()
+        # The primary key (``id``) is the partition key, as Postgres requires of a
+        # partitioned table's primary key, so ``ON CONFLICT (id)`` works unchanged.
+        partition_args = (
+            {"postgresql_partition_by": "HASH (id)"} if self.collection_partitions > 1 else {}
+        )
 
         if not await self.has_collection(collection_name):
             async with self.VECTOR_DB_LOCK:
@@ -798,6 +852,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                         Column("payload", JSON),
                         Column("vector", HALFVEC(vector_size)),
                         schema=self.schema or None,
+                        **partition_args,
                     )
 
                     async with self.engine.begin() as connection:
@@ -810,6 +865,20 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                         # its own error, before the halfvec column is created.
                         await self._pgvector_version(connection)
                         await connection.run_sync(table.metadata.create_all, tables=[table])
+                        for remainder in range(self.collection_partitions if partition_args else 0):
+                            partition = self._qualified_table(
+                                partition_name(collection_name, remainder)
+                            )
+                            await connection.execute(
+                                text(
+                                    f"CREATE TABLE {partition} PARTITION OF "
+                                    f"{self._qualified_table(collection_name)} FOR VALUES WITH "
+                                    f"(MODULUS {self.collection_partitions}, "
+                                    f"REMAINDER {remainder})"
+                                )
+                            )
+                        # On a partitioned table the statement below creates the index
+                        # on every partition and attaches them to the parent's.
                         # Same transaction as the table: if the index fails, the table
                         # rolls back with it and the retry starts over, instead of the
                         # retry finding the table and leaving it unindexed.
