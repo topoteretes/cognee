@@ -146,12 +146,14 @@ def test_chunk_id_comes_from_the_enclosing_chunk_scope(capture_env):
     asyncio.run(run())
     _capture(text_input="outside")
 
-    chunk_by_input = {r["text_input"]: r["chunk_id"] for r in _records(directory)}
+    records = _records(directory)
+    chunk_by_input = {r["text_input"]: r.get("chunk_id") for r in records}
     assert chunk_by_input == {
         str(first_chunk): str(first_chunk),
         str(second_chunk): str(second_chunk),
         "outside": None,
     }
+    assert "chunk_id" not in next(r for r in records if r["text_input"] == "outside")
 
 
 def test_failed_call_is_recorded_with_its_error_class(capture_env):
@@ -245,3 +247,16 @@ def test_capture_returns_while_the_writer_is_stuck_on_disk(capture_env, monkeypa
     caller.join()
     assert not stuck, "capture_llm_call waited on the disk write"
     assert len(_records(directory)) == 101
+
+
+def test_a_record_without_a_chunk_has_no_chunk_id_key(capture_env):
+    directory = capture_env(ENABLED="true", DIRECTORY=str(capture_env()))
+    chunk_id = uuid4()
+
+    _capture()
+    with chunk_scope(chunk_id):
+        _capture()
+
+    without_chunk, with_chunk = _records(directory)
+    assert "chunk_id" not in without_chunk
+    assert with_chunk["chunk_id"] == str(chunk_id)

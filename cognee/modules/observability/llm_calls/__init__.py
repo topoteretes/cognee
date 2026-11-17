@@ -77,6 +77,11 @@ def _as_text(output: Any) -> str | None:
     return str(output)
 
 
+def _record_json(record: LLMCallRecord) -> str:
+    """The record as one JSON line, without ``chunk_id`` when no chunk was supplied."""
+    return record.model_dump_json(exclude={"chunk_id"} if record.chunk_id is None else None)
+
+
 def capture_llm_call(
     *,
     started_at: datetime,
@@ -123,7 +128,7 @@ def capture_llm_call(
             tokens_in=tokens_in,
             tokens_out=tokens_out,
         )
-        _get_writer(config.directory).put(record.model_dump_json())
+        _get_writer(config.directory).put(_record_json(record))
     except Exception:
         logger.warning("LLM call capture failed; the call itself is unaffected", exc_info=True)
 
