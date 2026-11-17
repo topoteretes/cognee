@@ -16,6 +16,7 @@ import copy
 import json
 import random
 import re
+import signal
 
 import pytest
 from fake_asana import FakeAsana, Resp, serve_over_http
@@ -58,8 +59,9 @@ REASONS = {
     "failed_ingestion",
 }
 # A walker that stops making progress loops in the tests that run until the listing ends: fail
-# that one test by time (the signal method; pytest-timeout falls back on Windows), not the job.
-pytestmark = pytest.mark.timeout(60, method="signal")
+# that one test by time, not the job. The signal method needs SIGALRM, which Windows lacks: there
+# pytest-timeout's thread method stops the whole run instead.
+pytestmark = pytest.mark.timeout(60, method="signal" if hasattr(signal, "SIGALRM") else "thread")
 # What one task costs to read: the task, its comments and its subtasks.
 TASK_REQUESTS = 3
 # What a run spends before it renders a task of a one project selection: the project, its
