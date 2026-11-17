@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -25,3 +26,20 @@ def run_spec():
         return PipelineRunSpec(**(fields | overrides))
 
     return build
+
+
+@pytest.fixture
+def info_lines(monkeypatch):
+    """``info_lines(module)`` replaces the module's logger and returns the list
+    its info lines are added to, as the text they are logged as."""
+
+    def of(module) -> list[str]:
+        lines: list[str] = []
+        monkeypatch.setattr(
+            module,
+            "logger",
+            SimpleNamespace(info=lambda message, *args: lines.append(message % args)),
+        )
+        return lines
+
+    return of

@@ -29,6 +29,7 @@ the run's id (``run_pipeline_shard``).
 
 import json
 from bisect import bisect_left
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 from uuid import UUID
@@ -129,9 +130,9 @@ class WorkerBackend(Protocol):
     ) -> None: ...
 
 
-def worker_can_be_given(item: Any, incremental: bool) -> bool:
-    """Whether ``item`` can be described to a worker, in a run that is
-    ``incremental`` or not.
+def why_no_worker_can_be_given(item: Any, incremental: bool) -> str | None:
+    """Why ``item`` cannot be described to a worker, in a run that is
+    ``incremental`` or not; ``None`` when it can.
 
     A ``Data`` row goes as its id, in an incremental run only: a worker that is
     lost leaves no answer, and only there does the row's completion stamp say
@@ -141,8 +142,15 @@ def worker_can_be_given(item: Any, incremental: bool) -> bool:
     is reported failed.
     """
     if isinstance(item, Data):
-        return incremental
-    return not incremental and survives_json(item)
+        return None if incremental else "a data row goes to a worker in an incremental run only"
+    if incremental:
+        return "an item that is no data row goes to a worker in a run that is not incremental only"
+    return None if survives_json(item) else "an item that is no data row has to survive JSON"
+
+
+def worker_can_be_given(item: Any, incremental: bool) -> bool:
+    """Whether ``item`` can be described to a worker (:func:`why_no_worker_can_be_given`)."""
+    return why_no_worker_can_be_given(item, incremental) is None
 
 
 def item_size(item: Any) -> int | None:
@@ -309,6 +317,8 @@ class ShardedExecutor:
             self.max_shard_bytes,
         )
         if not groups:
+            if pending:
+                self._log_why_no_worker_runs(spec, pending, incremental, item_run)
             return await item_run.run_in_process(data_items)
 
         stores = run_stores()
@@ -345,6 +355,33 @@ class ShardedExecutor:
         # above raised instead, there are no entries and it goes by each item's
         # completion stamp, so what the workers finished is kept either way.
         return entries
+
+    def _log_why_no_worker_runs(
+        self, spec: PipelineRunSpec, pending: list[Any], incremental: bool, item_run: ItemRun
+    ) -> None:
+        """Say why a run that may leave this process keeps all of its items here:
+        how many of them could go to a worker, and what keeps the others."""
+        kept: Counter[str] = Counter()
+        for item in pending:
+            if not item_run.portable_item(item):
+                kept["the tasks another process rebuilds do not cover the item"] += 1
+            elif (reason := why_no_worker_can_be_given(item, incremental)) is not None:
+                kept[reason] += 1
+        one_shard = (
+            f"{self.shard_size} items"
+            if self.shard_size is not None
+            else f"{self.max_shard_bytes} bytes"
+        )
+        logger.info(
+            "Run %s (%s) keeps its items in this process: %d of the %d to process can go to a "
+            "worker, which is no more than one shard (%s).%s",
+            spec.pipeline_run_id,
+            spec.pipeline_name,
+            len(pending) - sum(kept.values()),
+            len(pending),
+            one_shard,
+            "".join(f" {count} cannot: {reason}." for reason, count in kept.items()),
+        )
 
     async def _run_shards(
         self,

@@ -160,7 +160,8 @@ class CognifyTaskResolver:
     ``None``. What that process rebuilds knows ``portable_routes`` only: the
     standard route, and for the cognify run the DLT route too (see
     ``build_portable_cognify_task_resolver`` and
-    ``build_portable_indexing_task_resolver``).
+    ``build_portable_indexing_task_resolver``). ``stays_because`` says why
+    another process cannot rebuild it, for the log of a run that stays.
     """
 
     def __init__(
@@ -169,10 +170,12 @@ class CognifyTaskResolver:
         portable_args: dict | None = None,
         portable_name: str = PORTABLE_COGNIFY_RESOLVER,
         portable_routes: frozenset[CognifyRoute] = frozenset({CognifyRoute.STANDARD}),
+        stays_because: str | None = None,
     ):
         self.tasks_by_route = tasks_by_route
         self.portable = (portable_name, portable_args) if portable_args is not None else None
         self.portable_routes = portable_routes
+        self.stays_because = stays_because
 
     def __call__(self, data_item) -> list[Task]:
         return self.tasks_by_route[cognify_route_for(data_item)]
@@ -788,9 +791,14 @@ async def cognify(
         # the call passes a custom chunker (a class) or per-call vector or
         # graph database configuration (context variables of this process).
         # That is all the indexing run depends on; the cognify run has more
-        # below.
+        # below. Why a run stays is kept for its log (see portable_spec).
         portable_chunking = None
-        if chunker is TextChunker and vector_db_config is None and graph_db_config is None:
+        chunking_stays_because = None
+        if chunker is not TextChunker:
+            chunking_stays_because = "the call passes a chunker of its own"
+        elif vector_db_config is not None or graph_db_config is not None:
+            chunking_stays_because = "the call passes a vector or graph database configuration"
+        else:
             # Resolved here, not sent as given: a setting changed in this
             # process only (cognee.config) must not make another process cut
             # different chunks than this one would.
@@ -812,6 +820,7 @@ async def cognify(
                 },
                 portable_chunking,
                 PORTABLE_INDEXING_RESOLVER,
+                stays_because=chunking_stays_because,
             )
 
         # The cognify run is not portable either when the call passes its own
@@ -819,12 +828,18 @@ async def cognify(
         # machine), extra extraction kwargs, or a graph model another process
         # cannot build (see graph_model_schema_for_workers).
         portable_args = None
-        if (
-            portable_chunking is not None
-            and caller_config is None
-            and ontology_file_path is None
-            and not kwargs
-        ):
+        stays_because = chunking_stays_because
+        if stays_because is not None:
+            pass
+        elif caller_config is not None:
+            stays_because = "the call passes an ontology configuration of its own"
+        elif ontology_file_path is not None:
+            stays_because = "the call passes an ontology file"
+        elif kwargs:
+            stays_because = (
+                f"the call passes extraction arguments of its own ({', '.join(sorted(kwargs))})"
+            )
+        else:
             model_travels, graph_model_schema = graph_model_schema_for_workers(graph_model)
             if model_travels:
                 portable_args = {
@@ -837,8 +852,16 @@ async def cognify(
                     "chunk_attachment": chunk_attachment,
                     "dlt_chunks_per_batch": resolve_dlt_chunks_per_batch(chunks_per_batch),
                 }
+            else:
+                stays_because = (
+                    "another process cannot build its graph model (a class written in Python, "
+                    "or a schema that names a class it does not define)"
+                )
         resolve_cognify_tasks = CognifyTaskResolver(
-            tasks_by_route, portable_args, portable_routes=COGNIFY_PORTABLE_ROUTES
+            tasks_by_route,
+            portable_args,
+            portable_routes=COGNIFY_PORTABLE_ROUTES,
+            stays_because=stays_because,
         )
 
         # run_pipeline derives needs_llm itself for a task list, but this call

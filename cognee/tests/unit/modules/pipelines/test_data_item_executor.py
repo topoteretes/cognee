@@ -236,29 +236,99 @@ async def test_portable_incremental_run_goes_to_the_executor(monkeypatch, runner
     assert logs.complete.await_args.kwargs["embedding_tokens"] == 11
 
 
+NOT_REGISTERED = (
+    "its tasks are not registered task lists another process could rebuild (see registered_tasks)"
+)
+PER_CALL_MODEL = "it has a per-call LLM or embedding configuration"
+NOT_JSON = "what describes it to another process does not survive JSON"
+
+
+class _ResolverThatSaysWhy:
+    """Not portable, and says why itself, as cognify's resolver does."""
+
+    portable = None
+    stays_because = "the call passes a chunker of its own"
+
+    def __call__(self, data_item):
+        return ["TASKS"]
+
+
+class _ResolverWithArguments(_PortableResolver):
+    portable = ("test_resolver", {"chunk_size": 512, "model": object()})
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "tasks, run_arguments",
+    "tasks, run_arguments, reason",
     [
-        pytest.param(["TASKS"], {}, id="a plain task list"),
-        pytest.param(lambda item: ["TASKS"], {}, id="a resolver that does not describe itself"),
-        # A per-call configuration holds credentials, which do not travel.
-        pytest.param(_PortableResolver(), {"llm_config": SimpleNamespace()}, id="llm config"),
+        pytest.param(["TASKS"], {}, NOT_REGISTERED, id="a plain task list"),
         pytest.param(
-            _PortableResolver(), {"embedding_config": SimpleNamespace()}, id="embedding config"
+            lambda item: ["TASKS"],
+            {},
+            NOT_REGISTERED,
+            id="a resolver that does not describe itself",
+        ),
+        pytest.param(
+            _ResolverThatSaysWhy(),
+            {},
+            "the call passes a chunker of its own",
+            id="a resolver that says why it is not portable",
+        ),
+        # A per-call configuration holds credentials, which do not travel.
+        pytest.param(
+            _PortableResolver(), {"llm_config": SimpleNamespace()}, PER_CALL_MODEL, id="llm config"
+        ),
+        pytest.param(
+            _PortableResolver(),
+            {"embedding_config": SimpleNamespace()},
+            PER_CALL_MODEL,
+            id="embedding config",
         ),
         # JSON has no set and no form for an object; it turns a tuple into a list
         # and a number key into text.
-        pytest.param(_PortableResolver(), {"extras": {"ids": {1, 2}}}, id="extras: set"),
-        pytest.param(_PortableResolver(), {"extras": {"pair": (1, 2)}}, id="extras: tuple"),
-        pytest.param(_PortableResolver(), {"extras": {1: "x"}}, id="extras: number key"),
-        pytest.param(_PortableResolver(), {"extras": {"model": object()}}, id="extras: object"),
+        pytest.param(
+            _PortableResolver(),
+            {"extras": {"kept": 1, "ids": {1, 2}}},
+            f"{NOT_JSON} (extras['ids'])",
+            id="extras: set",
+        ),
+        pytest.param(
+            _PortableResolver(),
+            {"extras": {"pair": (1, 2)}},
+            f"{NOT_JSON} (extras['pair'])",
+            id="extras: tuple",
+        ),
+        pytest.param(
+            _PortableResolver(),
+            {"extras": {1: "x"}},
+            f"{NOT_JSON} (extras[1])",
+            id="extras: number key",
+        ),
+        pytest.param(
+            _PortableResolver(),
+            {"extras": {"model": object()}},
+            f"{NOT_JSON} (extras['model'])",
+            id="extras: object",
+        ),
+        pytest.param(
+            _PortableResolver(),
+            {"extras": {"run": uuid4()}},
+            f"{NOT_JSON} (extras['run'])",
+            id="extras: uuid",
+        ),
+        pytest.param(
+            _ResolverWithArguments(),
+            {},
+            f"{NOT_JSON} (task argument 'model')",
+            id="task arguments: object",
+        ),
     ],
 )
-async def test_run_another_process_could_not_run_stays_in_process(
-    monkeypatch, runner_plumbing, tasks, run_arguments
+async def test_run_another_process_could_not_run_stays_in_process_and_says_why(
+    monkeypatch, runner_plumbing, info_lines, tasks, run_arguments, reason
 ):
     dataset, _, in_process = _setup(monkeypatch, runner_plumbing)
+    lines = info_lines(data_item_executor)
     executor = _RecordingExecutor()
     set_data_item_executor(executor)
 
@@ -266,6 +336,23 @@ async def test_run_another_process_could_not_run_stays_in_process(
 
     assert executor.calls == []
     assert in_process.await_count == 2
+    [line] = lines
+    assert line.startswith("Run ")
+    assert line.endswith(f" ({PIPELINE}) keeps its items in this process: {reason}.")
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_no_executor_says_nothing_about_staying(
+    monkeypatch, runner_plumbing, info_lines
+):
+    """Staying in the process is not news where nothing would take the run."""
+    dataset, _, in_process = _setup(monkeypatch, runner_plumbing)
+    lines = info_lines(data_item_executor)
+
+    await _drive(dataset, ["TASKS"], _items(2))
+
+    assert in_process.await_count == 2
+    assert lines == []
 
 
 @pytest.mark.asyncio
@@ -291,7 +378,7 @@ async def test_a_portable_run_that_is_not_incremental_reaches_the_executor(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("variable", ["llm_config", "embedding_config"])
 async def test_config_an_outer_scope_set_keeps_a_portable_run_in_process(
-    monkeypatch, runner_plumbing, variable
+    monkeypatch, runner_plumbing, info_lines, variable
 ):
     """A per-call configuration reaches the items through a context variable, and
     an enclosing call may have set it without this run being passed one. Items in
@@ -302,6 +389,7 @@ async def test_config_an_outer_scope_set_keeps_a_portable_run_in_process(
     executor = _RecordingExecutor()
     set_data_item_executor(executor)
 
+    lines = info_lines(data_item_executor)
     token = getattr(context, variable).set(SimpleNamespace())
     try:
         await _drive(dataset, _PortableResolver(), _items(2))
@@ -310,13 +398,15 @@ async def test_config_an_outer_scope_set_keeps_a_portable_run_in_process(
 
     assert executor.calls == []
     assert in_process.await_count == 2
+    [line] = lines
+    assert line.endswith(f"{PER_CALL_MODEL}.")
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("variable", ["vector_db_config", "graph_db_config"])
 @pytest.mark.parametrize("access_control", [False, True])
 async def test_a_store_only_this_context_knows_keeps_a_portable_run_in_process(
-    monkeypatch, runner_plumbing, variable, access_control
+    monkeypatch, runner_plumbing, info_lines, variable, access_control
 ):
     """A call's vector or graph store configuration stays set for its context.
     Without backend access control, another process would open the environment's
@@ -331,6 +421,7 @@ async def test_a_store_only_this_context_knows_keeps_a_portable_run_in_process(
     executor = _RecordingExecutor()
     set_data_item_executor(executor)
 
+    lines = info_lines(data_item_executor)
     token = getattr(context, variable).set({"provider": "set by an earlier call"})
     try:
         await _drive(dataset, _PortableResolver(), _items(2))
@@ -339,6 +430,12 @@ async def test_a_store_only_this_context_knows_keeps_a_portable_run_in_process(
 
     assert len(executor.calls) == (1 if access_control else 0)
     assert in_process.await_count == (0 if access_control else 2)
+    assert len(lines) == (0 if access_control else 1)
+    for line in lines:
+        assert line.endswith(
+            "it has a per-call vector or graph store configuration, "
+            "and backend access control is off."
+        )
 
 
 @pytest.mark.asyncio

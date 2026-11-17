@@ -99,6 +99,7 @@ async def test_plain_call_is_portable_with_the_settings_it_resolved():
 
     name, args = resolver.portable
     assert name == cognify_module.PORTABLE_COGNIFY_RESOLVER
+    assert resolver.stays_because is None
     assert args["chunk_size"] == 1024
     # Resolved here, not None: a worker must not resolve them from its own state.
     assert isinstance(args["chunks_per_batch"], int)
@@ -141,17 +142,30 @@ async def test_unset_settings_travel_resolved(monkeypatch):
     assert args["early_chunk_indexing"] is True
 
 
+GRAPH_MODEL_STAYS = (
+    "another process cannot build its graph model (a class written in Python, "
+    "or a schema that names a class it does not define)"
+)
+STORE_CONFIGURATION = "the call passes a vector or graph database configuration"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "kwargs",
+    "kwargs, stays_because",
     [
-        {"graph_model": _OtherGraph},
-        {"chunker": _OtherChunker},
-        {"config": {"ontology_config": {"ontology_resolver": None}}},
-        {"ontology_file_path": "/tmp/on-this-machine.owl"},
-        {"vector_db_config": {"vector_db_provider": "pgvector"}},
-        {"graph_db_config": {"graph_database_provider": "postgres"}},
-        {"some_extraction_kwarg": 1},
+        ({"graph_model": _OtherGraph}, GRAPH_MODEL_STAYS),
+        ({"chunker": _OtherChunker}, "the call passes a chunker of its own"),
+        (
+            {"config": {"ontology_config": {"ontology_resolver": None}}},
+            "the call passes an ontology configuration of its own",
+        ),
+        ({"ontology_file_path": "/tmp/on-this-machine.owl"}, "the call passes an ontology file"),
+        ({"vector_db_config": {"vector_db_provider": "pgvector"}}, STORE_CONFIGURATION),
+        ({"graph_db_config": {"graph_database_provider": "postgres"}}, STORE_CONFIGURATION),
+        (
+            {"some_extraction_kwarg": 1, "another_one": 2},
+            "the call passes extraction arguments of its own (another_one, some_extraction_kwarg)",
+        ),
     ],
     ids=[
         "graph_model that is no DataPoint",
@@ -163,10 +177,14 @@ async def test_unset_settings_travel_resolved(monkeypatch):
         "extraction kwargs",
     ],
 )
-async def test_call_another_process_could_not_rebuild_is_not_portable(kwargs):
+async def test_call_another_process_could_not_rebuild_is_not_portable_and_says_why(
+    kwargs, stays_because
+):
+    """The reason is what a run that stays in its process is logged with."""
     resolver, _ = await _resolver_of(**kwargs)
 
     assert resolver.portable is None
+    assert resolver.stays_because == stays_because
 
 
 @pytest.mark.asyncio
@@ -190,6 +208,7 @@ async def test_a_graph_model_written_in_python_keeps_the_run_in_its_process():
     resolver, _ = await _resolver_of(graph_model=PeopleGraph, chunk_attachment="all")
 
     assert resolver.portable is None
+    assert resolver.stays_because == GRAPH_MODEL_STAYS
 
 
 def test_a_graph_model_built_from_a_schema_builds_the_same_schema_again():
@@ -412,6 +431,8 @@ async def test_indexing_run_is_portable_when_another_process_cuts_the_same_chunk
     resolver = await _indexing_resolver_of(early_chunk_indexing=True, **kwargs)
 
     assert (resolver.portable is not None) is portable
+    # It names a reason exactly when it stays, and only one of its own.
+    assert (resolver.stays_because is None) is portable
 
 
 @pytest.mark.asyncio

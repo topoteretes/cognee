@@ -305,14 +305,54 @@ async def test_a_run_cut_by_size_hands_out_its_shards_and_counts_their_items(run
 
 
 @pytest.mark.asyncio
-async def test_a_small_run_never_reaches_the_backend(run_spec, rows):
+async def test_a_small_run_never_reaches_the_backend_and_says_why(run_spec, rows, info_lines):
     backend, item_run, items = _Backend(rows), _item_run(), _items(10)
+    lines = info_lines(sharded_executor)
+    spec = run_spec()
 
-    entries = await ShardedExecutor(backend, 10).run_items(run_spec(), items, item_run)
+    entries = await ShardedExecutor(backend, 10).run_items(spec, items, item_run)
 
     assert backend.calls == [] and rows.notes == []
     item_run.run_in_process.assert_awaited_once_with(items)
     assert [entry["data_id"] for entry in entries] == [item.id for item in items]
+    [line] = lines
+    assert line == (
+        f"Run {spec.pipeline_run_id} ({PIPELINE}) keeps its items in this process: 10 of the 10 "
+        "to process can go to a worker, which is no more than one shard (10 items)."
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_run_whose_items_no_worker_can_take_says_what_keeps_them(
+    run_spec, rows, info_lines
+):
+    """Counted by what keeps them: items the rebuilt tasks do not cover, and
+    items a worker cannot be given in this kind of run."""
+    lines = info_lines(sharded_executor)
+    items = [*_items(3, kind="code"), *_items(2)]
+
+    await ShardedExecutor(_Backend(rows), max_shard_bytes=1000).run_items(
+        run_spec(incremental_loading=False), items, _item_run()
+    )
+
+    [line] = lines
+    assert line.endswith(
+        "keeps its items in this process: 0 of the 5 to process can go to a worker, which is no "
+        "more than one shard (1000 bytes). 3 cannot: the tasks another process rebuilds do not "
+        "cover the item. 2 cannot: a data row goes to a worker in an incremental run only."
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_nothing_left_to_process_says_nothing(run_spec, rows, info_lines):
+    lines = info_lines(sharded_executor)
+    spec = run_spec()
+
+    await ShardedExecutor(_Backend(rows), 10).run_items(
+        spec, [_stamped(spec.dataset_id)], _item_run()
+    )
+
+    assert lines == []
 
 
 @pytest.mark.asyncio
