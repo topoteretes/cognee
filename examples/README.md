@@ -85,6 +85,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`code_graph_example.py`](guides/code_graph_example.py) | Code-graph pipeline + `SearchType.CODE` |
 | [`gmail.py`](guides/gmail.py) | Ingest Gmail with the bundled SDK connector, incremental sync and delete propagation (needs `cognee[gmail]`) |
 | [`dropbox.py`](guides/dropbox.py) | Sync one Dropbox folder by its folder id with the bundled SDK connector (no extra) |
+| [`telegram.py`](guides/telegram.py) | Ingest the messages a Telegram bot sees with the bundled SDK connector, incremental sync and forget when the bot leaves a chat (needs a bot token) |
 | [`google_drive.py`](guides/google_drive.py) | Ingest a Drive folder with the bundled SDK connector (needs `cognee[google-drive]`) |
 | [`google_calendar.py`](guides/google_calendar.py) | Ingest a Google Calendar with the bundled SDK connector, incremental sync through Google's sync token (needs `cognee[google-calendar]`) |
 | [`slack.py`](guides/slack.py) | Ingest a Slack channel with the bundled SDK connector: a thread is one document and the messages without replies of one day are one document, a new message re-renders only its thread or day, and a deleted message is forgotten when the next sync walks the whole channel |

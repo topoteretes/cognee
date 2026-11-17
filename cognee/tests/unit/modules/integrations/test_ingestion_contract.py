@@ -1,5 +1,6 @@
 """The provider-neutral ingestion contract and the persisted Google resource names."""
 
+import re
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -153,6 +154,153 @@ def test_vercel_service_built_from_an_oauth_access_token_sends_it_as_a_bearer_he
         resource_name="vercel_x", project_id="prj_web", team_id="team_acme", service=service
     )
     assert source.name == "vercel_x"
+
+
+def test_telegram_names_are_pinned_and_a_dlt_table_name():
+    # Same rule as the Asana pin: the literal is deliberate. One connection is one bot, so there
+    # is no scope. The name is the table, the dlt state key and the pipeline scope, and it must
+    # pass the connector's own resource_name check.
+    name = ingestion.resource_name("telegram", CREDENTIAL)
+    assert name == "telegram_e8ba1b716982492b069485f8"
+    assert re.fullmatch(r"[a-z][a-z0-9_]{0,62}", name)
+    assert ingestion.source_factory("telegram").__module__ == (
+        "cognee.tasks.ingestion.connectors.telegram"
+    )
+
+
+def test_telegram_service_is_built_from_a_bot_token_sent_only_in_the_path():
+    # Telegram has no OAuth for bots, so a host connects it by API key: the builder takes
+    # the bot token a user pasted. It goes into the request path, never into a header.
+    from cognee.tasks.ingestion.connectors.telegram import TelegramBotClient
+
+    token = "123456789:" + "A" * 35
+    client = ingestion.build_service("telegram", token)
+    assert isinstance(client, TelegramBotClient)
+    sent = []
+
+    class Answer:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b'{"ok": true, "result": {"id": 123456789}}'
+
+    def capture(request):
+        sent.append(request)
+        return Answer()
+
+    client._open = capture
+    assert client.call("getMe") == {"id": 123456789}
+    assert sent[0].full_url == f"https://api.telegram.org/bot{token}/getMe"
+    assert not any(token in value for value in sent[0].headers.values())
+    with pytest.raises(ValueError) as info:
+        ingestion.build_service("telegram", "not-a-bot-token")
+    assert "not-a-bot-token" not in str(info.value)
+
+
+@pytest.mark.asyncio
+async def test_a_telegram_failure_the_source_counted_is_counted_once(monkeypatch):
+    """F15: the source counts a raised failure under its reason key, and the host used to add
+    its own ``failed`` on top, so one failed run read as failed=2."""
+    import importlib
+    from unittest.mock import AsyncMock
+
+    from cognee.tasks.ingestion.connectors.telegram import TelegramBotMismatchError
+
+    async def failing_remember(*args, **kwargs):
+        try:
+            raise TelegramBotMismatchError("another bot")
+        except TelegramBotMismatchError as error:
+            raise RuntimeError("pipeline failed") from error
+
+    monkeypatch.setattr(
+        importlib.import_module("cognee.api.v1.remember.remember"), "remember", failing_remember
+    )
+    monkeypatch.setattr("cognee.modules.users.methods.get_user", AsyncMock(return_value="owner"))
+    monkeypatch.setattr(
+        ingestion, "require_active_credential", AsyncMock(side_effect=lambda credential: credential)
+    )
+    counts = {"scanned": 0, "skipped": 0, "failed": 0}
+    credential = SimpleNamespace(
+        id=USER_ID, user_id=USER_ID, provider="telegram", provider_account_id="acct-1"
+    )
+
+    def make_source(scope, name, check_active):
+        return SimpleNamespace(cognee_sync_stats={"failed": 1, "failed_bot_mismatch": 1})
+
+    await ingestion.sync_scopes(
+        "telegram",
+        credential,
+        counts,
+        scopes=[""],
+        dataset_name="telegram",
+        make_source=make_source,
+        classify_error=ingestion.error_classifier("telegram"),
+    )
+    assert counts["failed"] == 1
+    assert counts["failed_bot_mismatch"] == 1
+    assert "failed_ingestion" not in counts
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_telegram_failure_is_counted_once(monkeypatch):
+    """F15: a KeyError while the page is planned was counted failed_provider by the source and
+    failed_ingestion by the host, so the run read failed=2."""
+    import importlib
+    from unittest.mock import AsyncMock
+
+    from cognee.tasks.ingestion.connectors import telegram as module
+    from cognee.tests.unit.tasks.connectors.fake_telegram import GROUP, FakeBot, msg
+
+    bot = FakeBot()
+    bot.add(message=msg(GROUP, 1, "a"))
+    stats = module.new_stats()
+
+    def broken(*args, **kwargs):
+        raise KeyError("id")
+
+    monkeypatch.setattr(module, "message_to_row", broken)
+
+    async def remember(*args, **kwargs):
+        rows = module.sync_rows(
+            bot,
+            {},
+            stats,
+            selection=module._selection(None, False),
+            resource_name="telegram_x",
+            staged_ids=list,
+        )
+        try:
+            list(rows)
+        except Exception as error:
+            raise RuntimeError("pipeline failed") from error
+
+    monkeypatch.setattr(
+        importlib.import_module("cognee.api.v1.remember.remember"), "remember", remember
+    )
+    monkeypatch.setattr("cognee.modules.users.methods.get_user", AsyncMock(return_value="owner"))
+    monkeypatch.setattr(
+        ingestion, "require_active_credential", AsyncMock(side_effect=lambda credential: credential)
+    )
+    counts = {"scanned": 0, "skipped": 0, "failed": 0}
+    credential = SimpleNamespace(
+        id=USER_ID, user_id=USER_ID, provider="telegram", provider_account_id="acct-1"
+    )
+    await ingestion.sync_scopes(
+        "telegram",
+        credential,
+        counts,
+        scopes=[""],
+        dataset_name="telegram",
+        make_source=lambda scope, name, check_active: SimpleNamespace(cognee_sync_stats=stats),
+        classify_error=ingestion.error_classifier("telegram"),
+    )
+    assert counts["failed"] == 1
+    assert counts["failed_unexpected"] == 1
+    assert "failed_ingestion" not in counts
 
 
 def test_asana_service_sends_the_token_as_a_bearer_header_and_shows_it_nowhere(monkeypatch):
