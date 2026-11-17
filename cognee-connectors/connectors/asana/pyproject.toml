@@ -27,7 +27,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "cognee-connectors-core[dlt]>=0.1,<1",
+    "cognee-connectors-core[dlt]>=0.2,<1",
     # The REST client calls requests itself (lazily, on the first request). cognee pins
     # no range of its own for it; this is dlt's floor, which cognee-connectors-core[dlt]
     # pulls in anyway, capped below the next major.

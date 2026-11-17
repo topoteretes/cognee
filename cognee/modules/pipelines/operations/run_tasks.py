@@ -63,6 +63,18 @@ async def close_run_with_cause(run: AsyncGenerator, cause: Exception) -> None:
         _close_cause.reset(token)
 
 
+def writes_durable_before_push(*engines: Any) -> bool:
+    """Whether a run's writes are durable as soon as they are written.
+
+    An engine with ``push_to_s3`` (Ladybug, SQLite) may keep its writes in a
+    local copy of an S3 database until the push after the item loop, so until
+    then they exist in this process alone; its ``needs_push_to_s3`` says so,
+    the same check its ``push_to_s3`` makes. Every such engine must define it:
+    a missing one raises rather than passing writes off as durable.
+    """
+    return not any(engine.needs_push_to_s3() for engine in engines if hasattr(engine, "push_to_s3"))
+
+
 async def run_tasks(
     tasks: list[Task] | Callable[[Any], list[Task]],
     dataset_id: UUID,
@@ -136,6 +148,11 @@ async def run_tasks(
         database_ready = False
         run_finished = False
         items_failed = False
+        # Whether this run's writes are durable: the rollback keeps the items the
+        # run completed only then, since a kept item must still be there for the
+        # next process. Set once the dataset's engines are known; becomes true
+        # after the S3 push below where one is needed.
+        writes_durable = False
         async with AsyncExitStack() as stack:
             try:
                 yield PipelineRunStarted(
@@ -158,6 +175,9 @@ async def run_tasks(
                     )
                 )
                 database_ready = True
+                writes_durable = writes_durable_before_push(
+                    await get_graph_engine(), get_relational_engine()
+                )
                 if not isinstance(data, list):
                     data = [data]
 
@@ -285,6 +305,13 @@ async def run_tasks(
                     for future in item_futures:
                         future.cancel()
                     await asyncio.gather(*item_futures, return_exceptions=True)
+                    # The items that finished before the failure still report
+                    # their result, so the rollback keeps what they completed.
+                    results = [
+                        future.result()
+                        for future in item_futures
+                        if not future.cancelled() and future.exception() is None and future.result()
+                    ]
                     # By default (RAISE_INCREMENTAL_LOADING_ERRORS) a failing item raises
                     # its own error here; a cancellation is not an item failure.
                     items_failed = isinstance(gather_error, Exception)
@@ -337,7 +364,9 @@ async def run_tasks(
                 # fails it must be treated as a failure of this run (rollback +
                 # PipelineRunErrored), not raised after the run has already been
                 # reported as completed — which would both roll back already-completed
-                # data and emit two contradictory terminal events for one run.
+                # data and emit two contradictory terminal events for one run. Until
+                # the push succeeds the writes are not durable (``writes_durable``),
+                # so a failure up to here rolls back the whole run, stamps included.
                 graph_engine = await get_graph_engine()
                 if hasattr(graph_engine, "push_to_s3"):
                     await graph_engine.push_to_s3()
@@ -345,6 +374,7 @@ async def run_tasks(
                 relational_engine = get_relational_engine()
                 if hasattr(relational_engine, "push_to_s3"):
                     await relational_engine.push_to_s3()
+                writes_durable = True
 
                 await log_pipeline_run_complete(
                     pipeline_run_id,
@@ -387,6 +417,7 @@ async def run_tasks(
                             data=data,
                             data_ingestion_info=locals().get("results"),
                             error=error,
+                            writes_durable=writes_durable,
                         )
                     except Exception:
                         logger.exception("Rollback errored")

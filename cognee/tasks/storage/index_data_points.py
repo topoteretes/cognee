@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass
 from uuid import UUID
 
 from cognee.infrastructure.databases.vector import get_vector_engine_async
@@ -36,18 +37,34 @@ def _embedding_request_size(vector_engine) -> int | None:
     return size
 
 
-def indexing_semaphore(vector_engine) -> asyncio.Semaphore:
-    """Bound provider requests across every collection in one storage step.
+@dataclass(frozen=True)
+class IndexingBudget:
+    """The two bounds of one storage step, shared by every collection it indexes.
 
-    A request cannot exceed the smaller of the provider and write batch sizes.
-    The gateway holds a slot only during a provider call; preparation and database
-    writes have their own backpressure and do not occupy embedding capacity.
+    ``requests`` bounds provider requests in flight; the gateway holds a slot only
+    during a provider call. ``batches`` bounds write batches admitted at all, from
+    their first embedding request until their rows are stored, so a slow store holds
+    back embedding instead of letting embedded vectors pile up behind it.
+    """
+
+    requests: asyncio.Semaphore
+    batches: asyncio.Semaphore
+
+
+def indexing_budget(vector_engine) -> IndexingBudget:
+    """Size both bounds from ``EMBEDDING_MAX_CONCURRENT_DATA_POINTS``.
+
+    A request cannot exceed the smaller of the provider and write batch sizes. As many
+    batches are admitted as there are request slots: enough to keep every slot busy
+    while other batches write, and the number of concurrent writes there was before
+    writes and requests were sized apart.
     """
     max_concurrent = get_embedding_context_config().embedding_max_concurrent_data_points
     request_size = min(
         _embedding_request_size(vector_engine) or write_batch_size(), write_batch_size()
     )
-    return asyncio.Semaphore(max(1, max_concurrent // request_size))
+    slots = max(1, max_concurrent // request_size)
+    return IndexingBudget(requests=asyncio.Semaphore(slots), batches=asyncio.Semaphore(slots))
 
 
 def _for_field(data_point: DataPoint, field_name: str) -> DataPoint:
@@ -70,25 +87,26 @@ def _for_field(data_point: DataPoint, field_name: str) -> DataPoint:
 async def index_data_points(
     data_points: list[DataPoint],
     vector_engine=None,
-    semaphore: asyncio.Semaphore | None = None,
+    budget: IndexingBudget | None = None,
 ):
     """Index data points in the vector engine by creating embeddings for specified fields.
 
     Each ``(type, index field)`` pair is one collection. Duplicate IDs keep their
     last input and merge their tags before embedding. Its points are written in
     batches of ``write_batch_size()`` rows; the engine embeds a batch (in requests of its
-    own size) and upserts it. ``semaphore`` bounds provider requests in flight; by
-    default ``indexing_semaphore(vector_engine)``, which keeps at most
+    own size) and upserts it. ``budget`` bounds the provider requests in flight and the
+    batches admitted, embedding or being written; by default
+    ``indexing_budget(vector_engine)``, which keeps at most
     ``embedding_max_concurrent_data_points`` (default 150, env
     ``EMBEDDING_MAX_CONCURRENT_DATA_POINTS``) data points at the embedding engine. A
-    caller indexing several lists in one step passes one semaphore to all of them.
+    caller indexing several lists in one step passes one budget to all of them.
 
     Args:
         data_points: List of DataPoint objects to index. Each DataPoint's metadata must
                      contain an 'index_fields' list specifying which fields to embed.
         vector_engine: Optional pre-created vector engine. Falls back to
                        ``get_vector_engine_async()`` when not supplied.
-        semaphore: Optional shared bound on concurrent embedding requests.
+        budget: Optional shared bounds on embedding requests and admitted batches.
 
     Returns:
         The original data_points list.
@@ -126,13 +144,14 @@ async def index_data_points(
                     point = point.model_copy(update={"belongs_to_set": tags})
             points[point.id] = point
 
-    if semaphore is None:
-        semaphore = indexing_semaphore(vector_engine)
+    if budget is None:
+        budget = indexing_budget(vector_engine)
     rows_per_write = write_batch_size()
 
     async def _index_batch(type_name, field_name, batch):
-        with embedding_request_scope(semaphore):
-            await vector_engine.index_data_points(type_name, field_name, batch)
+        async with budget.batches:
+            with embedding_request_scope(budget.requests):
+                await vector_engine.index_data_points(type_name, field_name, batch)
 
     tasks = []
     for (type_name, field_name), points_by_id in points_by_collection.items():

@@ -32,10 +32,15 @@ from cognee.modules.integrations.github.app_auth import (
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 from cognee.modules.integrations.outbound import client_session
 from cognee.modules.integrations.sync_progress import report_sync_progress, track_sync
+from cognee.modules.operations.origin import ORIGIN_BACKGROUND, operation_origin_scope
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = aiohttp.ClientTimeout(total=30)
+
+# GitHub's ``owner/repo``: an owner of letters, digits and hyphens, a repository
+# of letters, digits, '.', '_' and '-'. Checked before a name becomes a clone URL.
+_FULL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+")
 
 GITHUB_DATASET_PREFIX = "github"
 
@@ -52,8 +57,11 @@ def clone_url(full_name: str) -> str:
     Deliberately carries no token: auth travels out-of-band as
     ``repo_credentials`` (injected into git via environment config by
     ``resolve_repo_source``), so no URL-derived string — clone slugs, result
-    items, logs, git error output — can ever leak a secret.
+    items, logs, git error output — can ever leak a secret. Raises ``ValueError``
+    for anything that is not a GitHub ``owner/repo`` name.
     """
+    if not _FULL_NAME.fullmatch(full_name):
+        raise ValueError(f"Not a GitHub repository name: {full_name!r}")
     return f"https://github.com/{full_name}.git"
 
 
@@ -165,16 +173,23 @@ async def sync_repositories(
             account_login,
             dataset_name_for_account(account_login),
         )
-        result = await cognee_remember(
-            [clone_url(full_name) for full_name in repo_full_names],
-            dataset_name=dataset_name_for_account(account_login),
-            user=owner,
-            content_type="code",
-            repo_credentials=token,
-            # Report a repo that fails (clone, auth, pipeline) as an errored item
-            # and keep syncing the rest, instead of aborting the whole batch.
-            raise_on_error=False,
-        )
+        clone_urls = [clone_url(full_name) for full_name in repo_full_names]
+        # Cloning follows ALLOW_HTTP_REQUESTS, whose unset default refuses API
+        # requests because their callers choose the URL. These URLs are built here,
+        # on github.com, from names GitHub itself returned, so the sync runs as
+        # system work: unset clones, and a set value that disables HTTP still
+        # refuses (track_sync above already stopped that case).
+        with operation_origin_scope(ORIGIN_BACKGROUND):
+            result = await cognee_remember(
+                clone_urls,
+                dataset_name=dataset_name_for_account(account_login),
+                user=owner,
+                content_type="code",
+                repo_credentials=token,
+                # Report a repo that fails (clone, auth, pipeline) as an errored item
+                # and keep syncing the rest, instead of aborting the whole batch.
+                raise_on_error=False,
+            )
         if getattr(result, "status", None) == "errored":
             logger.warning(
                 "GitHub sync for %s finished with errors: %s",

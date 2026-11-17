@@ -47,9 +47,13 @@ from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.shared.logging_utils import get_logger
 
-from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
+from ...relational.sqlalchemy.SqlAlchemyAdapter import (
+    DEFAULT_MAX_OVERFLOW,
+    DEFAULT_POOL_SIZE,
+    SQLAlchemyAdapter,
+)
 from ..embeddings.EmbeddingGateway import EmbeddingGateway
-from ..exceptions import CollectionNotFoundError, SharedDatabasePruneError
+from ..exceptions import CollectionNotFoundError, PgvectorVersionError, SharedDatabasePruneError
 from ..models.ScoredResult import ScoredResult
 from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface, validate_raw_vector_points
@@ -68,20 +72,34 @@ _ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 20}
 # 4,000; a larger embedding stays unindexed and is searched by a full scan.
 _HNSW_VECTOR_MAX_DIMENSIONS = 2000
 _HNSW_HALFVEC_MAX_DIMENSIONS = 4000
-# HNSW arrived in pgvector 0.5.0 and the halfvec type in 0.7.0. On an older server a
-# collection is left unindexed and searched by the exact scan, as before.
-_HNSW_MIN_PGVECTOR = (0, 5, 0)
-_HALFVEC_MIN_PGVECTOR = (0, 7, 0)
-# An HNSW scan returns at most hnsw.ef_search rows (default 40); pgvector caps the
-# setting at 1,000, so a larger limit keeps the exact full scan.
-_HNSW_DEFAULT_EF_SEARCH = 40
+# The halfvec type arrived in pgvector 0.7.0 (HNSW in 0.5.0): new collections store
+# halfvec, so the adapter requires it (see ``_pgvector_version``).
+_MIN_PGVECTOR = (0, 7, 0)
+# Links per node (m) and build-time candidate list (ef_construction) of new HNSW
+# indexes. pgvector's defaults are m = 16 and ef_construction = 64; only m is changed.
+# With many concurrent writers the index insert dominates a write, and its cost grows
+# with m: every new row is linked to up to 2*m neighbours on the base layer, and each of
+# those rewrites its own neighbour list. Measured locally on 99,328 stored text
+# embeddings of 3072 dimensions, inserted by 24 concurrent connections into an indexed
+# table: 36.6 s with m = 8 against 80.3 s with m = 16. The price is recall: 0.951 against
+# 0.974 (recall@10 against an exact scan, 200 queries, ef_search 40), which searching
+# more candidates buys back, see _HNSW_DEFAULT_EF_SEARCH. Existing indexes are not rebuilt
+# (CREATE INDEX IF NOT EXISTS) and keep the parameters they were built with.
+_HNSW_M = 8
+_HNSW_EF_CONSTRUCTION = 64
+# An HNSW scan examines hnsw.ef_search candidates and returns at most that many rows.
+# Searches use at least 100 (pgvector's own default is 40). In the measurement above that
+# gives an index with m = 8 a recall@10 of 0.971, where m = 16 had 0.974 at 40, for a
+# median query of 4.8 ms against 2.9 ms; an index built with m = 16 reaches 0.989 at 100.
+# A larger limit raises the setting. pgvector caps it at 1,000, so a limit above that
+# keeps the exact full scan.
+_HNSW_DEFAULT_EF_SEARCH = 100
 _HNSW_MAX_EF_SEARCH = 1000
 # Postgres truncates identifiers to NAMEDATALEN - 1 bytes, with only a NOTICE.
 _PG_MAX_IDENTIFIER_BYTES = 63
-# Vectors reach Postgres in binary through a small asyncpg pool of the adapter's own
-# (``_get_write_pool``): connections open on demand, close after this long idle, and
-# never exceed this many per adapter.
-_WRITE_POOL_MAX_SIZE = 8
+# Vectors reach Postgres in binary through an asyncpg pool of the adapter's own
+# (``_get_write_pool``): connections open on demand and close after this long idle.
+# Its size follows the adapter's pool args (``_write_pool_size``).
 _WRITE_POOL_IDLE_SECONDS = 60.0
 # SQLAlchemy's asyncpg dialect consumes these connect_args itself; asyncpg.connect
 # does not accept them.
@@ -92,6 +110,26 @@ def _is_write_deadlock(error: BaseException) -> bool:
     """A deadlock abort from the binary write pool (a bare asyncpg error) or behind
     SQLAlchemy's wrapping (every other statement of this adapter)."""
     return isinstance(error, DeadlockDetectedError) or is_deadlock(error)
+
+
+def _write_pool_size(pool_args: dict) -> int:
+    """Most connections the binary write pool may open: ``pool_size + max_overflow``.
+
+    The same ceiling the adapter's SQLAlchemy pool has, read from the same pool args
+    (``VECTOR_POOL_ARGS``, else ``POOL_ARGS``, else the adapter's defaults), so one
+    setting sizes both pools. The write pool is a pool of its own, so an adapter can
+    hold up to this many connections in each. SQLAlchemy's "no limit" values
+    (``pool_size`` 0, a negative ``max_overflow``) have no asyncpg equivalent.
+    """
+    pool_size = pool_args.get("pool_size", DEFAULT_POOL_SIZE)
+    max_overflow = pool_args.get("max_overflow", DEFAULT_MAX_OVERFLOW)
+    if pool_size <= 0 or max_overflow < 0:
+        raise ValueError(
+            "PGVector writes need a bounded connection pool: set a positive pool_size and "
+            "a non-negative max_overflow in VECTOR_POOL_ARGS (or POOL_ARGS), got "
+            f"pool_size={pool_size}, max_overflow={max_overflow}."
+        )
+    return pool_size + max_overflow
 
 
 def _row_order(row_id: Any) -> str:
@@ -112,10 +150,11 @@ def _row_order(row_id: Any) -> str:
 PgvectorVersion = tuple[int, ...]
 
 # Collection tables in the engine's current schema (the dataset's own schema in
-# shared-database mode): a ``vector`` column of pgvector's ``vector`` type, whose
-# ``atttypmod`` is its declared dimension count (-1 when undeclared).
+# shared-database mode): a ``vector`` column of pgvector's ``vector`` or ``halfvec``
+# type, with that type's name and its ``atttypmod``, the declared dimension count (-1
+# when undeclared).
 _VECTOR_COLLECTIONS_SQL = """
-SELECT c.relname, a.atttypmod
+SELECT c.relname, t.typname, a.atttypmod
 FROM pg_attribute a
 JOIN pg_class c ON c.oid = a.attrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -123,7 +162,7 @@ JOIN pg_type t ON t.oid = a.atttypid
 WHERE n.nspname = current_schema()
   AND c.relkind = 'r'
   AND a.attname = 'vector'
-  AND t.typname = 'vector'
+  AND t.typname IN ('vector', 'halfvec')
   AND NOT a.attisdropped
 """
 # An HNSW build is much slower once its graph outgrows maintenance_work_mem (12k
@@ -169,22 +208,32 @@ def hnsw_index_name(table_name: str) -> str:
     return f"{prefix}_{digest}_hnsw"
 
 
-def _indexed_type(dimensions: int, pgvector_version: PgvectorVersion | None) -> str | None:
-    """``vector`` or ``halfvec`` when pgvector can index ``dimensions``, else None."""
-    if pgvector_version is None or pgvector_version < _HNSW_MIN_PGVECTOR or dimensions <= 0:
+def _stored_type(vector_column) -> str:
+    """``halfvec`` or ``vector``: the type of a collection's (reflected) vector column."""
+    from pgvector.sqlalchemy import HALFVEC
+
+    return "halfvec" if isinstance(vector_column.type, HALFVEC) else "vector"
+
+
+def _indexed_type(dimensions: int, column_type: str) -> str | None:
+    """The type the HNSW index of a ``column_type`` column uses (``vector`` or
+    ``halfvec``), or None when pgvector cannot index it.
+
+    New collections store ``halfvec`` and are indexed as they are. A collection created
+    earlier with a ``vector`` column keeps it (nothing converts it): indexed as ``vector``
+    up to 2,000 dimensions and through a halfvec cast above.
+    """
+    if dimensions <= 0:
         return None
-    if dimensions <= _HNSW_VECTOR_MAX_DIMENSIONS:
+    if column_type == "vector" and dimensions <= _HNSW_VECTOR_MAX_DIMENSIONS:
         return "vector"
-    if dimensions <= _HNSW_HALFVEC_MAX_DIMENSIONS and pgvector_version >= _HALFVEC_MIN_PGVECTOR:
+    if dimensions <= _HNSW_HALFVEC_MAX_DIMENSIONS:
         return "halfvec"
     return None
 
 
 def hnsw_index_statement(
-    table_name: str,
-    dimensions: int,
-    pgvector_version: PgvectorVersion | None,
-    schema: str | None = None,
+    table_name: str, dimensions: int, *, column_type: str, schema: str | None = None
 ) -> str | None:
     """CREATE INDEX for a collection's vector column, or None when pgvector cannot index it.
 
@@ -192,30 +241,40 @@ def hnsw_index_statement(
     3072-dimensional collection of 12k rows is ~160 MB of TOAST pages per query, which
     took 20 s on a Neon compute whose cache was empty.
 
+    The index is on the column itself when it has the indexed type, and on a halfvec
+    cast of it when a ``vector`` column is too wide to index (``_indexed_type``).
+
     With ``schema`` the table is named in that schema, so a schema-pinned adapter
     indexes its own collection and never a same-named one earlier on the search path.
     """
-    indexed_type = _indexed_type(dimensions, pgvector_version)
-    if indexed_type == "vector":
-        indexed, operator_class = "vector", "vector_cosine_ops"
-    elif indexed_type == "halfvec":
-        indexed, operator_class = f"(vector::halfvec({dimensions}))", "halfvec_cosine_ops"
-    else:
+    indexed_type = _indexed_type(dimensions, column_type)
+    if indexed_type is None:
         return None
+    indexed = "vector" if indexed_type == column_type else f"(vector::halfvec({dimensions}))"
     table = f'"{schema}"."{table_name}"' if schema else f'"{table_name}"'
     return (
         f'CREATE INDEX IF NOT EXISTS "{hnsw_index_name(table_name)}" '
-        f"ON {table} USING hnsw ({indexed} {operator_class})"
+        f"ON {table} USING hnsw ({indexed} {indexed_type}_cosine_ops) "
+        f"WITH (m = {_HNSW_M}, ef_construction = {_HNSW_EF_CONSTRUCTION})"
     )
 
 
 def _indexed_distance(vector_column, query_vector: list[float], indexed_type: str, dimensions: int):
     """The distance expression the HNSW index orders by (see ``hnsw_index_statement``)."""
-    if indexed_type == "vector":
+    if _stored_type(vector_column) == indexed_type:
         return vector_column.cosine_distance(query_vector)
     from pgvector.sqlalchemy import HALFVEC
 
     return cast(vector_column, HALFVEC(dimensions)).cosine_distance(query_vector)
+
+
+def _vector_values(stored) -> list[float]:
+    """A stored vector as floats: pgvector returns a ``vector`` column as a numpy array
+    and a ``halfvec`` column as a ``HalfVector``."""
+    from pgvector.sqlalchemy import HalfVector
+
+    values = stored.to_list() if isinstance(stored, HalfVector) else stored
+    return [float(v) for v in values]
 
 
 class IndexSchema(DataPoint):
@@ -344,6 +403,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self._write_pool = None
         self._write_pool_loop = None
         self._write_pool_lock = LoopAgnosticLock()
+        self._write_pool_max_size = _write_pool_size(effective_pool_args)
 
         # Reuse engine and sessionmaker if the relational engine is provided and is the same database as the one configured for pgvector
         db_name1 = make_url(relational_db.db_uri).database
@@ -519,12 +579,16 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """The asyncpg pool vectors are written through, opened on first use per event loop.
 
         Vectors go to Postgres in binary: pgvector's asyncpg codec turns a row's vector
-        into float32 bytes in C, where the SQLAlchemy bind processor formatted every
-        coordinate as text in Python, about half of a large write's time. The pool is
+        into the column's bytes in C (half floats for ``halfvec``, float32 for a
+        ``vector`` column of an earlier release), where the SQLAlchemy bind processor
+        formatted every coordinate as text in Python, about half of a large write's time.
+        The pool is
         separate from the SQLAlchemy engine because a codec is registered per
         connection and would change how the engine's own statements, which bind
         vectors as text, encode them. Connections open on demand and close after
-        ``_WRITE_POOL_IDLE_SECONDS`` idle, so outside a write the pool holds none.
+        ``_WRITE_POOL_IDLE_SECONDS`` idle, so outside a write the pool holds none; at
+        most ``pool_size + max_overflow`` of the adapter's pool args are open at once
+        (``_write_pool_size``).
 
         asyncpg connections belong to the loop that opened them, and this adapter is
         cached across loops (the CLI and the tests run several), so a pool from an
@@ -543,7 +607,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             pool = await asyncpg.create_pool(
                 self._asyncpg_dsn(),
                 min_size=0,
-                max_size=_WRITE_POOL_MAX_SIZE,
+                max_size=self._write_pool_max_size,
                 max_inactive_connection_lifetime=_WRITE_POOL_IDLE_SECONDS,
                 init=self._init_write_connection,
                 **self._write_connect_args,
@@ -628,10 +692,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     async def get_stored_vector_size(self) -> int | None:
         """Width of the vectors already in this store, or None when nothing is stored yet.
 
-        Every table's ``vector`` column is declared ``vector(N)`` with the
-        embedding width that built it. Read once per dataset by the dataset
-        context to record the width for rows that predate the recorded
-        embedding model.
+        Every table's ``vector`` column is declared ``halfvec(N)`` (``vector(N)`` in
+        collections created by earlier releases) with the embedding width that built
+        it. Read once per dataset by the dataset context to record the width for rows
+        that predate the recorded embedding model.
 
         Reads every such column rather than the first: a schema built across an
         ``EMBEDDING_MODEL`` change holds two widths, and which one gets recorded
@@ -652,16 +716,18 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         widths = []
         for declared_type in declared_types:
-            match = re.fullmatch(r"vector\((\d+)\)", declared_type or "")
+            match = re.fullmatch(r"(?:vector|halfvec)\((\d+)\)", declared_type or "")
             if match:
                 widths.append(int(match.group(1)))
         return choose_stored_vector_size(widths, self.name)
 
     async def _pgvector_version(self, executor=None) -> PgvectorVersion | None:
-        """The installed pgvector version, which decides whether collections get an index.
+        """The installed pgvector version; raises ``PgvectorVersionError`` below 0.7.0.
 
-        Cached once known. None (the extension is not installed yet) is not cached, so
-        the first collection created after ``CREATE EXTENSION`` still sees the version.
+        Cached once known and supported. None (the extension is not installed yet) is not
+        cached, so the first collection created after ``CREATE EXTENSION`` still checks
+        the version; an unsupported one is not cached, so an upgraded extension
+        (``ALTER EXTENSION vector UPDATE``) is seen without a restart.
         """
         if self._pgvector_version_cache is not None:
             return self._pgvector_version_cache
@@ -671,8 +737,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         else:
             async with self.engine.connect() as own_connection:
                 raw = (await own_connection.execute(statement)).scalar_one_or_none()
-        self._pgvector_version_cache = parse_pgvector_version(raw)
-        return self._pgvector_version_cache
+        version = parse_pgvector_version(raw)
+        if version is not None and version < _MIN_PGVECTOR:
+            raise PgvectorVersionError(raw, ".".join(map(str, _MIN_PGVECTOR)))
+        self._pgvector_version_cache = version
+        return version
 
     async def existing_collections(self, collection_names: list[str]) -> list[str]:
         """Return the given collections that exist, read in one round trip.
@@ -752,16 +821,20 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if not await self.has_collection(collection_name):
             async with self.VECTOR_DB_LOCK:
                 if not await self.has_collection(collection_name):
+                    from pgvector.sqlalchemy import HALFVEC
+
                     # A plain Table, not a declarative class: one class per collection
                     # used to be registered on the shared declarative Base, and warned
                     # on every repeat. Same DDL: a UUID primary key, a JSON payload and
-                    # a VECTOR(size) column, in the pinned schema when there is one.
+                    # a HALFVEC(size) column, in the pinned schema when there is one.
+                    # halfvec: half the bytes per row of vector to store and write, and
+                    # the only type HNSW indexes above 2,000 dimensions.
                     table = Table(
                         collection_name,
                         MetaData(),
                         Column("id", Uuid, primary_key=True),
                         Column("payload", JSON),
-                        Column("vector", self.Vector(vector_size)),
+                        Column("vector", HALFVEC(vector_size)),
                         schema=self.schema or None,
                     )
 
@@ -771,6 +844,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                         # routing) has no handler, so the collection installs it.
                         # A no-op where it is installed.
                         await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                        # After CREATE EXTENSION, so an outdated pgvector fails here with
+                        # its own error, before the halfvec column is created.
+                        await self._pgvector_version(connection)
                         await connection.run_sync(table.metadata.create_all, tables=[table])
                         # Same transaction as the table: if the index fails, the table
                         # rolls back with it and the retry starts over, instead of the
@@ -778,7 +854,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                         index_statement = hnsw_index_statement(
                             collection_name,
                             vector_size,
-                            await self._pgvector_version(connection),
+                            column_type="halfvec",
                             schema=self.schema or None,
                         )
                         if index_statement is not None:
@@ -885,8 +961,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict.
 
         The rows reach Postgres as plain ``(id, payload, vector)`` tuples over the binary
-        write pool: no ORM object per row, and the vector as float32 bytes instead of a
-        text literal built coordinate by coordinate.
+        write pool: no ORM object per row, and the vector in the column's binary form
+        instead of a text literal built coordinate by coordinate.
         """
         if not data_points:
             return
@@ -1135,8 +1211,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             return [
                 ScoredResult(
                     id=parse_id(result.id),
-                    # pgvector hands the column back as a numpy array; callers get floats.
-                    payload={**result.payload, "vector": [float(v) for v in result.vector]}
+                    # pgvector hands a vector column back as a numpy array and a halfvec
+                    # one as a HalfVector; callers get floats.
+                    payload={**result.payload, "vector": _vector_values(result.vector)}
                     if include_vector
                     else result.payload,
                     score=0,
@@ -1248,18 +1325,22 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         async with self.get_async_session() as session:
             # The column was sized by this engine in create_collection.
             dimensions = self.embedding_engine.get_vector_size()
-            indexed_type = _indexed_type(dimensions, await self._pgvector_version(session))
+            await self._pgvector_version(session)  # fails fast on an outdated pgvector
+            # The collection's own column type: one created as ``vector`` keeps it.
+            column_type = _stored_type(PGVectorDataPoint.c.vector)
+            indexed_type = _indexed_type(dimensions, column_type)
             use_index = (
                 indexed_type is not None
                 and not node_name
                 and not exact_scan_required
                 and limit <= _HNSW_MAX_EF_SEARCH
             )
-            if indexed_type == "vector" and not use_index:
-                # Up to 2,000 dimensions the index is on the column itself, so Postgres
-                # would also pick it for an exact ORDER BY and return at most
-                # hnsw.ef_search rows, before any node-set filter is applied. Searches
-                # that must be exact keep the full scan.
+            if indexed_type == column_type and not use_index:
+                # When the index is on the column itself (every indexed halfvec column, a
+                # vector column up to 2,000 dimensions), Postgres would also pick it for
+                # an exact ORDER BY and return at most hnsw.ef_search rows, before any
+                # node-set filter is applied. Searches that must be exact keep the full
+                # scan.
                 await session.execute(text("SET LOCAL enable_indexscan = off"))
             if node_name:
                 if node_name_filter_operator == "AND":
@@ -1329,8 +1410,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if len(vector_list) == 0:
             return []
 
-        # An index scan returns rows in the index's order (half precision above 2,000
-        # dimensions); callers expect them sorted by the exact distance they carry.
+        # An index scan returns rows in the index's order (half precision through a
+        # halfvec cast); callers expect them sorted by the distance they carry.
         vector_list.sort(key=lambda row: row["_distance"])
 
         # Return backend raw cosine distance as score (lower is better)
@@ -1599,11 +1680,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """
         async with self.engine.connect() as connection:
             collections = (await connection.execute(text(_VECTOR_COLLECTIONS_SQL))).all()
-            pgvector_version = await self._pgvector_version(connection)
+            await self._pgvector_version(connection)  # fails fast on an outdated pgvector
 
         indexed, failed = [], []
-        for table_name, dimensions in collections:
-            statement = hnsw_index_statement(table_name, dimensions, pgvector_version)
+        for table_name, column_type, dimensions in collections:
+            statement = hnsw_index_statement(table_name, dimensions, column_type=column_type)
             if statement is None:
                 continue
             try:

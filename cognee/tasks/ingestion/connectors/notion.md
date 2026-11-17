@@ -147,8 +147,8 @@ text; they are not resolved into graph edges yet.
   the binary is not downloaded in this version.
 - A data source with more than 10,000 rows aborts every run: Notion cuts a query off there, and
   syncing only the first 10,000 would forget the rest.
-- The walk runs inside cognee's process-wide dlt staging lock, so while a large tree syncs every
-  other dlt ingestion in the same process (Drive, Gmail, Linear, CSV) waits.
+- The walk runs inside the dlt staging lock of its dataset, so while a large tree syncs every
+  other dlt ingestion into that dataset waits; other datasets stage meanwhile.
 - A page is only re-rendered when it changes itself. Text it shows from other objects (sub-page
   and database titles, synced copies, mentions) stays as it was until the page is edited.
 - Pinned to Notion API version `2025-09-03` (the first with data sources as first-class

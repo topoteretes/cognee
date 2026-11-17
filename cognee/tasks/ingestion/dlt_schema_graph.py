@@ -14,6 +14,8 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
 from cognee.modules.engine.models import DltColumn
 from cognee.modules.engine.utils.timestamp_from_text import timestamp_from_text
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.schema_alignment import align_tables_with_ontology
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.schema.models import SchemaColumn, SchemaRelationship, SchemaTable
 from cognee.tasks.storage.index_data_points import index_data_points
@@ -44,6 +46,8 @@ async def emit_dlt_schema_graph(
     emitted_value_node_ids: set | None = None,
     emitted_column_node_ids: set | None = None,
     emitted_has_value_edges: set | None = None,
+    ontology_resolver: BaseOntologyResolver | None = None,
+    authoritative_sources: dict[str, str | None] | None = None,
 ) -> None:
     """Build and persist the DLT schema graph for the given tables and rows.
 
@@ -77,6 +81,10 @@ async def emit_dlt_schema_graph(
         emitted_has_value_edges: same run-scoped bookkeeping for ``has_value``
             edges, keyed ``(column_id, value_id, "has_value")``, so a value that
             recurs in later batches does not write its column edge again.
+        ontology_resolver: the ontology each table name is aligned with (see
+            ``schema_alignment``); None writes no ``realizes`` edges. The environment
+            is not read here: the caller resolves both ontology arguments.
+        authoritative_sources: table name to owner, stamped on ``realizes`` edges.
 
     Creates SchemaTable nodes (deterministic uuid5 ids, so re-emitting is an
     idempotent upsert), SchemaRelationship nodes with has_foreign_key /
@@ -152,6 +160,10 @@ async def emit_dlt_schema_graph(
 
     # SchemaTable nodes for each source table
     table_node_ids = {}
+    # The names the ontology alignment matches authoritative sources against: qualified
+    # by the source's database when it names one ("crm.customers"), so two sources'
+    # tables of one name can be told apart.
+    aligned_table_names = {}
     for table_key, table_meta in tables.items():
         table_name = table_meta.get("name", table_key)
         scope = table_meta.get("scope", "")
@@ -178,6 +190,9 @@ async def emit_dlt_schema_graph(
         )
         schema_nodes.append(table_node)
         table_node_ids[(scope, table_name)] = table_node.id
+        aligned_table_names[table_node.id] = (
+            f"{source_label}.{table_name}" if source_label else table_name
+        )
         # The table belongs to the source document (the database) it was read from.
         if scope:
             schema_edges.append(
@@ -192,6 +207,14 @@ async def emit_dlt_schema_graph(
                     },
                 )
             )
+
+    # Business-to-technical mapping: with an ontology configured, each table node
+    # realizes the ontology class its name is the key of (see schema_alignment).
+    entity_types, alignment_edges = align_tables_with_ontology(
+        aligned_table_names, ontology_resolver, authoritative_sources
+    )
+    schema_nodes.extend(entity_types)
+    schema_edges.extend(alignment_edges)
 
     # SchemaRelationship nodes for each FK definition
     relationship_count = 0

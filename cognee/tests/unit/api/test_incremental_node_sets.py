@@ -68,7 +68,7 @@ async def test_fresh_chunks_reach_extraction_with_document_membership(monkeypatc
     monkeypatch.setattr(incremental, "publish_updated_data", publish)
     result = await incremental._write_and_publish(
         {
-            "staged": object(),
+            "staged": SimpleNamespace(content_hash="staged-hash"),
             "document": document,
             "stored_chunks": [],
             "plan": ChunkPlan(fresh=fresh),

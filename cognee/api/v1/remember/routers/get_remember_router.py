@@ -125,9 +125,9 @@ def get_remember_router() -> APIRouter:
                 "Data given as strings instead of uploads, one entry each: raw text to "
                 "remember, a local file or directory path on the server's filesystem or an "
                 "s3:// object read with the server's AWS credentials (both require "
-                "ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
-                "ALLOW_HTTP_REQUESTS), a GitHub/GitLab repository URL, which is "
-                "shallow-cloned and indexed as a code graph, or a database connection "
+                "ACCEPT_LOCAL_FILE_PATH), a web URL to fetch, a GitHub/GitLab repository URL, "
+                "which is shallow-cloned and indexed as a code graph (both require "
+                "ALLOW_HTTP_REQUESTS=true on the server), or a database connection "
                 "string (postgresql://, mysql://, sqlite:///, ...), refused over the "
                 "API with 422 DatabaseIngestionDisabled unless the server sets "
                 "ALLOW_DATABASE_INGESTION=true. Combined with 'data': "
@@ -318,8 +318,8 @@ def get_remember_router() -> APIRouter:
         - **raw_data** (Optional[List[str]]): String inputs, one entry each: raw text, a
           local file or directory path on the server or an s3:// object read with the
           server's AWS credentials (both require ACCEPT_LOCAL_FILE_PATH), a web URL
-          fetched as a page (requires ALLOW_HTTP_REQUESTS), a GitHub/GitLab
-          repository URL, shallow-cloned and indexed as a code graph, or a database
+          fetched as a page, a GitHub/GitLab repository URL, shallow-cloned and indexed
+          as a code graph (both require ALLOW_HTTP_REQUESTS=true on the server), or a database
           connection string (postgresql://, mysql://, sqlite:///, ...). Database
           ingestion is disabled over the API by default: the request fails with
           422 DatabaseIngestionDisabled unless the server sets
@@ -562,11 +562,11 @@ def get_remember_router() -> APIRouter:
 
         from cognee.api.v1.ontologies.ontologies import OntologyService
         from cognee.api.v1.remember import remember as cognee_remember
-        from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 
-        # Validate graph_model before the generic try/except so failures
-        # surface as a clear 400 instead of being swallowed into a 409.
-        graph_model_parsed = None
+        # Only the form field's JSON text is parsed here. remember() checks the schema
+        # before storing anything and raises a CogneeValidationError (400) for a bad one,
+        # which the handler below re-raises to the app-level handler.
+        graph_model_schema = None
         if graph_model:
             try:
                 graph_model_schema = json.loads(graph_model)
@@ -575,17 +575,6 @@ def get_remember_router() -> APIRouter:
                     status_code=400,
                     detail=f"graph_model is not valid JSON: {parse_err}",
                 )
-            try:
-                graph_model_parsed = graph_schema_to_graph_model(graph_model_schema)
-            except Exception as parse_err:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"graph_model could not be converted to a graph model schema: {parse_err}. "
-                        "Expected the same dict format as the cognify endpoint, "
-                        "including a top-level 'title' key."
-                    ),
-                ) from parse_err
 
         try:
             config_to_use = None
@@ -595,7 +584,7 @@ def get_remember_router() -> APIRouter:
                 ontology_service = OntologyService()
                 # File objects keep the upload's filename and content type so the
                 # resolver can pick the right RDF parser (Turtle, JSON-LD, ...).
-                ontology_streams = ontology_service.get_ontology_files(ontology_keys, user)
+                ontology_streams = await ontology_service.get_ontology_files(ontology_keys, user)
 
                 from cognee.modules.ontology.ontology_config import Config
                 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
@@ -630,7 +619,7 @@ def get_remember_router() -> APIRouter:
                 # for any other content_type, including None.
                 **({"index_vectors": bool(index_vectors)} if content_type == "code" else {}),
                 **({"config": config_to_use} if config_to_use else {}),
-                **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
+                **({"graph_model": graph_model_schema} if graph_model else {}),
                 # HTTP contract: an errored blocking run is reported as the 409
                 # body below, not as an exception.
                 raise_on_error=False,

@@ -15,14 +15,31 @@ const nextConfig: NextConfig = {
   // gitignores `.env*.local`, so a synced env file is copied onto the runner
   // and then silently dropped by `git add` (CLO-703). Next inlines these at
   // build time, so a prebuilt `cognee -ui` could not pick them up from the
-  // environment afterwards either. Reading process.env first keeps both
+  // environment afterwards either. Reading process.env first keeps it
   // overridable for anyone building the frontend themselves, including from
   // their own untracked .env.local, which Next loads before this file runs.
+  // Leave NEXT_PUBLIC_LOCAL_API_URL unset unless the builder explicitly sets it,
+  // so an unconfigured browser can derive the backend from its own host.
   env: {
     NEXT_PUBLIC_IS_CLOUD_ENVIRONMENT:
       process.env.NEXT_PUBLIC_IS_CLOUD_ENVIRONMENT ?? "false",
-    NEXT_PUBLIC_LOCAL_API_URL:
-      process.env.NEXT_PUBLIC_LOCAL_API_URL ?? "http://localhost:8000",
+    // With the dev API proxy below, the browser calls the page's own origin
+    // (getLocalApiUrl), not a backend host of its own.
+    NEXT_PUBLIC_API_SAME_ORIGIN: process.env.COGNEE_DEV_API_PROXY ? "true" : "false",
+  },
+
+  // Opt-in, for testing OAuth providers that only accept HTTPS redirect URLs (Slack):
+  // with COGNEE_DEV_API_PROXY=http://localhost:8000 this server forwards the backend's
+  // routes, so one tunnel serves the UI, the API and the OAuth callback on one host and
+  // the install-nonce cookie set by `authorize` comes back with the callback. Unset, it
+  // adds nothing. The UI's own routes live under /api/<name>, never /api/v1.
+  async rewrites() {
+    const backend = process.env.COGNEE_DEV_API_PROXY?.replace(/\/+$/, "");
+    if (!backend) return [];
+    return [
+      { source: "/api/v1/:path*", destination: `${backend}/api/v1/:path*` },
+      { source: "/health", destination: `${backend}/health` },
+    ];
   },
 
   images: {

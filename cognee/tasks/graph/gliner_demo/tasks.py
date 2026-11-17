@@ -37,7 +37,6 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.graph.exceptions import InvalidDataChunksError
 from cognee.tasks.graph.extract_graph_from_data import extract_graph_from_data
-from cognee.tasks.provenance import record_provenance
 from cognee.tasks.storage import add_data_points, find_indexed_chunks
 from cognee.tasks.summarization.models import TextSummary
 
@@ -451,10 +450,7 @@ async def get_gliner_demo_tasks(
             needs_llm=False,
         ),
     ]
-
-    if track_provenance:
-        tasks.append(
-            Task(record_provenance, task_config={"batch_size": chunks_per_batch}, needs_llm=False)
-        )
+    # ``track_provenance`` is accepted for signature compatibility only: the
+    # audit ledger is recorded by add_data_points at the storage seam.
 
     return tasks

@@ -141,7 +141,7 @@ class FakeApollo:
             return [dict(stage) for stage in stages]
         return [{**stage, "team_id": self.team_id} for stage in stages]
 
-    def request(self, method: str, path: str, *, body=None, params=None):
+    def request(self, method: str, path: str, *, body=None, params=None, check_active=None):
         self.calls.append((method, path))
         self.bodies.append((path, dict(body or {})))
         if path in self.fail_paths:

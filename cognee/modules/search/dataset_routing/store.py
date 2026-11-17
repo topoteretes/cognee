@@ -32,6 +32,7 @@ from __future__ import annotations
 from contextvars import copy_context
 
 from cognee.infrastructure.databases.vector import get_vectordb_config
+from cognee.infrastructure.databases.vector.embeddings.vector_size import engine_vector_size
 from cognee.infrastructure.databases.vector.get_vector_engine import _VectorEngineHandle
 from cognee.shared.logging_utils import get_logger
 
@@ -145,7 +146,9 @@ async def routing_width_matches(engine) -> bool:
     if read_stored_size is None:
         return True
     stored = await read_stored_size()
-    configured = engine.embedding_engine.get_vector_size()
+    # Awaited: a sync get_vector_size() may block this loop to ask a remote
+    # embedding worker for its size (embedding_worker without EMBEDDING_DIMENSIONS).
+    configured = await engine_vector_size(engine.embedding_engine)
     if stored is None or stored == configured:
         return True
     logger.warning(
