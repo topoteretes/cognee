@@ -73,6 +73,8 @@ from cognee.modules.chunking.chunk_policy import (
     IncrementalPlanError,
     stored_chunker_id,
 )
+from cognee.modules.chunking.Chunker import Chunker
+from cognee.modules.chunking.chunker_registry import stamps_every_chunk
 from cognee.modules.chunking.external_metadata import normalize_external_metadata
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
@@ -398,7 +400,7 @@ def _resolve_extraction_config() -> Config:
 async def _extraction_step(
     extractor: str,
     document: Document,
-    chunker: type,
+    chunker: type[Chunker],
     graph_model: type[BaseModel],
     custom_prompt: str | None,
     cognify_config,
@@ -696,7 +698,7 @@ async def incremental_update(
     preferred_loaders=None,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
-    chunker: type = TextChunker,
+    chunker: type[Chunker] = TextChunker,
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
     extractor: str = LLM_EXTRACTOR,
 ) -> dict:
@@ -841,7 +843,7 @@ async def _run_incremental_update(
     preferred_loaders,
     graph_model: type[BaseModel],
     custom_prompt: str | None,
-    chunker: type,
+    chunker: type[Chunker],
     policy: ChunkPolicy,
     extractor: str,
 ) -> dict:
@@ -959,7 +961,7 @@ async def _stage_and_plan(
     user: User,
     node_set: list[str] | None,
     preferred_loaders,
-    chunker: type,
+    chunker: type[Chunker],
     policy: ChunkPolicy,
 ) -> dict:
     """Everything that can be decided WITHOUT touching live state.
@@ -1032,6 +1034,16 @@ async def _stage_and_plan(
         if stored_chunker and stored_chunker != getattr(chunker, "chunker_id", ""):
             raise IncrementalUpdateNotPossible(
                 f"document was chunked by {stored_chunker}, not {getattr(chunker, 'chunker_id', '')}",
+                RefusalReason.UNSUPPORTED_CHUNKER,
+            )
+        # Chunks with no single id were stored before chunks carried one (cognee
+        # before 1.5.4) or were cut by more than one chunker. TextChunker keeps
+        # updating them, as it always has. A chunker the deployment registered
+        # stamps every chunk it cuts, so it did not cut these: patching them with
+        # it would leave the document cut by two chunkers.
+        if not stored_chunker and stamps_every_chunk(chunker):
+            raise IncrementalUpdateNotPossible(
+                f"document's chunks do not all carry {chunker.chunker_id}",
                 RefusalReason.UNSUPPORTED_CHUNKER,
             )
 
@@ -1173,7 +1185,7 @@ async def _write_and_publish(
     graph_model: type[BaseModel],
     custom_prompt: str | None,
     pipeline_run_id: UUID,
-    chunker: type = TextChunker,
+    chunker: type[Chunker] = TextChunker,
     extractor: str = LLM_EXTRACTOR,
 ) -> dict:
     """The write phase, ending in the one-transaction publish.
