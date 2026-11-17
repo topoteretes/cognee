@@ -170,7 +170,7 @@ async def test_the_cognify_run_opens_first_and_the_indexing_run_works_in_between
     cognify_run_id = events[0].pipeline_run_id
     assert {event.pipeline_run_id for event in events} == {cognify_run_id}
     # None of the cognify run's extras; only the run the ledger rows it writes name.
-    assert indexing["extras"] == {LEDGER_RUN_ID: cognify_run_id}
+    assert indexing["extras"] == {LEDGER_RUN_ID: str(cognify_run_id)}
     # Its subscriber learns that the indexing run works for it.
     assert [run_id for run_id, _ in pushed] == [cognify_run_id, cognify_run_id]
     progress = [event for _, event in pushed]

@@ -282,13 +282,15 @@ async def _dataset_chain(
             _push_stage_progress(started, 0, len(selected))
             try:
                 # The ledger row of an item the indexing run stores first names
-                # the cognify run: the one callers follow and roll back.
+                # the cognify run: the one callers follow and roll back. As
+                # text: a run's extras go to its workers as JSON, and a run
+                # whose extras do not survive it keeps its items here.
                 indexed = await _run_indexing(
                     indexing_tasks,
                     {
                         **run_params,
                         "data": selected,
-                        "extras": {LEDGER_RUN_ID: started.pipeline_run_id},
+                        "extras": {LEDGER_RUN_ID: str(started.pipeline_run_id)},
                     },
                 )
             except Exception as error:
