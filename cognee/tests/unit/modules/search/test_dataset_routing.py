@@ -195,7 +195,9 @@ async def test_routes_to_the_dataset_whose_best_row_matches(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_dataset_with_no_routing_rows_is_always_searched(monkeypatch):
+async def test_a_dataset_with_no_routing_rows_is_left_out_when_another_is_routed(monkeypatch):
+    """SDK-1516: an unindexed dataset waits for the search's widening pass; kept
+    next to every routed one, a backlog of them meant routing never narrowed."""
     a, b, c = uuid4(), uuid4(), uuid4()
     (root_a,), (root_b,) = dataset_route_ids(a, []), dataset_route_ids(b, [])
     engine = FakeEngine(scores={root_a: 0.2, root_b: 0.3})
@@ -205,8 +207,35 @@ async def test_a_dataset_with_no_routing_rows_is_always_searched(monkeypatch):
 
     assert decision.routed == (a,)
     assert decision.unindexed == (c,)
-    assert decision.dataset_ids == [a, c]
+    assert decision.dataset_ids == [a]
     assert decision.narrowed is True
+
+
+@pytest.mark.asyncio
+async def test_one_indexed_dataset_narrows_a_backlog_of_unindexed_ones(monkeypatch):
+    """The case that kept routing from narrowing: one dataset indexed, the rest not."""
+    indexed, *backlog = (uuid4() for _ in range(6))
+    (root,) = dataset_route_ids(indexed, [])
+    _patch(monkeypatch, FakeEngine(scores={root: 0.4}), {d: [] for d in [indexed, *backlog]})
+
+    decision = await _route("q", [indexed, *backlog], top_k=1)
+
+    assert decision.dataset_ids == [indexed]
+    assert decision.unindexed == tuple(backlog)
+    assert decision.narrowed is True
+
+
+@pytest.mark.asyncio
+async def test_with_no_dataset_indexed_every_dataset_is_searched(monkeypatch):
+    a, b = uuid4(), uuid4()
+    _patch(monkeypatch, FakeEngine(scores={}), {a: [], b: []})
+
+    decision = await _route("q", [a, b], top_k=1)
+
+    assert decision.routed == ()
+    assert decision.unindexed == (a, b)
+    assert decision.dataset_ids == [a, b]
+    assert decision.narrowed is False
 
 
 @pytest.mark.asyncio

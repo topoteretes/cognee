@@ -37,9 +37,6 @@ class _FakeIntegration(OAuthIntegration):
         assert token_response == {"raw": "response"}
         return self._installation
 
-    def state_signing_secret(self):
-        raise NotImplementedError
-
     def frontend_base_url(self):
         raise NotImplementedError
 
