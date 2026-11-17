@@ -45,7 +45,11 @@ from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.shared.logging_utils import get_logger
 
-from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
+from ...relational.sqlalchemy.SqlAlchemyAdapter import (
+    DEFAULT_MAX_OVERFLOW,
+    DEFAULT_POOL_SIZE,
+    SQLAlchemyAdapter,
+)
 from ..embeddings.EmbeddingGateway import EmbeddingGateway
 from ..exceptions import CollectionNotFoundError, PgvectorVersionError, SharedDatabasePruneError
 from ..models.ScoredResult import ScoredResult
@@ -91,10 +95,9 @@ _HNSW_DEFAULT_EF_SEARCH = 100
 _HNSW_MAX_EF_SEARCH = 1000
 # Postgres truncates identifiers to NAMEDATALEN - 1 bytes, with only a NOTICE.
 _PG_MAX_IDENTIFIER_BYTES = 63
-# Vectors reach Postgres in binary through a small asyncpg pool of the adapter's own
-# (``_get_write_pool``): connections open on demand, close after this long idle, and
-# never exceed this many per adapter.
-_WRITE_POOL_MAX_SIZE = 8
+# Vectors reach Postgres in binary through an asyncpg pool of the adapter's own
+# (``_get_write_pool``): connections open on demand and close after this long idle.
+# Its size follows the adapter's pool args (``_write_pool_size``).
 _WRITE_POOL_IDLE_SECONDS = 60.0
 # SQLAlchemy's asyncpg dialect consumes these connect_args itself; asyncpg.connect
 # does not accept them.
@@ -105,6 +108,26 @@ def _is_write_deadlock(error: BaseException) -> bool:
     """A deadlock abort from the binary write pool (a bare asyncpg error) or behind
     SQLAlchemy's wrapping (every other statement of this adapter)."""
     return isinstance(error, DeadlockDetectedError) or is_deadlock(error)
+
+
+def _write_pool_size(pool_args: dict) -> int:
+    """Most connections the binary write pool may open: ``pool_size + max_overflow``.
+
+    The same ceiling the adapter's SQLAlchemy pool has, read from the same pool args
+    (``VECTOR_POOL_ARGS``, else ``POOL_ARGS``, else the adapter's defaults), so one
+    setting sizes both pools. The write pool is a pool of its own, so an adapter can
+    hold up to this many connections in each. SQLAlchemy's "no limit" values
+    (``pool_size`` 0, a negative ``max_overflow``) have no asyncpg equivalent.
+    """
+    pool_size = pool_args.get("pool_size", DEFAULT_POOL_SIZE)
+    max_overflow = pool_args.get("max_overflow", DEFAULT_MAX_OVERFLOW)
+    if pool_size <= 0 or max_overflow < 0:
+        raise ValueError(
+            "PGVector writes need a bounded connection pool: set a positive pool_size and "
+            "a non-negative max_overflow in VECTOR_POOL_ARGS (or POOL_ARGS), got "
+            f"pool_size={pool_size}, max_overflow={max_overflow}."
+        )
+    return pool_size + max_overflow
 
 
 def _row_order(row_id: Any) -> str:
@@ -378,6 +401,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self._write_pool = None
         self._write_pool_loop = None
         self._write_pool_lock = LoopAgnosticLock()
+        self._write_pool_max_size = _write_pool_size(effective_pool_args)
 
         # Reuse engine and sessionmaker if the relational engine is provided and is the same database as the one configured for pgvector
         db_name1 = make_url(relational_db.db_uri).database
@@ -560,7 +584,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         separate from the SQLAlchemy engine because a codec is registered per
         connection and would change how the engine's own statements, which bind
         vectors as text, encode them. Connections open on demand and close after
-        ``_WRITE_POOL_IDLE_SECONDS`` idle, so outside a write the pool holds none.
+        ``_WRITE_POOL_IDLE_SECONDS`` idle, so outside a write the pool holds none; at
+        most ``pool_size + max_overflow`` of the adapter's pool args are open at once
+        (``_write_pool_size``).
 
         asyncpg connections belong to the loop that opened them, and this adapter is
         cached across loops (the CLI and the tests run several), so a pool from an
@@ -579,7 +605,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             pool = await asyncpg.create_pool(
                 self._asyncpg_dsn(),
                 min_size=0,
-                max_size=_WRITE_POOL_MAX_SIZE,
+                max_size=self._write_pool_max_size,
                 max_inactive_connection_lifetime=_WRITE_POOL_IDLE_SECONDS,
                 init=self._init_write_connection,
                 **self._write_connect_args,
