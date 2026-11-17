@@ -109,7 +109,11 @@ async def test_add_data_points_indexes_nodes_and_edges(
         "custom edges are written in their own call, not the main-edge batch"
     )
     assert graph_engine.add_edges.await_args_list[1].args[0] == expected_custom_edges
-    assert mock_index_edges.await_count == 2
+    # One edge-indexing pass over both lists: an edge type they share is embedded once.
+    mock_index_edges.assert_awaited_once()
+    indexed_edges = mock_index_edges.await_args.args[0]
+    assert expected_main_edges[0] in indexed_edges
+    assert expected_custom_edges[0] in indexed_edges
 
 
 @pytest.mark.asyncio
@@ -140,6 +144,111 @@ async def test_a_failed_graph_write_indexes_no_vectors(
         await add_data_points([dp1])
 
     mock_index_nodes.assert_not_awaited()
+    mock_index_edges.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_node_vectors_are_written_while_the_edge_graph_rows_are(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    """Each store's vectors follow its graph rows, and the two kinds overlap: the edge
+    graph rows are written while the node vectors are still in flight."""
+    import asyncio
+
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, _vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+
+    order = []
+    edges_written = asyncio.Event()
+
+    async def _add_nodes(*_args, **_kwargs):
+        order.append("graph_add_nodes")
+
+    async def _add_edges(*_args, **_kwargs):
+        order.append("graph_add_edges")
+        edges_written.set()
+
+    async def _index_nodes(*_args, **_kwargs):
+        order.append("index_nodes:start")
+        # Returns only once the edge rows went in: they must not wait for this.
+        await asyncio.wait_for(edges_written.wait(), timeout=5)
+        order.append("index_nodes:end")
+
+    async def _index_edges(*_args, **_kwargs):
+        assert edges_written.is_set(), "edge vectors must follow the edge graph rows"
+        order.append("index_edges")
+
+    graph_engine.add_nodes.side_effect = _add_nodes
+    graph_engine.add_edges.side_effect = _add_edges
+    mock_index_nodes.side_effect = _index_nodes
+    mock_index_edges.side_effect = _index_edges
+
+    await add_data_points([dp1, dp2])
+
+    assert order.index("graph_add_nodes") < order.index("index_nodes:start")
+    assert order.index("graph_add_edges") < order.index("index_nodes:end")
+    assert order.index("graph_add_edges") < order.index("index_edges")
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_a_failed_node_indexing_lets_the_edge_writes_finish_before_raising(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    """The error is raised only once the concurrent edge half has finished, so nothing
+    is still writing after add_data_points has reported failure."""
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, _vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+    mock_index_nodes.side_effect = RuntimeError("vector store down")
+
+    with pytest.raises(RuntimeError, match="vector store down"):
+        await add_data_points([dp1, dp2])
+
+    graph_engine.add_edges.assert_awaited_once()
+    mock_index_edges.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_a_failed_edge_graph_write_indexes_no_edge_vectors(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, _vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+    graph_engine.add_edges.side_effect = RuntimeError("graph is down")
+
+    with pytest.raises(RuntimeError, match="graph is down"):
+        await add_data_points([dp1, dp2])
+
+    mock_index_nodes.assert_awaited_once()  # the node half still ran to its end
     mock_index_edges.assert_not_awaited()
 
 

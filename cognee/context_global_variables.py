@@ -1,3 +1,28 @@
+"""Per-context database, model and user bindings that let one process serve many datasets.
+
+Cognee code asks for "the" graph engine, vector engine, file storage, LLM client or
+embedding engine without passing a dataset around. The ContextVars here make that work:
+``get_graph_context_config``, ``get_vectordb_context_config``, the file storage config,
+``get_llm_context_config`` and the embedding context config read them first and fall back
+to the process-wide settings when they are unset. Because ContextVars are scoped to the
+current asyncio task, concurrent requests and pipeline runs on different datasets each see
+their own bindings.
+
+``set_database_global_context_variables`` is the entry point. Under backend access
+control (``ENABLE_BACKEND_ACCESS_CONTROL``, on by default) it binds the dataset's own
+graph database, vector database and data root, provisioning them on first use, so code
+inside the scope that resolves its engines and storage through those context configs
+reaches that dataset's isolated stores without being handed the dataset. With access
+control off it only records the dataset id and any per-call LLM/embedding overrides, and
+everything shares the configured stores.
+
+``backend_access_control_enabled`` and ``multi_user_support_possible`` decide which of the
+two modes applies. Isolation needs a registered dataset-database handler that works with
+the configured provider, for both graph and vector; when either is missing, enabling
+access control (explicitly or by leaving it unset) raises instead of silently sharing
+databases between datasets.
+"""
+
 import os
 import warnings
 from contextvars import ContextVar
@@ -36,16 +61,39 @@ current_dataset_id: ContextVar[UUID | None] = ContextVar("current_dataset_id", d
 llm_config: ContextVar[LLMConfig | None] = ContextVar("llm_config", default=None)
 embedding_config = ContextVar("embedding_config", default=None)
 session_user = ContextVar("session_user", default=None)
-# Labels the pipeline stage (extraction | summarization | query) whose LLM
-# config is currently active on `llm_config`, for tracing (see pipeline_stage).
+# Labels the LLM calls in this context with the stage that made them, for
+# tracing (see pipeline_stage).
 current_pipeline_stage: ContextVar[str | None] = ContextVar("current_pipeline_stage", default=None)
 
 
 async def set_session_user_context_variable(user):
+    """Record ``user`` as the acting user for the current async context.
+
+    Retrievers and session-aware completion read ``session_user`` as the acting user;
+    the improve/memify session tasks fall back to it when no user is passed to them.
+    """
     session_user.set(user)
 
 
 def multi_user_support_possible():
+    """Check that the configured backends can give every dataset its own databases.
+
+    Both the graph and the vector dataset-database handler must be registered in
+    ``supported_dataset_database_handlers`` (in-tree handlers, or ones added at runtime
+    with ``use_dataset_database_handler()``), and each handler must work with the
+    configured provider. Handlers are derived from the provider by default;
+    ``GRAPH_DATASET_DATABASE_HANDLER`` / ``VECTOR_DATASET_DATABASE_HANDLER`` select an
+    alternative one.
+
+    Returns:
+        ``True`` when per-dataset isolation is possible.
+
+    Raises:
+        OSError: If either handler is unsupported or does not match its provider. The
+            message names the selected handler (and the provider, on a mismatch), lists
+            the supported handlers and points at the two fixes: a supported handler, or
+            ``ENABLE_BACKEND_ACCESS_CONTROL=false``.
+    """
     graph_db_config = get_graph_config()
     vector_db_config = get_vectordb_config()
 
@@ -96,6 +144,18 @@ def multi_user_support_possible():
 
 
 def backend_access_control_enabled():
+    """Return whether per-dataset database isolation is in effect.
+
+    Read from ``ENABLE_BACKEND_ACCESS_CONTROL`` on every call. Unset or ``"true"``
+    (case-insensitive) means on, after ``multi_user_support_possible()`` confirms the
+    backends support it; any other value means off, with all datasets sharing the
+    configured graph and vector stores.
+
+    Raises:
+        OSError: When access control is on (including the unset default) but the
+            configured backends cannot isolate datasets. An unsupported backend is a
+            hard error, not a silent switch to shared databases.
+    """
     backend_access_control = os.environ.get("ENABLE_BACKEND_ACCESS_CONTROL", None)
     if backend_access_control is None:
         # If backend access control is not defined in environment variables,
@@ -139,7 +199,8 @@ async def _verify_dataset_access(user_id: UUID, dataset_id: UUID, permission_typ
 class DatabaseContextManager:
     """Dual-mode helper returned by :func:`set_database_global_context_variables`.
 
-    Supports both ``await`` (legacy) and ``async with`` (scoped) usage.
+    Supports both ``await`` (legacy, deprecated) and ``async with`` (scoped) usage; see
+    that function for what entering binds and what exit restores.
 
     Note: Single-use object, should not be reused across multiple calls.
     """
@@ -407,38 +468,55 @@ def set_database_global_context_variables(
     embedding_config: EmbeddingConfig | None = None,
     permission_type: str | None = None,
 ) -> "DatabaseContextManager":
-    """Returns a dual-mode helper that is both awaitable and an async context manager.
+    """Scope the current async context to one dataset's databases and model overrides.
 
-    - ``await set_database_global_context_variables(ds, user_id)`` — legacy;
-      applies the context and relies on task-end queue cleanup to release the
-      slot.
+    This is how pipeline runs, searches and session writes reach the right stores:
+    inside the scope, ``get_graph_engine``, ``get_vector_engine``, file storage,
+    ``get_llm_client`` and ``get_embedding_engine`` resolve to this dataset's
+    bindings, so downstream code needs no dataset argument. ``current_dataset_id``
+    is set in both access-control modes for code that keys on the dataset.
+
     - ``async with set_database_global_context_variables(ds, user_id):`` —
-      applies the context on enter; explicitly releases this dataset's queue
-      slot on exit. Preferred for sequential multi-dataset loops and scoped
-      operations.
+      preferred. Applies the context on enter and releases this dataset's queue
+      slot on exit, which suits sequential multi-dataset loops.
+    - ``await set_database_global_context_variables(ds, user_id)`` — deprecated
+      (emits ``DeprecationWarning``); applies the context and relies on task-end
+      queue cleanup to release the slot.
 
-    If backend access control is enabled this ensures all datasets have their
-    own databases, access to which will be enforced by given permissions.
-    Database name will be determined by dataset and the appropriate vector and
-    graph database handlers will be enforced.
+    With backend access control on (see :func:`backend_access_control_enabled`),
+    entering:
 
-    Additionally, this acts as the queue gate for dataset-level operations:
-    applying the context ensures the current asyncio task holds a
-    :class:`DatasetQueue` slot for ``dataset``. Repeated calls in the same
-    task for the same dataset are no-ops;. The dataset queue slot is released automatically when the
-    task completes (legacy mode) or on async-with exit (scoped mode).
+    - takes a :class:`DatasetQueue` slot for ``dataset`` (waits while the process
+      is at ``DATASET_QUEUE_MAX_CONCURRENT``; a pass-through when
+      ``DATASET_QUEUE_ENABLED`` is off). A nested entry for the same dataset in the
+      same task reuses the slot it already holds;
+    - looks up the dataset's registry row and, on first use, provisions its graph
+      and vector databases through the configured handlers. Storage is namespaced by
+      the dataset's owner, never by ``user_id``, so a user granted access to a
+      shared dataset reads and writes the owner's databases;
+    - binds the dataset's graph, vector and data-root configs to this context;
+    - checks that the configured embedding model's vector width matches the one the
+      dataset was built with. A dataset with no recorded width records the width its
+      store already holds, or adopts the configured model when the store is empty; a
+      store that cannot report its width is not checked.
+
+    If any of this fails after the slot is taken, the slot is released before the
+    error propagates. With access control off, none of these steps run and the
+    process-wide stores are used.
 
     If ``llm_config`` and/or ``embedding_config`` are provided they are set on
     their respective ContextVars and picked up by ``get_llm_client`` (LiteLLM)
     and ``get_embedding_engine`` in the current async context. Unlike the
     graph/vector configs these are applied even when backend access control is
     disabled, since they are an explicit caller-provided override. In the
-    ``async with`` form they are restored to their prior values on exit, while
-    the per-dataset graph/vector/file-storage configs persist after exit so
-    callers can keep reading the dataset databases.
+    ``async with`` form they and ``current_dataset_id`` are restored to their prior
+    values on exit, while the per-dataset graph/vector/file-storage configs persist
+    after exit so callers can keep reading the dataset databases.
 
     Args:
-        dataset: Cognee dataset id
+        dataset: Cognee dataset id (a ``UUID``). Resolve dataset names to ids before
+            calling. Required when backend access control is on; ``None`` is
+            accepted only with it off.
         user_id: Optional UUID of the user entering the context. Storage
             (registry row, database paths, data root) always resolves under
             the dataset's owner, never this value — it is consulted only by
@@ -448,12 +526,22 @@ def set_database_global_context_variables(
         embedding_config: Optional ``EmbeddingConfig`` to use for embedding calls
             in this context.
         permission_type: Optional permission ("read"/"write"/"delete"/"share")
-            to verify for ``user_id`` on the dataset before entering. When
-            omitted, no permission check is performed here — callers are
-            expected to have authorized at the API layer.
+            to verify for ``user_id`` on the dataset before entering. Checked
+            only with backend access control on. When omitted, no permission
+            check is performed here — callers are expected to have authorized at
+            the API layer.
 
     Returns:
         A :class:`DatabaseContextManager` that can be awaited or used as an
-        async context manager.
+        async context manager. Nothing is applied until it is awaited or entered.
+
+    Raises (on await or enter):
+        CogneeValidationError: ``dataset`` is not a ``UUID``; or, with access control
+            on, it is ``None`` or ``permission_type`` is given without ``user_id``.
+        OSError: Access control is on but the backends cannot isolate datasets.
+        PermissionDeniedError: ``user_id`` lacks ``permission_type`` on the dataset.
+        DatasetNotFoundError: The dataset does not exist (access control on).
+        EmbeddingDimensionMismatchError: The configured embedding model's width
+            differs from the one the dataset was built with.
     """
     return DatabaseContextManager(dataset, user_id, llm_config, embedding_config, permission_type)

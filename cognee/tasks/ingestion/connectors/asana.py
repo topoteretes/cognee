@@ -57,19 +57,22 @@ Design
   document and is asked again on the next run, after every fresh task. It is never tombstoned
   and never blocks another task. A 200 of the wrong shape in a listing, the events feed, a
   project read or the check of a missing task raises instead.
-* **A run is bounded and resumable.** On a rate limit, a spent request budget, an outage (three
-  tasks in a row answering 5xx or nothing, counted apart in the fresh tasks, in the retry tail
-  and in the checks of missing tasks) or a rejected token after rows were emitted, the source stops cleanly, keeps what it
-  emitted, queues the tasks it did not reach in ``state["pending"]`` and reports the reason in
-  ``cognee_sync_stats`` (``failed_rate_limit``, ``failed_budget``, ``failed_unavailable``,
-  ``failed_auth``). It never sleeps on a 429: ``dlt`` rolls back the state of a failed run and
-  the walk holds its dataset's staging lock.
+* **A run is bounded and resumable.** A rate limit, a spent request budget, an outage (three
+  tasks in a row answering 5xx or nothing) or, once the listing is complete, a rejected token
+  stops the run cleanly: it keeps what it emitted, queues the rest in ``state["pending"]`` and
+  names the stop in ``cognee_sync_stats`` (``failed_rate_limit``, ``failed_budget``,
+  ``failed_unavailable``, ``failed_auth``). A budget or token stop that kept nothing raises
+  instead: the next run would stop at the same place. It never sleeps on a 429: dlt drops the
+  state of a failed run and the walk holds its dataset's staging lock.
 * **The listing is a pass that can span runs.** A project whose listing finished, and the events
   and page offset of one cut inside, are kept in ``state["listing"]`` (ids, timestamps and
   offsets, never text) and the finished projects' rows are emitted at once. A run cut inside the
   listing (a 429 or a spent budget) renders nothing and forgets nothing; the next run continues
   at the page it stopped at, and the pass completes, renders and forgets only when every
-  selected project is listed. A changed selection starts the pass over.
+  selected project is listed. A stored offset Asana refuses (a 4xx outside
+  ``_NOT_AN_OFFSET_REFUSAL``) lists that project again from its first page, once per run; the
+  run keeps the fresh offset.
+  A changed selection starts the pass over.
 * **Budget.** ``max_requests`` bounds every request of a run, the listing's and the reads' (a
   task costs three, so at least three), so a run holds the staging lock for at most that many
   requests plus the client's retries of each (``_RETRIES``); there is no deadline or other
@@ -95,7 +98,7 @@ import re
 import time
 from collections.abc import Callable, Iterable, Iterator
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, TypedDict
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import dlt_utils
@@ -123,6 +126,12 @@ _OVERLAP_SECONDS = 60
 _OUTAGE_STREAK = 3
 # Requests that read one task: the task, its comments and its subtasks.
 _TASK_REQUESTS = 3
+# Answers to the first page of a resumed listing that never mean its stored offset was
+# refused: a rejected token, a missing permission, a rate limit. Asana documents that an offset
+# expires but not with which status (400 for one it never issued; an expired one is not
+# verified, SDK-1485), so any other 4xx restarts the listing. The restart sends no offset, so
+# a 4xx the offset did not cause comes back there and raises, as the sibling Linear walk does.
+_NOT_AN_OFFSET_REFUSAL = frozenset({401, 403, 429})
 # A gid goes into the URL of its own read, so no ``.``, ``/``, ``?``, ``#`` or ``%`` may get
 # through. Asana's gids are digits; only the character set is checked.
 _GID = re.compile(r"[0-9A-Za-z]+")
@@ -192,6 +201,15 @@ class AsanaSyncTokenExpiredError(AsanaAPIError):
     def __init__(self, endpoint: str, sync_token: str):
         super().__init__(412, endpoint)
         self.sync_token = sync_token
+
+
+class _OffsetRejected(Exception):
+    """Internal: Asana refused a page offset stored by an earlier run.
+
+    Raised only for the first page of a listing resumed from such an offset, and always caught:
+    the listing then starts over at its first page. Its argument is the status, the refusal is
+    its ``__cause__``.
+    """
 
 
 class AsanaResponseError(AsanaSourceError):
@@ -428,15 +446,16 @@ def _documents_for(
 ) -> set[str]:
     """Map event task gids onto the task documents they affect.
 
-    A gid in ``swept`` is a document itself. Otherwise it may be a subtask whose title is folded
-    into its parent's document; ``subtask_parents`` remembers which, because renaming or deleting
-    a subtask touches neither the parent nor the event's ``parent`` field. Anything else drops.
+    A gid in ``swept`` is a document itself. It may also be a subtask whose title is folded into
+    its parent's document, a subtask in a selected project being both; ``subtask_parents``
+    remembers which, because renaming or deleting a subtask touches neither the parent nor the
+    event's ``parent`` field. Anything else drops.
     """
     documents: set[str] = set()
     for gid in task_gids:
         if gid in swept:
             documents.add(gid)
-        elif subtask_parents.get(gid) in swept:
+        if subtask_parents.get(gid) in swept:
             documents.add(subtask_parents[gid])
     return documents
 
@@ -624,12 +643,35 @@ def render_project(gid: str, project: dict) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Extraction
 # ---------------------------------------------------------------------------
+class _ListingProgress(TypedDict):
+    """The progress inside a project cut in its listing, kept in ``state["listing"]["partial"]``.
+
+    Ids, timestamps and offsets, never text. A plain dict at runtime, so dlt stores it as is.
+    """
+
+    token: str | None  # the Events sync token to ask next
+    polled: bool  # the Events feed is read to its end
+    events: list[str]  # task gids the events named
+    renamed: bool  # a project or section rename was among them
+    gap: bool  # the feed had a gap (HTTP 412): every task is read
+    offset: str | None  # where the next page starts
+    listed: dict[str, str]  # task gid -> modified_at, listed so far
+
+
 class _CutShort(Exception):
     """Internal: stop the run here, keeping the state reached so far."""
 
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
+
+
+class _AuthCut(_CutShort):
+    """Internal: Asana rejected the token; ``error`` is raised instead if the run kept nothing."""
+
+    def __init__(self, error: AsanaAuthError):
+        super().__init__("auth")
+        self.error = error
 
 
 class _Walker:
@@ -640,9 +682,10 @@ class _Walker:
     projects of a task that is in more than one), ``selection`` (the selected project gids),
     ``retry`` (tasks kept after a failure), ``pending`` (tasks a stopped run did not reach),
     ``listing`` (only while a listing pass is unfinished: its selection, the result of each
-    project listed so far and the progress inside the ones cut) and, per project, the ``cursor``,
-    the tasks ``seen`` near it, the Events ``sync`` token and the ``tasks`` last listed. Only the
-    final commit (or ``commit_listing``) writes it, so a run that raises leaves it as it was.
+    project listed so far and the progress inside the ones cut, ``_ListingProgress``) and, per
+    project, the ``cursor``, the tasks ``seen`` near it, the Events ``sync`` token and the
+    ``tasks`` last listed. Only the final commit (or ``commit_listing``) writes it, so a run that
+    raises leaves it as it was.
     """
 
     def __init__(
@@ -661,7 +704,6 @@ class _Walker:
         self.projects = project_gids
         self.max_requests = max_requests
         self.check_active = check_active
-        self.emitted = 0
         self.used = 0  # the requests of this run, counted against ``max_requests``
         self.known: set[str] = set(state.get("known_ids", []))
         self.subtask_parents: dict[str, str] = dict(state.get("subtasks", {}))
@@ -678,7 +720,7 @@ class _Walker:
         self.held_pending: set[str] = set()
         self.held_retry: set[str] = set()
         self.listing: dict[str, dict] = {}  # project gid -> its ``_list_project`` result
-        self.partial: dict[str, dict] = {}  # project gid -> the progress inside a cut project
+        self.partial: dict[str, _ListingProgress] = {}  # project gid -> its progress, if cut
         self.unresolved: dict[str, int] = {}  # project gid -> the 403 or 404 Asana answered
         self.next_projects: dict[str, dict[str, Any]] = {}
         self.project_rows: list[dict[str, Any]] = []  # of the projects this run listed
@@ -694,6 +736,9 @@ class _Walker:
         # Tasks in a row that answered 5xx or nothing; the retry tail starts its own count.
         self.outage = 0
         self.listed = False
+        # Known tasks the listing missed that a check found still selected: queued, so the next
+        # pass reads them once it lists them (an edit hidden by a shifted page is not lost).
+        self.missing_kept: set[str] = set()
 
     # -- requests ----------------------------------------------------------
     def _call(self, path: str, params: dict[str, Any] | None = None):
@@ -714,14 +759,13 @@ class _Walker:
         except AsanaRateLimitedError:
             self.stats["failed"] += 1
             raise _CutShort("rate_limit") from None
-        except AsanaAuthError:
-            # A rejection before any row left this run raises: the token is bad. Project rows go
-            # out right after the listing, so one in the listing always raises; later it stops
-            # the run cleanly (the token expired mid-run) only if a row already went out, which
-            # a run resuming a pass whose projects earlier runs listed has not.
-            if self.emitted:
+        except AsanaAuthError as exc:
+            # Inside the listing it raises. Once the pass is listed it stops the run instead of
+            # failing each task in turn, which would spend the budget on 401s; a stop that kept
+            # nothing raises after all (``_iter_rows``).
+            if self.listed:
                 self.stats["failed"] += 1
-                raise _CutShort("auth") from None
+                raise _AuthCut(exc) from None
             raise
 
     def _pages(
@@ -729,20 +773,35 @@ class _Walker:
     ) -> Iterator[tuple[list[dict], str | None]]:
         """Each page of a paginated collection as ``(items, next_offset)``, from ``offset``.
 
-        ``next_offset`` is ``None`` after the last page. The offsets of the pages this call has
-        read are remembered: one that comes back twice raises instead of looping.
+        ``next_offset`` is ``None`` after the last page, which Asana marks with
+        ``next_page: null``; a body without ``next_page`` raises ``AsanaResponseError``. A
+        starting ``offset`` Asana rejects raises ``_OffsetRejected``. An offset that comes back
+        twice raises instead of looping.
         """
         endpoint = _endpoint(path)
-        offsets: set[str] = set()
+        # The starting offset counts as read: a page that names it again is a loop.
+        offsets: set[str] = {offset} if offset else set()
+        resumed = offset  # asked for on the first page only
         while True:
             page_params = {**params, "limit": PAGE_SIZE}
             if offset:
                 page_params["offset"] = offset
-            body = self._call(path, page_params)
+            try:
+                body = self._call(path, page_params)
+            except AsanaAPIError as exc:
+                if resumed and 400 <= exc.status < 500 and exc.status not in _NOT_AN_OFFSET_REFUSAL:
+                    raise _OffsetRejected(exc.status) from exc
+                raise
+            resumed = None
             page = _data(body, list, endpoint)
             if not all(isinstance(item, dict) for item in page):
                 raise AsanaResponseError(f"Asana {endpoint}: a listed item is not an object")
-            next_page = body.get("next_page")
+            if "next_page" not in body:
+                # Asana documents next_page on every response of a request that passes
+                # ``limit`` (null on the last page), and this one always does. A body without it
+                # is malformed; read as the last page it would cut the listing short.
+                raise AsanaResponseError(f"Asana {endpoint}: no next_page")
+            next_page = body["next_page"]
             if next_page is None:
                 offset = None
             else:
@@ -763,7 +822,7 @@ class _Walker:
         return [item for page, _ in self._pages(path, params) for item in page]
 
     # -- 1. List -----------------------------------------------------------
-    def _poll_events(self, project_gid: str, progress: dict) -> None:
+    def _poll_events(self, project_gid: str, progress: _ListingProgress) -> None:
         """Read a project's Events feed into ``progress``, one page at a time.
 
         ``progress["token"]`` is the sync token to ask next, ``events`` the task gids named so
@@ -788,7 +847,11 @@ class _Walker:
             if not isinstance(next_token, str) or not next_token:
                 raise AsanaResponseError("Asana /events: no sync token")
             events = _data(body, list, "/events")
-            more = bool(body.get("has_more"))
+            more = body.get("has_more")
+            if not isinstance(more, bool):
+                # A missing has_more read as the end would stop the feed short, as a page
+                # without next_page would cut a listing.
+                raise AsanaResponseError("Asana /events: no has_more")
             if more and next_token in seen:
                 raise AsanaResponseError("Asana /events: a sync token came back twice")
             seen.add(next_token)
@@ -796,12 +859,26 @@ class _Walker:
             progress["renamed"] = progress["renamed"] or _renamed(events)
             progress.update(token=next_token, polled=not more)
 
-    def _read_task_pages(self, project_gid: str, progress: dict) -> None:
+    def _read_task_pages(self, project_gid: str, progress: _ListingProgress) -> None:
         """List a project's tasks page by page into ``progress["listed"]`` (gid -> modified_at).
 
-        ``progress["offset"]`` is where the next page starts, saved after every page, so a run
-        cut inside a project resumes at the page it stopped at.
+        The offset is saved after every page, so a cut run resumes there. A stored offset Asana
+        refuses (``_OffsetRejected``) restarts the project at its first page, once: a refusal of
+        any other page raises. The fresh pass is complete on its own, and a task it lacks is still checked
+        before it is forgotten.
         """
+        try:
+            self._read_task_pages_from(project_gid, progress)
+        except _OffsetRejected as refused:
+            # The status, since a 4xx the offset did not cause shows only on the restarted page.
+            logger.warning(
+                "Asana: a stored page offset was refused (HTTP %s); the project is listed again.",
+                refused.args[0],
+            )
+            progress.update(offset=None, listed={})
+            self._read_task_pages_from(project_gid, progress)
+
+    def _read_task_pages_from(self, project_gid: str, progress: _ListingProgress) -> None:
         params = {"project": project_gid, "opt_fields": "modified_at"}
         for page, offset in self._pages("/tasks", params, offset=progress["offset"]):
             for task in page:
@@ -959,7 +1036,8 @@ class _Walker:
         the runs that made it, or a page shifted on resume. So a missing task is asked for its
         memberships (one request, counted in ``max_requests``): a 403 or 404, or no selected
         project, means it is gone and the caller forgets it; a selected project keeps it known
-        (its project's events or listing render it on a later pass). An answer of 5xx or nothing
+        and queues it in ``missing_kept``, so the next pass reads it once it lists it (its events
+        may already be spent on this pass). An answer of 5xx or nothing
         is unknown, not gone: the task stays known and counts in ``failed`` like a read that
         failed, and toward the outage streak, so a hung Asana does not spend the budget on
         checks either. Any other error raises, a 200 of the wrong shape (or whose ``memberships``
@@ -982,10 +1060,13 @@ class _Walker:
                 return True
             raise
         self.outage = 0
-        return bool(_selected_gids(_data(body, dict, "/tasks/{gid}"), self.projects))
+        selected = bool(_selected_gids(_data(body, dict, "/tasks/{gid}"), self.projects))
+        if selected:
+            self.missing_kept.add(row_id.removeprefix("task:"))
+        return selected
 
     def _count_outage(self) -> None:
-        """Count an answer of 5xx or nothing toward the outage streak; three in a row stop the run."""
+        """Count an answer of 5xx or nothing toward the outage streak; three in a row stop it."""
         self.outage += 1
         if self.outage >= _OUTAGE_STREAK:
             raise _CutShort("unavailable")
@@ -1043,19 +1124,14 @@ class _Walker:
     def _project_row_ids(self) -> list[str]:
         return [row["id"] for row in self.project_rows]
 
-    def _project_rows(self) -> Iterator[dict[str, Any]]:
-        for row in self.project_rows:
-            self.emitted += 1
-            yield row
-
     def rows(self) -> Iterator[dict[str, Any]]:
         try:
             self._list_phase()
         except _CutShort:
             # The projects listed so far go out now: their rows are whole documents.
-            yield from self._project_rows()
+            yield from self.project_rows
             raise
-        yield from self._project_rows()
+        yield from self.project_rows
         for index, gid in enumerate(self.order):
             self.position = index
             if index == self.tail_start:
@@ -1083,7 +1159,6 @@ class _Walker:
                 continue
             self._remember(gid, task, subtasks)
             self.rendered.add(gid)
-            self.emitted += 1
             yield row
 
         # The listing is complete: only now may a row that is no longer listed be forgotten.
@@ -1099,7 +1174,9 @@ class _Walker:
             self.tombstoned.add(row_id)
             self.stats["deleted"] += 1
             yield {"id": row_id, "_deleted": True}
-        self._commit(self.known - self.tombstoned | self._emitted_ids(), [], self.kept)
+        self._commit(
+            self.known - self.tombstoned | self._emitted_ids(), sorted(self.missing_kept), self.kept
+        )
 
     # -- 3. Commit ---------------------------------------------------------
     def _emitted_ids(self) -> set[str]:
@@ -1125,25 +1202,22 @@ class _Walker:
         rest = self.order[self.position :]
         retry = self.kept | (self.retry & set(rest))
         pending = [gid for gid in rest if gid not in retry]
+        pending += sorted(self.missing_kept - retry - set(pending))
         self._commit(self.known - self.tombstoned | self._emitted_ids(), pending, retry)
         return True
 
     def commit_listing(self) -> bool:
         """After a stop before the pass is rendered: keep its listing, move nothing else.
 
-        ``state["listing"]`` holds the selection of the pass, per finished project the ids and
-        timestamps ``_list_project`` returned, and per project cut inside its progress so far
-        (events, task gids with their timestamps, page offset): never text. The ids can exceed
-        ``known_ids`` until the pass completes. The next run of the same selection lists only
-        what is left. The project rows of this run are out, so their ids join ``known_ids`` (a
-        later deselection then forgets them). Nothing is rendered, forgotten or advanced
-        (``selection``, the cursors and the sync tokens stay as the last complete pass left
-        them), because a pass that has not listed every project knows neither which task left
-        nor what is left to render. ``_commit`` clears it when the pass completes. A run that
-        added nothing to what the state holds leaves it as it is, and returns ``False``.
+        ``state["listing"]`` holds the pass's selection, the finished projects' results and the
+        cut projects' ``_ListingProgress``. Nothing is rendered, forgotten or advanced until the
+        pass completes, since an unfinished pass knows neither what left nor what to render. The
+        project rows already out join ``known_ids``. Returns whether the state changed.
         """
         kept: dict = self.state.get("listing") or {}
-        if self.listing == kept.get("done", {}) and self.partial == kept.get("partial", {}):
+        unchanged = self.listing == kept.get("done", {}) and self.partial == kept.get("partial", {})
+        # A pass kept for another selection is replaced, even by one that listed the same.
+        if unchanged and (not kept or kept.get("selection") == self.projects):
             return False
         self.state["v"] = STATE_VERSION
         self.state["known_ids"] = sorted(self.known | set(self._project_row_ids()))
@@ -1189,9 +1263,9 @@ class _Walker:
 def new_stats() -> dict[str, int]:
     """The counts of a run, every key present from its start so a host finds them on any exit.
 
-    ``unresolved`` counts the projects Asana would not show this run. A reason key
-    (``failed_rate_limit``, ``failed_budget``, ``failed_unavailable``, ``failed_auth``) joins them
-    only when a run stops for it.
+    ``unresolved`` counts the projects Asana would not show this run; ``requests`` the requests
+    it started. A reason key (``failed_rate_limit``, ``failed_budget``, ``failed_unavailable``,
+    ``failed_auth``) joins them when a run stops for it, see ``_iter_rows``.
     """
     return dict.fromkeys(
         ("scanned", "skipped", "deleted", "failed", "kept", "pending", "requests", "unresolved"), 0
@@ -1207,7 +1281,13 @@ def _iter_rows(
     max_requests: int = DEFAULT_MAX_REQUESTS,
     check_active: Callable[[], None] | None = None,
 ) -> Iterator[dict]:
-    """Yield the changed rows of the selected projects. Pure of dlt, so tests drive it with a dict."""
+    """Yield the changed rows of the selected projects. Pure of dlt, so tests drive it with a dict.
+
+    A clean stop sets its reason key. A run that raises adds one to ``failed`` and names only a
+    rejected token (``failed_auth``) or a stop that kept nothing (``failed_budget``,
+    ``failed_auth``); the host classifies any other raise. What ``check_active`` raises adds
+    nothing to ``failed`` and no reason key.
+    """
     walker = _Walker(
         client,
         state,
@@ -1221,7 +1301,10 @@ def _iter_rows(
     except _CutShort as cut:
         changed = walker.commit_progress()
         stats[f"failed_{cut.reason}"] = 1
-        logger.warning("Asana sync stopped early (%s); it resumes on the next run.", cut.reason)
+        if isinstance(cut, _AuthCut) and not changed:
+            # Nothing was kept, so every later run stops at the same request: the token is
+            # rejected, as on a run that is rejected inside its listing.
+            raise cut.error from None
         if cut.reason == "budget" and not changed:
             # Nothing was kept, so the next run starts at the same place and spends the same
             # budget the same way: the budget cannot cover this selection. A 429 is not this,
@@ -1233,6 +1316,13 @@ def _iter_rows(
                 f"({_TASK_REQUESTS} requests) or one check of a missing task (1 request) could "
                 "answer, so the next run would stop at the same place. Raise max_requests."
             ) from None
+        if isinstance(cut, _AuthCut):
+            logger.warning(
+                "Asana sync stopped early (auth): Asana rejected the token, expired or revoked; "
+                "the next run with an accepted token resumes."
+            )
+        else:
+            logger.warning("Asana sync stopped early (%s); it resumes on the next run.", cut.reason)
     except AsanaSourceError as exc:
         # The run raises: dlt drops its state, not this object, and a host reads these counts
         # after the raise.
