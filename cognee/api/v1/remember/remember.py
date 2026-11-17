@@ -99,7 +99,15 @@ def _improve_error_text(improve_result: "ImproveResult") -> str | None:
 
 
 class RememberKwargs(TypedDict, total=False):
-    """Power-user overrides for remember(). Most users never need these."""
+    """Power-user overrides for remember(). Most users never need these.
+
+    On the add+cognify path each option goes to ``add()``, ``cognify()``, or
+    both (``_ADD_ONLY`` / ``_COGNIFY_ONLY`` / ``_SHARED``), so callers tune
+    those steps without calling them directly. Skills and code options are
+    read only by their ``content_type`` routes (``index_vectors`` also by
+    ``MemorySource`` imports). Presort options are read only by the presort
+    routes and raise ``TypeError`` on the add+cognify path.
+    """
 
     graph_model: Any
     extractor: Literal["llm", "gliner_demo", "gliner"]
@@ -741,6 +749,8 @@ async def _dispatch_session_entry(
                 feedback_text=entry.feedback_text,
                 feedback_score=entry.feedback_score,
                 used_graph_element_ids=entry.used_graph_element_ids,
+                time=entry.time,
+                prompt_time=entry.prompt_time,
             )
             result.entry_id = qa_id
             if qa_id is None:
@@ -760,6 +770,7 @@ async def _dispatch_session_entry(
                 method_params=entry.method_params,
                 method_return_value=entry.method_return_value,
                 error_message=entry.error_message,
+                time=entry.time,
             )
             result.entry_id = trace_id
             if trace_id is None:
@@ -1106,22 +1117,49 @@ async def remember(
     raise_on_error: bool = True,
     **kwargs: Unpack[RememberKwargs],
 ) -> Union["RememberResult", "DryRunEstimate", "PresortReport", dict]:
-    """Store data in memory.
+    """Store data in memory with one call; ``recall()`` is the matching read side.
 
-    Two modes depending on whether ``session_id`` is provided:
+    ``remember()`` is the primary write entrypoint. It combines the low-level
+    steps a caller would otherwise sequence by hand, so one call leaves the data
+    searchable. It picks one of two modes depending on whether ``session_id`` is
+    provided:
 
-    **Without session_id (permanent memory):** Runs ``add()`` +
-    ``cognify()`` to ingest data and build the knowledge graph.
+    **Without session_id (permanent memory):** runs ``add()`` (loading,
+    storage, dataset creation and permission checks), then ``cognify()``
+    (chunking, graph extraction, embedding), then ``improve()`` when
+    ``self_improvement`` is True (the default). The result is a knowledge
+    graph and vector index that ``recall()`` / ``search()`` can query. The
+    target is exactly one dataset, created on first use. To cognify several
+    datasets at once, or to rebuild memory over data that is already
+    stored, call ``cognify()`` directly.
 
-    **With session_id (session memory):** Stores the data in the
-    session cache for fast retrieval. When ``self_improvement`` is
-    True (default), also bridges the session data into the permanent
-    graph in the background via ``improve()``. The call returns
-    immediately — await the result to wait for the background sync.
-    ``IMPROVE_DEBOUNCE_ENTRIES`` / ``IMPROVE_DEBOUNCE_SECONDS`` hold that
-    bridge back until enough new entries or enough time accumulated, and
+    **With session_id (session memory):** stores the text as a turn in the
+    session cache, for conversational or agent memory that should be
+    available right away without waiting for graph extraction. The session
+    is bound to one dataset by its first write, so later writes and the
+    session's searches use that dataset's stores. When ``self_improvement``
+    is True, ``improve()`` then bridges the session into the permanent
+    graph in the background. The call returns immediately; await the
+    result to wait for that bridge. ``IMPROVE_DEBOUNCE_ENTRIES`` /
+    ``IMPROVE_DEBOUNCE_SECONDS`` hold the bridge back until enough new
+    entries or enough time has accumulated. Session memory needs the
+    session cache (``CACHING=true``): without it, plain text is skipped
+    with a logged warning and typed session entries raise ``RuntimeError``.
+
     ``IMPROVE_AUTO_ENABLED=false`` turns automatic improves off in both
     modes (see ``ImproveConfig``).
+
+    Other inputs take dedicated routes from the same entrypoint: typed
+    ``MemoryEntry`` objects (Q&A turns, agent trace steps, feedback, skill
+    runs) are written straight to the session or graph without add/cognify;
+    a ``MemorySource`` imports records from another memory system; a
+    ``PresortReport`` ingests its proposed dataset groups;
+    ``content_type="skills"`` / ``"code"`` build skill nodes or a code graph.
+    While ``cognee.serve(url=...)`` is active, typed entries and ordinary
+    remember calls are sent to that instance; ``MemorySource`` imports and
+    dry runs raise ``ValueError`` instead. Options the remote request would
+    drop (``extractor``, ``summary_method``, ``branch``,
+    ``early_chunk_indexing``, ``session_ids``) raise ``ValueError`` too.
 
     Args:
         data: The data to store: text, file paths, URLs, ``DataItem``s, typed memory
@@ -1197,14 +1235,29 @@ async def remember(
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
-        **kwargs: Additional options -- see ``RememberKwargs``. ``branch`` (without
-            ``content_type``) clones that branch of a repository URL; see ``add()``.
+        raise_on_error: If *True* (default), a blocking permanent remember raises
+            when the cognify run fails, and when the step after a completed run
+            fails (``AfterRunHookError``, raised only after the automatic
+            improve has run). If *False*, the failure is reported on the result
+            (``status="errored"`` / ``after_run_error``) instead. With *False*, a
+            ``content_type="code"`` batch records a failed repository on its
+            result item and continues with the rest. Background runs always
+            report failures on the result.
+        **kwargs: Additional options -- see ``RememberKwargs``. On the
+            add+cognify path each option is forwarded to ``add()``,
+            ``cognify()``, or both, and an option outside that routing raises
+            ``TypeError``. ``branch`` (without ``content_type``) clones that branch
+            of a repository URL; see ``add()``.
 
     Returns:
-        RememberResult or DryRunEstimate: A promise-like object for normal
-        runs, or a token/cost estimate when ``dry_run=True``. Print it for a
-        summary, await it to block until background processing finishes, or
-        inspect ``.status``, ``.dataset_name``, ``.elapsed_seconds``, etc.
+        RememberResult, DryRunEstimate, PresortReport, or dict: a promise-like
+        ``RememberResult`` for normal runs; a token/cost estimate when
+        ``dry_run=True``; a ``PresortReport`` when ``dry_run="presort"``; and
+        ``{dataset_name: RememberResult}`` when a presort report is applied.
+        Print a ``RememberResult`` for a summary, await it to block until
+        background processing finishes, or inspect ``.status``,
+        ``.dataset_id``, ``.items`` (per-item ids for ``forget(data_id=...)``),
+        ``.improve``, etc.
 
     Example::
 
@@ -1223,9 +1276,16 @@ async def remember(
     """
     from cognee import __version__ as cognee_version
     from cognee.api.v1.cognify.cognify import drop_deprecated_temporal_cognify
+    from cognee.shared.graph_model_utils import resolve_graph_model
     from cognee.shared.utils import send_telemetry
 
     drop_deprecated_temporal_cognify(kwargs)
+    # A graph_model schema is checked here, before add() stores anything: in background
+    # mode add() and cognify() run after this call returns. cognify() still receives the
+    # caller's graph_model as given and builds its own class from it. A typed MemoryEntry
+    # never reaches cognify(), so its graph_model is not read and not checked.
+    if not isinstance(data, MEMORY_ENTRY_TYPES):
+        graph_model_class = resolve_graph_model(kwargs.get("graph_model"))
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
@@ -1469,13 +1529,12 @@ async def remember(
         from cognee.infrastructure.llm import resolve_chunk_size
         from cognee.modules.chunking.chunker_registry import get_default_chunker
         from cognee.modules.cognify.estimator import estimate_remember_dry_run
-        from cognee.shared.data_models import KnowledgeGraph
 
         return await estimate_remember_dry_run(
             data,
             chunker=chunker or get_default_chunker(),
             chunk_size=await resolve_chunk_size(chunk_size),
-            graph_model=kwargs.get("graph_model") or KnowledgeGraph,
+            graph_model=graph_model_class,
             custom_prompt=custom_prompt,
             summary_method=resolve_summary_method(
                 kwargs.get("summary_method"), get_cognify_config()

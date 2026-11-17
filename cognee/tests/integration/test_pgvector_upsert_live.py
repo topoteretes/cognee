@@ -113,7 +113,8 @@ async def _stored(adapter: PGVectorAdapter, collection: str, point_id: UUID) -> 
 
 
 def _assert_vector(stored: list[float], expected: list[float]) -> None:
-    assert stored == pytest.approx(expected, abs=1e-6)
+    # A new collection stores half precision: a value in [-1, 1] is off by < 4.9e-4.
+    assert stored == pytest.approx(expected, abs=1e-3)
 
 
 async def test_identical_reupsert_writes_no_new_row_version(adapter, collection, embeddings):

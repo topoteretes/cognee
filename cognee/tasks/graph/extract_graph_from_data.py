@@ -19,6 +19,7 @@ from cognee.modules.graph.utils import (
     construct_data_points_and_edges,
     find_existing_edge_identities,
 )
+from cognee.modules.observability.llm_calls import chunk_scope
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
     construct_data_points_and_edges_with_ontology,
@@ -258,16 +259,21 @@ async def extract_graph_from_data(
         chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
         temporal_hints = _temporal_hints_for(data_chunks)
+
+        async def extract_chunk_graph(chunk, hints):
+            with chunk_scope(chunk.id):
+                return await extract_content_graph(
+                    chunk.text,
+                    graph_model,
+                    custom_prompt=custom_prompt,
+                    temporal_hints=hints,
+                    **kwargs,
+                )
+
         with pipeline_stage("extraction"):
             chunk_graphs = await asyncio.gather(
                 *[
-                    extract_content_graph(
-                        chunk.text,
-                        graph_model,
-                        custom_prompt=custom_prompt,
-                        temporal_hints=hints,
-                        **kwargs,
-                    )
+                    extract_chunk_graph(chunk, hints)
                     for chunk, hints in zip(data_chunks, temporal_hints)
                 ]
             )

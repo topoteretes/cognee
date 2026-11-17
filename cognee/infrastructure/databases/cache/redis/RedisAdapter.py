@@ -121,14 +121,17 @@ class RedisAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        time: str | None = None,
+        prompt_time: str | None = None,
     ) -> dict:
         """Serialize one QA entry into the normalized Redis payload shape."""
         entry = SessionQAEntry(
-            time=datetime.now(timezone.utc).isoformat(),
+            time=time or datetime.now(timezone.utc).isoformat(),
             question=question,
             context=context,
             answer=answer,
             qa_id=qa_id or str(uuid.uuid4()),
+            prompt_time=prompt_time or "",
             feedback_text=feedback_text,
             feedback_score=feedback_score,
             used_graph_element_ids=used_graph_element_ids,
@@ -148,6 +151,7 @@ class RedisAdapter(CacheDBInterface):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        time: str | None = None,
     ) -> dict:
         """Serialize one agent-trace step into the normalized Redis payload shape."""
         entry = SessionAgentTraceEntry(
@@ -160,6 +164,7 @@ class RedisAdapter(CacheDBInterface):
             method_return_value=method_return_value,
             error_message=error_message,
             session_feedback=session_feedback,
+            time=time or datetime.now(timezone.utc).isoformat(),
         )
         return entry.model_dump()
 
@@ -310,6 +315,8 @@ class RedisAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        time: str | None = None,
+        prompt_time: str | None = None,
     ) -> None:
         """
         Add a Q/A/context triplet to a Redis list for this session.
@@ -327,6 +334,8 @@ class RedisAdapter(CacheDBInterface):
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
                 used_session_context_ids=used_session_context_ids,
+                time=time,
+                prompt_time=prompt_time,
             )
             await self.async_redis.rpush(session_key, json.dumps(qa_entry))
             await self._apply_session_ttl(session_key)
@@ -621,6 +630,7 @@ class RedisAdapter(CacheDBInterface):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        time: str | None = None,
     ) -> None:
         """Append one trace step to the Redis list for this trace session."""
         try:
@@ -635,6 +645,7 @@ class RedisAdapter(CacheDBInterface):
                 method_return_value=method_return_value,
                 error_message=error_message,
                 session_feedback=session_feedback,
+                time=time,
             )
             await self.async_redis.rpush(trace_key, json.dumps(trace_entry))
             await self._apply_session_ttl(trace_key)
