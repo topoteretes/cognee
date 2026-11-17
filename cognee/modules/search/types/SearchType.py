@@ -52,7 +52,7 @@ class SearchType(str, Enum):
       ``tools``, bounded by ``max_iter``. Requires exactly one explicit dataset; ``skills``
       and ``tools`` are refused on every other member.
 
-    Retrieval-only strategies (no answering LLM call; the matches are the result):
+    Retrieval-only strategies (no LLM writes an answer; the matches are the result):
 
     - ``CHUNKS``: vector similarity over document chunks.
     - ``CHUNKS_LEXICAL``: BM25 keyword search over chunks, for exact terms and phrases.
@@ -66,7 +66,7 @@ class SearchType(str, Enum):
     - ``NATURAL_LANGUAGE``: an LLM writes a Cypher query from the question and runs it; the
       rows the query returns are the result.
     - ``GRAPH_REPORT``: an insight report on the graph (hubs, cross-node-set connections,
-      edge provenance) with LLM-suggested follow-up questions.
+      edge provenance), plus follow-up questions from one LLM call per request.
 
     Selection: ``FEELING_LUCKY`` asks an LLM to choose one of the members above (never
     ``CODE``) for the query, restricted to members that apply a given ``node_name`` filter.
