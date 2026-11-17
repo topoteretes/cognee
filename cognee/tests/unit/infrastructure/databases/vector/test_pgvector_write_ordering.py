@@ -134,6 +134,23 @@ async def test_create_data_points_sends_plain_rows_with_numeric_vectors():
 
 
 @pytest.mark.asyncio
+async def test_a_short_embedding_response_writes_nothing():
+    """Fewer vectors than inputs is an error, not a truncated batch stored as a success."""
+    log = []
+    adapter = _adapter(log)
+
+    async def one_vector_short(texts):
+        return [[0.1, 0.2, 0.3] for _ in texts[:-1]]
+
+    adapter.embed_data = one_vector_short
+
+    with pytest.raises(ValueError, match="returned 1 vectors for 2 inputs"):
+        await adapter.create_data_points("Point_text", [_Point(text="a"), _Point(text="b")])
+
+    assert log == []
+
+
+@pytest.mark.asyncio
 async def test_duplicate_ids_in_a_batch_are_written_once_with_their_tags_unioned():
     log = []
     point_id = uuid4()

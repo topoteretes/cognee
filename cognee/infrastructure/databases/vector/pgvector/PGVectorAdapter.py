@@ -924,6 +924,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         data_vectors = await self.embed_data(
             [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         )
+        # zip() below stops at the shorter list, so a provider that answers with fewer
+        # vectors than inputs would store part of the batch and report success.
+        if len(data_vectors) != len(data_points):
+            raise ValueError(
+                f"The embedding provider returned {len(data_vectors)} vectors for "
+                f"{len(data_points)} inputs; nothing was written to {collection_name!r}."
+            )
 
         # Dedup by id within the batch: the same id twice would otherwise be two
         # upserts of one row, and entity extraction may still emit same-UUID5
