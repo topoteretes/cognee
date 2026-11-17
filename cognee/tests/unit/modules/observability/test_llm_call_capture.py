@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.context_global_variables import current_pipeline_stage
+from cognee.infrastructure.llm.pipeline_stage import caller_scope, pipeline_stage
 from cognee.modules.observability import llm_calls
 from cognee.modules.observability.llm_calls import (
     capture_llm_call,
@@ -260,3 +261,17 @@ def test_a_record_without_a_chunk_has_no_chunk_id_key(capture_env):
     without_chunk, with_chunk = _records(directory)
     assert "chunk_id" not in without_chunk
     assert with_chunk["chunk_id"] == str(chunk_id)
+
+
+def test_a_record_carries_its_caller_and_stage_and_omits_a_missing_caller(capture_env):
+    directory = capture_env(ENABLED="true", DIRECTORY=str(capture_env()))
+
+    with caller_scope("improve.distill_sessions"), pipeline_stage("extraction"):
+        _capture()
+    _capture()
+
+    inside, outside = _records(directory)
+    assert inside["schema_version"] == 2
+    assert (inside["caller"], inside["stage"]) == ("improve.distill_sessions", "extraction")
+    assert "caller" not in outside
+    assert outside["stage"] is None

@@ -13,7 +13,7 @@ raising.
 
 import time
 
-from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
+from cognee.infrastructure.llm.pipeline_stage import caller_scope
 from cognee.shared.logging_utils import get_logger
 
 from .inputs import ImproveRunInputs
@@ -77,7 +77,7 @@ async def execute_stage(stage: BaseStage, inputs: ImproveRunInputs) -> StageResu
         return StageResult.skipped(stage.name, skip_reason)
 
     try:
-        with pipeline_stage(f"improve.{stage.name}"):
+        with caller_scope(f"improve.{stage.name}"):
             stage_result = await stage.run(inputs)
     except Exception as error:
         logger.warning("improve: stage '%s' failed: %s", stage.name, error, exc_info=True)

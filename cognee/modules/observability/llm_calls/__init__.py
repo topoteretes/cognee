@@ -3,8 +3,8 @@
 ``capture_llm_call()`` turns one call into an ``LLMCallRecord`` and hands it to
 a background writer. It is a no-op unless ``LLM_CALL_CAPTURE_ENABLED=true``, and
 it never raises: capture is observability, so a failure is logged and the LLM
-call it describes is unaffected. The stage, run and chunk the call belongs to are
-read from the current context, so callers pass only what they know about the call;
+call it describes is unaffected. The stage, caller, run and chunk the call belongs
+to are read from the current context, so callers pass only what they know about the call;
 a task that makes one LLM call per chunk wraps each in ``chunk_scope(chunk.id)``.
 
 Records are local JSONL files (see ``writer``); shipping them anywhere else is
@@ -78,8 +78,9 @@ def _as_text(output: Any) -> str | None:
 
 
 def _record_json(record: LLMCallRecord) -> str:
-    """The record as one JSON line, without ``chunk_id`` when no chunk was supplied."""
-    return record.model_dump_json(exclude={"chunk_id"} if record.chunk_id is None else None)
+    """The record as one JSON line, without ``chunk_id`` or ``caller`` when not supplied."""
+    omitted = {name for name in ("chunk_id", "caller") if getattr(record, name) is None}
+    return record.model_dump_json(exclude=omitted or None)
 
 
 def capture_llm_call(
@@ -107,7 +108,7 @@ def capture_llm_call(
         if not config.enabled:
             return
 
-        from cognee.context_global_variables import current_pipeline_stage
+        from cognee.context_global_variables import current_caller, current_pipeline_stage
         from cognee.modules.operations.usage_accumulator import get_parent_run_id
 
         record = build_llm_call_record(
@@ -118,6 +119,7 @@ def capture_llm_call(
             started_at=started_at,
             duration_ms=duration_ms,
             stage=current_pipeline_stage.get(),
+            caller=current_caller.get(),
             run_id=get_parent_run_id(),
             chunk_id=current_chunk_id.get(),
             model=model,
