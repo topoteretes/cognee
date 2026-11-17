@@ -21,6 +21,7 @@ from cognee.infrastructure.session.coding_unit_extraction import (
     FAILURE_CANDIDATE_CONFIDENCE,
     MAX_INPUT_CHARS,
     MAX_TRACE_INPUT_CHARS,
+    PITFALL_KEY_MAX_CHARS,
     UnitOfWork,
     build_extraction_inputs,
     build_failure_candidates,
@@ -182,6 +183,27 @@ class TestRenderTraceInput:
         assert "eyJabc" not in line
         assert line.startswith("- Bash curl")
 
+    def test_a_secret_past_the_clip_is_still_redacted(self):
+        # The command is clipped at 160 chars; a token the clip cut short would no longer
+        # match the redaction rule, so redaction runs on the whole value first.
+        token = "eyJ" + "a" * 60 + ".eyJ" + "b" * 60 + ".sig" + "c" * 60
+        entry = _trace("Bash", params={"command": f"curl -H 'Authorization: Bearer {token}' x"})
+        rendered = render_trace_input(entry, REPO)
+        assert "eyJ" not in rendered and "aaaa" not in rendered
+        jwt_only = _trace("Bash", params={"command": "echo " + "x" * 120 + " " + token})
+        assert "eyJ" not in render_trace_input(jwt_only, REPO)
+
+    def test_request_answer_and_turn_header_are_redacted(self):
+        turn = _turn(
+            [_trace("Read")],
+            request="Call the API with Authorization: Bearer sk-live-abcdef123456",
+            answer="Done; set api_key=sk-live-abcdef123456 in the config.",
+        )
+        header = cue.turn_header(1, turn)
+        block = cue.final_message_block(1, turn)
+        assert "sk-live" not in header and "sk-live" not in block
+        assert "Agent's final answer: Done; set api_key=" in block
+
     def test_line_has_tool_input_status_and_error(self):
         line = render_trace_line(_edit_failure(), REPO)
         assert line.startswith(
@@ -192,6 +214,14 @@ class TestRenderTraceInput:
         assert shell_program("cd /x && pytest -q") == "pytest"
         assert shell_program("FOO=1 sudo make all") == "make"
         assert shell_program("echo hi") == ""
+
+    def test_shell_program_resolves_runners_paths_and_quotes(self):
+        assert shell_program("uv run pytest tests/a.py") == "pytest"
+        assert shell_program("npm run lint") == "lint"
+        assert shell_program(".venv/bin/python a.py") == "python"
+        assert shell_program("/Users/bob/proj/.venv/bin/python a.py") == "python"
+        # A chain operator inside quotes does not split the command.
+        assert shell_program('git commit -m "fix; ruff && pytest"') == "git"
 
 
 # -- Repeated errors ----------------------------------------------------------
@@ -209,7 +239,7 @@ class TestRepeatedErrors:
         groups = group_repeated_errors(traces)
         assert len(groups) == 1
         assert len(groups[0].failures) == 6
-        assert groups[0].fixed and groups[0].fix.origin_function == "Bash"
+        assert groups[0].fixed and groups[0].fixes[0].origin_function == "Bash"
         assert pitfall_key(groups[0]) == "pitfall:Edit:no-changes-to-make:py"
 
         candidates = build_failure_candidates(groups, REPO)
@@ -253,7 +283,7 @@ class TestRepeatedErrors:
         show = _trace("Bash", params={"command": f"cat {path} && git status"})
         fix = _trace("Edit", params={"file_path": path})
         (group,) = group_repeated_errors([_edit_failure(path), look, show, fix])
-        assert group.fix is fix
+        assert group.fixes == [fix]
         assert group_repeated_errors([_edit_failure(path), look, show]) == []
 
     def test_a_shell_command_that_rewrites_the_file_is_a_fix(self):
@@ -265,7 +295,7 @@ class TestRepeatedErrors:
         ):
             rewrite = _trace("Bash", params={"command": command})
             (group,) = group_repeated_errors([_edit_failure(path), rewrite])
-            assert group.fix is rewrite, command
+            assert group.fixes == [rewrite], command
 
     def test_a_file_whose_name_contains_the_failed_files_name_is_not_a_fix(self):
         path = f"{REPO}/src/app.py"
@@ -314,7 +344,7 @@ class TestRepeatedErrors:
 
         rerun = _trace("Bash", params={"command": "cd src && python broken.py -v"})
         (group,) = group_repeated_errors([*failures, rerun])
-        assert group.fixed and group.fix is rerun
+        assert group.fixes == [rerun]
 
     def test_a_bare_program_rerun_matches_a_bare_failure(self):
         failed = {"command": "pytest -q"}
@@ -324,6 +354,91 @@ class TestRepeatedErrors:
         ]
         (group,) = group_repeated_errors(traces)
         assert group.fixed
+
+    def test_fail_edit_pass_names_the_edit_not_the_rerun(self):
+        command = {"command": "pytest tests/test_a.py -x"}
+        failure = _trace("Bash", status="error", params=command, error="FAILED tests/test_a.py")
+        edit = _trace("Edit", params={"file_path": f"{REPO}/src/a.py", "old_string": "1"})
+        traces = [failure, edit, _trace("Bash", params=command)]
+        (group,) = group_repeated_errors(traces)
+        assert group.fixes == [edit]
+        ((_, candidate),) = build_failure_candidates([group], REPO)
+        assert '" → Edit src/a.py' in candidate.content
+        assert "→ Bash pytest" not in candidate.content
+
+    def test_the_identical_rerun_with_nothing_changed_is_no_fix(self):
+        command = {"command": "pytest tests/test_a.py -x"}
+        failure = _trace("Bash", status="error", params=command, error="FAILED tests/test_a.py")
+        assert group_repeated_errors([failure, _trace("Bash", params=command)]) == []
+
+    def test_another_program_behind_the_same_runner_is_no_fix(self):
+        failure = _trace(
+            "Bash", status="error", params={"command": "uv run pytest a"}, error="FAILED a"
+        )
+        other = _trace("Bash", params={"command": "uv run ruff check ."})
+        assert group_repeated_errors([failure, other]) == []
+
+    def test_a_venv_path_and_the_bare_program_are_one_program(self):
+        failure = _trace(
+            "Bash",
+            status="error",
+            params={"command": ".venv/bin/python a.py"},
+            error="NameError: name 'x' is not defined",
+        )
+        edit = _trace("Edit", params={"file_path": f"{REPO}/a.py"})
+        (group,) = group_repeated_errors(
+            [failure, edit, _trace("Bash", params={"command": "python a.py"})]
+        )
+        assert group.fixes == [edit]
+
+    def test_two_different_tracebacks_give_two_keys(self):
+        def traceback(last_line):
+            return (
+                "Traceback (most recent call last):\n"
+                '  File "a.py", line 3, in <module>\n    main()\n' + last_line
+            )
+
+        command = {"command": "python a.py"}
+        traces = [
+            _trace("Bash", status="error", params=command, error=traceback("KeyError: 'id'")),
+            _trace("Bash", status="error", params=command, error=traceback("KeyError: 'id'")),
+            _trace("Bash", status="error", params=command, error=traceback("ImportError: no x")),
+            _trace("Bash", status="error", params=command, error=traceback("ImportError: no x")),
+        ]
+        keys = {pitfall_key(group) for group in group_repeated_errors(traces)}
+        assert keys == {"pitfall:Bash:keyerror-id:python", "pitfall:Bash:importerror-no:python"}
+
+    def test_an_exit_code_line_is_not_the_error(self):
+        error = "Exit code 1\ncat: illegal option -- x"
+        assert cue.normalized_error_line(error) == "cat: illegal option -- x"
+        assert cue.normalized_error_line("Exit code 2") == "exit code 2"  # nothing better
+
+    def test_a_venv_python_and_bare_python_give_one_key(self):
+        error = "ModuleNotFoundError: No module named 'x'"
+        fixed = _trace("Edit", params={"file_path": f"{REPO}/req.txt"})
+        keys = set()
+        for command in ("/Users/bob/proj/.venv/bin/python a.py", "python a.py"):
+            failure = _trace("Bash", status="error", params={"command": command}, error=error)
+            (group,) = group_repeated_errors(
+                [failure, fixed, _trace("Bash", params={"command": command})]
+            )
+            keys.add(pitfall_key(group))
+        assert keys == {"pitfall:Bash:modulenotfounderror-no-module-named:python"}
+        assert all("/" not in key for key in keys)
+
+    def test_an_over_long_error_still_stores_problem_error_and_fix(self):
+        error = "E" + "x" * 500 + "_" + "y" * 500 + ": failed"
+        failure = _trace(
+            "Bash", status="error", params={"command": "mytool" + "z" * 300 + " run"}, error=error
+        )
+        edit = _trace("Edit", params={"file_path": f"{REPO}/src/a.py"})
+        rerun = _trace("Bash", params={"command": "mytool" + "z" * 300 + " run"})
+        (group,) = group_repeated_errors([failure, edit, rerun])
+        assert len(pitfall_key(group)) <= PITFALL_KEY_MAX_CHARS
+        ((_, candidate),) = build_failure_candidates([group], REPO)
+        assert len(candidate.content) <= cue.MAX_CONTEXT_CONTENT_CHARS
+        assert ' failed with "e' in candidate.content
+        assert '" → Edit src/a.py' in candidate.content
 
     def test_candidates_cover_every_fixed_group_beyond_the_rendered_ten(self):
         traces = []
@@ -418,7 +533,7 @@ class TestExtractionInput:
             _turn(
                 [_trace("Read", params={"file_path": f"{REPO}/f{index}.py"})],
                 request=f"task {index}",
-                answer="a" * 6_000,
+                answer="z" * 6_000,  # not hex: a long hex run is redacted as a secret
                 qa_id=f"qa-{index}",
             )
             for index in range(40)

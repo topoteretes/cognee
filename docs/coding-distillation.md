@@ -32,6 +32,17 @@ were off for a while) is walked oldest first in windows of 400, the watermark se
 each, so a failure in a later window never repeats an earlier one and no trace is skipped.
 The stage no longer requires `AUTO_FEEDBACK`.
 
+**The whole backlog runs inside `improve()`'s dataset lock.** In the default mode most
+extraction happens mid-session, outside `improve()`, and the stage makes one LLM call over
+at most 40 traces. Here the stage extracts every settled pending trace of the session in
+one run: one LLM call per phase part and character chunk of each 400-trace window, in
+order, each after a memory search of up to 30 s. `improve()` holds the dataset lock for
+its whole run, so `add`, `cognify`, `remember`, `forget` and other improves on that dataset
+wait longer the longer the session was. Nothing is lost; the cost is waiting. Each session
+logs one line with the traces, windows and LLM calls it took and how long
+(`Coding unit extraction: session '...' extracted traces=... windows=... llm_calls=...
+seconds=...`), so the hold time is visible.
+
 **Traces are paired to turns by time, not position**
 (`cognee/infrastructure/session/coding_turns.py`). The plugin's Stop hook writes the
 answer asynchronously, so the first traces of the next turn can land before it, and a
@@ -78,14 +89,25 @@ the number of turns), in this order:
 3. `TRACES (part k of N, phase <phase>)`: a `-- turn k: <request> --` line opens each
    turn's traces, then one line per trace, `- <tool> <input> [<status>] | feedback | error | output`,
    with the tool input (repo-relative file path, the command, the search pattern, or the
-   old/new snippets of an edit), errors and outputs cut at 600 chars, secrets redacted.
-4. `REPEATED ERRORS AND WHAT WORKED`: failed traces grouped by tool and normalized first
-   error line (at least two failures, or one that a later call fixed), each paired with
-   the first later successful call that changed the same file or reran the same program
-   on the same target (`python broken.py` again, not `python --version`). The section
-   shows the first 10 groups; the deterministic pitfall candidates cover every fixed group.
+   old/new snippets of an edit), errors and outputs cut at 600 chars. Every value is
+   redacted with the rule failure lessons use before it is cut, so a secret cut short
+   cannot slip past it.
+4. `REPEATED ERRORS AND WHAT WORKED`: failed traces grouped by tool and informative error
+   line (at least two failures, or one that something fixed). The informative line is a
+   Python traceback's closing `ErrorType: message`, else the first line that is not
+   `Traceback (most recent call last):`, `Exit code N` or symbols only; an error format
+   with no rule falls back to its first line. What worked: for a failure on a file, the
+   first later successful call that changed that file. For a shell failure, the first
+   later success that reruns the same program on the same target, runner prefixes and
+   paths aside (`uv run pytest a` is `pytest a`, `.venv/bin/python a.py` is `python a.py`,
+   and `uv run ruff check .` never reruns `uv run pytest`), ends the search: the
+   successful changes between the failure and that rerun are what worked; with none, a
+   different command form is (`cat notes.txt` after a failed `cat -x notes.txt`); the
+   identical command with nothing changed in between fixed nothing. The section shows the
+   first 10 groups; the deterministic pitfall candidates cover every fixed group.
 5. `FINAL MESSAGE`: for each turn the input covers, numbered as in `TRACES`, the request
-   (1,200 chars) and the final answer (6,000 chars).
+   (1,200 chars) and the final answer (6,000 chars), redacted like the traces; the turn
+   lines in `TRACES` are too.
 
 Parts run in order so each sees the candidates of the earlier ones; up to 10 candidates per
 call, each naming the turn it was learned in (`CodingAgentContextExtraction`; a number
@@ -127,9 +149,13 @@ is untouched, a number the call got wrong is skipped, a group that spans two dif
 newest of its members' turns). The writer additionally gets `PROPOSED STATE KEY`, a glossary recased from
 the session's own text (the graph stores `marktaskcommand`; the lesson says
 `MarkTaskCommand`) and a compact STYLE line (statements of about 25 words). Evidence rules
-then settle the type: a lesson backed by a repeated-error candidate is a `pitfall` with that
-candidate's key; a `pitfall` with no failed-trace candidate behind it becomes a `change`;
-only `state` and `pitfall` lessons keep a state key. Every type the rules change is logged.
+then settle the type (`lesson_key`, the one rule the duplicate check's `proposal_key` uses
+too): a lesson the writer typed `pitfall`, or left untyped (`other`) with no key of its
+own, that is backed by a repeated-error candidate is a `pitfall` with that candidate's key;
+a footprint, location or other typed lesson that only cites the candidate keeps its type
+and key and does not take over the pitfall. A `pitfall` with no failed-trace candidate
+behind it becomes a `change`; only `state` and `pitfall` lessons keep a state key. Every
+type the rules change is logged.
 
 ## The lesson document
 
@@ -144,8 +170,10 @@ Edit on an unchanged string fails with "No changes to make" → rewrite the file
 - `Lesson-Type` is one of `location`, `pitfall`, `convention`, `constraint`, `change`,
   `state`, `other`.
 - `State-Key` appears on state lessons (`test-baseline`, `footprint:<feature>`) and
-  pitfalls (`pitfall:<tool>:<error-slug>[:<qualifier>]`, the qualifier being the file
-  extension or the shell program).
+  pitfalls (`pitfall:<tool>:<error-slug>[:<qualifier>]`, the slug taken from the
+  informative error line, the qualifier being the file extension or the program's basename,
+  never a path; each part and the whole key are bounded, and a candidate whose key would
+  leave no room for its problem, error and fix is not stored).
 - `(seen in N sessions)` appears on pitfalls only: the number of distinct sessions that
   stored the key in this project. Each row carries that list (`seen_sessions`), so the count
   survives the replacement of older rows and re-distilling a session keeps its number.
@@ -183,7 +211,8 @@ re-distilled identical lesson has the same row id and is kept.
 with its key by definition, and a pitfall seen again is the recurrence its `(seen in N
 sessions)` count exists for. When the writer still rejects one as known, the curator's
 working statement is stored under the key, as the state lesson or as the pitfall its
-repeated-error candidate names. The evidence rules above settle the lesson type after the
+repeated-error candidate names; a lesson the writer typed otherwise (a location that only
+cites the candidate) stays rejected. The evidence rules above settle the lesson type after the
 writer.
 
 ## Not in this mode

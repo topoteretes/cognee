@@ -21,6 +21,7 @@ only filters piped output (``cat x | grep y``) does not count.
 """
 
 import re
+import shlex
 import sys
 from dataclasses import dataclass
 from math import ceil
@@ -463,8 +464,7 @@ def split_shell_command(command: str) -> list[tuple[str, bool]]:
     return segments
 
 
-def _words(segment: str) -> list[str]:
-    words = segment.split()
+def _drop_wrappers(words: list[str]) -> list[str]:
     while words and (
         words[0] in SHELL_WRAPPERS or ("=" in words[0] and not words[0].startswith("="))
     ):
@@ -472,10 +472,25 @@ def _words(segment: str) -> list[str]:
     return words
 
 
+def _words(segment: str) -> list[str]:
+    return _drop_wrappers(segment.split())
+
+
 def program_of(segment: str) -> str:
     """The program a segment runs, after wrappers and ``VAR=value`` assignments."""
     words = _words(segment)
     return words[0].rsplit("/", 1)[-1] if words else ""
+
+
+def command_words(segment: str) -> list[str]:
+    """A segment's words with quotes honoured, wrappers and ``VAR=value`` assignments
+    dropped, and the program named by its basename, as ``program_of`` names it."""
+    try:
+        words = shlex.split(segment)
+    except ValueError:
+        words = segment.split()
+    words = _drop_wrappers(words)
+    return [words[0].rsplit("/", 1)[-1], *words[1:]] if words else []
 
 
 def is_scratch_path(path: str) -> bool:

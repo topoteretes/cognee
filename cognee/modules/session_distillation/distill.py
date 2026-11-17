@@ -520,18 +520,13 @@ async def find_duplicate_proposals(proposed: list[ProposedLesson]) -> list[list[
 
 
 def proposal_key(lesson: ProposedLesson, entries_by_id: dict) -> str:
-    """The key the proposal's lesson would be stored under: the curator's state key,
-    else the pitfall key of a repeated-error candidate among its members, else ``""``."""
+    """The key the proposal's lesson would be stored under (``lesson_key``): a curator
+    key makes it a state lesson, without one it is untyped until the writer types it."""
     state_key = str(getattr(lesson, "state_key", "") or "").strip()
-    if state_key:
-        return state_key
-    return member_pitfall_key(
-        [
-            entries_by_id[entry_id]
-            for entry_id in lesson.member_entry_ids
-            if entry_id in entries_by_id
-        ]
-    )
+    members = [
+        entries_by_id[entry_id] for entry_id in lesson.member_entry_ids if entry_id in entries_by_id
+    ]
+    return lesson_key("state" if state_key else "other", state_key, members)[1]
 
 
 def merge_duplicate_proposals(
@@ -823,6 +818,30 @@ def member_pitfall_key(members: list[SessionContextEntry]) -> str:
     return ""
 
 
+def lesson_key(
+    lesson_type: str, state_key: str, members: list[SessionContextEntry]
+) -> tuple[str, str]:
+    """The ``(type, state key)`` a coding lesson is stored under; the one rule for it.
+
+    A lesson is the pitfall of a repeated-error candidate among its members (one with a
+    ``pitfall:`` key) only when the writer typed it ``pitfall``, or left it untyped
+    (``other``) with no key of its own: a footprint, a location or a convention that
+    cites the candidate keeps its type and key, and does not take over the pitfall.
+    A ``pitfall`` with no failed-trace candidate behind it is a ``change``. Only state
+    and pitfall lessons keep a key.
+    """
+    state_key = state_key.strip()
+    pitfall_key = member_pitfall_key(members)
+    claims_pitfall = lesson_type == "pitfall" or (lesson_type == "other" and not state_key)
+    if pitfall_key and claims_pitfall:
+        lesson_type, state_key = "pitfall", pitfall_key
+    elif lesson_type == "pitfall" and not any(is_failed_trace_candidate(m) for m in members):
+        lesson_type, state_key = "change", ""
+    if lesson_type not in ("state", "pitfall"):
+        state_key = ""
+    return lesson_type, state_key
+
+
 def keep_state_key_update(
     proposed: ProposedLesson, written: CodingWrittenLesson, members: list[SessionContextEntry]
 ) -> CodingWrittenLesson:
@@ -836,9 +855,14 @@ def keep_state_key_update(
     if written.accept or written.reason != "already_known":
         return written
     state_key = str(getattr(proposed, "state_key", "") or "").strip()
-    lesson_type = "state"
-    if not state_key:
-        state_key, lesson_type = member_pitfall_key(members), "pitfall"
+    if state_key:
+        lesson_type = "state"
+    else:
+        # Only the pitfall itself is kept: a location or convention lesson the writer
+        # called known stays rejected even when it cites a repeated-error candidate.
+        lesson_type, state_key = lesson_key(written.lesson_type, "", members)
+        if lesson_type != "pitfall":
+            return written
     if not state_key:
         return written
     logger.info(
@@ -859,23 +883,12 @@ def apply_evidence_rules(
 ) -> CodingWrittenLesson:
     """Make the lesson type match its evidence (coding mode).
 
-    A lesson backed by a repeated-error candidate (one carrying a ``pitfall:`` state
-    key) is a pitfall with that key, whatever the writer typed; a ``pitfall`` with no
-    failed-trace candidate behind it is a ``change``. Only state and pitfall lessons
-    keep a state key, and a key the writer echoed into the statement is stripped.
-    Every type the rules change is logged.
+    The type and key follow ``lesson_key``, and a key the writer echoed into the
+    statement is stripped. Every type the rules change is logged.
     """
     if not lesson.accept:
         return lesson
-    pitfall_key = member_pitfall_key(members)
-    lesson_type = lesson.lesson_type
-    state_key = lesson.state_key.strip()
-    if pitfall_key:
-        lesson_type, state_key = "pitfall", pitfall_key
-    elif lesson_type == "pitfall" and not any(is_failed_trace_candidate(m) for m in members):
-        lesson_type, state_key = "change", ""
-    if lesson_type not in ("state", "pitfall"):
-        state_key = ""
+    lesson_type, state_key = lesson_key(lesson.lesson_type, lesson.state_key, members)
     if lesson_type != lesson.lesson_type:
         logger.info(
             "Coding distillation: lesson typed '%s' by the writer stored as '%s'%s",

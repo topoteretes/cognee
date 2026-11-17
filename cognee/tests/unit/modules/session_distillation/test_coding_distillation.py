@@ -264,9 +264,40 @@ class TestEvidenceRules:
             section="failure_lessons",
             source_trace_ids=["t1"],
         )
-        lesson = apply_evidence_rules(_written("location"), [member])
-        assert lesson.lesson_type == "pitfall"
-        assert lesson.state_key == "pitfall:Edit:no-changes-to-make:py"
+        for lesson_type in ("pitfall", "other"):
+            lesson = apply_evidence_rules(_written(lesson_type), [member])
+            assert lesson.lesson_type == "pitfall"
+            assert lesson.state_key == "pitfall:Edit:no-changes-to-make:py"
+
+    def test_a_lesson_that_only_cites_the_pitfall_keeps_its_type_and_key(self):
+        member = _entry(
+            "[state-key: pitfall:Edit:no-changes-to-make:py] Edit failed → Bash python",
+            section="failure_lessons",
+            source_trace_ids=["t1"],
+        )
+        footprint = apply_evidence_rules(_written("state", "footprint:export"), [member])
+        assert (footprint.lesson_type, footprint.state_key) == ("state", "footprint:export")
+        location = apply_evidence_rules(_written("location"), [member])
+        assert (location.lesson_type, location.state_key) == ("location", "")
+
+    def test_two_lessons_sharing_the_pitfall_candidate_both_survive(self):
+        member = _entry(
+            "[state-key: pitfall:Edit:no-changes-to-make:py] Edit failed → Bash python",
+            section="failure_lessons",
+            source_trace_ids=["t1"],
+        )
+        footprint = apply_evidence_rules(
+            _written("state", "footprint:export", "Export is export.py and cli.py."), [member]
+        )
+        pitfall = apply_evidence_rules(
+            _written("pitfall", statement="Edit on identical strings fails → use a script."),
+            [member],
+        )
+        kept = newest_per_state_key([footprint, pitfall])
+        assert [lesson.state_key for lesson in kept] == [
+            "footprint:export",
+            "pitfall:Edit:no-changes-to-make:py",
+        ]
 
     def test_pitfall_without_a_failed_trace_becomes_a_change(self):
         lesson = apply_evidence_rules(_written("pitfall"), [_entry("plain candidate")])
@@ -327,6 +358,16 @@ class TestEvidenceRules:
         assert kept.accept and kept.lesson_type == "pitfall"
         assert kept.state_key == "pitfall:Edit:no-changes-to-make:py"
         assert kept.statement == "Edit on an unchanged string fails; rewrite with a script."
+
+    def test_already_known_location_citing_a_pitfall_stays_rejected(self):
+        member = _entry(
+            "[state-key: pitfall:Edit:no-changes-to-make:py] Edit failed → Bash python",
+            section="failure_lessons",
+            source_trace_ids=["t1"],
+        )
+        proposed = CodingProposedLesson(working_statement="Routes live in api/routes.py.")
+        known = CodingWrittenLesson(accept=False, reason="already_known", lesson_type="location")
+        assert keep_state_key_update(proposed, known, [member]) is known
 
     def test_candidate_state_key_parsing(self):
         assert (

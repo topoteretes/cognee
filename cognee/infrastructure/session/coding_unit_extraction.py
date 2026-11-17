@@ -47,9 +47,8 @@ per session; the windows sealed before the failure are not extracted again.
 import asyncio
 import json
 import re
-import shlex
-from dataclasses import dataclass
-from typing import Any
+import time
+from dataclasses import dataclass, field
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
@@ -80,8 +79,11 @@ from cognee.infrastructure.session.session_node_set import get_session_node_set
 from cognee.infrastructure.session.session_persist_watermark import StateRowWatermark
 from cognee.infrastructure.session.trace_phases import (
     CHANGE,
+    NO_PHASE_PROGRAMS,
     VERIFY,
     PhaseBlock,
+    classify_trace,
+    command_words,
     segment_phase,
     split_into_parts,
     split_shell_command,
@@ -121,14 +123,49 @@ STATE_KEY_PREFIX = "[state-key: "
 PITFALL_KEY_PREFIX = "pitfall"
 PITFALL_SLUG_MIN_WORDS = 3
 PITFALL_SLUG_MAX_WORDS = 5
+# Bounds of a pitfall key's parts and of the whole key, so the key never takes the room
+# the candidate's problem, error and fix need.
+PITFALL_TOOL_MAX_CHARS = 32
+PITFALL_SLUG_MAX_CHARS = 48
+PITFALL_QUALIFIER_MAX_CHARS = 24
+PITFALL_KEY_MAX_CHARS = 120
+# A failure candidate whose problem, error and fix get less room than this is dropped:
+# a bare key with no body teaches nothing.
+MIN_FAILURE_BODY_CHARS = 60
 
 # Tools whose successful call changes the file it names.
 CHANGE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
-# Shell words that only set up the command after them, and words that run no program.
-_SHELL_WRAPPERS = frozenset({"sudo", "env", "time", "nohup"})
-_SHELL_NO_PROGRAM = frozenset({"cd", "export", "source", "set", "echo", "sleep", "exit", "true"})
-_SHELL_CHAIN_RE = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
+# Leading words that only launch the program after them: ``uv run pytest`` runs pytest,
+# ``npm run lint`` runs the lint script.
+RUNNER_PREFIXES = (
+    ("uv", "run"),
+    ("uvx",),
+    ("poetry", "run"),
+    ("pipenv", "run"),
+    ("pdm", "run"),
+    ("hatch", "run"),
+    ("npx",),
+    ("bunx",),
+    ("npm", "run"),
+    ("npm", "exec"),
+    ("pnpm", "run"),
+    ("pnpm", "exec"),
+    ("pnpm", "dlx"),
+    ("yarn", "run"),
+    ("yarn", "dlx"),
+    ("bun", "run"),
+    ("python", "-m"),
+    ("python3", "-m"),
+    ("docker", "compose"),
+)
 _WORD_RE = re.compile(r"[a-z0-9_]{2,}")
+_KEY_PART_RE = re.compile(r"[^\w.+-]")
+_TRACEBACK_HEAD = "traceback (most recent call last):"
+_EXIT_CODE_RE = re.compile(
+    r"^(?:error:\s*)?exit(?:ed with)?\s+(?:code|status)\b:?\s*-?\d+\s*$", re.IGNORECASE
+)
+# The closing line of a Python traceback: ``ErrorType: message`` (dotted names too).
+_PY_EXCEPTION_RE = re.compile(r"^[A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt)\b")
 # A run of characters a path is written with, as it stands in a command or a script.
 _PATH_TOKEN_RE = re.compile(r"[\w./~+-]+")
 
@@ -163,11 +200,12 @@ class ErrorGroup:
     error_line: str
     failures: list
     last_index: int = 0
-    fix: Any = None  # the first later success on the same file or program, a trace entry
+    # What worked, trace entries: the change that fixed the failure (see ``find_fixes``).
+    fixes: list = field(default_factory=list)
 
     @property
     def fixed(self) -> bool:
-        return self.fix is not None
+        return bool(self.fixes)
 
 
 def relative_path(path: str, repo_root: str) -> str:
@@ -187,16 +225,29 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def shell_program(command: str) -> str:
-    """The program a shell command runs: the first segment's first word after wrappers."""
-    for segment in _SHELL_CHAIN_RE.split(str(command or "").strip()):
-        words = segment.split()
-        while words and (words[0] in _SHELL_WRAPPERS or "=" in words[0]):
-            words = words[1:]
-        if not words or words[0] in _SHELL_NO_PROGRAM:
+def program_words(command: str) -> list[str]:
+    """The words of the first segment of ``command`` that runs a program, wrappers and
+    runner prefixes dropped, the program by its basename: ``cd x && uv run pytest -q``
+    is ``["pytest", "-q"]``, ``.venv/bin/python a.py`` is ``["python", "a.py"]``."""
+    for segment, _after_pipe in split_shell_command(str(command or "")):
+        words = command_words(segment)
+        if not words or words[0] in NO_PHASE_PROGRAMS:
             continue
-        return words[0]
-    return ""
+        for prefix in RUNNER_PREFIXES:
+            if tuple(words[: len(prefix)]) == prefix and len(words) > len(prefix):
+                rest = words[len(prefix) :]
+                while rest and rest[0].startswith("-"):
+                    rest = rest[1:]
+                words = [rest[0].rsplit("/", 1)[-1], *rest[1:]] if rest else words
+                break
+        return words
+    return []
+
+
+def shell_program(command: str) -> str:
+    """The program a shell command runs (``program_words``), or ``""``."""
+    words = program_words(command)
+    return words[0] if words else ""
 
 
 def _params(entry) -> dict:
@@ -217,8 +268,17 @@ def trace_command(entry) -> str:
     return command if isinstance(command, str) else ""
 
 
+def _redacted_clip(text: str, limit: int) -> str:
+    """``text`` redacted whole, then clipped: a secret cut short by the clip would no
+    longer match the redaction rule."""
+    # One character past the limit, so a cut value still ends in the clip's "…".
+    return _clip(redact_text(str(text or ""), max_chars=limit + 1), limit)
+
+
 def render_trace_input(entry, repo_root: str = "") -> str:
-    """The tool input in at most ``MAX_TRACE_INPUT_CHARS``: path, command, pattern or edit."""
+    """The tool input in at most ``MAX_TRACE_INPUT_CHARS``: path, command, pattern or edit.
+
+    Each value is redacted before it is clipped."""
     params = _params(entry)
     parts: list[str] = []
     path = trace_file(entry)
@@ -226,20 +286,20 @@ def render_trace_input(entry, repo_root: str = "") -> str:
         parts.append(relative_path(path, repo_root))
     command = trace_command(entry)
     if command.strip():
-        parts.append(_clip(command, MAX_COMMAND_CHARS))
+        parts.append(_redacted_clip(command, MAX_COMMAND_CHARS))
     pattern = params.get("pattern")
     if isinstance(pattern, str) and pattern.strip():
-        parts.append(f"pattern={_clip(pattern, MAX_COMMAND_CHARS)}")
+        parts.append(f"pattern={_redacted_clip(pattern, MAX_COMMAND_CHARS)}")
     old = params.get("old_string")
     new = params.get("new_string")
     if isinstance(old, str) or isinstance(new, str):
-        old_snippet = _clip(old or "", MAX_EDIT_SNIPPET_CHARS)
-        new_snippet = _clip(new or "", MAX_EDIT_SNIPPET_CHARS)
+        old_snippet = _redacted_clip(old or "", MAX_EDIT_SNIPPET_CHARS)
+        new_snippet = _redacted_clip(new or "", MAX_EDIT_SNIPPET_CHARS)
         parts.append(f"{old_snippet!r} -> {new_snippet!r}")
     if not parts:
         for value in params.values():
             if isinstance(value, str) and value.strip():
-                parts.append(_clip(value, MAX_COMMAND_CHARS))
+                parts.append(_redacted_clip(value, MAX_COMMAND_CHARS))
                 break
     return redact_text(" ".join(parts), max_chars=MAX_TRACE_INPUT_CHARS)
 
@@ -271,10 +331,33 @@ def render_trace_line(entry, repo_root: str = "") -> str:
 # -- Repeated errors ---------------------------------------------------------
 
 
+def informative_error_line(error_message: str) -> str:
+    """The line that says what went wrong: a Python traceback's closing
+    ``ErrorType: message``, else the first line that is not a traceback head, an
+    ``Exit code N`` or symbols only. A format with no rule here falls back to the
+    first line."""
+    lines = [line.strip() for line in str(error_message or "").splitlines() if line.strip()]
+    if not lines:
+        return ""
+    if any(line.lower().startswith(_TRACEBACK_HEAD) for line in lines):
+        for line in reversed(lines):
+            if _PY_EXCEPTION_RE.match(line):
+                return line
+    for line in lines:
+        if (
+            line.lower().startswith(_TRACEBACK_HEAD)
+            or _EXIT_CODE_RE.match(line)
+            or not _WORD_RE.search(line.lower())
+        ):
+            continue
+        return line
+    return lines[0]
+
+
 def normalized_error_line(error_message: str) -> str:
-    """The first line of an error, redacted, lowercased and whitespace-collapsed."""
-    first = str(error_message or "").strip().splitlines()
-    return " ".join(redact_text(first[0]).lower().split()) if first else ""
+    """The informative line of an error, redacted, lowercased and whitespace-collapsed."""
+    line = informative_error_line(error_message)
+    return " ".join(redact_text(line).lower().split()) if line else ""
 
 
 def pitfall_slug(error_line: str) -> str:
@@ -284,23 +367,35 @@ def pitfall_slug(error_line: str) -> str:
     words = _WORD_RE.findall(head)
     if len(words) < PITFALL_SLUG_MIN_WORDS:
         words = _WORD_RE.findall(lowered)
-    return "-".join(words[:PITFALL_SLUG_MAX_WORDS]).replace("_", "-")
+    slug = "-".join(words[:PITFALL_SLUG_MAX_WORDS]).replace("_", "-")
+    return slug[:PITFALL_SLUG_MAX_CHARS].strip("-")
+
+
+def _key_part(text: str, limit: int) -> str:
+    """``text`` as one bounded state-key part: no ``]``, no spaces, no path."""
+    return _KEY_PART_RE.sub("", str(text or ""))[:limit]
 
 
 def pitfall_qualifier(entry) -> str:
-    """The file extension of the trace's file, else the shell program it ran."""
+    """The file extension of the trace's file, else the program it ran by its basename
+    (never a path, so the key is the same on every machine)."""
     path = trace_file(entry)
     basename = path.rsplit("/", 1)[-1]
     if "." in basename:
-        return basename.rsplit(".", 1)[-1].lower()
-    return shell_program(trace_command(entry))
+        qualifier = basename.rsplit(".", 1)[-1].lower()
+    else:
+        qualifier = shell_program(trace_command(entry))
+    return _key_part(qualifier, PITFALL_QUALIFIER_MAX_CHARS)
 
 
 def pitfall_key(group: ErrorGroup) -> str:
+    """``pitfall:<tool>:<slug>[:<qualifier>]``, every part and the whole bounded."""
+    tool = _key_part(group.tool, PITFALL_TOOL_MAX_CHARS) or "tool"
     slug = pitfall_slug(group.error_line) or "error"
-    key = f"{PITFALL_KEY_PREFIX}:{group.tool}:{slug}"
+    key = f"{PITFALL_KEY_PREFIX}:{tool}:{slug}"
     qualifier = pitfall_qualifier(group.failures[0])
-    return f"{key}:{qualifier}" if qualifier else key
+    key = f"{key}:{qualifier}" if qualifier else key
+    return key[:PITFALL_KEY_MAX_CHARS]
 
 
 def _names_file(text: str, path: str) -> bool:
@@ -330,49 +425,70 @@ def _changes_file(entry, path: str) -> bool:
     )
 
 
-def _program_segment(command: str) -> list[str]:
-    """The words of the first chained segment that runs a program, wrappers dropped."""
-    for segment in _SHELL_CHAIN_RE.split(str(command or "").strip()):
-        try:
-            words = shlex.split(segment)
-        except ValueError:
-            words = segment.split()
-        while words and (words[0] in _SHELL_WRAPPERS or "=" in words[0]):
-            words = words[1:]
-        if words and words[0] not in _SHELL_NO_PROGRAM:
-            return words
-    return []
-
-
-def _command_target(command: str) -> str:
+def _command_target(words: list[str]) -> str:
     """What the program ran on: its first argument that is not a flag (a script, a file,
     a subcommand), or "" when it ran bare."""
-    for word in _program_segment(command)[1:]:
+    for word in words[1:]:
         if not word.startswith("-"):
             return word
     return ""
 
 
 def _reruns_program(entry, failure) -> bool:
-    """The same tool ran the same program on the same target: ``python broken.py`` after
-    a failed ``python broken.py``, not ``python --version``."""
+    """The same tool ran the same program on the same target, runner prefixes and
+    paths aside: ``python broken.py`` after a failed ``.venv/bin/python broken.py``,
+    not ``python --version``, and ``uv run ruff check .`` never reruns ``uv run pytest``."""
     if entry.origin_function != failure.origin_function:
         return False
-    later, failed = trace_command(entry), trace_command(failure)
-    program = shell_program(later)
+    later = program_words(trace_command(entry))
+    failed = program_words(trace_command(failure))
     return (
-        bool(program)
-        and program == shell_program(failed)
+        bool(later)
+        and bool(failed)
+        and later[0] == failed[0]
         and _command_target(later) == _command_target(failed)
     )
+
+
+def _successful_changes(traces: list) -> list:
+    """The successful traces that changed something: an edit tool, or a shell command
+    whose phase is a change."""
+    return [
+        entry for entry in traces if entry.status == "success" and classify_trace(entry) == CHANGE
+    ]
+
+
+def find_fixes(traces: list, last_index: int, failure) -> list:
+    """What worked for ``failure``, from the traces after the group's last failure.
+
+    The first later success that changes the failed file is the fix. For a failure with
+    no file (a shell command), the first later success that reruns the program on the
+    same target ends the search: the successful changes made before it are what
+    worked; with none, a different command form (``cat notes.txt`` after a failed
+    ``cat -x notes.txt``) is; the identical command with nothing changed in between
+    fixed nothing, so there is no fix.
+    """
+    failed_file = trace_file(failure)
+    later = traces[last_index + 1 :]
+    for offset, entry in enumerate(later):
+        if entry.status != "success":
+            continue
+        if _changes_file(entry, failed_file):
+            return [entry]
+        if not failed_file and _reruns_program(entry, failure):
+            changes = _successful_changes(later[:offset])
+            if changes:
+                return changes
+            same = program_words(trace_command(entry)) == program_words(trace_command(failure))
+            return [] if same else [entry]
+    return []
 
 
 def group_repeated_errors(traces: list) -> list[ErrorGroup]:
     """Failed traces grouped by tool and first error line, each paired with its fix.
 
-    A group counts when it failed at least twice, or once and a later successful trace
-    changed the same file or reran the same program. The fix is the first such success
-    after the group's last failure. In order of first failure; the rendered section
+    A group counts when it failed at least twice, or once and something fixed it
+    (``find_fixes``). In order of first failure; the rendered section
     shows the first ``MAX_ERROR_GROUPS``, the deterministic candidates cover every
     fixed group.
     """
@@ -391,16 +507,16 @@ def group_repeated_errors(traces: list) -> list[ErrorGroup]:
         group.last_index = index
 
     for group in groups.values():
-        first_failure = group.failures[0]
-        failed_file = trace_file(first_failure)
-        for later in traces[group.last_index + 1 :]:
-            if later.status != "success":
-                continue
-            if _changes_file(later, failed_file) or _reruns_program(later, first_failure):
-                group.fix = later
-                break
+        group.fixes = find_fixes(traces, group.last_index, group.failures[0])
 
     return [group for group in groups.values() if len(group.failures) >= 2 or group.fixed]
+
+
+def render_fixes(fixes: list, repo_root: str = "") -> str:
+    """What worked, one ``<tool> <input>`` per trace, ``; ``-separated."""
+    return "; ".join(
+        f"{entry.origin_function} {render_trace_input(entry, repo_root)}".strip() for entry in fixes
+    )
 
 
 def render_error_groups(groups: list[ErrorGroup], repo_root: str = "") -> str:
@@ -414,10 +530,7 @@ def render_error_groups(groups: list[ErrorGroup], repo_root: str = "") -> str:
             f"error: {_clip(group.error_line, MAX_TRACE_TEXT_CHARS)}"
         )
         if group.fixed:
-            lines.append(
-                f"  What worked: {group.fix.origin_function} "
-                f"{render_trace_input(group.fix, repo_root) or '(no input)'}"
-            )
+            lines.append(f"  What worked: {render_fixes(group.fixes, repo_root)}")
         else:
             lines.append("  What worked: no later successful call")
     return "\n".join(lines)
@@ -445,7 +558,8 @@ def build_failure_candidates(
     a repeated run link the same entry instead of creating another. The candidate model
     cuts the content at ``MAX_CONTEXT_CONTENT_CHARS``, so the problem, the error and
     what worked share that room (``fit_parts``): a long command or error line never
-    pushes the fix out.
+    pushes the fix out. A group whose key leaves less than ``MIN_FAILURE_BODY_CHARS``
+    for them gets no candidate.
     """
     candidates = []
     for group in groups:
@@ -454,13 +568,22 @@ def build_failure_candidates(
         failure = group.failures[0]
         key = f"{STATE_KEY_PREFIX}{pitfall_key(group)}] "
         failed_with, arrow = ' failed with "', '" → '
+        room = MAX_CONTEXT_CONTENT_CHARS - len(key) - len(failed_with) - len(arrow)
+        if room < MIN_FAILURE_BODY_CHARS:
+            logger.warning(
+                "Coding unit extraction: failure candidate '%s' left out, its key leaves "
+                "%d characters for the problem, error and fix",
+                key.strip(),
+                room,
+            )
+            continue
         problem, error_line, worked = fit_parts(
             [
                 f"{group.tool} {render_trace_input(failure, repo_root)}".strip(),
                 group.error_line,
-                f"{group.fix.origin_function} {render_trace_input(group.fix, repo_root)}".strip(),
+                render_fixes(group.fixes, repo_root),
             ],
-            MAX_CONTEXT_CONTENT_CHARS - len(key) - len(failed_with) - len(arrow),
+            room,
         )
         content = f"{key}{problem}{failed_with}{error_line}{arrow}{worked}"
         candidates.append(
@@ -607,13 +730,14 @@ def render_existing_lessons(lessons: list) -> str:
 
 def turn_header(number: int, turn: Turn) -> str:
     """The line that opens a turn's traces in TRACES."""
-    return f"-- turn {number}: {_clip(turn.request, MAX_TURN_LABEL_CHARS) or '(no request)'} --"
+    request = _redacted_clip(turn.request, MAX_TURN_LABEL_CHARS) or "(no request)"
+    return f"-- turn {number}: {request} --"
 
 
 def final_message_block(number: int, turn: Turn) -> str:
-    """One turn's request and final answer, as FINAL MESSAGE shows them."""
-    request = _clip(turn.request, MAX_REQUEST_CHARS) or "(none recorded)"
-    answer = _clip(turn.final_answer, MAX_FINAL_ANSWER_CHARS) or "(none recorded)"
+    """One turn's request and final answer, redacted, as FINAL MESSAGE shows them."""
+    request = _redacted_clip(turn.request, MAX_REQUEST_CHARS) or "(none recorded)"
+    answer = _redacted_clip(turn.final_answer, MAX_FINAL_ANSWER_CHARS) or "(none recorded)"
     return f"Turn {number}:\nUser request: {request}\nAgent's final answer: {answer}"
 
 
@@ -877,10 +1001,13 @@ async def extract_coding_unit_context(
         if dataset is not None:
             project = await get_session_node_set(session_manager, user_id, session_id)
 
+        started = time.monotonic()
+        windows = trace_windows(backlog.traces)
         touched: list[str] = []
-        for window in trace_windows(backlog.traces):
+        llm_calls = 0
+        for window in windows:
             sealed += len(window)
-            touched += await _extract_window(
+            window_touched, window_calls = await _extract_window(
                 session_manager=session_manager,
                 user_id=user_id,
                 session_id=session_id,
@@ -889,9 +1016,22 @@ async def extract_coding_unit_context(
                 system_prompt=system_prompt,
                 project=project,
             )
+            touched += window_touched
+            llm_calls += window_calls
             await TRACE_EXTRACTION_WATERMARK.write_count(
                 session_manager, user_id, session_id, count=sealed
             )
+        # The whole backlog is extracted inside improve()'s dataset lock: this line is
+        # how long that took (docs/coding-distillation.md).
+        logger.info(
+            "Coding unit extraction: session '%s' extracted traces=%d windows=%d "
+            "llm_calls=%d seconds=%.1f",
+            session_id,
+            len(backlog.traces),
+            len(windows),
+            llm_calls,
+            time.monotonic() - started,
+        )
         return touched
 
 
@@ -911,8 +1051,9 @@ async def _extract_window(
     unit: UnitOfWork,
     system_prompt,
     project: tuple[str, ...] = (),
-) -> list[str]:
-    """One window's extraction calls and failure candidates; returns the touched ids.
+) -> tuple[list[str], int]:
+    """One window's extraction calls and failure candidates; returns the touched ids and
+    the number of LLM calls made.
 
     Every candidate is linked to the Q&A row of its turn: the LLM names the turn of
     each lesson (a number outside the chunk's turns counts as its newest), a failure
@@ -976,4 +1117,4 @@ async def _extract_window(
         len(groups),
         len(touched),
     )
-    return touched
+    return touched, len(chunks)
