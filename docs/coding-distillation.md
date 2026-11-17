@@ -92,15 +92,15 @@ the number of turns), in this order:
    old/new snippets of an edit), errors and outputs cut at 600 chars. Every value is
    redacted with the rule failure lessons use before it is cut, so a secret cut short
    cannot slip past it.
-4. `REPEATED ERRORS AND WHAT WORKED`: failed traces grouped by tool and informative error
-   line (at least two failures, or one that something fixed). The informative line is a
-   Python traceback's closing `ErrorType: message`, else the first line that is not
-   `Traceback (most recent call last):`, `Exit code N` or symbols only; an error format
-   with no rule falls back to its first line. What worked: for a failure on a file, the
-   first later successful call that changed that file. For a shell failure, the first
-   later success that reruns the same program on the same target, runner prefixes and
-   paths aside (`uv run pytest a` is `pytest a`, `.venv/bin/python a.py` is `python a.py`,
-   and `uv run ruff check .` never reruns `uv run pytest`), ends the search: the
+4. `REPEATED ERRORS AND WHAT WORKED`: failed traces grouped by tool and normalized first
+   error line (at least two failures, or one that something fixed). No error format is
+   parsed: when the first line is generic (`Traceback (most recent call last):`,
+   `Exit code 1`, a test runner's header), different errors of one program share it, and
+   so share a group and a pitfall key. What worked: for a failure on a file, the first
+   later successful call that changed that file. For a shell failure, the first later
+   success that runs the same command, flags and paths aside (`python a.py` after a failed
+   `.venv/bin/python a.py -v`; `uv run ruff check .` never reruns `uv run pytest`; no
+   runner is unwrapped, the command's non-flag words are compared), ends the search: the
    successful changes between the failure and that rerun are what worked; with none, a
    different command form is (`cat notes.txt` after a failed `cat -x notes.txt`); the
    identical command with nothing changed in between fixed nothing. The section shows the
@@ -171,9 +171,10 @@ Edit on an unchanged string fails with "No changes to make" → rewrite the file
   `state`, `other`.
 - `State-Key` appears on state lessons (`test-baseline`, `footprint:<feature>`) and
   pitfalls (`pitfall:<tool>:<error-slug>[:<qualifier>]`, the slug taken from the
-  informative error line, the qualifier being the file extension or the program's basename,
-  never a path; each part and the whole key are bounded, and a candidate whose key would
-  leave no room for its problem, error and fix is not stored).
+  first error line, the qualifier being the file extension or the command's first word by
+  its basename (`uv` for `uv run pytest`), never a path; each part and the whole key are
+  bounded, and a candidate whose key would leave no room for its problem, error and fix is
+  not stored).
 - `(seen in N sessions)` appears on pitfalls only: the number of distinct sessions that
   stored the key in this project. Each row carries that list (`seen_sessions`), so the count
   survives the replacement of older rows and re-distilling a session keeps its number.
@@ -211,8 +212,10 @@ re-distilled identical lesson has the same row id and is kept.
 with its key by definition, and a pitfall seen again is the recurrence its `(seen in N
 sessions)` count exists for. When the writer still rejects one as known, the curator's
 working statement is stored under the key, as the state lesson or as the pitfall its
-repeated-error candidate names; a lesson the writer typed otherwise (a location that only
-cites the candidate) stays rejected. The evidence rules above settle the lesson type after the
+repeated-error candidate names. A rejection is kept as the pitfall only when the writer
+typed it `pitfall` (the writer types rejections too) or every member of the proposal is a
+failed-trace candidate; any other rejection (a location that only cites the candidate,
+typed or left `other`) stays rejected. The evidence rules above settle the lesson type after the
 writer.
 
 ## Not in this mode

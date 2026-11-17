@@ -55,4 +55,5 @@ When accept is true, write:
   with <feature> a short lower-case hyphenated name. Keep the PROPOSED STATE KEY unless the lesson
   is about a different feature. Empty for every other type.
 
-When accept is false, set reason and leave statement, entities, why_learned and state_key empty.
+When accept is false, set reason and lesson_type (what the lesson would have been) and leave
+statement, entities, why_learned and state_key empty.

@@ -215,9 +215,10 @@ class TestRenderTraceInput:
         assert shell_program("FOO=1 sudo make all") == "make"
         assert shell_program("echo hi") == ""
 
-    def test_shell_program_resolves_runners_paths_and_quotes(self):
-        assert shell_program("uv run pytest tests/a.py") == "pytest"
-        assert shell_program("npm run lint") == "lint"
+    def test_shell_program_is_the_first_word_by_its_basename(self):
+        # No runner is unwrapped: the program is the first word.
+        assert shell_program("uv run pytest tests/a.py") == "uv"
+        assert shell_program("npm run lint") == "npm"
         assert shell_program(".venv/bin/python a.py") == "python"
         assert shell_program("/Users/bob/proj/.venv/bin/python a.py") == "python"
         # A chain operator inside quotes does not split the command.
@@ -378,6 +379,12 @@ class TestRepeatedErrors:
         other = _trace("Bash", params={"command": "uv run ruff check ."})
         assert group_repeated_errors([failure, other]) == []
 
+        # The same command behind the runner, flags aside, is the rerun.
+        edit = _trace("Edit", params={"file_path": f"{REPO}/src/a.py"})
+        rerun = _trace("Bash", params={"command": "uv run --frozen pytest a -x"})
+        (group,) = group_repeated_errors([failure, edit, rerun])
+        assert group.fixes == [edit]
+
     def test_a_venv_path_and_the_bare_program_are_one_program(self):
         failure = _trace(
             "Bash",
@@ -391,7 +398,9 @@ class TestRepeatedErrors:
         )
         assert group.fixes == [edit]
 
-    def test_two_different_tracebacks_give_two_keys(self):
+    def test_a_traceback_keys_on_its_first_line(self):
+        # No error format is parsed: two tracebacks of one program share their first line,
+        # so they are one group and one key (the documented limit).
         def traceback(last_line):
             return (
                 "Traceback (most recent call last):\n"
@@ -406,12 +415,11 @@ class TestRepeatedErrors:
             _trace("Bash", status="error", params=command, error=traceback("ImportError: no x")),
         ]
         keys = {pitfall_key(group) for group in group_repeated_errors(traces)}
-        assert keys == {"pitfall:Bash:keyerror-id:python", "pitfall:Bash:importerror-no:python"}
+        assert keys == {"pitfall:Bash:traceback-most-recent-call-last:python"}
 
-    def test_an_exit_code_line_is_not_the_error(self):
+    def test_the_error_line_is_the_first_line(self):
         error = "Exit code 1\ncat: illegal option -- x"
-        assert cue.normalized_error_line(error) == "cat: illegal option -- x"
-        assert cue.normalized_error_line("Exit code 2") == "exit code 2"  # nothing better
+        assert cue.normalized_error_line(error) == "exit code 1"
 
     def test_a_venv_python_and_bare_python_give_one_key(self):
         error = "ModuleNotFoundError: No module named 'x'"

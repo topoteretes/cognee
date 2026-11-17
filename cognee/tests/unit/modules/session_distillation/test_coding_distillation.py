@@ -360,14 +360,34 @@ class TestEvidenceRules:
         assert kept.statement == "Edit on an unchanged string fails; rewrite with a script."
 
     def test_already_known_location_citing_a_pitfall_stays_rejected(self):
-        member = _entry(
+        pitfall = _entry(
             "[state-key: pitfall:Edit:no-changes-to-make:py] Edit failed → Bash python",
             section="failure_lessons",
             source_trace_ids=["t1"],
         )
+        location = _entry("Routes are registered in api/routes.py.")
         proposed = CodingProposedLesson(working_statement="Routes live in api/routes.py.")
-        known = CodingWrittenLesson(accept=False, reason="already_known", lesson_type="location")
-        assert keep_state_key_update(proposed, known, [member]) is known
+        # As the writer sends a rejection: untyped (the default ``other``) or typed.
+        for known in (
+            CodingWrittenLesson(accept=False, reason="already_known"),
+            CodingWrittenLesson(accept=False, reason="already_known", lesson_type="location"),
+        ):
+            assert keep_state_key_update(proposed, known, [pitfall, location]) is known
+
+    def test_already_known_typed_pitfall_is_kept_beside_other_members(self):
+        pitfall = _entry(
+            "[state-key: pitfall:Edit:no-changes-to-make:py] Edit failed → Bash python",
+            section="failure_lessons",
+            source_trace_ids=["t1"],
+        )
+        note = _entry("Edit refuses an unchanged string in src/app.py.")
+        proposed = CodingProposedLesson(
+            working_statement="Edit on an unchanged string fails; rewrite with a script."
+        )
+        known = CodingWrittenLesson(accept=False, reason="already_known", lesson_type="pitfall")
+        kept = keep_state_key_update(proposed, known, [pitfall, note])
+        assert kept.accept and kept.lesson_type == "pitfall"
+        assert kept.state_key == "pitfall:Edit:no-changes-to-make:py"
 
     def test_candidate_state_key_parsing(self):
         assert (

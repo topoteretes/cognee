@@ -135,37 +135,8 @@ MIN_FAILURE_BODY_CHARS = 60
 
 # Tools whose successful call changes the file it names.
 CHANGE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
-# Leading words that only launch the program after them: ``uv run pytest`` runs pytest,
-# ``npm run lint`` runs the lint script.
-RUNNER_PREFIXES = (
-    ("uv", "run"),
-    ("uvx",),
-    ("poetry", "run"),
-    ("pipenv", "run"),
-    ("pdm", "run"),
-    ("hatch", "run"),
-    ("npx",),
-    ("bunx",),
-    ("npm", "run"),
-    ("npm", "exec"),
-    ("pnpm", "run"),
-    ("pnpm", "exec"),
-    ("pnpm", "dlx"),
-    ("yarn", "run"),
-    ("yarn", "dlx"),
-    ("bun", "run"),
-    ("python", "-m"),
-    ("python3", "-m"),
-    ("docker", "compose"),
-)
 _WORD_RE = re.compile(r"[a-z0-9_]{2,}")
 _KEY_PART_RE = re.compile(r"[^\w.+-]")
-_TRACEBACK_HEAD = "traceback (most recent call last):"
-_EXIT_CODE_RE = re.compile(
-    r"^(?:error:\s*)?exit(?:ed with)?\s+(?:code|status)\b:?\s*-?\d+\s*$", re.IGNORECASE
-)
-# The closing line of a Python traceback: ``ErrorType: message`` (dotted names too).
-_PY_EXCEPTION_RE = re.compile(r"^[A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt)\b")
 # A run of characters a path is written with, as it stands in a command or a script.
 _PATH_TOKEN_RE = re.compile(r"[\w./~+-]+")
 
@@ -226,26 +197,19 @@ def _clip(text: str, limit: int) -> str:
 
 
 def program_words(command: str) -> list[str]:
-    """The words of the first segment of ``command`` that runs a program, wrappers and
-    runner prefixes dropped, the program by its basename: ``cd x && uv run pytest -q``
-    is ``["pytest", "-q"]``, ``.venv/bin/python a.py`` is ``["python", "a.py"]``."""
+    """The words of the first segment of ``command`` that runs a program, wrappers
+    dropped, the program by its basename: ``cd x && uv run pytest -q`` is
+    ``["uv", "run", "pytest", "-q"]``, ``.venv/bin/python a.py`` is ``["python", "a.py"]``.
+    No runner is unwrapped: the program is the first word, whatever it launches."""
     for segment, _after_pipe in split_shell_command(str(command or "")):
         words = command_words(segment)
-        if not words or words[0] in NO_PHASE_PROGRAMS:
-            continue
-        for prefix in RUNNER_PREFIXES:
-            if tuple(words[: len(prefix)]) == prefix and len(words) > len(prefix):
-                rest = words[len(prefix) :]
-                while rest and rest[0].startswith("-"):
-                    rest = rest[1:]
-                words = [rest[0].rsplit("/", 1)[-1], *rest[1:]] if rest else words
-                break
-        return words
+        if words and words[0] not in NO_PHASE_PROGRAMS:
+            return words
     return []
 
 
 def shell_program(command: str) -> str:
-    """The program a shell command runs (``program_words``), or ``""``."""
+    """The program a shell command runs: the first word of ``program_words``, or ``""``."""
     words = program_words(command)
     return words[0] if words else ""
 
@@ -331,33 +295,14 @@ def render_trace_line(entry, repo_root: str = "") -> str:
 # -- Repeated errors ---------------------------------------------------------
 
 
-def informative_error_line(error_message: str) -> str:
-    """The line that says what went wrong: a Python traceback's closing
-    ``ErrorType: message``, else the first line that is not a traceback head, an
-    ``Exit code N`` or symbols only. A format with no rule here falls back to the
-    first line."""
-    lines = [line.strip() for line in str(error_message or "").splitlines() if line.strip()]
-    if not lines:
-        return ""
-    if any(line.lower().startswith(_TRACEBACK_HEAD) for line in lines):
-        for line in reversed(lines):
-            if _PY_EXCEPTION_RE.match(line):
-                return line
-    for line in lines:
-        if (
-            line.lower().startswith(_TRACEBACK_HEAD)
-            or _EXIT_CODE_RE.match(line)
-            or not _WORD_RE.search(line.lower())
-        ):
-            continue
-        return line
-    return lines[0]
-
-
 def normalized_error_line(error_message: str) -> str:
-    """The informative line of an error, redacted, lowercased and whitespace-collapsed."""
-    line = informative_error_line(error_message)
-    return " ".join(redact_text(line).lower().split()) if line else ""
+    """The first line of an error, redacted, lowercased and whitespace-collapsed.
+
+    No error format is parsed: when the first line is generic (``Traceback (most recent
+    call last):``, ``Exit code 1``, a test runner's header), different errors of one
+    program share it, and so share a group and a pitfall key."""
+    first = str(error_message or "").strip().splitlines()
+    return " ".join(redact_text(first[0]).lower().split()) if first else ""
 
 
 def pitfall_slug(error_line: str) -> str:
@@ -425,29 +370,19 @@ def _changes_file(entry, path: str) -> bool:
     )
 
 
-def _command_target(words: list[str]) -> str:
-    """What the program ran on: its first argument that is not a flag (a script, a file,
-    a subcommand), or "" when it ran bare."""
-    for word in words[1:]:
-        if not word.startswith("-"):
-            return word
-    return ""
+def _command_shape(command: str) -> list[str]:
+    """The non-flag words of the command's program segment, each by its basename."""
+    return [word.rsplit("/", 1)[-1] for word in program_words(command) if not word.startswith("-")]
 
 
 def _reruns_program(entry, failure) -> bool:
-    """The same tool ran the same program on the same target, runner prefixes and
-    paths aside: ``python broken.py`` after a failed ``.venv/bin/python broken.py``,
-    not ``python --version``, and ``uv run ruff check .`` never reruns ``uv run pytest``."""
+    """The same tool ran the same command, flags and paths aside: ``python broken.py``
+    after a failed ``.venv/bin/python broken.py -v``, not ``python --version``, and
+    ``uv run ruff check .`` never reruns ``uv run pytest``."""
     if entry.origin_function != failure.origin_function:
         return False
-    later = program_words(trace_command(entry))
-    failed = program_words(trace_command(failure))
-    return (
-        bool(later)
-        and bool(failed)
-        and later[0] == failed[0]
-        and _command_target(later) == _command_target(failed)
-    )
+    later = _command_shape(trace_command(entry))
+    return bool(later) and later == _command_shape(trace_command(failure))
 
 
 def _successful_changes(traces: list) -> list:
@@ -462,8 +397,8 @@ def find_fixes(traces: list, last_index: int, failure) -> list:
     """What worked for ``failure``, from the traces after the group's last failure.
 
     The first later success that changes the failed file is the fix. For a failure with
-    no file (a shell command), the first later success that reruns the program on the
-    same target ends the search: the successful changes made before it are what
+    no file (a shell command), the first later success that reruns the same command
+    (``_reruns_program``) ends the search: the successful changes made before it are what
     worked; with none, a different command form (``cat notes.txt`` after a failed
     ``cat -x notes.txt``) is; the identical command with nothing changed in between
     fixed nothing, so there is no fix.

@@ -858,11 +858,16 @@ def keep_state_key_update(
     if state_key:
         lesson_type = "state"
     else:
-        # Only the pitfall itself is kept: a location or convention lesson the writer
-        # called known stays rejected even when it cites a repeated-error candidate.
-        lesson_type, state_key = lesson_key(written.lesson_type, "", members)
-        if lesson_type != "pitfall":
+        # Only the pitfall itself is kept: the writer typed the rejected lesson a
+        # pitfall, or the proposal is nothing but failed-trace candidates. A rejection
+        # left untyped (``other``, the default) with other members is a location or
+        # convention that cites the candidate, and stays rejected.
+        is_pitfall = written.lesson_type == "pitfall" or (
+            bool(members) and all(is_failed_trace_candidate(member) for member in members)
+        )
+        if not is_pitfall:
             return written
+        lesson_type, state_key = "pitfall", member_pitfall_key(members)
     if not state_key:
         return written
     logger.info(
