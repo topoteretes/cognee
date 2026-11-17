@@ -1,7 +1,10 @@
 from typing import Protocol, TypeAlias
 
+import numpy as np
+from numpy.typing import NDArray
+
 # One embedding: the model's vector for one input text.
-Vector: TypeAlias = list[float]
+Vector: TypeAlias = list[float] | NDArray[np.float32]
 
 
 class EmbeddingResult(list[Vector]):

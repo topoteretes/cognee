@@ -3,7 +3,8 @@
 :class:`ShardedExecutor` is a :class:`~.data_item_executor.DataItemExecutor`. It
 cuts the items that still need processing into shards and has a
 :class:`WorkerBackend` get each shard processed outside this process: 101 items
-at a shard size of 10 are 11 workers.
+at a shard size of 10 are 11 workers. With ``max_shard_bytes`` a shard is cut by
+the size of its items instead of their number (see :func:`plan_shards`).
 
 How a worker is started is the backend's business. Everything else is the same
 whatever runs the workers: a worker is started with the id of its shard, reads
@@ -22,6 +23,7 @@ hooks remain with ``run_tasks`` in this process; a worker runs its items under
 the run's id (``run_pipeline_shard``).
 """
 
+from bisect import bisect_left
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 from uuid import UUID
@@ -122,23 +124,70 @@ class WorkerBackend(Protocol):
 
 
 def plan_shards(
-    pending: list[Any], shard_size: int, portable_item: Callable[[Any], bool]
+    pending: list[Any],
+    shard_size: int | None,
+    portable_item: Callable[[Any], bool],
+    max_shard_bytes: int | None = None,
 ) -> tuple[list[Any], list[list[Any]]]:
     """``(items that stay in this process, shards of items for workers)``.
 
     An item another process cannot run (``portable_item``) stays here. The rest
-    is cut into shards of ``shard_size`` when there are more of them than one
-    shard; a run with no more than that is not worth a worker and stays here
-    whole.
+    is cut into shards when it is more than one shard's worth; a run with no more
+    than that is not worth a worker and stays here whole.
+
+    By number (``shard_size``): every shard holds that many items, the last one
+    the rest. By size (``max_shard_bytes``): every shard holds as many items as
+    fit under that many bytes, however many that is, so a worker's work is bounded
+    by what it has to read and not by how many files that comes in. The size is
+    the item's ``data_size`` (the stored file's bytes, on the ``Data`` row).
     """
     for_workers = [item for item in pending if portable_item(item)]
-    if len(for_workers) <= shard_size:
-        return pending, []
+    if max_shard_bytes is not None:
+        shards = shards_by_size(for_workers, max_shard_bytes)
+        if len(shards) <= 1:
+            return pending, []
+    else:
+        if len(for_workers) <= shard_size:
+            return pending, []
+        shards = [
+            for_workers[start : start + shard_size]
+            for start in range(0, len(for_workers), shard_size)
+        ]
     stays = [item for item in pending if not portable_item(item)]
-    shards = [
-        for_workers[start : start + shard_size] for start in range(0, len(for_workers), shard_size)
-    ]
     return stays, shards
+
+
+def shards_by_size(items: list[Any], max_shard_bytes: int) -> list[list[Any]]:
+    """``items`` packed into as few shards of at most ``max_shard_bytes`` as a
+    best-fit pass finds: largest item first, each into the shard it fills up most.
+
+    An item larger than the maximum is a shard by itself, and so is one whose size
+    is not known (no ``data_size``): it cannot be shown to fit beside another.
+    Shards come out in the order they were opened, so the first hold the largest
+    items and their workers start first.
+    """
+
+    def size_of(item: Any) -> int:
+        size = getattr(item, "data_size", None)
+        return max_shard_bytes if size is None else size
+
+    shards: list[list[Any]] = []
+    # Open shards by the room they have left, smallest first: (room, shard index).
+    rooms: list[tuple[int, int]] = []
+    for item in sorted(items, key=size_of, reverse=True):
+        size = size_of(item)
+        at = bisect_left(rooms, (size, -1))
+        if at == len(rooms):
+            shards.append([item])
+            room = max_shard_bytes - size
+            if room > 0:
+                rooms.insert(bisect_left(rooms, (room, len(shards) - 1)), (room, len(shards) - 1))
+            continue
+        room, index = rooms.pop(at)
+        shards[index].append(item)
+        if room - size > 0:
+            rooms.insert(bisect_left(rooms, (room - size, index)), (room - size, index))
+    return shards
 
 
 async def outcomes_by_stamp(spec: PipelineRunSpec, data_ids: list[UUID]) -> list[ItemOutcome]:
@@ -174,11 +223,23 @@ class ShardedExecutor:
     worker is told their ids and reads the rows itself.
     """
 
-    def __init__(self, backend: WorkerBackend, shard_size: int):
-        if shard_size < 1:
+    def __init__(
+        self,
+        backend: WorkerBackend,
+        shard_size: int | None = None,
+        max_shard_bytes: int | None = None,
+    ):
+        """Shards are cut by number of items (``shard_size``) or by their size
+        (``max_shard_bytes``): exactly one of the two."""
+        if (shard_size is None) == (max_shard_bytes is None):
+            raise ValueError("give exactly one of shard_size and max_shard_bytes")
+        if shard_size is not None and shard_size < 1:
             raise ValueError(f"shard_size must be at least 1, got {shard_size}")
+        if max_shard_bytes is not None and max_shard_bytes < 1:
+            raise ValueError(f"max_shard_bytes must be at least 1, got {max_shard_bytes}")
         self.backend = backend
         self.shard_size = shard_size
+        self.max_shard_bytes = max_shard_bytes
 
     async def run_items(
         self, spec: PipelineRunSpec, data_items: list[Any], item_run: ItemRun
@@ -189,7 +250,9 @@ class ShardedExecutor:
         # completion stamp can be trusted for a worker that left no result.
         completed, pending = split_completed(data_items, spec.pipeline_name, spec.dataset_id)
 
-        stays, groups = plan_shards(pending, self.shard_size, item_run.portable_item)
+        stays, groups = plan_shards(
+            pending, self.shard_size, item_run.portable_item, self.max_shard_bytes
+        )
         if not groups:
             return await item_run.run_in_process(data_items)
 

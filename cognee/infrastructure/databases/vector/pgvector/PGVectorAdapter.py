@@ -1,10 +1,17 @@
 import asyncio
 import hashlib
+import json
+import os
 import re
 import threading
-from typing import Any, get_type_hints
+from collections import Counter
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
 from uuid import UUID
 
+import asyncpg
+import numpy as np
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 from pydantic import BaseModel
 from sqlalchemy import (
@@ -13,6 +20,7 @@ from sqlalchemy import (
     MetaData,
     Table,
     TextClause,
+    Uuid,
     cast,
     delete,
     exc,
@@ -20,11 +28,9 @@ from sqlalchemy import (
     select,
     text,
 )
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.inspection import inspect
-from sqlalchemy.orm import Mapped, mapped_column
 from tenacity import (
     retry,
     retry_if_exception,
@@ -37,6 +43,7 @@ from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.postgres.deadlock import is_deadlock
 from cognee.infrastructure.databases.relational import get_relational_config, get_relational_engine
+from cognee.infrastructure.databases.unified.storage_trace import storage_batch, storage_span
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
@@ -44,7 +51,6 @@ from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.shared.logging_utils import get_logger
 
-from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ..embeddings.EmbeddingGateway import EmbeddingGateway
 from ..exceptions import CollectionNotFoundError, SharedDatabasePruneError
@@ -73,9 +79,75 @@ _HALFVEC_MIN_PGVECTOR = (0, 7, 0)
 # An HNSW scan returns at most hnsw.ef_search rows (default 40); pgvector caps the
 # setting at 1,000, so a larger limit keeps the exact full scan.
 _HNSW_DEFAULT_EF_SEARCH = 40
+# TEST ONLY: cheaper build parameters for new HNSW indexes, an
+# experiment (pgvector's defaults are m = 16, ef_construction = 64). Existing indexes
+# keep the parameters they were built with.
+_HNSW_M = 8
+_HNSW_EF_CONSTRUCTION = 64
 _HNSW_MAX_EF_SEARCH = 1000
 # Postgres truncates identifiers to NAMEDATALEN - 1 bytes, with only a NOTICE.
 _PG_MAX_IDENTIFIER_BYTES = 63
+# Vectors reach Postgres in binary through a small asyncpg pool of the adapter's own
+# (``_get_write_pool``): connections open on demand, close after this long idle, and
+# never exceed this many per adapter.
+# TEST ONLY: the pool's limit is
+# taken from the environment so a test can change it
+# (COGNEE_POC_VECTOR_WRITE_POOL_MAX_SIZE). Unset, it is 8.
+_WRITE_POOL_MAX_SIZE = int(os.getenv("COGNEE_POC_VECTOR_WRITE_POOL_MAX_SIZE", "8"))
+_WRITE_POOL_IDLE_SECONDS = 60.0
+# TEST ONLY: new collections are
+# created hash-partitioned by ``id`` into this many partitions, each with its own HNSW
+# index, so concurrent inserts spread over N index graphs instead of contending on the
+# buffer locks of one (COGNEE_POC_VECTOR_PARTITIONS). Unset or 1 is the single table.
+# An existing table keeps the layout it was created with.
+_PARTITIONS_ENV = "COGNEE_POC_VECTOR_PARTITIONS"
+
+
+def _vector_partitions() -> int:
+    """The partition count for new collections; anything but an integer >= 1 raises."""
+    raw = os.getenv(_PARTITIONS_ENV)
+    if raw is None:
+        return 1
+    if not raw.strip().isdigit() or int(raw) < 1:
+        raise ValueError(f"{_PARTITIONS_ENV} must be an integer >= 1, got {raw!r}")
+    return int(raw)
+
+
+def _partition_name(table_name: str, remainder: int) -> str:
+    """``<collection>_p<i>``, hashed like ``hnsw_index_name`` past 63 bytes so two long
+    collection names never truncate to the same partition name."""
+    name = f"{table_name}_p{remainder}"
+    if len(name.encode()) <= _PG_MAX_IDENTIFIER_BYTES:
+        return name
+    digest = hashlib.sha1(table_name.encode()).hexdigest()[:12]
+    prefix = table_name.encode()[:40].decode(errors="ignore")
+    return f"{prefix}_{digest}_p{remainder}"
+
+
+# Partitions of partitioned tables, as (schema, table): SQLAlchemy's reflection lists
+# them as tables of their own (relkind 'r'), but they are part of their parent's
+# collection, never a collection.
+_PARTITIONS_SQL = """
+SELECT n.nspname, c.relname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relispartition
+"""
+# TEST ONLY: what ``create_data_points`` did with its rows, summed
+# over calls, read by tests. ``rows`` counts the rows
+# given (after the in-call dedup), ``embedded`` the rows sent to the embedding engine;
+# ``unchanged`` is rows - inserted - upserted; ``upserted`` counts rows sent to the
+# upsert statement.
+POC_WRITE_COUNTS: Counter = Counter()
+# SQLAlchemy's asyncpg dialect consumes these connect_args itself; asyncpg.connect
+# does not accept them.
+_SQLALCHEMY_ONLY_CONNECT_ARGS = ("prepared_statement_cache_size", "prepared_statement_name_func")
+
+
+def _is_write_deadlock(error: BaseException) -> bool:
+    """A deadlock abort from the binary write pool (a bare asyncpg error) or behind
+    SQLAlchemy's wrapping (every other statement of this adapter)."""
+    return isinstance(error, DeadlockDetectedError) or is_deadlock(error)
 
 
 def _row_order(row_id: Any) -> str:
@@ -96,18 +168,20 @@ def _row_order(row_id: Any) -> str:
 PgvectorVersion = tuple[int, ...]
 
 # Collection tables in the engine's current schema (the dataset's own schema in
-# shared-database mode): a ``vector`` column of pgvector's ``vector`` type, whose
-# ``atttypmod`` is its declared dimension count (-1 when undeclared).
+# shared-database mode): a ``vector`` column of pgvector's ``vector`` or ``halfvec``
+# type (see ``_column_type``), with that type's name and its ``atttypmod``, the declared
+# dimension count (-1 when undeclared).
 _VECTOR_COLLECTIONS_SQL = """
-SELECT c.relname, a.atttypmod
+SELECT c.relname, t.typname, a.atttypmod
 FROM pg_attribute a
 JOIN pg_class c ON c.oid = a.attrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_type t ON t.oid = a.atttypid
 WHERE n.nspname = current_schema()
-  AND c.relkind = 'r'
+  AND c.relkind IN ('r', 'p')  -- 'p': a partitioned collection (test-only partitions)
+  AND NOT c.relispartition     -- its partitions are not collections of their own
   AND a.attname = 'vector'
-  AND t.typname = 'vector'
+  AND t.typname IN ('vector', 'halfvec')
   AND NOT a.attisdropped
 """
 # An HNSW build is much slower once its graph outgrows maintenance_work_mem (12k
@@ -153,46 +227,100 @@ def hnsw_index_name(table_name: str) -> str:
     return f"{prefix}_{digest}_hnsw"
 
 
-def _indexed_type(dimensions: int, pgvector_version: PgvectorVersion | None) -> str | None:
-    """``vector`` or ``halfvec`` when pgvector can index ``dimensions``, else None."""
+def _indexed_type(
+    dimensions: int, pgvector_version: PgvectorVersion | None, column_type: str = "vector"
+) -> str | None:
+    """``vector`` or ``halfvec``: the type pgvector indexes a ``column_type`` column of
+    ``dimensions`` by, else None.
+
+    A ``halfvec`` column is indexed as it is, up to 4,000 dimensions. A ``vector`` column
+    is indexed as it is up to 2,000 dimensions and through a halfvec cast above that.
+    """
     if pgvector_version is None or pgvector_version < _HNSW_MIN_PGVECTOR or dimensions <= 0:
         return None
+    halfvec_indexable = (
+        dimensions <= _HNSW_HALFVEC_MAX_DIMENSIONS and pgvector_version >= _HALFVEC_MIN_PGVECTOR
+    )
+    if column_type == "halfvec":
+        return "halfvec" if halfvec_indexable else None
     if dimensions <= _HNSW_VECTOR_MAX_DIMENSIONS:
         return "vector"
-    if dimensions <= _HNSW_HALFVEC_MAX_DIMENSIONS and pgvector_version >= _HALFVEC_MIN_PGVECTOR:
-        return "halfvec"
-    return None
+    return "halfvec" if halfvec_indexable else None
+
+
+def _column_type(dimensions: int, pgvector_version: PgvectorVersion | None) -> str:
+    """The type a new collection's ``vector`` column is created with: ``halfvec`` at
+    every size, wherever the server has the type (pgvector 0.7.0), so the column is
+    indexed as it is stored and both take 2 bytes per dimension.
+
+    A ``halfvec`` value of up to about 2,000 dimensions also fits several to an index
+    page, where a ``vector`` of 1,024 dimensions (4 KB) takes a page to itself. A
+    collection created with a ``vector`` column keeps it (nothing converts it), so
+    everything that depends on the type reads the collection's actual one: reflection
+    for statements, the catalog for index builds.
+    """
+    has_halfvec = pgvector_version is not None and pgvector_version >= _HALFVEC_MIN_PGVECTOR
+    return "halfvec" if has_halfvec else "vector"
+
+
+def _stored_type(vector_column) -> str:
+    """``halfvec`` or ``vector``: the type of a collection's (reflected) vector column."""
+    from pgvector.sqlalchemy import HALFVEC
+
+    return "halfvec" if isinstance(vector_column.type, HALFVEC) else "vector"
 
 
 def hnsw_index_statement(
-    table_name: str, dimensions: int, pgvector_version: PgvectorVersion | None
+    table_name: str,
+    dimensions: int,
+    pgvector_version: PgvectorVersion | None,
+    schema: str | None = None,
+    *,
+    column_type: str,
 ) -> str | None:
     """CREATE INDEX for a collection's vector column, or None when pgvector cannot index it.
 
     Without an index every search is a full scan that reads every stored vector; a
     3072-dimensional collection of 12k rows is ~160 MB of TOAST pages per query, which
     took 20 s on a Neon compute whose cache was empty.
+
+    The index is on the column itself when the column (``column_type``) has the indexed
+    type, and on a halfvec cast of it when a ``vector`` column is too wide to index.
+
+    With ``schema`` the table is named in that schema, so a schema-pinned adapter
+    indexes its own collection and never a same-named one earlier on the search path.
     """
-    indexed_type = _indexed_type(dimensions, pgvector_version)
-    if indexed_type == "vector":
-        indexed, operator_class = "vector", "vector_cosine_ops"
-    elif indexed_type == "halfvec":
-        indexed, operator_class = f"(vector::halfvec({dimensions}))", "halfvec_cosine_ops"
-    else:
+    indexed_type = _indexed_type(dimensions, pgvector_version, column_type)
+    if indexed_type is None:
         return None
+    if indexed_type == column_type:
+        indexed = "vector"
+    else:
+        indexed = f"(vector::{indexed_type}({dimensions}))"
+    table = f'"{schema}"."{table_name}"' if schema else f'"{table_name}"'
     return (
         f'CREATE INDEX IF NOT EXISTS "{hnsw_index_name(table_name)}" '
-        f'ON "{table_name}" USING hnsw ({indexed} {operator_class})'
+        f"ON {table} USING hnsw ({indexed} {indexed_type}_cosine_ops) "
+        f"WITH (m = {_HNSW_M}, ef_construction = {_HNSW_EF_CONSTRUCTION})"
     )
 
 
 def _indexed_distance(vector_column, query_vector: list[float], indexed_type: str, dimensions: int):
     """The distance expression the HNSW index orders by (see ``hnsw_index_statement``)."""
-    if indexed_type == "vector":
+    if _stored_type(vector_column) == indexed_type:
         return vector_column.cosine_distance(query_vector)
     from pgvector.sqlalchemy import HALFVEC
 
     return cast(vector_column, HALFVEC(dimensions)).cosine_distance(query_vector)
+
+
+def _vector_values(stored) -> list[float]:
+    """A stored vector as floats: pgvector returns a ``vector`` column as a numpy array
+    and a ``halfvec`` column as a ``HalfVector``."""
+    from pgvector.sqlalchemy import HalfVector
+
+    values = stored.to_numpy() if isinstance(stored, HalfVector) else stored
+    return [float(v) for v in values]
 
 
 class IndexSchema(DataPoint):
@@ -226,6 +354,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     """Vector-database adapter backed by Postgres + pgvector; implements VectorDBInterface."""
 
     name = "PGVector"
+    # Postgres schema this adapter is pinned to ("" = the connection's default schema).
+    # Class-level defaults so a bare instance (tests build them with object.__new__)
+    # reads as unpinned and without a write pool.
+    schema: str = ""
+    _write_pool: asyncpg.Pool | None = None
+    _write_pool_loop = None
+    _partitions: int = 1  # TEST ONLY, see _vector_partitions
 
     def __init__(
         self,
@@ -250,6 +385,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Postgres schema this adapter is pinned to ("" = default/public search path).
         # Read by schema-scoped overrides of get_table_names()/delete_database().
         self.schema: str = schema or ""
+        # TEST ONLY: read (and validated) at construction, so a bad value fails fast.
+        self._partitions = _vector_partitions()
         # Loop-agnostic: the adapter is cached across event loops, and an
         # asyncio.Lock binds to the first loop that awaits it.
         self.VECTOR_DB_LOCK = LoopAgnosticLock()
@@ -295,20 +432,33 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             else None
         )
 
+        # Connect args for every connection this adapter opens itself: the SQLAlchemy
+        # engine (when it is not borrowed) and the binary write pool. In
+        # shared-database schema-isolation mode they are pinned to this dataset's
+        # schema via search_path; ``public`` is kept on the path so the pgvector
+        # extension's ``vector`` type and operators (installed in public) resolve.
+        # Collection tables are named with the schema in every statement, so neither
+        # reads nor writes can fall through to a same-named table in public.
+        connect_args = dict(effective_connect_args) if effective_connect_args else {}
+        if self.schema:
+            server_settings = dict(connect_args.get("server_settings") or {})
+            server_settings["search_path"] = f"{self.schema}, public"
+            connect_args["server_settings"] = server_settings
+        self._write_connect_args = {
+            key: value
+            for key, value in connect_args.items()
+            if key not in _SQLALCHEMY_ONLY_CONNECT_ARGS
+        }
+        self._write_pool = None
+        self._write_pool_loop = None
+        self._write_pool_lock = LoopAgnosticLock()
+
         # Reuse engine and sessionmaker if the relational engine is provided and is the same database as the one configured for pgvector
         db_name1 = make_url(relational_db.db_uri).database
         db_name2 = make_url(self.db_uri).database
         if self.schema:
-            # Shared-database schema-isolation mode. Always a dedicated engine
-            # whose connections are pinned to this dataset's schema via
-            # search_path; ``public`` is kept on the path so the pgvector
-            # extension's ``vector`` type and operators (installed in public)
-            # resolve. Our collection tables are always created in the dataset
-            # schema (first on the path), so reads never fall through to public.
-            connect_args = dict(effective_connect_args) if effective_connect_args else {}
-            server_settings = dict(connect_args.get("server_settings") or {})
-            server_settings["search_path"] = f"{self.schema}, public"
-            connect_args["server_settings"] = server_settings
+            # Shared-database schema-isolation mode: always a dedicated engine, since
+            # the shared relational engine's search_path has to stay on ``public``.
             super().__init__(
                 connection_string=self.db_uri,
                 connect_args=connect_args,
@@ -349,6 +499,20 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """
         self._metadata = MetaData()
 
+    def _table_key(self, collection_name: str) -> str:
+        """The key a collection's reflected table has in ``self._metadata``."""
+        return f"{self.schema}.{collection_name}" if self.schema else collection_name
+
+    def _qualified_table(self, collection_name: str) -> str:
+        """The collection's table as SQL names it: schema-qualified when pinned.
+
+        An unqualified name resolves along the search path, where ``public`` follows
+        the pinned schema, so a same-named collection there would be read and written
+        instead of this dataset's.
+        """
+        quoted = f'"{collection_name}"'
+        return f'"{self.schema}".{quoted}' if self.schema else quoted
+
     async def get_table_names(self) -> list[str]:
         """List collection tables, scoped to this adapter's schema when pinned.
 
@@ -359,14 +523,24 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         back to the base (all non-system schemas) when not schema-pinned.
         """
         if not self.schema:
-            return await super().get_table_names()
-
-        table_names: list[str] = []
-        async with self.engine.begin() as connection:
-            metadata = MetaData()
-            await connection.run_sync(metadata.reflect, schema=self.schema)
-            table_names.extend(metadata.tables.keys())
-        return table_names
+            table_names = await super().get_table_names()
+        else:
+            table_names = []
+            async with self.engine.begin() as connection:
+                metadata = MetaData()
+                await connection.run_sync(metadata.reflect, schema=self.schema)
+                table_names.extend(metadata.tables.keys())
+        # TEST ONLY: a partitioned collection is listed once, as its parent. Reflection
+        # keys are "schema.table", or a bare "table" for the connection's default schema.
+        async with self.engine.connect() as connection:
+            partitions = (await connection.execute(text(_PARTITIONS_SQL))).all()
+            default_schema = (await connection.execute(text("SELECT current_schema()"))).scalar()
+        hidden = {f"{schema}.{name}" for schema, name in partitions}
+        return [
+            name
+            for name in table_names
+            if (name if "." in name else f"{default_schema}.{name}") not in hidden
+        ]
 
     async def delete_database(self):
         """Drop this dataset's tables, scoped to its schema when pinned.
@@ -399,8 +573,31 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         Called automatically by ``closing_lru_cache`` when this adapter is
         evicted from ``_create_vector_engine``'s cache.
         """
-        if self._owns_engine:
-            await self.engine.dispose(close=True)
+        pool, self._write_pool = self._write_pool, None
+        pool_loop, self._write_pool_loop = self._write_pool_loop, None
+        try:
+            if pool is not None:
+                if pool_loop is asyncio.get_running_loop():
+                    try:
+                        await asyncio.wait_for(pool.close(), timeout=10)
+                    except asyncio.TimeoutError:
+                        self._terminate_write_pool(pool, pool_loop)
+                else:
+                    self._terminate_write_pool(pool, pool_loop)
+        finally:
+            if self._owns_engine:
+                await self.engine.dispose(close=True)
+
+    @staticmethod
+    def _terminate_write_pool(pool, loop) -> None:
+        try:
+            pool.terminate()
+        except RuntimeError:
+            # asyncpg aborts transports on their owning loop. Once that loop is
+            # closed it cannot schedule transport cleanup; the detached pool must
+            # be reclaimed instead. Do not hide errors on a live loop.
+            if loop is None or not loop.is_closed():
+                raise
 
     def _get_write_lock(self, collection_name: str) -> LoopAgnosticLock:
         with self._write_locks_guard:
@@ -410,29 +607,250 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 self._write_locks[collection_name] = lock
             return lock
 
+    def _asyncpg_dsn(self) -> str:
+        """This adapter's URL for asyncpg itself, without the SQLAlchemy driver suffix."""
+        return (
+            make_url(self.db_uri).set(drivername="postgresql").render_as_string(hide_password=False)
+        )
+
+    async def _init_write_connection(self, connection) -> None:
+        """Register pgvector's binary codecs on a new write-pool connection.
+
+        The codec is looked up in the schema holding the extension (``public`` unless a
+        deployment installed it elsewhere). ``create_collection`` installs the extension
+        before the first write, so a missing one here is a configuration error.
+        """
+        from pgvector.asyncpg import register_vector
+
+        extension_schema = await connection.fetchval(
+            "SELECT n.nspname FROM pg_extension e "
+            "JOIN pg_namespace n ON n.oid = e.extnamespace WHERE e.extname = 'vector'"
+        )
+        if extension_schema is None:
+            raise RuntimeError(
+                "The pgvector extension is not installed in the vector database; "
+                "create a collection first, which installs it."
+            )
+        await register_vector(connection, schema=extension_schema)
+
+    async def _get_write_pool(self) -> asyncpg.Pool:
+        """The asyncpg pool vectors are written through, opened on first use per event loop.
+
+        Vectors go to Postgres in binary: pgvector's asyncpg codec turns a row's vector
+        into float32 bytes in C, where the SQLAlchemy bind processor formatted every
+        coordinate as text in Python, about half of a large write's time. The pool is
+        separate from the SQLAlchemy engine because a codec is registered per
+        connection and would change how the engine's own statements, which bind
+        vectors as text, encode them. Connections open on demand and close after
+        ``_WRITE_POOL_IDLE_SECONDS`` idle, so outside a write the pool holds none.
+
+        asyncpg connections belong to the loop that opened them, and this adapter is
+        cached across loops (the CLI and the tests run several), so a pool from an
+        earlier loop is dropped and a new one opened.
+        """
+        loop = asyncio.get_running_loop()
+        if self._write_pool is not None and self._write_pool_loop is loop:
+            return self._write_pool
+        async with self._write_pool_lock:
+            if self._write_pool is not None and self._write_pool_loop is loop:
+                return self._write_pool
+            if self._write_pool is not None:
+                stale, self._write_pool = self._write_pool, None
+                stale_loop, self._write_pool_loop = self._write_pool_loop, None
+                self._terminate_write_pool(stale, stale_loop)
+            pool = await asyncpg.create_pool(
+                self._asyncpg_dsn(),
+                min_size=0,
+                max_size=_WRITE_POOL_MAX_SIZE,
+                max_inactive_connection_lifetime=_WRITE_POOL_IDLE_SECONDS,
+                init=self._init_write_connection,
+                **self._write_connect_args,
+            )
+            self._write_pool = pool
+            self._write_pool_loop = loop
+            return pool
+
+    @asynccontextmanager
+    async def _write_transaction(self, write_gate=None) -> AsyncIterator[asyncpg.Connection]:
+        """A write-pool connection inside a transaction: committed when the block ends,
+        rolled back when it raises. Holds ``write_gate`` (when given) for the whole
+        write, and always gives the connection back to the pool."""
+        pool = await self._get_write_pool()
+        if write_gate is not None:
+            with storage_span("writer_wait"):
+                await write_gate.acquire()
+        try:
+            with storage_span("pool_wait"):
+                connection = await pool.acquire()
+            try:
+                transaction = connection.transaction()
+                await transaction.start()
+                try:
+                    yield connection
+                except BaseException:
+                    await transaction.rollback()
+                    raise
+                else:
+                    with storage_span("commit"):
+                        await transaction.commit()
+            finally:
+                await pool.release(connection)
+        finally:
+            if write_gate is not None:
+                write_gate.release()
+
+    @staticmethod
+    def _row_params(rows: list[dict]) -> list[tuple]:
+        """``(id, payload as JSON text, vector)`` per row: ``$1``-``$3`` of the statements."""
+        with storage_span("prepare_parameters"):
+            return [(row["id"], json.dumps(row["payload"]), row["vector"]) for row in rows]
+
+    async def _write_rows(
+        self,
+        collection_name: str,
+        rows: list[dict],
+        statement_for,
+        *,
+        use_copy=False,
+        write_gate=None,
+    ) -> None:
+        """Upsert ``rows`` (``id``, ``payload``, ``vector`` each), in their order, in one
+        transaction on the write pool: one statement per row, prepared once per
+        connection and pipelined by asyncpg. ``statement_for(table, collection_name)``
+        gives the statement; its ``$3`` is the vector, encoded by the binary codec.
+        """
+        if not rows:
+            return
+        params = self._row_params(rows)
+        async with self._write_transaction(write_gate) as connection:
+            if use_copy:
+                # Each checked-out connection has its own staging table. It is
+                # emptied by commit and rolled back with a failed batch.
+                with storage_span("staging"):
+                    await connection.execute(
+                        "CREATE TEMP TABLE IF NOT EXISTS cognee_vector_stage "
+                        "(id uuid, payload json, vector vector) ON COMMIT DELETE ROWS"
+                    )
+                with storage_span("copy"):
+                    await connection.copy_records_to_table(
+                        "cognee_vector_stage",
+                        schema_name="pg_temp",
+                        records=params,
+                        columns=("id", "payload", "vector"),
+                    )
+                statement = statement_for(
+                    self._qualified_table(collection_name),
+                    collection_name,
+                    source_sql="SELECT id, payload, vector FROM pg_temp.cognee_vector_stage ORDER BY id",
+                )
+                with storage_span("merge"):
+                    await connection.execute(statement)
+            else:
+                statement = statement_for(self._qualified_table(collection_name), collection_name)
+                with storage_span("merge"):
+                    await connection.executemany(statement, params)
+
+    async def _classify_rows(
+        self, connection, collection_name: str, params: list[tuple]
+    ) -> tuple[list[tuple], list[tuple]]:
+        """Split ``params`` into (missing, changed) against the committed table, dropping
+        rows whose upsert would change nothing. Keeps the input order in each list."""
+        if not params:
+            return [], []
+        records = await connection.fetch(
+            self._classify_sql(self._qualified_table(collection_name), collection_name),
+            [row[0] for row in params],
+            [row[1] for row in params],
+        )
+        is_missing = {record["id"]: record["missing"] for record in records}
+        missing = [row for row in params if is_missing.get(row[0]) is True]
+        changed = [row for row in params if is_missing.get(row[0]) is False]
+        return missing, changed
+
+    async def _rows_to_write(self, collection_name: str, rows: list[dict]) -> list[dict]:
+        """The rows an upsert would write (missing, or changed), in their order.
+
+        Asked before the rows are embedded, so a row stored unchanged costs no embedding.
+        The classify runs on a write-pool connection outside any transaction: no
+        transaction stays open across the embedding request. ``_write_data_point_rows``
+        classifies again inside its transaction, which settles anything that changed in
+        between; a row found unchanged here and deleted before that write is not written
+        by this call, as if the call had completed before the delete.
+        """
+        pairs = [(row["id"], json.dumps(row["payload"])) for row in rows]
+        pool = await self._get_write_pool()
+        with storage_span("classify_before_embed"):
+            connection = await pool.acquire()
+            try:
+                missing, changed = await self._classify_rows(connection, collection_name, pairs)
+            finally:
+                await pool.release(connection)
+        written_ids = {pair[0] for pair in missing + changed}
+        return [row for row in rows if row["id"] in written_ids]
+
+    async def _write_data_point_rows(
+        self, collection_name: str, rows: list[dict], *, write_gate=None
+    ) -> None:
+        """Write ``rows`` as ``_data_point_upsert_sql`` would, locking only rows it changes.
+
+        ``ON CONFLICT DO UPDATE`` locks every conflicting row until commit, even when its
+        ``WHERE`` is false, so an id many concurrent writers share (the same entity
+        extracted from many documents) queued every writer behind every other one,
+        although nearly all of them changed nothing. In one transaction: a lock-free
+        classify drops the unchanged rows; the missing ones are inserted with ``DO
+        NOTHING``, which locks no existing row; a missing row another writer inserted
+        meanwhile (not returned by the insert) is classified again; only what is left
+        goes through the upsert. All inserts precede all upserts, each in ``_row_order``:
+        a writer waiting for another's insert holds no updated row's lock yet, so the two
+        phases form no wait cycle.
+        """
+        if not rows:
+            return
+        params = self._row_params(rows)
+        table = self._qualified_table(collection_name)
+        async with self._write_transaction(write_gate) as connection:
+            with storage_span("classify"):
+                missing, changed = await self._classify_rows(connection, collection_name, params)
+            inserted_ids: set = set()
+            if missing:
+                with storage_span("insert"):
+                    records = await connection.fetchmany(
+                        self._data_point_insert_sql(table), missing
+                    )
+                inserted_ids = {record["id"] for record in records}
+            lost_race = [row for row in missing if row[0] not in inserted_ids]
+            with storage_span("classify"):
+                still_missing, changed_since = await self._classify_rows(
+                    connection, collection_name, lost_race
+                )
+            to_upsert = sorted(
+                changed + still_missing + changed_since, key=lambda row: _row_order(row[0])
+            )
+            if to_upsert:
+                with storage_span("merge"):
+                    await connection.executemany(
+                        self._data_point_upsert_sql(table, collection_name), to_upsert
+                    )
+        # TEST ONLY: counted after the commit, so a retried attempt
+        # that rolled back is not counted.
+        POC_WRITE_COUNTS.update(
+            unchanged=len(params) - len(inserted_ids) - len(to_upsert),
+            inserted=len(inserted_ids),
+            lost_race=len(lost_race),
+            upserted=len(to_upsert),
+        )
+
     async def embed_data(self, data: list[str]) -> list[list[float]]:
-        """
-        Embed a list of texts into vectors using the specified embedding engine.
-
-        Parameters:
-        -----------
-
-            - data (list[str]): A list of strings to be embedded into vectors.
-
-        Returns:
-        --------
-
-            - list[list[float]]: A list of lists of floats representing embedded vectors.
-        """
+        """Preserve the public vector interface's list output for external consumers."""
         return await self.embedding_engine.embed_text(data)
 
     async def get_stored_vector_size(self) -> int | None:
         """Width of the vectors already in this store, or None when nothing is stored yet.
 
-        Every table's ``vector`` column is declared ``vector(N)`` with the
-        embedding width that built it. Read once per dataset by the dataset
-        context to record the width for rows that predate the recorded
-        embedding model.
+        Every table's ``vector`` column is declared ``vector(N)`` or ``halfvec(N)``
+        (see ``_column_type``) with the embedding width that built it. Read once per
+        dataset by the dataset context to record the width for rows that predate the
+        recorded embedding model.
 
         Reads every such column rather than the first: a schema built across an
         ``EMBEDDING_MODEL`` change holds two widths, and which one gets recorded
@@ -453,7 +871,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         widths = []
         for declared_type in declared_types:
-            match = re.fullmatch(r"vector\((\d+)\)", declared_type or "")
+            match = re.fullmatch(r"(?:vector|halfvec)\((\d+)\)", declared_type or "")
             if match:
                 widths.append(int(match.group(1)))
         return choose_stored_vector_size(widths, self.name)
@@ -480,19 +898,26 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         A missing table is never cached by ``get_table``, so a search over many
         collection names would otherwise reflect each missing one on its own
-        connection, every search. The list holds the tables visible on the
-        connection's ``search_path``, the same resolution ``get_table`` and the
-        unqualified search statements use.
+        connection, every search. The list holds the tables of this adapter's schema
+        (the pinned one, or the connection's default), the same resolution
+        ``get_table`` uses.
         """
+        schema = self.schema or None
         async with self.engine.connect() as connection:
             table_names = set(
-                await connection.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
+                await connection.run_sync(
+                    lambda sync_conn: inspect(sync_conn).get_table_names(schema=schema)
+                )
             )
         return [name for name in collection_names if name in table_names]
 
     async def has_collection(self, collection_name: str) -> bool:
         """
-        Check if a specified collection exists in the database.
+        Check if a specified collection exists in this adapter's schema.
+
+        A schema-pinned adapter looks only in its own schema. ``public`` stays on its
+        search path for pgvector's types, and a same-named collection there used to
+        count as this dataset's, so its rows went to that table.
 
         Parameters:
         -----------
@@ -504,26 +929,31 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
             - bool: Returns True if the collection exists, False otherwise.
         """
-        if collection_name in self._metadata.tables:
+        key = self._table_key(collection_name)
+        if key in self._metadata.tables:
             return True
 
         try:
             async with self.engine.begin() as connection:
-                await connection.run_sync(self._metadata.reflect, only=[collection_name])
+                await connection.run_sync(
+                    self._metadata.reflect, only=[collection_name], schema=self.schema or None
+                )
         except exc.InvalidRequestError:
             return False
 
-        return collection_name in self._metadata.tables
+        return key in self._metadata.tables
 
     async def delete_collection(self, collection_name: str) -> None:
         """Drop the table for ``collection_name``; a missing table is not an error.
 
-        Resolved through the connection's ``search_path`` like every other
-        statement here, so a schema-pinned adapter drops its own schema's table.
+        Named with the schema when pinned, like every other statement here, so a
+        schema-pinned adapter drops its own schema's table.
         """
         async with self.engine.begin() as connection:
-            await connection.execute(text(f'DROP TABLE IF EXISTS "{collection_name}" CASCADE'))
-        table = self._metadata.tables.get(collection_name)
+            await connection.execute(
+                text(f"DROP TABLE IF EXISTS {self._qualified_table(collection_name)} CASCADE")
+            )
+        table = self._metadata.tables.get(self._table_key(collection_name))
         if table is not None:
             self._metadata.remove(table)
 
@@ -542,58 +972,70 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     )
     async def create_collection(self, collection_name: str, payload_schema=None):
         """Create the pgvector table for `collection_name` if it does not already exist."""
-        data_point_types = get_type_hints(DataPoint)
         vector_size = self.embedding_engine.get_vector_size()
 
         if not await self.has_collection(collection_name):
             async with self.VECTOR_DB_LOCK:
                 if not await self.has_collection(collection_name):
-
-                    class PGVectorDataPoint(Base):
-                        """
-                        Represent a point in a vector data space with associated data and vector representation.
-
-                        This class inherits from Base and is associated with a database table defined by
-                        __tablename__. It maintains the following public methods and instance variables:
-
-                        - __init__(self, id, payload, vector): Initializes a new PGVectorDataPoint instance.
-
-                        Instance variables:
-                        - id: Identifier for the data point, defined by data_point_types.
-                        - payload: JSON data associated with the data point.
-                        - vector: Vector representation of the data point, with size defined by vector_size.
-                        """
-
-                        __tablename__ = collection_name
-                        __table_args__ = {"extend_existing": True}
-                        # PGVector requires one column to be the primary key
-                        id: Mapped[data_point_types["id"]] = mapped_column(primary_key=True)
-                        payload = Column(JSON)
-                        vector = Column(self.Vector(vector_size))
-
-                        def __init__(self, id, payload, vector):
-                            """Initialize the pgvector row with id, JSON payload, and vector."""
-                            self.id = id
-                            self.payload = payload
-                            self.vector = vector
-
                     async with self.engine.begin() as connection:
                         # The dataset handlers install the extension in the databases
                         # they create; the deployment's default database (dataset
                         # routing) has no handler, so the collection installs it.
                         # A no-op where it is installed.
                         await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-                        if len(Base.metadata.tables.keys()) > 0:
-                            await connection.run_sync(
-                                Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
+                        pgvector_version = await self._pgvector_version(connection)
+                        column_type = _column_type(vector_size, pgvector_version)
+                        from pgvector.sqlalchemy import HALFVEC
+
+                        # A plain Table, not a declarative class: one class per
+                        # collection used to be registered on the shared declarative
+                        # Base, and warned on every repeat. A UUID primary key, a JSON
+                        # payload and a vector column of ``column_type``, in the pinned
+                        # schema when there is one.
+                        vector_type = HALFVEC if column_type == "halfvec" else self.Vector
+                        # TEST ONLY: with partitions the table is created
+                        # ``PARTITION BY HASH (id)`` (the primary key contains the
+                        # partition key, as Postgres requires, so ON CONFLICT (id)
+                        # keeps working) and its partitions are created below.
+                        partition_kwargs = (
+                            {"postgresql_partition_by": "HASH (id)"}
+                            if self._partitions > 1
+                            else {}
+                        )
+                        table = Table(
+                            collection_name,
+                            MetaData(),
+                            Column("id", Uuid, primary_key=True),
+                            Column("payload", JSON),
+                            Column("vector", vector_type(vector_size)),
+                            schema=self.schema or None,
+                            **partition_kwargs,
+                        )
+                        await connection.run_sync(table.metadata.create_all, tables=[table])
+                        for remainder in range(self._partitions if partition_kwargs else 0):
+                            partition = _partition_name(collection_name, remainder)
+                            partition_sql = (
+                                f'"{self.schema}"."{partition}"' if self.schema else f'"{partition}"'
                             )
+                            await connection.execute(
+                                text(
+                                    f"CREATE TABLE {partition_sql} PARTITION OF "
+                                    f"{self._qualified_table(collection_name)} FOR VALUES WITH "
+                                    f"(MODULUS {self._partitions}, REMAINDER {remainder})"
+                                )
+                            )
+                        # The index statement below is unchanged: on a partitioned
+                        # table Postgres creates the index on every partition (one
+                        # HNSW graph each) and attaches them to the parent's index.
                         # Same transaction as the table: if the index fails, the table
                         # rolls back with it and the retry starts over, instead of the
                         # retry finding the table and leaving it unindexed.
                         index_statement = hnsw_index_statement(
                             collection_name,
                             vector_size,
-                            await self._pgvector_version(connection),
+                            pgvector_version,
+                            schema=self.schema or None,
+                            column_type=column_type,
                         )
                         if index_statement is not None:
                             await connection.execute(text(index_statement))
@@ -601,17 +1043,22 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     # _metadata is never populated for a table that
                     # might be rolled back.
                     async with self.engine.begin() as connection:
-                        await connection.run_sync(self._metadata.reflect, only=[collection_name])
+                        await connection.run_sync(
+                            self._metadata.reflect,
+                            only=[collection_name],
+                            schema=self.schema or None,
+                        )
 
     @staticmethod
-    def _merged_belongs_to_set_payload(collection_name: str):
-        """The ``ON CONFLICT`` payload column value (see ``_merged_payload_sql``)."""
-        return text(f"({PGVectorAdapter._merged_payload_sql(collection_name)})::json")
-
-    @staticmethod
-    def _merged_payload_sql(collection_name: str) -> str:
-        """The ``ON CONFLICT`` payload as jsonb SQL: the incoming one with ``belongs_to_set``
+    def _merged_payload_sql(collection_name: str, incoming: str) -> str:
+        """The upserted payload as jsonb SQL: the incoming one with ``belongs_to_set``
         unioned with the stored row's, so an upsert never drops a tag the row already carries.
+
+        ``incoming`` names the relation holding the incoming row's ``payload`` column:
+        ``EXCLUDED`` in the upserts, the incoming rows in ``_classify_sql``, so the two
+        cannot disagree on what an upsert would write. The stored row is referred to by
+        the table's bare name, which both the conflict clause and a join over the
+        schema-qualified table accept.
 
         A side whose ``belongs_to_set`` is absent or JSON ``null`` (a DataPoint's default)
         counts as empty: ``COALESCE`` alone leaves a JSON ``null`` in place, and
@@ -619,10 +1066,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """
         quoted_table = f'"{collection_name}"'
         stored_tags = f"NULLIF({quoted_table}.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
-        incoming_tags = "NULLIF(EXCLUDED.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
+        incoming_tags = f"NULLIF({incoming}.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
         return f"""
             jsonb_set(
-                EXCLUDED.payload::jsonb,
+                {incoming}.payload::jsonb,
                 '{{belongs_to_set}}',
                 (
                     SELECT COALESCE(jsonb_agg(DISTINCT val), '[]'::jsonb)
@@ -635,140 +1082,201 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             """
 
     @staticmethod
-    def _vector_if_text_changed(collection_name: str):
+    def _vector_if_text_changed_sql(collection_name: str) -> str:
         """``ON CONFLICT`` vector: the new embedding when the row's text changed (a summary
         keeps its id across re-extraction), else the stored one, so a metadata-only change
         leaves the indexed column alone and can stay a HOT update.
         """
         table = f'"{collection_name}"'
-        return text(
+        return (
             f"CASE WHEN {table}.payload::jsonb->'text' IS DISTINCT FROM "
             f"EXCLUDED.payload::jsonb->'text' THEN EXCLUDED.vector ELSE {table}.vector END"
         )
 
     @staticmethod
-    def _payload_changed(collection_name: str):
-        """``ON CONFLICT`` condition: the merged payload differs from the stored one.
+    def _payload_changed_sql(collection_name: str, incoming: str) -> str:
+        """The merged payload differs from the stored one: the upsert's ``ON CONFLICT``
+        condition and ``_classify_sql``'s filter (``incoming`` as in ``_merged_payload_sql``).
 
         The timestamps are stamped on every write and read by no one, so they are left
         out: an unchanged re-upsert writes no new row version and no HNSW index entry.
         """
         volatile = "- 'created_at' - 'updated_at'"
-        merged = PGVectorAdapter._merged_payload_sql(collection_name)
+        merged = PGVectorAdapter._merged_payload_sql(collection_name, incoming)
         stored = f'"{collection_name}".payload::jsonb'
-        return text(f"(({merged}) {volatile}) IS DISTINCT FROM ({stored} {volatile})")
+        return f"(({merged}) {volatile}) IS DISTINCT FROM ({stored} {volatile})"
+
+    @classmethod
+    def _data_point_upsert_sql(
+        cls, table: str, collection_name: str, source_sql: str = "VALUES ($1, $2, $3)"
+    ) -> str:
+        """The statement ``create_data_points`` runs per row: insert, or on a conflicting
+        id merge ``belongs_to_set``, keep the vector unless the text changed, and skip the
+        update altogether when nothing but the timestamps differs. ``table`` is the
+        schema-qualified name; the conflict clause refers to the target by its bare name.
+        """
+        return (
+            f"INSERT INTO {table} (id, payload, vector) {source_sql} "
+            "ON CONFLICT (id) DO UPDATE SET "
+            f"payload = ({cls._merged_payload_sql(collection_name, 'EXCLUDED')})::json, "
+            f"vector = {cls._vector_if_text_changed_sql(collection_name)} "
+            f"WHERE {cls._payload_changed_sql(collection_name, 'EXCLUDED')}"
+        )
+
+    @staticmethod
+    def _data_point_insert_sql(table: str) -> str:
+        """Insert a row unless its id exists, returning the id only when inserted.
+
+        ``DO NOTHING`` takes no lock on an existing row; it waits only while another
+        transaction's insert of the same id is uncommitted.
+        """
+        return (
+            f"INSERT INTO {table} (id, payload, vector) VALUES ($1, $2, $3) "
+            "ON CONFLICT (id) DO NOTHING RETURNING id"
+        )
+
+    @classmethod
+    def _classify_sql(cls, table: str, collection_name: str) -> str:
+        """The incoming rows an upsert would write, each with whether its id is missing.
+
+        A plain ``SELECT``: it takes no row lock and waits for none. An existing row the
+        upsert would leave as it is (``_payload_changed_sql`` false) is not returned.
+        ``$1`` and ``$2`` are parallel arrays: the ids, and the payloads as JSON text.
+        """
+        stored = f'"{collection_name}"'
+        return (
+            f"SELECT incoming.id, {stored}.id IS NULL AS missing "
+            "FROM unnest($1::uuid[], $2::text[]) AS incoming(id, payload) "
+            f"LEFT JOIN {table} ON {stored}.id = incoming.id "
+            f"WHERE {stored}.id IS NULL "
+            f"OR {cls._payload_changed_sql(collection_name, 'incoming')}"
+        )
+
+    @classmethod
+    def _raw_vector_upsert_sql(
+        cls, table: str, collection_name: str, source_sql: str = "VALUES ($1, $2, $3)"
+    ) -> str:
+        """The statement ``upsert_raw_vectors`` runs per row: a conflicting id takes the
+        new payload (tags merged) and the new vector."""
+        return (
+            f"INSERT INTO {table} (id, payload, vector) {source_sql} "
+            "ON CONFLICT (id) DO UPDATE SET "
+            f"payload = ({cls._merged_payload_sql(collection_name, 'EXCLUDED')})::json, "
+            "vector = EXCLUDED.vector"
+        )
 
     @retry(
-        retry=retry_if_exception(is_deadlock),
+        retry=retry_if_exception(_is_write_deadlock),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
         reraise=True,
     )
-    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
-        """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict."""
-        data_point_types = get_type_hints(DataPoint)
-        if not await self.has_collection(collection_name):
-            await self.create_collection(
-                collection_name=collection_name,
-                payload_schema=type(data_points[0]),
-            )
+    async def create_data_points(
+        self, collection_name: str, data_points: list[DataPoint], *, use_copy=False, write_gate=None
+    ):
+        """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict.
 
-        data_vectors = await self.embed_data(
-            [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
-        )
-
-        vector_size = self.embedding_engine.get_vector_size()
-
-        class PGVectorDataPoint(Base):
-            """
-            Represents a data point in a PGVector database. This class maps to a table defined by
-            the SQLAlchemy ORM.
-
-            It contains the following public instance variables:
-            - id: An identifier for the data point.
-            - payload: A JSON object containing additional data related to the data point.
-            - vector: A vector representation of the data point, configured to the specified size.
-            """
-
-            __tablename__ = collection_name
-            __table_args__ = {"extend_existing": True}
-            # PGVector requires one column to be the primary key
-            id: Mapped[data_point_types["id"]] = mapped_column(primary_key=True)
-            payload = Column(JSON)
-            vector = Column(self.Vector(vector_size))
-
-            def __init__(self, id, payload, vector):
-                self.id = id
-                self.payload = payload
-                self.vector = vector
-
-        pgvector_data_points = []
-
-        for data_index, data_point in enumerate(data_points):
-            pgvector_data_points.append(
-                PGVectorDataPoint(
-                    id=data_point.id,
-                    vector=data_vectors[data_index],
-                    # Strip NUL bytes: the json column accepts \u0000 on insert, but
-                    # the payload::jsonb casts in search/merge queries reject it.
-                    payload=sanitize_relational_payload(serialize_data(data_point.model_dump())),
+        The rows reach Postgres as plain ``(id, payload, vector)`` tuples over the binary
+        write pool: no ORM object per row, and the vector as float32 bytes instead of a
+        text literal built coordinate by coordinate. Rows already stored unchanged are
+        found first (``_rows_to_write``) and never embedded; the rest are written by
+        ``_write_data_point_rows``, which locks only the rows it changes. The opt-in COPY
+        path (``use_copy``) still embeds every row and merges every staged row with the
+        single upsert.
+        """
+        if not data_points:
+            return
+        with storage_batch(collection_name, len(data_points)):
+            if not await self.has_collection(collection_name):
+                await self.create_collection(
+                    collection_name=collection_name,
+                    payload_schema=type(data_points[0]),
                 )
+            with storage_span("prepare"):
+                rows = self._data_point_rows(data_points)
+            if use_copy:
+                await self._embed_rows(rows)
+                await self._write_rows(
+                    collection_name,
+                    rows,
+                    self._data_point_upsert_sql,
+                    use_copy=True,
+                    write_gate=write_gate,
+                )
+                return
+            # Only the rows an upsert would write are embedded. A changed row is embedded
+            # even when its text is the same and the upsert keeps its stored vector:
+            # leaving it out would need a placeholder vector that a race (the text
+            # changed or the row deleted meanwhile) could store.
+            to_write = await self._rows_to_write(collection_name, rows)
+            await self._embed_rows(to_write)
+            await self._write_data_point_rows(collection_name, to_write, write_gate=write_gate)
+            # TEST ONLY: rows found unchanged before the embedding.
+            POC_WRITE_COUNTS.update(
+                rows=len(rows), embedded=len(to_write), unchanged=len(rows) - len(to_write)
             )
 
-        def to_dict(obj):
-            """Dump a mapped PGVectorDataPoint row to a plain column→value dict."""
-            return {
-                column.key: getattr(obj, column.key) for column in inspect(obj).mapper.column_attrs
+    async def _embed_rows(self, rows: list[dict]) -> None:
+        """Embed each row's ``embeddable`` text into its ``vector``; nothing to embed
+        sends no request."""
+        if not rows:
+            return
+        from ..embeddings.array_format import embed_float32
+
+        with storage_span("embed"):
+            vectors = await embed_float32(
+                self.embedding_engine, [row["embeddable"] for row in rows]
+            )
+        if len(vectors) != len(rows):
+            raise ValueError(
+                "Embedding provider returned a different number of vectors than inputs"
+            )
+        for row, vector in zip(rows, vectors):
+            row["vector"] = vector
+
+    @staticmethod
+    def _data_point_rows(data_points) -> list[dict]:
+        """One row per id (``id``, ``payload``, ``embeddable`` text), in ``_row_order``;
+        ``_embed_rows`` adds the ``vector``."""
+        # Dedup by id within the batch: the same id twice would otherwise be two
+        # upserts of one row, and entity extraction may still emit same-UUID5
+        # rows in one batch. The last payload (and its text) wins, with the
+        # duplicates' belongs_to_set arrays unioned so a tag that only appears on one
+        # duplicate isn't dropped (mirrors the in-batch tag merge in
+        # Neo4jAdapter.add_nodes). The rows are then written in ``_row_order``
+        # so concurrent batches cannot deadlock.
+        rows_by_id: dict[str, dict] = {}
+        for data_point in data_points:
+            # Strip NUL bytes: the json column accepts \u0000 on insert, but
+            # the payload::jsonb casts in search/merge queries reject it.
+            payload = sanitize_relational_payload(serialize_data(data_point.model_dump()))
+            key = str(data_point.id)
+            existing = rows_by_id.get(key)
+            if existing is not None:
+                existing_tags = (existing["payload"] or {}).get("belongs_to_set") or []
+                incoming_tags = (payload or {}).get("belongs_to_set") or []
+                if existing_tags or incoming_tags:
+                    merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
+                    payload = {**payload, "belongs_to_set": merged_tags}
+            rows_by_id[key] = {
+                "id": data_point.id,
+                "payload": payload,
+                "embeddable": DataPoint.get_embeddable_data(data_point),
             }
-
-        # Dedup by id within the batch — with ON CONFLICT DO UPDATE,
-        # Postgres raises "cannot affect row a second time" if the same
-        # id appears twice in one INSERT. The prior ON CONFLICT DO NOTHING
-        # path silently tolerated duplicates, so entity extraction may
-        # still emit same-UUID5 rows in one batch. Union the duplicates'
-        # belongs_to_set arrays before collapsing so a tag that only
-        # appears on one duplicate isn't dropped (mirrors the in-batch
-        # tag merge in Neo4jAdapter.add_nodes). The rows are then written
-        # in ``_row_order`` so concurrent batches cannot deadlock.
-        deduped_by_id: dict = {}
-        for dp in pgvector_data_points:
-            existing = deduped_by_id.get(dp.id)
-            if existing is None:
-                deduped_by_id[dp.id] = dp
-                continue
-            existing_payload = existing.payload or {}
-            incoming_payload = dp.payload or {}
-            existing_tags = existing_payload.get("belongs_to_set") or []
-            incoming_tags = incoming_payload.get("belongs_to_set") or []
-            if existing_tags or incoming_tags:
-                merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
-                dp.payload = {**incoming_payload, "belongs_to_set": merged_tags}
-            deduped_by_id[dp.id] = dp
-        pgvector_data_points = sorted(deduped_by_id.values(), key=lambda dp: _row_order(dp.id))
-
-        point_dicts = [to_dict(data_point) for data_point in pgvector_data_points]
-
-        async with self.get_async_session() as session:
-            for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
-                point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
-                insert_statement = insert(PGVectorDataPoint).values(point_batch)
-                insert_statement = insert_statement.on_conflict_do_update(
-                    index_elements=["id"],
-                    set_={
-                        "payload": self._merged_belongs_to_set_payload(collection_name),
-                        "vector": self._vector_if_text_changed(collection_name),
-                    },
-                    where=self._payload_changed(collection_name),
-                )
-                await session.execute(insert_statement)
-            await session.commit()
+        return sorted(rows_by_id.values(), key=lambda row: _row_order(row["id"]))
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """Create the underlying index collection (table) for the given name/property pair."""
         await self.create_collection(f"{index_name}_{index_property_name}")
 
     async def index_data_points(
-        self, index_name: str, index_property_name: str, data_points: list[DataPoint]
+        self,
+        index_name: str,
+        index_property_name: str,
+        data_points: list[DataPoint],
+        *,
+        use_copy=False,
+        write_gate=None,
     ):
         """Write index rows derived from `data_points` into the `{index}_{property}` table."""
         await self.create_data_points(
@@ -790,6 +1298,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 )
                 for data_point in data_points
             ],
+            use_copy=use_copy,
+            write_gate=write_gate,
         )
 
     async def get_table(self, collection_name: str) -> Table:
@@ -797,19 +1307,22 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         Dynamically loads a table using the given collection name
         with an async engine.
         """
-        if collection_name in self._metadata.tables:
-            return self._metadata.tables[collection_name]
+        key = self._table_key(collection_name)
+        if key in self._metadata.tables:
+            return self._metadata.tables[key]
 
         try:
             async with self.engine.begin() as connection:
-                await connection.run_sync(self._metadata.reflect, only=[collection_name])
+                await connection.run_sync(
+                    self._metadata.reflect, only=[collection_name], schema=self.schema or None
+                )
         except exc.InvalidRequestError:
             raise CollectionNotFoundError(
                 f"Collection '{collection_name}' not found!",
             )
 
-        if collection_name in self._metadata.tables:
-            return self._metadata.tables[collection_name]
+        if key in self._metadata.tables:
+            return self._metadata.tables[key]
 
         raise CollectionNotFoundError(
             f"Collection '{collection_name}' not found!",
@@ -860,7 +1373,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             await session.commit()
 
     @retry(
-        retry=retry_if_exception(is_deadlock),
+        retry=retry_if_exception(_is_write_deadlock),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
         reraise=True,
@@ -878,16 +1391,16 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         ``retrieve(..., include_vector=True)`` lands here unchanged. A conflicting id
         takes the new payload and the new vector, except ``belongs_to_set``, which is
         unioned with the stored row's as in ``create_data_points``. The same id twice
-        in one call is written once (one INSERT cannot touch a row twice), see
-        ``validate_raw_vector_points``. Rows are written in ``_row_order``, like
-        ``create_data_points``, so concurrent upserts of the same ids cannot deadlock.
+        in one call is written once, see ``validate_raw_vector_points``. Rows are
+        written in ``_row_order``, like ``create_data_points``, so concurrent upserts
+        of the same ids cannot deadlock, and over the same binary write pool.
         """
         if not points:
             return
 
         vector_size = self.embedding_engine.get_vector_size()
         # Every check runs before the table exists, so a rejected call creates nothing.
-        row_list = sorted(
+        rows = sorted(
             (
                 {
                     "id": row["id"],
@@ -901,22 +1414,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         if not await self.has_collection(collection_name):
             await self.create_collection(collection_name, payload_schema=payload_schema)
-        table = await self.get_table(collection_name)
 
-        async with self.get_async_session() as session:
-            for start_index in range(0, len(row_list), QUERY_BATCH_SIZE):
-                statement = insert(table).values(
-                    row_list[start_index : start_index + QUERY_BATCH_SIZE]
-                )
-                statement = statement.on_conflict_do_update(
-                    index_elements=["id"],
-                    set_={
-                        "payload": self._merged_belongs_to_set_payload(collection_name),
-                        "vector": statement.excluded.vector,
-                    },
-                )
-                await session.execute(statement)
-            await session.commit()
+        await self._write_rows(collection_name, rows, self._raw_vector_upsert_sql)
 
     async def retrieve(
         self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
@@ -952,8 +1451,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             return [
                 ScoredResult(
                     id=parse_id(result.id),
-                    # pgvector hands the column back as a numpy array; callers get floats.
-                    payload={**result.payload, "vector": [float(v) for v in result.vector]}
+                    # pgvector hands the column back as an array; callers get floats.
+                    payload={**result.payload, "vector": _vector_values(result.vector)}
                     if include_vector
                     else result.payload,
                     score=0,
@@ -1065,18 +1564,23 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         async with self.get_async_session() as session:
             # The column was sized by this engine in create_collection.
             dimensions = self.embedding_engine.get_vector_size()
-            indexed_type = _indexed_type(dimensions, await self._pgvector_version(session))
+            indexed_type = _indexed_type(
+                dimensions,
+                await self._pgvector_version(session),
+                _stored_type(PGVectorDataPoint.c.vector),
+            )
             use_index = (
                 indexed_type is not None
                 and not node_name
                 and not exact_scan_required
                 and limit <= _HNSW_MAX_EF_SEARCH
             )
-            if indexed_type == "vector" and not use_index:
-                # Up to 2,000 dimensions the index is on the column itself, so Postgres
-                # would also pick it for an exact ORDER BY and return at most
-                # hnsw.ef_search rows, before any node-set filter is applied. Searches
-                # that must be exact keep the full scan.
+            if indexed_type == _stored_type(PGVectorDataPoint.c.vector) and not use_index:
+                # When the index is on the column itself (a ``halfvec`` column, or a
+                # ``vector`` one up to 2,000 dimensions), Postgres would also pick it
+                # for an exact ORDER BY and return at most hnsw.ef_search rows, before
+                # any node-set filter is applied. Searches that must be exact keep the
+                # full scan.
                 await session.execute(text("SET LOCAL enable_indexscan = off"))
             if node_name:
                 if node_name_filter_operator == "AND":
@@ -1146,8 +1650,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if len(vector_list) == 0:
             return []
 
-        # An index scan returns rows in the index's order (half precision above 2,000
-        # dimensions); callers expect them sorted by the exact distance they carry.
+        # An index scan of a halfvec cast returns rows in the index's (half-precision)
+        # order; callers expect them sorted by the exact distance they carry.
         vector_list.sort(key=lambda row: row["_distance"])
 
         # Return backend raw cosine distance as score (lower is better)
@@ -1279,7 +1783,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         first_error: SQLAlchemyError | None = None
         for table_name in candidate_tables:
-            quoted_table = f'"{table_name}"'
+            quoted_table = self._qualified_table(table_name)
             # Can't use a data-modifying CTE (UPDATE … RETURNING then DELETE
             # against the CTE): Postgres runs both statements under the
             # same snapshot, so the outer DELETE doesn't observe the
@@ -1419,8 +1923,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             pgvector_version = await self._pgvector_version(connection)
 
         indexed, failed = [], []
-        for table_name, dimensions in collections:
-            statement = hnsw_index_statement(table_name, dimensions, pgvector_version)
+        for table_name, column_type, dimensions in collections:
+            statement = hnsw_index_statement(
+                table_name, dimensions, pgvector_version, column_type=column_type
+            )
             if statement is None:
                 continue
             try:

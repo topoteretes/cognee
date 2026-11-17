@@ -401,7 +401,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 (left_vec,), (right_vec,) = left_result, right_result
 
                 # POOL the two embeddings into one
-                pooled = (np.array(left_vec) + np.array(right_vec)) / 2
+                pooled = (
+                    np.asarray(left_vec, dtype=np.float64) + np.asarray(right_vec, dtype=np.float64)
+                ) / 2
                 return EmbeddingResult(
                     vectors=[pooled.tolist()],
                     tokens=left_result.tokens + right_result.tokens,

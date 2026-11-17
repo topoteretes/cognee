@@ -177,7 +177,10 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                         self.embed_text([right_part]),
                     )
                     (left_vec,), (right_vec,) = left_result, right_result
-                    pooled = (np.array(left_vec) + np.array(right_vec)) / 2
+                    pooled = (
+                        np.asarray(left_vec, dtype=np.float64)
+                        + np.asarray(right_vec, dtype=np.float64)
+                    ) / 2
                     embeddings = [pooled.tolist()]
                     return EmbeddingResult(
                         vectors=handle_embedding_response(
