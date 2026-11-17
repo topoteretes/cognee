@@ -103,9 +103,9 @@ async def run_pipeline(
 
     ``datasets`` takes names or ids. Omitted, the run covers every dataset the user may
     write to. A name the user has no dataset for creates that dataset; an unknown
-    ``UUID``, or no dataset at all, raises ``DatasetNotFoundError``. ``data`` limits the run to those
-    items; without it each dataset's run covers all of its rows. ``llm_config`` and
-    ``embedding_config`` apply inside each dataset's database context.
+    ``UUID``, or no dataset at all, raises ``DatasetNotFoundError``. ``data`` limits the
+    run to those items; without it each dataset's run covers all of its rows.
+    ``llm_config`` and ``embedding_config`` apply inside each dataset's database context.
 
     ``tasks`` is either the task list every data item runs, or a callable
     mapping one item to its task list (a task resolver — see ``run_tasks``);
@@ -207,9 +207,8 @@ async def run_pipeline_per_dataset(
 
     ``Data`` rows in ``data`` are read again once the lock is held, so tasks see each row
     as it is now and rows deleted meanwhile are dropped; without ``data`` the run covers
-    every row of the dataset. The remaining
-    arguments pass through to ``run_tasks``. Callers normally use ``run_pipeline``,
-    which authorizes the user and datasets first.
+    every row of the dataset. The remaining arguments pass through to ``run_tasks``.
+    Callers normally use ``run_pipeline``, which authorizes the user and datasets first.
     """
 
     # The actual work of a single run, factored out so it can run either under
