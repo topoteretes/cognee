@@ -201,7 +201,7 @@ def test_a_write_error_stops_the_writer_without_raising(capture_env):
     capture_env(ENABLED="true", DIRECTORY=str(blocker / "calls"))
 
     _capture()
-    assert flush_llm_call_capture()
+    assert flush_llm_call_capture() is False
     _capture()
 
     assert llm_calls._writer._failed is True
@@ -275,3 +275,47 @@ def test_a_record_carries_its_caller_and_stage_and_omits_a_missing_caller(captur
     assert (inside["caller"], inside["stage"]) == ("improve.distill_sessions", "extraction")
     assert "caller" not in outside
     assert outside["stage"] is None
+
+
+def test_flush_reports_a_disk_error_to_a_waiting_and_a_later_caller(capture_env, monkeypatch):
+    capture_env(ENABLED="true", DIRECTORY=str(capture_env()))
+    write_started, fail_disk = threading.Event(), threading.Event()
+
+    class FailingFile:
+        """A file whose first write waits for the test, then fails like a full disk."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def write(self, text):
+            write_started.set()
+            fail_disk.wait()
+            raise OSError("No space left on device")
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(writer_module, "open", lambda *a, **k: FailingFile(), raising=False)
+
+    _capture()
+    assert write_started.wait(5)
+    waiting = {}
+    waiter = threading.Thread(target=lambda: waiting.update(result=flush_llm_call_capture()))
+    waiter.start()
+    fail_disk.set()
+    waiter.join(timeout=5)
+
+    assert waiting["result"] is False
+    assert flush_llm_call_capture() is False
+
+
+def test_flush_is_true_once_every_record_is_on_disk(capture_env):
+    directory = capture_env(ENABLED="true", DIRECTORY=str(capture_env()))
+
+    _capture()
+
+    assert flush_llm_call_capture() is True
+    assert len(_records(directory)) == 1

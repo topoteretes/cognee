@@ -152,7 +152,10 @@ def capture_llm_call(
 
 
 def flush_llm_call_capture(timeout: float = 5.0) -> bool:
-    """Wait until every captured record is on disk (scripts and tests). True if nothing is pending."""
+    """Wait until every captured record is on disk (scripts and tests).
+
+    True once they are; False on timeout or after a write error lost records.
+    """
     return True if _writer is None else _writer.flush(timeout)
 
 
