@@ -33,7 +33,8 @@ class SearchType(str, Enum):
       an extra LLM call and a larger context. Single query only; it never defers, so a
       request hybrid cannot serve raises ``QueryValidationError``.
     - ``GRAPH_COMPLETION``: triplet search over the knowledge graph, expanded to a
-      neighbourhood when ``neighborhood_depth`` is set. Use for relationship-heavy questions or to apply a typed graph scope.
+      neighbourhood when ``neighborhood_depth`` is set. Use for relationship-heavy questions
+      or to apply a typed graph scope.
       Variants built on it: ``GRAPH_COMPLETION_COT`` (iterative reasoning rounds,
       ``max_iter``), ``GRAPH_COMPLETION_CONTEXT_EXTENSION`` (widens the context over several
       rounds), ``GRAPH_COMPLETION_DECOMPOSITION`` (answers sub-queries first), and
@@ -50,7 +51,6 @@ class SearchType(str, Enum):
     - ``AGENTIC_COMPLETION``: a multi-step LLM loop that can load ``skills`` and call
       ``tools``, bounded by ``max_iter``. Requires exactly one explicit dataset; ``skills``
       and ``tools`` are refused on every other member.
-    - ``NATURAL_LANGUAGE``: an LLM writes a Cypher query from the question and runs it.
 
     Retrieval-only strategies (no answering LLM call; the matches are the result):
 
@@ -63,6 +63,8 @@ class SearchType(str, Enum):
       (``coding_agent_rules`` when none is given).
     - ``SKILLS``: metadata-only discovery of skill playbooks; exactly one explicit dataset.
     - ``CYPHER``: runs the query text as raw Cypher.
+    - ``NATURAL_LANGUAGE``: an LLM writes a Cypher query from the question and runs it; the
+      rows the query returns are the result.
     - ``GRAPH_REPORT``: an insight report on the graph (hubs, cross-node-set connections,
       edge provenance) with LLM-suggested follow-up questions.
 
