@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+pytest.importorskip("asyncpg")
+pytest.importorskip("pgvector")
+
 from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
     _ACCESS_CONTROL_DEFAULT_POOL_ARGS,
     PGVectorAdapter,

@@ -8,6 +8,9 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.pool import NullPool
 
+pytest.importorskip("asyncpg")
+pytest.importorskip("pgvector")
+
 from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 
 PG_URL = os.getenv("TEST_PGVECTOR_URL")
