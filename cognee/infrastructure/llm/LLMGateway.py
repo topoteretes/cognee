@@ -1,3 +1,4 @@
+import asyncio
 import time
 from collections.abc import Coroutine
 from datetime import datetime, timezone
@@ -129,6 +130,12 @@ async def _capture_llm_call_after(
 
     try:
         result = await coro
+    except asyncio.CancelledError:
+        try:
+            record(None, "error", error_class="CancelledError")
+        except Exception:
+            logger.warning("LLM call capture failed", exc_info=True)
+        raise
     except Exception as error:
         record(None, "error", error_class=type(error).__name__)
         raise
