@@ -25,6 +25,8 @@ import numpy as np
 from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError, EmbeddingException
 
+from .array_format import native_embedding
+
 EncodingFormat = Literal["base64", "float"]
 ENCODING_FORMATS = ("base64", "float")
 
@@ -126,7 +128,9 @@ def resolve_encoding_format(
     return "base64" if _routes_to_openai_api(model, endpoint) else "float"
 
 
-def decode_embedding(embedding: list[float] | str, encoding_format: EncodingFormat) -> list[float]:
+def decode_embedding(
+    embedding: list[float] | str, encoding_format: EncodingFormat
+) -> list[float] | np.ndarray:
     """Return the vector as floats.
 
     With base64 requested, the server must answer with a base64 string of little-endian
@@ -157,7 +161,7 @@ def decode_embedding(embedding: list[float] | str, encoding_format: EncodingForm
             "The embedding server returned NaN or infinity in a base64 vector. If this "
             "persists, the server may not send float32: set EMBEDDING_ENCODING_FORMAT=float."
         )
-    return vector.tolist()
+    return native_embedding(vector)
 
 
 _ENCODING_REJECTION_RE = re.compile(r"encoding_format|base64", re.IGNORECASE)

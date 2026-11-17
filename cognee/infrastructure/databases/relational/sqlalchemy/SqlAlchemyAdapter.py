@@ -28,6 +28,10 @@ logger = get_logger()
 # Locations per reference query: two IN lists, kept under SQLite's bound-parameter limit.
 _LOCATION_CHUNK = 400
 
+# QueuePool sizing of a server-database engine when POOL_ARGS does not give it.
+DEFAULT_POOL_SIZE = 5
+DEFAULT_MAX_OVERFLOW = 35
+
 
 class SQLAlchemyAdapter:
     """
@@ -147,8 +151,8 @@ class SQLAlchemyAdapter:
                 # which multiply per dataset under access control — hold few
                 # of the server's max_connections slots between bursts while
                 # keeping a 40-connection burst ceiling.
-                pool_args.setdefault("pool_size", 5)
-                pool_args.setdefault("max_overflow", 35)
+                pool_args.setdefault("pool_size", DEFAULT_POOL_SIZE)
+                pool_args.setdefault("max_overflow", DEFAULT_MAX_OVERFLOW)
                 pool_args.setdefault("pool_pre_ping", True)
                 pool_args.setdefault("pool_recycle", 280)
                 pool_args.setdefault("pool_timeout", 280)
