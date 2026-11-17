@@ -17,6 +17,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunStarted,
     PipelineRunYield,
 )
+from cognee.modules.provenance.tracking import LEDGER_RUN_ID
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
 
 memory_pipelines = importlib.import_module("cognee.modules.cognify.memory_pipelines")
@@ -157,7 +158,7 @@ async def test_the_cognify_run_opens_first_and_the_indexing_run_works_in_between
     assert indexing["data"] == ITEMS, "the items the cognify run selected"
     assert indexing["incremental_loading"] is True
     assert indexing["data_per_batch"] == 7
-    for own in ("extras", "after_run_completed", "after_items_ran"):
+    for own in ("after_run_completed", "after_items_ran"):
         assert own not in indexing
 
     # Callers see one run: the cognify run's events only, as before.
@@ -168,6 +169,8 @@ async def test_the_cognify_run_opens_first_and_the_indexing_run_works_in_between
     ]
     cognify_run_id = events[0].pipeline_run_id
     assert {event.pipeline_run_id for event in events} == {cognify_run_id}
+    # None of the cognify run's extras; only the run the ledger rows it writes name.
+    assert indexing["extras"] == {LEDGER_RUN_ID: cognify_run_id}
     # Its subscriber learns that the indexing run works for it.
     assert [run_id for run_id, _ in pushed] == [cognify_run_id, cognify_run_id]
     progress = [event for _, event in pushed]

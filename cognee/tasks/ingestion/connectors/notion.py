@@ -80,8 +80,8 @@ Limitations
   to another workspace.
 * A data source with more than 10,000 rows aborts every run: Notion cuts a
   query off there, and syncing the first 10,000 would forget the rest.
-* The walk runs inside ``ingest_dlt_source``'s process-wide staging lock, so
-  while a large tree syncs every other dlt ingestion in the process waits.
+* The walk runs inside ``ingest_dlt_source``'s staging lock for its dataset, so
+  while a large tree syncs every other dlt ingestion into that dataset waits.
 * A page is only re-rendered when it changes itself. Text it shows from other
   objects (sub-page and database titles, synced copies, mentions) stays as it
   was until the page is edited.

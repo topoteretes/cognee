@@ -34,6 +34,7 @@ from cognee.tasks.ingestion.refuse_changed_existing_documents import (
     refuse_changed_existing_documents,
 )
 from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
+from cognee.tasks.ingestion.screen_server_paths import screen_server_paths
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
 
 logger = get_logger()
@@ -284,6 +285,12 @@ async def add(
     # Before any work starts: with run_in_background the fetch runs after this call
     # has returned, where its refusal would never reach the caller.
     require_http_requests_allowed_for(data)
+
+    # With the server-path gate closed, decide here, once, what each caller
+    # string is: before anything is written (a refused call leaves no dataset
+    # behind) and before anything below (CSV detection, the changed-document
+    # check, the pipeline) could look it up on disk.
+    data = screen_server_paths(data)
 
     if preferred_loaders is not None:
         transformed = {}

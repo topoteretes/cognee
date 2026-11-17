@@ -17,9 +17,11 @@ where the option is consumed.
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from fastapi import status
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from cognee.infrastructure.loaders.external.dlt_csv_loader import DltCsvLoader
+from cognee.tasks.ingestion.exceptions.exceptions import InvalidDLTArgumentError
 
 
 class DltConfig(BaseModel):
@@ -36,6 +38,23 @@ class DltConfig(BaseModel):
 
 
 DLT_OPTION_NAMES = frozenset(DltConfig.model_fields)
+
+
+def parse_dlt_config(dlt_config: str | None) -> dict[str, Any] | None:
+    """Parse the ``dlt_config`` form field: one JSON object of ``DltConfig`` keys.
+
+    Returns None when the field is absent or blank. Invalid JSON, an unknown
+    key or a value of the wrong type raises ``InvalidDLTArgumentError`` (400).
+    """
+    if dlt_config is None or not dlt_config.strip():
+        return None
+    try:
+        return DltConfig.model_validate_json(dlt_config).model_dump(exclude_unset=True)
+    except ValidationError as error:
+        raise InvalidDLTArgumentError(
+            message=f"dlt_config is not a valid JSON object of DLT options: {error}",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
 
 
 def resolve_dlt_options(dlt_config: dict | None, loose_kwargs: dict[str, Any]) -> dict[str, Any]:

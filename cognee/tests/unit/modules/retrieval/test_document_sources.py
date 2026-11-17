@@ -37,7 +37,12 @@ async def relational(monkeypatch):
             id=uuid4(),
             dataset_id=DATASET_A,
             label="Renamed in Cloud",
-            system_metadata={"source": "wiki", "title": TITLE, "url": URL},
+            system_metadata={
+                "source": "wiki",
+                "title": TITLE,
+                "url": URL,
+                "structure": {"ancestors": [{"kind": "space", "id": "S1", "name": "#orion"}]},
+            },
         ),
         DATASET_B: Data(
             id=uuid4(),
@@ -97,6 +102,17 @@ async def test_a_connector_chunk_carries_its_title_and_link_as_stored(relational
 
     assert chunk.payload["document_title"] == TITLE
     assert chunk.payload["document_url"] == URL
+
+
+@pytest.mark.asyncio
+async def test_a_connector_chunk_names_the_place_its_row_sits_in(relational):
+    """SDK-1502: the nearest ancestor's name from the row's structure (a Slack channel's
+    ``#name``), which is never hashed, so naming it re-cognifies nothing."""
+    chunk = _chunk(relational[DATASET_A])
+
+    await _name([chunk], DATASET_A)
+
+    assert chunk.payload["document_parent"] == "#orion"
 
 
 @pytest.mark.asyncio

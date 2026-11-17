@@ -59,9 +59,6 @@ class _FakeIntegration(OAuthIntegration):
     def parse_installation(self, token_response):
         return OAuthInstallation(provider_account_id="ACC1", token_payload={})
 
-    def state_signing_secret(self):
-        return "fake-secret"
-
     def frontend_base_url(self):
         return "https://app.example.com"
 
@@ -461,7 +458,11 @@ def put_resources(client, integration, body, *, allows_all, monkeypatch):
             )()
         ),
     )
-    monkeypatch.setattr(_router_module, "update_provider_metadata", update)
+
+    async def change_provider_metadata(provider, account_id, change):
+        return await update(provider, account_id, change({}))
+
+    monkeypatch.setattr(_router_module, "change_provider_metadata", change_provider_metadata)
     response = client.put("/api/v1/integrations/fake/resources", json={"resourceIds": body})
     return response, update
 
@@ -473,6 +474,67 @@ def test_a_null_selection_is_refused_for_a_provider_that_cannot_select_all(clien
 
     assert response.status_code == 422
     assert "explicit list" in response.json()["detail"]
+    update.assert_not_awaited()
+
+
+def test_a_selection_the_provider_refuses_is_a_422_and_is_not_stored(client, monkeypatch):
+    integration = supported_integrations["fake"]
+    monkeypatch.setattr(
+        integration,
+        "validate_resource_selection",
+        AsyncMock(side_effect=ValueError("A selected folder is inside another")),
+    )
+
+    response, update = put_resources(
+        client, integration, ["outer", "inner"], allows_all=False, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "A selected folder is inside another"
+    update.assert_not_awaited()
+
+
+def _refusing(error):
+    return AsyncMock(side_effect=error)
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "detail"),
+    [
+        (
+            "inactive",
+            404,
+            "fake is not connected",
+        ),
+        ("outbound", 503, "ALLOW_HTTP_REQUESTS"),
+        ("provider", 502, "Could not check the fake selection; try again"),
+        ("network", 502, "Could not check the fake selection; try again"),
+    ],
+)
+def test_a_selection_check_that_fails_is_a_clear_error_and_nothing_is_stored(
+    client, monkeypatch, error, status, detail
+):
+    from cognee.modules.integrations.credentials import CredentialInactiveError
+    from cognee.modules.integrations.outbound import OutboundHttpDisabledError
+
+    secret = "sl.secret-token id:SecretFolder /Private/path"
+    raised = {
+        "inactive": CredentialInactiveError(secret),
+        "outbound": OutboundHttpDisabledError("fake"),
+        "provider": RuntimeError(f"HTTP 401 for {secret}"),
+        "network": OSError(f"cannot reach {secret}"),
+    }[error]
+    monkeypatch.setenv("ALLOW_HTTP_REQUESTS", "false")
+    integration = supported_integrations["fake"]
+    monkeypatch.setattr(integration, "validate_resource_selection", _refusing(raised))
+
+    response, update = put_resources(
+        client, integration, ["a", "b"], allows_all=False, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == status
+    assert detail in response.json()["detail"]
+    assert secret not in response.text and "SecretFolder" not in response.text
     update.assert_not_awaited()
 
 
@@ -1005,11 +1067,36 @@ def test_connect_and_sync_are_refused_while_outbound_http_is_disabled(client, mo
     assert not any(name.startswith("cognee_oauth_nonce_") for name in authorize.cookies)
 
 
+@pytest.mark.parametrize("selection", [["id:"], ["id:a b"], ["/Notes"]])
+def test_a_dropbox_selection_the_source_would_refuse_is_a_422(client, monkeypatch, selection):
+    from cognee.modules.integrations.dropbox.adapter import DropboxIntegration
+
+    integration = supported_integrations["fake"]
+    monkeypatch.setattr(
+        integration, "invalid_resource_ids", DropboxIntegration().invalid_resource_ids
+    )
+
+    response, update = put_resources(
+        client, integration, selection, allows_all=False, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 422 and "Not a fake resource id" in response.json()["detail"]
+    update.assert_not_awaited()
+
+
+@pytest.fixture(autouse=True)
+def no_pause(monkeypatch):
+    """No connection is paused unless a test says so (the pause lives in the database)."""
+    monkeypatch.setattr(
+        "cognee.modules.integrations.ingestion.sync_is_paused", AsyncMock(return_value=False)
+    )
+
+
 @pytest.fixture(autouse=True)
 def no_staging_drop(monkeypatch):
-    """A real drop takes the process-wide staging lock and deletes files under dlt's
-    pipelines directory; a drop that outlives the test client's loop would keep that lock
-    for every later dlt test. Tests that are about the drop pass their own."""
+    """A real drop takes its dataset's staging lock and the shared pipeline's, and deletes
+    files under dlt's pipelines directory; a drop that outlives the test client's loop would
+    keep those locks for every later dlt test. Tests that are about the drop pass their own."""
     monkeypatch.setattr(_ingest_dlt_module, "drop_dlt_dataset", AsyncMock())
 
 
@@ -1192,6 +1279,79 @@ def test_disconnect_reports_related_data_that_could_not_be_deleted(client):
     assert response.status_code == 502
 
 
+def save_selection(client, monkeypatch, *, stored, body):
+    """PUT ``body`` over a connection whose stored selection is ``stored``."""
+    integration = supported_integrations["fake"]
+    credential = type(
+        "Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {"picked": stored}}
+    )()
+    updated = type(
+        "Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {"picked": body}}
+    )()
+    sync_now = AsyncMock()
+    monkeypatch.setattr(integration, "resource_selection_key", "picked")
+    monkeypatch.setattr(integration, "resource_selection_allows_all", False)
+    monkeypatch.setattr(integration, "sync_now", sync_now)
+    monkeypatch.setattr(
+        _router_module, "get_active_credential_for_user", AsyncMock(return_value=credential)
+    )
+
+    async def change_provider_metadata(provider, account_id, change):
+        change({"picked": stored})
+        return updated
+
+    monkeypatch.setattr(_router_module, "change_provider_metadata", change_provider_metadata)
+    response = client.put("/api/v1/integrations/fake/resources", json={"resourceIds": body})
+    return response, sync_now, updated
+
+
+@pytest.mark.parametrize(
+    ("stored", "body"),
+    [(["a"], ["a", "b"]), (["a", "b"], ["a"]), (["a", "b"], [])],
+    ids=["a_scope_added", "a_scope_removed", "everything_deselected"],
+)
+def test_a_changed_selection_starts_a_sync_at_once(client, monkeypatch, stored, body):
+    """What the user picked shows, and what they removed leaves, without waiting for the
+    next scheduled sync; deselecting everything included, which no schedule would run."""
+    response, sync_now, updated = save_selection(client, monkeypatch, stored=stored, body=body)
+
+    assert response.status_code == 200
+    sync_now.assert_called_once_with(updated)
+
+
+def test_a_changed_selection_of_a_paused_connection_is_saved_and_not_synced(client, monkeypatch):
+    """The pause (SDK-1434) holds a selection save too, for every provider."""
+    monkeypatch.setattr(
+        "cognee.modules.integrations.ingestion.sync_is_paused", AsyncMock(return_value=True)
+    )
+    response, sync_now, _ = save_selection(client, monkeypatch, stored=["a"], body=["a", "b"])
+
+    assert response.status_code == 200
+    sync_now.assert_not_called()
+
+
+def test_an_unchanged_selection_starts_no_sync(client, monkeypatch):
+    response, sync_now, _ = save_selection(client, monkeypatch, stored=["a"], body=["a"])
+
+    assert response.status_code == 200
+    sync_now.assert_not_called()
+
+
+def test_a_selection_saved_during_a_sync_runs_once_more_after_it(client, monkeypatch):
+    from cognee.modules.integrations import ingestion
+
+    ingestion._running_syncs.add(("fake", "ACC1"))
+    try:
+        response, sync_now, _ = save_selection(client, monkeypatch, stored=["a"], body=[])
+        # The running sync read the old selection; a second one would be dropped.
+        sync_now.assert_not_called()
+        assert ingestion.request_rerun_if_running("fake", "ACC1")
+    finally:
+        ingestion._running_syncs.discard(("fake", "ACC1"))
+        ingestion._rerun_requested.discard(("fake", "ACC1"))
+    assert response.status_code == 200
+
+
 @pytest.mark.parametrize("revoked_by", ["provider", "owner"])
 def test_connection_status_says_when_the_data_of_an_ended_connection_is_deleted(client, revoked_by):
     """A provider can schedule the deletion of an ended connection's data (Slack:
@@ -1256,6 +1416,38 @@ def test_start_needs_a_logged_in_user():
     response = TestClient(app).get("/api/v1/integrations/fake/start", follow_redirects=False)
 
     assert response.status_code == 401
+
+
+def test_a_selection_is_compared_with_what_is_stored_when_it_is_written(client, monkeypatch):
+    """Two saves at once (X to Y, then Y back to X): the second read X before the first wrote
+    Y, so against its own copy nothing changed and no sync started, while the sync the first
+    started may already have read Y. The comparison is made under the connection's lock."""
+    integration = supported_integrations["fake"]
+    stale = type(
+        "Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {"picked": ["x"]}}
+    )()
+    updated = type(
+        "Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {"picked": ["x"]}}
+    )()
+
+    async def change_provider_metadata(provider, account_id, change):
+        patch_ = change({"picked": ["y"]})  # what the concurrent save left
+        assert patch_ == {"picked": ["x"]}
+        return updated
+
+    sync_now = AsyncMock()
+    monkeypatch.setattr(integration, "resource_selection_key", "picked")
+    monkeypatch.setattr(integration, "resource_selection_allows_all", False)
+    monkeypatch.setattr(integration, "sync_now", sync_now)
+    monkeypatch.setattr(
+        _router_module, "get_active_credential_for_user", AsyncMock(return_value=stale)
+    )
+    monkeypatch.setattr(_router_module, "change_provider_metadata", change_provider_metadata)
+
+    response = client.put("/api/v1/integrations/fake/resources", json={"resourceIds": ["x"]})
+
+    assert response.status_code == 200
+    sync_now.assert_called_once_with(updated)
 
 
 def test_deleting_the_data_waits_for_no_running_sync(client):
@@ -1374,3 +1566,105 @@ async def test_a_disconnect_cancelled_while_its_drop_waits_still_finishes_the_dr
     await asyncio.gather(*spawned)
     assert dropped == ["fake_acme"]
     assert len(spawned) == 1
+
+
+def test_the_resource_picker_passes_the_parent_through_one_call_path(client, monkeypatch):
+    integration = supported_integrations["fake"]
+    listed = AsyncMock(return_value=[{"id": "child", "name": "Child"}])
+    monkeypatch.setattr(integration, "resource_selection_key", "picked")
+    monkeypatch.setattr(integration, "list_resources", listed)
+    monkeypatch.setattr(
+        _router_module,
+        "_credential_or_404",
+        AsyncMock(return_value=type("Cred", (), {"provider_metadata": {}})()),
+    )
+
+    with_parent = client.get("/api/v1/integrations/fake/resources?parent=id%3Aa")
+    without = client.get("/api/v1/integrations/fake/resources")
+
+    assert with_parent.status_code == 200 and without.status_code == 200
+    assert [c.kwargs for c in listed.await_args_list] == [{"parent": "id:a"}, {"parent": None}]
+
+
+def test_a_parent_for_a_provider_that_lists_everything_is_a_422(client, monkeypatch):
+    """The base list_resources (the fake keeps it) lists nothing and refuses a parent."""
+    integration = supported_integrations["fake"]
+    monkeypatch.setattr(integration, "resource_selection_key", "picked")
+    monkeypatch.setattr(
+        _router_module,
+        "_credential_or_404",
+        AsyncMock(return_value=type("Cred", (), {"provider_metadata": {}})()),
+    )
+
+    without = client.get("/api/v1/integrations/fake/resources")
+    with_parent = client.get("/api/v1/integrations/fake/resources?parent=x")
+
+    assert without.status_code == 404, "unchanged: no selectable resources"
+    assert with_parent.status_code == 422 and "parent" in with_parent.json()["detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "module, cls",
+    [
+        ("google_drive", "GoogleDriveIntegration"),
+        ("gmail", "GoogleGmailIntegration"),
+        ("google_calendar", "GoogleCalendarIntegration"),
+        ("linear", "LinearIntegration"),
+        ("notion", "NotionIntegration"),
+        ("slack", "SlackIntegration"),
+    ],
+)
+async def test_providers_that_list_everything_refuse_a_parent_before_any_request(module, cls):
+    from importlib import import_module
+
+    from cognee.modules.integrations.base import ResourceParentNotSupportedError
+
+    adapter = getattr(import_module(f"cognee.modules.integrations.{module}.adapter"), cls)()
+    with pytest.raises(ResourceParentNotSupportedError):
+        await adapter.list_resources(object(), parent="x")
+
+
+@pytest.mark.parametrize(
+    ("parent", "status"),
+    [("id:a", 200), ("/Notes", 422), ("ns:123", 422), ("id:a\nb", 422), ("id:gone", 404)],
+)
+def test_the_dropbox_picker_lists_one_level_under_a_valid_parent(
+    client, monkeypatch, parent, status
+):
+    """Through the real router and the real Dropbox adapter; only Dropbox's HTTP is faked."""
+    from cognee.modules.integrations.dropbox import adapter as dropbox_adapter
+    from cognee.modules.integrations.dropbox import client as dropbox_client
+
+    use_integration(dropbox_adapter.DropboxIntegration())
+    bodies = []
+
+    async def dropbox_http(operation, url, **kwargs):
+        bodies.append(kwargs["json"])
+        if kwargs["json"]["path"] == "id:gone":
+            raise dropbox_client.DropboxIntegrationError(operation, "path")
+        return {
+            "entries": [
+                {".tag": "folder", "id": "id:c", "path_lower": "/a/c", "path_display": "/A/c"},
+                {".tag": "file", "id": "id:f", "path_lower": "/a/f.md", "path_display": "/A/f.md"},
+            ],
+            "cursor": "c",
+            "has_more": False,
+        }
+
+    monkeypatch.setattr(dropbox_client, "_post", dropbox_http)
+    monkeypatch.setattr(dropbox_adapter, "access_token_for", AsyncMock(return_value="sl.t"))
+    monkeypatch.setattr(
+        _router_module,
+        "_credential_or_404",
+        AsyncMock(return_value=type("Cred", (), {"provider_metadata": {}})()),
+    )
+
+    response = client.get("/api/v1/integrations/dropbox/resources", params={"parent": parent})
+
+    assert response.status_code == status, response.text
+    if status == 200:
+        assert bodies == [{"path": "id:a", "recursive": False, "limit": 2000}]
+        assert [r["id"] for r in response.json()["resources"]] == ["id:c"]
+    if status == 422:
+        assert bodies == [], "an invalid parent never reaches Dropbox"

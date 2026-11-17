@@ -56,7 +56,6 @@ def _settings(monkeypatch):
         f"{SETTINGS}.redirect_uri",
         "http://localhost:8000/api/v1/integrations/google_calendar/callback",
     )
-    monkeypatch.setattr(f"{SETTINGS}.state_secret", "state-secret")
     monkeypatch.setattr(f"{SETTINGS}.frontend_base_url", "http://localhost:3000")
 
 
@@ -83,10 +82,8 @@ def test_settings_read_the_google_calendar_prefix(monkeypatch):
     assert GoogleCalendarOAuthSettings().client_id == "from-env"
 
 
-def test_state_secret_and_frontend_url_come_from_their_own_settings():
-    integration = GoogleCalendarIntegration()
-    assert integration.state_signing_secret() == "state-secret"
-    assert integration.frontend_base_url() == "http://localhost:3000"
+def test_the_frontend_url_comes_from_its_own_settings():
+    assert GoogleCalendarIntegration().frontend_base_url() == "http://localhost:3000"
 
 
 @pytest.mark.asyncio

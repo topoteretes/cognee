@@ -1,10 +1,11 @@
 """A cited connector chunk's document title and link, carried in the chunk's payload.
 
 A document-mode connector row keeps them in its data record's ``system_metadata`` (``title``,
-``url``, written by ``resolve_dlt_sources._build_document_data_item``); chunks carry only the
-stored file name. With references asked for, the retrievers that cite chunks copy them into
-the payload as ``document_title`` / ``document_url``, exactly as stored; whoever prints them
-escapes them for its own format.
+``url``, written by ``resolve_dlt_sources._build_document_data_item``), with the place it sits
+in (``structure``); chunks carry only the stored file name. With references asked for, the
+retrievers that cite chunks copy them into the payload as ``document_title`` /
+``document_url`` / ``document_parent`` (the nearest ancestor's name), exactly as stored;
+whoever prints them escapes them for its own format.
 """
 
 from uuid import UUID
@@ -23,6 +24,7 @@ logger = get_logger("document_sources")
 
 TITLE_KEY = "document_title"
 URL_KEY = "document_url"
+PARENT_KEY = "document_parent"
 
 
 async def name_chunk_documents(chunks: list) -> None:
@@ -60,5 +62,17 @@ async def name_chunk_documents(chunks: list) -> None:
             for key, field in ((TITLE_KEY, "title"), (URL_KEY, "url"))
             if isinstance(metadata.get(field), str) and metadata.get(field)
         }
+        parent = _parent_name(metadata.get("structure"))
+        if parent:
+            named[PARENT_KEY] = parent
         for chunk_payload in payloads_by_id[data_id]:
             chunk_payload.update(named)
+
+
+def _parent_name(structure: object) -> str | None:
+    """The name of the nearest place the row sits in (a Slack channel's ``#name``, a Notion
+    page), from the structure its connector wrote; ``None`` when it names none."""
+    ancestors = structure.get("ancestors") if isinstance(structure, dict) else None
+    nearest = ancestors[0] if isinstance(ancestors, list) and ancestors else None
+    name = nearest.get("name") if isinstance(nearest, dict) else None
+    return name if isinstance(name, str) and name else None
