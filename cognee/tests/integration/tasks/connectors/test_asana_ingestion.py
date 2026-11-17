@@ -277,6 +277,28 @@ async def test_two_asana_connections_in_one_dataset_stay_apart(clean_environment
     # the two connections share row ids ("task:1"): each keeps its own table, so each keeps its own
     assert len(await _rows()) == 4 + 3
 
+    # an edit in A replaces A's document of "task:2" and leaves B's documents alone
+    b_before = {d.id for d in await _rows() if d.system_metadata["table_name"] == "asana_b"}
+    a_before = {
+        str(d.system_metadata["external_id"]): d.id
+        for d in await _rows()
+        if d.system_metadata["table_name"] == "asana_a"
+    }
+    team_a.edit_task("2", notes="Only in A.")
+    await _sync(team_a, "asana_a")
+    rows = await _rows()
+    assert {d.id for d in rows if d.system_metadata["table_name"] == "asana_b"} == b_before
+    a_after = {
+        str(d.system_metadata["external_id"]): d
+        for d in rows
+        if d.system_metadata["table_name"] == "asana_a"
+    }
+    assert a_after["task:2"].id != a_before["task:2"]
+    assert "Only in A." in _stored_text(a_after["task:2"])
+    assert {k: d.id for k, d in a_after.items() if k != "task:2"} == {
+        k: v for k, v in a_before.items() if k != "task:2"
+    }
+
     team_b.delete_task("2")
     await _sync(team_b, "asana_b")
     await _sync(team_a, "asana_a")
