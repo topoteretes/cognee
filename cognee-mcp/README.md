@@ -699,7 +699,8 @@ remember(
 In API mode, upload the ontologies first through `POST /api/v1/ontologies` using
 the same authenticated user as the MCP server. Keys are sent as repeated
 `ontology_key` form fields. In local mode, keys resolve through `OntologyService`
-in the default user's local ontology store; remote uploads are not copied locally.
+in the default user's ontology store under this instance's data root (a local
+folder or an `s3://` prefix); uploads to a remote instance are not copied into it.
 Unknown or inaccessible keys fail the write. Background failures are reported by
 `cognify_status`.
 

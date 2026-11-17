@@ -92,7 +92,9 @@ async def get_edge_evidence_records(
 
     Append-only observations are considered active when they have no run id or
     their pipeline run has a completed terminal record. Failed/rolled-back runs
-    therefore need no delete-side mutation.
+    therefore need no delete-side mutation; the rollback detaches the rows of
+    the documents such a run completed, which it keeps
+    (``keep_completed_items_evidence``).
     """
     unique_edge_ids = list(dict.fromkeys(edge_ids))
     if not unique_edge_ids or per_edge_limit <= 0 or total_limit <= 0:

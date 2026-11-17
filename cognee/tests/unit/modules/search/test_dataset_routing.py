@@ -195,7 +195,9 @@ async def test_routes_to_the_dataset_whose_best_row_matches(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_dataset_with_no_routing_rows_is_always_searched(monkeypatch):
+async def test_a_dataset_with_no_routing_rows_is_left_out_when_another_is_routed(monkeypatch):
+    """SDK-1516: an unindexed dataset waits for the search's widening pass; kept
+    next to every routed one, a backlog of them meant routing never narrowed."""
     a, b, c = uuid4(), uuid4(), uuid4()
     (root_a,), (root_b,) = dataset_route_ids(a, []), dataset_route_ids(b, [])
     engine = FakeEngine(scores={root_a: 0.2, root_b: 0.3})
@@ -205,8 +207,35 @@ async def test_a_dataset_with_no_routing_rows_is_always_searched(monkeypatch):
 
     assert decision.routed == (a,)
     assert decision.unindexed == (c,)
-    assert decision.dataset_ids == [a, c]
+    assert decision.dataset_ids == [a]
     assert decision.narrowed is True
+
+
+@pytest.mark.asyncio
+async def test_one_indexed_dataset_narrows_a_backlog_of_unindexed_ones(monkeypatch):
+    """The case that kept routing from narrowing: one dataset indexed, the rest not."""
+    indexed, *backlog = (uuid4() for _ in range(6))
+    (root,) = dataset_route_ids(indexed, [])
+    _patch(monkeypatch, FakeEngine(scores={root: 0.4}), {d: [] for d in [indexed, *backlog]})
+
+    decision = await _route("q", [indexed, *backlog], top_k=1)
+
+    assert decision.dataset_ids == [indexed]
+    assert decision.unindexed == tuple(backlog)
+    assert decision.narrowed is True
+
+
+@pytest.mark.asyncio
+async def test_with_no_dataset_indexed_every_dataset_is_searched(monkeypatch):
+    a, b = uuid4(), uuid4()
+    _patch(monkeypatch, FakeEngine(scores={}), {a: [], b: []})
+
+    decision = await _route("q", [a, b], top_k=1)
+
+    assert decision.routed == ()
+    assert decision.unindexed == (a, b)
+    assert decision.dataset_ids == [a, b]
+    assert decision.narrowed is False
 
 
 @pytest.mark.asyncio
@@ -709,3 +738,28 @@ async def test_no_database_is_created_without_access_control_or_outside_pgvector
     )
     await store_module.ensure_default_store()
     assert created == []
+
+
+@pytest.mark.asyncio
+async def test_routing_width_check_awaits_the_engines_vector_size():
+    """A worker-backed engine's size is awaited, never asked with the blocking call."""
+    from cognee.modules.search.dataset_routing.store import routing_width_matches
+
+    class SelfSizingEmbedder:
+        async def resolve_vector_size(self):
+            return 4
+
+        def get_vector_size(self):  # would block the event loop on a remote worker
+            raise AssertionError("get_vector_size() must not be called from async code")
+
+    class Store:
+        embedding_engine = SelfSizingEmbedder()
+
+        def __init__(self, stored):
+            self.stored = stored
+
+        async def get_stored_vector_size(self):
+            return self.stored
+
+    assert await routing_width_matches(Store(4)) is True
+    assert await routing_width_matches(Store(8)) is False

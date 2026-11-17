@@ -47,6 +47,7 @@ from cognee.modules.integrations.base import (
     OAuthInstallation,
     OAuthIntegration,
     WebhookVerifier,
+    refuse_parent,
 )
 from cognee.modules.integrations.credentials import (
     CredentialInactiveError,
@@ -55,6 +56,7 @@ from cognee.modules.integrations.credentials import (
     revoke_credential_if_current,
     update_refreshed_credential,
 )
+from cognee.modules.integrations.ingestion import sync_is_paused
 from cognee.modules.integrations.linear.client import LinearUnauthorizedError, graphql
 from cognee.modules.integrations.linear.handle_linear_event import handle_linear_event
 from cognee.modules.integrations.linear.linear_settings import LinearSettings, require
@@ -648,9 +650,6 @@ class LinearIntegration(OAuthIntegration):
             auth_type="oauth2",
         )
 
-    def state_signing_secret(self) -> str:
-        return require("webhook_secret")
-
     def frontend_base_url(self) -> str:
         return require("frontend_base_url")
 
@@ -668,14 +667,20 @@ class LinearIntegration(OAuthIntegration):
         unknown (same race as GitHub's ``installation.created``). This hook,
         firing after the upsert, gives the agent something to recall from on
         day one. The admin chose the teams on Linear's install screen, so the
-        default is every granted team until the user narrows it.
+        default is every granted team until the user narrows it. An owner's paused
+        default holds it.
         """
+        if await sync_is_paused(self.provider, credential, "install sync"):
+            return
         await request_sync(credential)
 
     async def sync_now(self, credential: IntegrationCredential) -> None:
         await request_sync(credential)
 
-    async def list_resources(self, credential: IntegrationCredential) -> list[dict[str, Any]]:
+    async def list_resources(
+        self, credential: IntegrationCredential, *, parent: str | None = None
+    ) -> list[dict[str, Any]]:
+        refuse_parent(self.provider, parent)
         return [
             {
                 "id": str(team["id"]),

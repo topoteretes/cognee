@@ -376,3 +376,14 @@ def test_list_calendars_asks_for_hidden_calendars():
     list_calendars(fake)
 
     assert [p["showHidden"] for p in fake.calendar_list_params] == [True]
+
+
+@pytest.fixture(autouse=True)
+def waits(monkeypatch):
+    """The backoff waits ``api_retry`` asked for, in order, without sleeping for real.
+
+    A fake that raises a 5xx or 429 is retried by the connector, so every test needs this.
+    """
+    recorded: list[float] = []
+    monkeypatch.setattr("time.sleep", recorded.append)
+    return recorded

@@ -482,6 +482,17 @@ class TestNodeNameScopedRouting:
         assert SearchType.HYBRID_COMPLETION in scoped
         assert SearchType.CHUNKS_LEXICAL not in scoped
 
+    def test_names_with_an_explicit_none_type_are_refused_before_routing(self, monkeypatch):
+        from cognee.modules import preflight
+        from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+        from cognee.modules.search import search_type_policy
+
+        monkeypatch.setattr(preflight, "llm_available", lambda _config: True)
+        monkeypatch.setattr(search_type_policy, "cypher_queries_allowed", lambda: True)
+
+        with pytest.raises(QueryValidationError):
+            RoutingConstraints.from_config(None, node_type=None, node_name=["proj"])
+
     def test_a_pinned_type_is_not_rerouted_by_the_filter(self):
         assert pinned_route(SearchType.CHUNKS_LEXICAL, self._node_set_scoped()) == RouteDecision(
             search_type=SearchType.CHUNKS_LEXICAL, rule="pinned"

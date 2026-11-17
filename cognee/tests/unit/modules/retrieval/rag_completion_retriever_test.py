@@ -408,3 +408,32 @@ async def test_graph_scope_goes_through_the_scoped_search_not_the_node_set_filte
         limit=2,
     )
     mock_vector_engine.search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("include_references", [True, False])
+async def test_retrieval_names_the_cited_documents_only_with_references(
+    mock_vector_engine, include_references
+):
+    """The chunks are named where they are retrieved, so every path that builds a
+    reference from them (an answer, only_context, a session lane) sees the names."""
+    chunk = MagicMock()
+    chunk.payload = {"text": "Ana moved the launch.", "document_id": "x"}
+    mock_vector_engine.search.return_value = [chunk]
+    retriever = CompletionRetriever(include_references=include_references)
+    name = AsyncMock()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        patch("cognee.modules.retrieval.completion_retriever.name_chunk_documents", name),
+    ):
+        objects = await retriever.get_retrieved_objects("When is the launch?")
+
+    if include_references:
+        name.assert_awaited_once()
+        assert name.await_args.args[0] == objects
+    else:
+        name.assert_not_awaited()

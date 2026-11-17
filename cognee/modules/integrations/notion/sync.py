@@ -168,7 +168,7 @@ async def _sync_source(
         make_source=make_source,
         classify_error=_classify_error,
     )
-    if not counts["failed"]:
+    if not ingestion.retirement_blocked(counts):
         await ingestion.retire_resources(
             "notion", credential, dataset_name_for_credential(credential), retained
         )

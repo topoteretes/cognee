@@ -28,43 +28,44 @@ class EmbeddingGateway:
     """Gateway to an embedding engine: wraps it, returns its vectors and records
     each call's token usage, the way LLMGateway does for completions.
 
-    Large calls are split into provider-sized requests. Inside a storage step they
-    run concurrently under its shared request semaphore. Outside that scope they
-    remain sequential, preserving the caller's existing concurrency policy.
+    Inside a storage step (``embedding_request_scope``) a call larger than one provider
+    request is split into provider-sized requests that run concurrently under the
+    step's shared request semaphore. Outside that scope a call reaches the engine as
+    it was given, in one request.
     """
 
     def __init__(self, engine: EmbeddingEngine):
         self._engine = engine
 
     async def embed_text(self, text: list[str]) -> list[Vector]:
-        request_size = self._request_size()
         semaphore = _request_semaphore.get()
+        if semaphore is None:
+            vectors = await self._engine.embed_text(text)
+            await self._record_usage(vectors.tokens)
+            return vectors
 
         async def request(texts):
-            if semaphore is None:
-                return await self._engine.embed_text(texts)
             async with semaphore:
                 return await self._engine.embed_text(texts)
 
+        request_size = self._request_size()
         if request_size is None or len(text) <= request_size:
             vectors = await request(text)
             await self._record_usage(vectors.tokens)
             return vectors
 
-        batches = [
-            text[start : start + request_size] for start in range(0, len(text), request_size)
-        ]
-        if semaphore is None:
-            parts = [await request(batch) for batch in batches]
-        else:
-            # Preserve input order, and let every sibling finish before propagating
-            # failure so no provider request outlives the storage call.
-            parts = await asyncio.gather(
-                *(request(batch) for batch in batches), return_exceptions=True
-            )
-            for part in parts:
-                if isinstance(part, BaseException):
-                    raise part
+        # Preserve input order, and let every sibling finish before propagating
+        # failure so no provider request outlives the storage call.
+        parts = await asyncio.gather(
+            *(
+                request(text[start : start + request_size])
+                for start in range(0, len(text), request_size)
+            ),
+            return_exceptions=True,
+        )
+        for part in parts:
+            if isinstance(part, BaseException):
+                raise part
         vectors = [vector for part in parts for vector in part]
         tokens = sum(part.tokens for part in parts)
         await self._record_usage(tokens)

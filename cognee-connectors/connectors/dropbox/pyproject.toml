@@ -1,0 +1,79 @@
+[build-system]
+# Pinned together with cognee's: the build backend decides the wheel's
+# Metadata-Version, and the PyPI publish action validates it with a pinned
+# twine. Bump this together with the release workflow's publish-action pin.
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cognee-connector-dropbox"
+version = "0.1.0"
+description = "Dropbox connector for cognee: syncs a Dropbox folder's text, Markdown, CSV, PDF files and Paper docs into cognee memory, incrementally and with forget-on-delete"
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Cognee team" }]
+keywords = ["cognee", "ai-memory", "connector", "dropbox"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "cognee-connectors-core[dlt]>=0.2,<1",
+    # The provider's own libraries, with the ranges cognee's pyproject.toml uses: aiohttp for
+    # the OAuth, account and folder-picker client, httpx for the DLT source's walk, pypdf for
+    # PDF text, pydantic and pydantic-settings for the DROPBOX_* settings class.
+    "aiohttp>=3.13.5,<4.0.0",
+    "httpx>=0.28.1",
+    "pypdf>=6.6.2,<7.0.0",
+    "pydantic>=2.13",
+    "pydantic-settings>=2.7.0,!=2.12.*,!=2.13.*,!=2.14.0,!=2.14.1,<3",
+]
+
+[project.optional-dependencies]
+# The integration tests run the sync through cognee. Nothing in the package needs it: the
+# Dropbox integration a cognee server runs (OAuth routes, credential store, sync runner) stays
+# in cognee, so there is no cognee_host/ to install. A sync needs a cognee whose ingestion
+# reads per-row structure (DOCUMENT_SYNC_VERSION 3, cognee 1.6.6rc1); an older host is
+# refused with a clear message when the source is built, not at install time.
+cognee = ["cognee>=1.6.5,<2"]
+
+[project.urls]
+Homepage = "https://github.com/topoteretes/cognee/tree/main/cognee-connectors/connectors/dropbox"
+Repository = "https://github.com/topoteretes/cognee"
+Issues = "https://github.com/topoteretes/cognee/issues"
+Documentation = "https://docs.cognee.ai"
+
+[project.entry-points."cognee.connectors"]
+dropbox = "cognee_connector_dropbox:CONNECTOR"
+
+[project.entry-points."cognee.sources"]
+dropbox = "cognee_connector_dropbox:dropbox_source"
+
+# No "cognee.integrations" entry point: cognee bundles its own Dropbox integration
+# (cognee.modules.integrations.dropbox), which this package does not replace.
+
+[tool.uv]
+# Note: exclude newer packages that are less than 2 days old, as cognee's own
+# pyproject does. Inside the cognee-connectors workspace uv reads only the
+# workspace root's settings, which carry the same lines; this copy applies when
+# the package is checked out and resolved on its own.
+exclude-newer = "2 days"
+# ...but never for cognee itself (or enola-cli, which cognee pins exactly): the
+# window otherwise resolves a release-day cognee to the previous release, as in
+# cognee-mcp (issue #4360).
+exclude-newer-package = { cognee = "0 days", enola-cli = "0 days" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["cognee_connector_dropbox"]
+
+[tool.hatch.build.targets.sdist]
+include = ["cognee_connector_dropbox", "tests", "README.md", "LICENSE", "pyproject.toml"]

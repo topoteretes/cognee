@@ -40,6 +40,8 @@ except ModuleNotFoundError:  # postgres extra not installed
     pytestmark.append(pytest.mark.skip(reason="pgvector extra not installed"))
 
 DIMENSIONS = 8
+# New collections store halfvec: a value read back is the half float nearest to it.
+HALF_PRECISION = 1e-3
 
 
 class _Embeddings:
@@ -95,7 +97,7 @@ async def _stored_text(adapter, table: str, point_id) -> str:
 
 
 async def test_binary_write_stores_what_a_text_insert_stores(adapter, collection):
-    """Bit for bit: the binary codec's float32 and the server's text parsing agree."""
+    """Bit for bit: the binary codec's encoding and the server's text parsing agree."""
     point = _Point(text="binary")
     await adapter.create_data_points(collection, [point])
 
@@ -118,7 +120,9 @@ async def test_binary_write_stores_what_a_text_insert_stores(adapter, collection
         adapter, table, text_id
     )
     (row,) = await adapter.retrieve(collection, [str(point.id)], include_vector=True)
-    assert row.payload["vector"] == pytest.approx(_Embeddings().vector("binary"), abs=1e-6)
+    assert row.payload["vector"] == pytest.approx(
+        _Embeddings().vector("binary"), abs=HALF_PRECISION
+    )
 
 
 async def test_raw_vectors_round_trip_through_the_binary_path(adapter, collection):
@@ -130,7 +134,7 @@ async def test_raw_vectors_round_trip_through_the_binary_path(adapter, collectio
 
     (row,) = await adapter.retrieve(collection, [str(point_id)], include_vector=True)
     assert row.payload["text"] == "raw"
-    assert row.payload["vector"] == pytest.approx(vector, abs=1e-6)
+    assert row.payload["vector"] == pytest.approx(vector, abs=HALF_PRECISION)
 
 
 async def test_duplicate_ids_in_one_batch_write_one_row_with_tags_unioned(adapter, collection):

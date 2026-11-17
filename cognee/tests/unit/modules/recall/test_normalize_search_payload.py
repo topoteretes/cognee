@@ -19,6 +19,18 @@ def test_hybrid_completion_normalizes_as_graph_completion():
     assert items[0].kind == SearchResultKind.GRAPH_COMPLETION
 
 
+def test_hybrid_completion_decomposition_normalizes_as_graph_completion():
+    payload = SearchResultPayload(
+        completion=["answer"],
+        search_type=SearchType.HYBRID_COMPLETION_DECOMPOSITION,
+    )
+
+    items = normalize_search_payload(payload)
+
+    assert len(items) == 1
+    assert items[0].kind == SearchResultKind.GRAPH_COMPLETION
+
+
 def test_chunk_result_exposes_provenance_metadata():
     """CHUNK results surface data_id/chunk_id/chunk_index so callers can trace
     a result back to the ingested document and the cited chunk."""

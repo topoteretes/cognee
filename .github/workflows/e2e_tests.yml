@@ -150,6 +150,65 @@ jobs:
       - name: Run Migration/Model Lockstep Guard
         run: uv run pytest cognee/tests/e2e/migrations/test_migration_model_lockstep.py -v
 
+  # Secret-free: the provider's sync is a recorder. SDK-1434 asks for the
+  # cross-process claim and the end-to-end tick on both SQLite and Postgres.
+  run-sync-policy-e2e-sqlite:
+    name: Sync policy e2e (SQLite)
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run sync policy e2e (SQLite)
+        env:
+          ENV: 'dev'
+        run: uv run pytest cognee/tests/e2e/sync_policy/ -v
+
+  run-sync-policy-e2e-postgres:
+    name: Sync policy e2e (Postgres)
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "postgres"
+
+      - name: Run sync policy e2e (Postgres)
+        env:
+          ENV: 'dev'
+          DB_PROVIDER: 'postgres'
+          DB_NAME: 'cognee_db'
+          DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+        run: uv run pytest cognee/tests/e2e/sync_policy/ -v
+
   run-bundled-extension-offline:
     name: Bundled JSON Extension Offline e2e
     # Deliberately NOT in the ci-image container: the test drives the runner's

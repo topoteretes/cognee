@@ -1,6 +1,7 @@
 """EmbeddingGateway returns an engine's vectors and records its token usage,
 which never fails the embedding."""
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -11,6 +12,7 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import (
     EmbeddingGateway,
+    embedding_request_scope,
 )
 
 RECORD = "cognee.modules.session_lifecycle.usage_tracking.record_embedding_call"
@@ -72,11 +74,23 @@ async def test_a_recording_failure_does_not_fail_the_embedding():
 
 
 @pytest.mark.asyncio
-async def test_more_texts_than_one_request_carries_go_in_consecutive_requests():
-    """A write batch larger than the provider's request size is embedded request by
-    request, in order, with the token counts summed and recorded once."""
+async def test_a_call_outside_a_storage_step_is_one_request():
+    """Only a storage step splits: any other caller's texts reach the engine as given."""
     engine = _SizedEngine(batch_size=2)
     with patch(RECORD, new=AsyncMock()) as record:
+        vectors = await EmbeddingGateway(engine).embed_text(["a", "bb", "ccc", "dddd", "e"])
+
+    assert engine.requests == [["a", "bb", "ccc", "dddd", "e"]]
+    assert vectors.tokens == 5
+    record.assert_awaited_once_with(model="fake-embedding-model", tokens=5)
+
+
+@pytest.mark.asyncio
+async def test_a_storage_step_splits_a_write_batch_into_provider_sized_requests():
+    """A write batch larger than the provider's request size is embedded in requests of
+    that size, the vectors in input order and the token counts summed and recorded once."""
+    engine = _SizedEngine(batch_size=2)
+    with patch(RECORD, new=AsyncMock()) as record, embedding_request_scope(asyncio.Semaphore(1)):
         vectors = await EmbeddingGateway(engine).embed_text(["a", "bb", "ccc", "dddd", "e"])
 
     assert engine.requests == [["a", "bb"], ["ccc", "dddd"], ["e"]]
@@ -88,7 +102,7 @@ async def test_more_texts_than_one_request_carries_go_in_consecutive_requests():
 @pytest.mark.asyncio
 async def test_a_request_sized_call_is_one_request():
     engine = _SizedEngine(batch_size=3)
-    with patch(RECORD, new=AsyncMock()):
+    with patch(RECORD, new=AsyncMock()), embedding_request_scope(asyncio.Semaphore(1)):
         vectors = await EmbeddingGateway(engine).embed_text(["a", "b", "c"])
 
     assert engine.requests == [["a", "b", "c"]]
@@ -99,7 +113,7 @@ async def test_a_request_sized_call_is_one_request():
 @pytest.mark.parametrize("batch_size", [None, 0, -4, True])
 async def test_an_engine_without_a_usable_request_size_gets_one_request(batch_size):
     engine = _SizedEngine(batch_size=batch_size)
-    with patch(RECORD, new=AsyncMock()):
+    with patch(RECORD, new=AsyncMock()), embedding_request_scope(asyncio.Semaphore(1)):
         vectors = await EmbeddingGateway(engine).embed_text(["a", "b", "c"])
 
     assert engine.requests == [["a", "b", "c"]]
