@@ -11,6 +11,7 @@ from cognee.context_global_variables import (
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
+from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
@@ -251,30 +252,31 @@ async def authorized_search(
 
     async def _search(datasets: list[Dataset], widening: bool = False) -> list[SearchResultPayload]:
         # Searches all provided datasets and handles setting up of appropriate database context based on permissions
-        return await search_in_datasets_context(
-            search_datasets=datasets,
-            widening=widening,
-            query_type=query_type,
-            query_text=query_text,
-            user=user,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            top_k=top_k,
-            node_type=node_type,
-            node_name=node_name,
-            node_name_filter_operator=node_name_filter_operator,
-            only_context=only_context,
-            session_id=session_id,
-            wide_search_top_k=wide_search_top_k,
-            triplet_distance_penalty=triplet_distance_penalty,
-            feedback_influence=feedback_influence,
-            retriever_specific_config=retriever_specific_config,
-            neighborhood_depth=neighborhood_depth,
-            neighborhood_seed_top_k=neighborhood_seed_top_k,
-            include_references=include_references,
-            llm_config=llm_config,
-            embedding_config=embedding_config,
-        )
+        with pipeline_stage("retrieval"):
+            return await search_in_datasets_context(
+                search_datasets=datasets,
+                widening=widening,
+                query_type=query_type,
+                query_text=query_text,
+                user=user,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                top_k=top_k,
+                node_type=node_type,
+                node_name=node_name,
+                node_name_filter_operator=node_name_filter_operator,
+                only_context=only_context,
+                session_id=session_id,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
+                feedback_influence=feedback_influence,
+                retriever_specific_config=retriever_specific_config,
+                neighborhood_depth=neighborhood_depth,
+                neighborhood_seed_top_k=neighborhood_seed_top_k,
+                include_references=include_references,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
+            )
 
     routed_datasets = await _route_datasets(query_type, query_text, dataset_ids, search_datasets)
     if routed_datasets is None:
