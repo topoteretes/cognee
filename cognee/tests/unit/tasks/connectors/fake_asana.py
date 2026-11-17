@@ -5,7 +5,9 @@
 It models what was observed against a real workspace: ``/events`` answers 412 with a fresh sync
 token when the token is missing or stale, a listing pages through ``next_page.offset`` (an
 opaque token that stands for a position in the list as it is when the page is asked for, so
-items added or removed meanwhile shift it, and one the fake never issued answers 400), and an
+items added or removed meanwhile shift it; one the fake never issued answers 400, and one
+``expire_offsets`` expired answers the status it was given, see ``_NOT_AN_OFFSET_REFUSAL`` in the
+source for what is known of Asana's), and an
 edited comment (or a new one) leaves the task's ``modified_at`` alone: it arrives only as a story
 event, an edited one with ``parent: null`` and the task under ``resource.target``. An endpoint
 the connector does not use is not answered: a call to it raises ``AssertionError``.
@@ -60,6 +62,8 @@ class FakeAsana:
         self.event_feed: list[tuple[str, bool]] = []
         # issued offset token -> (the listing it belongs to, the position it stands for)
         self._offsets: dict[str, tuple[str, int]] = {}
+        self._issued = 0
+        self._expired: dict[str, int] = {}  # token ``expire_offsets`` took back -> its answer
         self.events_page_size = 100
         self._clock = 0
         self._counter = 0
@@ -76,9 +80,14 @@ class FakeAsana:
         self.projects[gid] = {"name": name, "notes": notes}
         self.events.setdefault(gid, [])
 
-    def add_task(
-        self, gid: str, name: str | None = None, *, projects=("P1",), parent=None, **fields
-    ):
+    def add_task(self, gid: str, name: str | None = None, *, projects=None, parent=None, **fields):
+        """A task in ``projects`` (default ``("P1",)``), or a subtask of ``parent``.
+
+        A subtask is in no project unless ``projects`` names some: Asana lets a subtask be added
+        to a project too, and the project's listing then holds it.
+        """
+        if projects is None:
+            projects = ("P1",) if parent is None else ()
         self.tasks[gid] = {
             "name": name or f"Task {gid}",
             "notes": "",
@@ -91,12 +100,19 @@ class FakeAsana:
             "comments": [],  # [{"gid", "author", "text", "created_at"}]
             "modified_at": self.stamp(),
             **fields,
-            "projects": list(projects) if parent is None else [],
+            "projects": list(projects),
             "parent": parent,
         }
 
-    def _emit(self, task_gid: str, event: dict) -> None:
-        for project_gid in self.tasks[task_gid]["projects"]:
+    def _emit(self, task_gid: str, event: dict, *, to_parent: bool = False) -> None:
+        """Queue ``event`` in the feeds of the task's projects and, with ``to_parent``, of its
+        parent's. Only a subtask's rename and deletion are assumed to reach the parent's feeds;
+        how Asana routes a subtask's events is not verified (asana.md, Known gaps)."""
+        task = self.tasks[task_gid]
+        feeds = set(task["projects"])
+        if to_parent and task["parent"] in self.tasks:
+            feeds |= set(self.tasks[task["parent"]]["projects"])
+        for project_gid in sorted(feeds):
             self.events[project_gid].append(event)
 
     # -- changes the way Asana makes them -----------------------------------
@@ -125,13 +141,13 @@ class FakeAsana:
     def rename_subtask(self, gid: str, name: str) -> None:
         """A subtask rename moves neither its parent's ``modified_at`` nor any ``parent`` field."""
         self.tasks[gid]["name"] = name
-        parent = self.tasks[gid]["parent"]
-        for project_gid in self.tasks[parent]["projects"]:
-            event = {"action": "changed", "resource": task_ref(gid), "parent": None}
-            self.events[project_gid].append(event)
+        event = {"action": "changed", "resource": task_ref(gid), "parent": None}
+        self._emit(gid, event, to_parent=True)
 
     def delete_task(self, gid: str) -> None:
-        self._emit(gid, {"action": "deleted", "resource": task_ref(gid), "parent": None})
+        self._emit(
+            gid, {"action": "deleted", "resource": task_ref(gid), "parent": None}, to_parent=True
+        )
         del self.tasks[gid]
 
     def move_task(self, gid: str, projects) -> None:
@@ -353,9 +369,16 @@ class FakeAsana:
         ]
 
     def _issue_offset(self, scope: str, position: int) -> str:
-        token = f"tok{len(self._offsets)}-{position * 7919 % 10007}"
+        # A count of its own, not of ``_offsets``: an expired token must never be issued again.
+        self._issued += 1
+        token = f"tok{self._issued}-{position * 7919 % 10007}"
         self._offsets[token] = (scope, position)
         return token
+
+    def expire_offsets(self, status: int = 400) -> None:
+        """Asana stops accepting every offset issued so far: each answers ``status`` from now on."""
+        self._expired.update(dict.fromkeys(self._offsets, status))
+        self._offsets.clear()
 
     def offset_position(self, token: str) -> int:
         """The position an issued offset token stands for, for tests to read."""
@@ -365,6 +388,8 @@ class FakeAsana:
         limit = min(int(params.get("limit", 20)), self.page_size)
         offset = params.get("offset")
         issued = self._offsets.get(offset)
+        if offset in self._expired:
+            return _error(self._expired[offset], "offset: Invalid offset")
         if (
             offset is not None
             and offset != self.stuck_offset
