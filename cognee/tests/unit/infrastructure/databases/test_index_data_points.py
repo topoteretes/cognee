@@ -7,7 +7,7 @@ import pytest
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import EmbeddingGateway
 from cognee.infrastructure.engine import DataPoint
-from cognee.tasks.storage.index_data_points import index_data_points
+from cognee.tasks.storage.index_data_points import IndexingBudget, index_data_points
 
 
 class TestDataPoint(DataPoint):
@@ -203,8 +203,8 @@ async def test_a_point_with_one_index_field_is_handed_over_without_a_copy():
 
 
 @pytest.mark.asyncio
-async def test_a_shared_semaphore_bounds_concurrent_calls_together():
-    """Two index calls handed one semaphore never exceed its bound between them."""
+async def test_a_shared_budget_bounds_concurrent_calls_together():
+    """Two index calls handed one budget never exceed its request bound between them."""
     in_flight = 0
     peak = 0
 
@@ -229,15 +229,15 @@ async def test_a_shared_semaphore_bounds_concurrent_calls_together():
     second = [TestDataPoint(name=f"b{i}") for i in range(6)]
     for data_point in first + second:
         data_point.metadata["index_fields"] = ["name"]
-    shared = asyncio.Semaphore(2)
+    shared = IndexingBudget(requests=asyncio.Semaphore(2), batches=asyncio.Semaphore(12))
 
     with patch.dict(
         index_data_points.__globals__,
         {"get_vectordb_config": lambda: SimpleNamespace(vector_write_batch_size=1)},
     ):
         await asyncio.gather(
-            index_data_points(first, vector_engine=mock_vector_engine, semaphore=shared),
-            index_data_points(second, vector_engine=mock_vector_engine, semaphore=shared),
+            index_data_points(first, vector_engine=mock_vector_engine, budget=shared),
+            index_data_points(second, vector_engine=mock_vector_engine, budget=shared),
         )
 
     assert peak == 2
@@ -287,8 +287,64 @@ async def test_failed_batch_waits_for_sibling_writes():
         patch.dict(index_data_points.__globals__, {"write_batch_size": lambda: 1}),
         pytest.raises(ValueError, match="write failed"),
     ):
-        await index_data_points(points, vector_engine=engine, semaphore=asyncio.Semaphore(2))
+        await index_data_points(
+            points,
+            vector_engine=engine,
+            budget=IndexingBudget(requests=asyncio.Semaphore(2), batches=asyncio.Semaphore(2)),
+        )
     assert completed.is_set(), "no sibling write may outlive the failed storage call"
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_store_holds_back_embedding():
+    """Batches waiting on the store keep their slots, so embedding cannot run ahead of it."""
+    total = 4096
+    embedded = 0
+    all_embedded = asyncio.Event()
+    release_storage = asyncio.Event()
+
+    async def embed(texts):
+        nonlocal embedded
+        embedded += len(texts)
+        if embedded == total:
+            all_embedded.set()
+        await asyncio.sleep(0)
+        return EmbeddingResult([[1.0]] * len(texts), tokens=0)
+
+    engine = AsyncMock()
+    engine.embedding_engine = EmbeddingGateway(
+        SimpleNamespace(get_batch_size=lambda: 32, embed_text=embed)
+    )
+    engine.embedding_engine._record_usage = AsyncMock()
+
+    async def write(_type, _field, points):
+        await engine.embedding_engine.embed_text([point.name for point in points])
+        await release_storage.wait()
+
+    engine.index_data_points = AsyncMock(side_effect=write)
+    points = [TestDataPoint(name=str(index)) for index in range(total)]
+    for point in points:
+        point.metadata = {"index_fields": ["name"]}
+
+    with patch.dict(
+        index_data_points.__globals__,
+        {
+            "get_vectordb_config": lambda: SimpleNamespace(vector_write_batch_size=128),
+            "get_embedding_context_config": lambda: SimpleNamespace(
+                embedding_max_concurrent_data_points=150
+            ),
+        },
+    ):
+        indexing = asyncio.create_task(index_data_points(points, vector_engine=engine))
+        try:
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(all_embedded.wait(), timeout=0.5)
+            # 150 // 32 = 4 batches admitted, 128 rows each.
+            assert embedded == 4 * 128
+        finally:
+            release_storage.set()
+            await indexing
+    assert embedded == total
 
 
 @pytest.mark.asyncio

@@ -29,7 +29,7 @@ from cognee.tasks.storage.exceptions import (
 )
 
 from .chunk_ownership import collect_chunk_ownership
-from .index_data_points import index_data_points, indexing_semaphore
+from .index_data_points import index_data_points, indexing_budget
 from .index_graph_edges import index_graph_edges
 
 if TYPE_CHECKING:
@@ -401,13 +401,14 @@ async def add_data_points(
     else:
         await _write_nodes_grouped()
 
-        # One bound on concurrent embedding requests for both halves, so together they
-        # stay within EMBEDDING_MAX_CONCURRENT_DATA_POINTS. The nodes are handed
-        # over as they are: index_data_points copies only what it must.
-        slots = indexing_semaphore(vector_engine)
+        # One budget for both halves, so together they stay within
+        # EMBEDDING_MAX_CONCURRENT_DATA_POINTS at the provider and a slow store holds
+        # back embedding for both. The nodes are handed over as they are:
+        # index_data_points copies only what it must.
+        budget = indexing_budget(vector_engine)
 
         async def _index_nodes():
-            await index_data_points(nodes_to_embed, vector_engine=vector_engine, semaphore=slots)
+            await index_data_points(nodes_to_embed, vector_engine=vector_engine, budget=budget)
 
         async def _write_edges_then_index():
             await _write_edges_grouped(edges)
@@ -419,7 +420,7 @@ async def add_data_points(
                 await index_graph_edges(
                     edges + custom_edges if custom_edges else edges,
                     vector_engine=vector_engine,
-                    semaphore=slots,
+                    budget=budget,
                 )
 
         await _run_to_completion(_index_nodes(), _write_edges_then_index())
