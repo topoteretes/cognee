@@ -35,6 +35,10 @@ class DataDTO(OutDTO):
     # a client that knows what it added find the row again via
     # GET /datasets/{id}/data?content_hash=... without listing everything.
     content_hash: str | None = None
+    # Where a connector row sits in its source, nearest parent first
+    # (``{"ancestors": [{"kind", "id", "name"?}, ...]}``: a Slack channel, a Notion page),
+    # from ``system_metadata["structure"]``. The dataset page groups rows by it.
+    structure: dict | None = None
 
 
 class DeleteDataReceiptDTO(OutDTO):

@@ -178,16 +178,21 @@ async def test_llm_connection() -> None:
     """
     from litellm.exceptions import AuthenticationError
 
+    # Imported here: this module loads during cognee's startup, before the
+    # context variables pipeline_stage depends on can be imported.
+    from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
+
     try:
         logger.info("Testing connection to LLM endpoint...")
-        await asyncio.wait_for(
-            LLMGateway.acreate_structured_output(
-                text_input="test",
-                system_prompt='Respond to me with the following string: "test"',
-                response_model=str,
-            ),
-            timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
-        )
+        with pipeline_stage("connection_test"):
+            await asyncio.wait_for(
+                LLMGateway.acreate_structured_output(
+                    text_input="test",
+                    system_prompt='Respond to me with the following string: "test"',
+                    response_model=str,
+                ),
+                timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
+            )
     except asyncio.TimeoutError:
         msg = (
             f"LLM connection test timed out after {CONNECTION_TEST_TIMEOUT_SECONDS}s. "
@@ -270,6 +275,14 @@ async def determine_embedding_dimensions(detected_dimensions: int) -> None:
     from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
 
     embedding_config = get_embedding_config()
+    if embedding_config.embedding_dimensions is None:
+        embedding_engine = (await get_vector_engine_async()).embedding_engine
+        if hasattr(embedding_engine, "configured_dimensions"):
+            # The engine learns its vector size itself (embedding_worker) and
+            # already holds it. Writing it into the config would make the next
+            # get_embedding_engine() build a second engine (it is cached by its
+            # arguments) that takes the learned size for EMBEDDING_DIMENSIONS.
+            return
     if embedding_config.embedding_dimensions != detected_dimensions:
         embedding_config.embedding_dimensions = detected_dimensions
 

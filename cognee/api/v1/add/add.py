@@ -34,6 +34,7 @@ from cognee.tasks.ingestion.refuse_changed_existing_documents import (
     refuse_changed_existing_documents,
 )
 from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
+from cognee.tasks.ingestion.screen_server_paths import screen_server_paths
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
 
 logger = get_logger()
@@ -93,7 +94,8 @@ async def add(
           project, or any URL ending in .git) is shallow-cloned and ingested as ONE
           code-repo item that cognify runs through the enola code graph pipeline
           (cross-file edges), plus the repo's documents; same as adding a local code
-          project directory. Requires ALLOW_HTTP_REQUESTS and git on PATH. Pass
+          project directory. Requires git on PATH, and ALLOW_HTTP_REQUESTS=true on
+          the server for API calls. Pass
           ``branch`` to clone a branch other than the remote's default.
         - **Database connection strings**: "postgresql://...", "mysql://...",
           "sqlite:///path/to/file.db" and the other schemes in
@@ -277,6 +279,18 @@ async def add(
 
         # Before anything is written, and before the name can reach git.
         check_branch_name(branch)
+
+    from cognee.tasks.web_scraper.ssrf_protection import require_http_requests_allowed_for
+
+    # Before any work starts: with run_in_background the fetch runs after this call
+    # has returned, where its refusal would never reach the caller.
+    require_http_requests_allowed_for(data)
+
+    # With the server-path gate closed, decide here, once, what each caller
+    # string is: before anything is written (a refused call leaves no dataset
+    # behind) and before anything below (CSV detection, the changed-document
+    # check, the pipeline) could look it up on disk.
+    data = screen_server_paths(data)
 
     if preferred_loaders is not None:
         transformed = {}

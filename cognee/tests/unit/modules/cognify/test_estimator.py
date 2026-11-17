@@ -332,28 +332,28 @@ async def test_missing_absolute_path_is_raw_text():
 
 
 @pytest.mark.asyncio
-async def test_local_paths_are_rejected_when_gate_disabled(tmp_path, monkeypatch):
+async def test_local_paths_are_rejected_when_gate_disabled(
+    offline_estimator, tmp_path, monkeypatch
+):
     # ACCEPT_LOCAL_FILE_PATH=false must gate dry_run exactly like real ingestion.
+    from cognee.modules.ingestion.exceptions import IngestionError
     from cognee.tasks.ingestion.save_data_item_to_storage import settings
 
     monkeypatch.setattr(settings, "accept_local_file_path", False)
+    monkeypatch.chdir(tmp_path)
     file_path = tmp_path / "notes.txt"
     file_path.write_text("stored text")
 
-    # An existing local file is rejected, whether named by file:// URI or by an
-    # absolute path — the gate must reject exactly what a real run rejects.
-    with pytest.raises(ValueError, match="not accepted"):
-        await estimator._input_to_texts(file_path.as_uri())
-    with pytest.raises(ValueError, match="not accepted"):
-        await estimator._input_to_texts(str(file_path))
-    # A non-existent absolute path is raw text even with the gate off: a real run
-    # saves it as text because it is not an existing local file (see #3887).
-    assert await estimator._input_to_texts("/no/such/file.txt") == ["/no/such/file.txt"]
-    # A real run refuses a relative path to an existing file too when the gate
-    # is off (save_data_item_to_storage's relative-path branch).
-    monkeypatch.chdir(tmp_path)
-    with pytest.raises(ValueError, match="not accepted"):
-        await estimator._input_to_texts("notes.txt")
+    async def estimate(data):
+        return await estimator.estimate_remember_dry_run(data, chunker=_FakeChunker, chunk_size=128)
+
+    # The real run's refusal, decided by shape: nothing is looked up, so a
+    # missing path is refused just like an existing one.
+    for path in (file_path.as_uri(), str(file_path), "/no/such/file.txt", "./notes.txt"):
+        with pytest.raises(IngestionError, match="not accepted"):
+            await estimate(path)
+    # A bare name cannot be told from a word: text, though notes.txt exists here.
+    assert (await estimate("notes.txt")).chunks == 1
 
 
 @pytest.mark.asyncio

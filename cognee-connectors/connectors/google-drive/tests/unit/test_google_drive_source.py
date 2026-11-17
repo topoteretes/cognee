@@ -13,6 +13,7 @@ tests stay focused on the sync state machine.
 """
 
 import re
+from types import SimpleNamespace
 
 import drive_pdfs
 import pytest
@@ -179,7 +180,7 @@ def _config(**overrides):
 def fake_content_extraction(monkeypatch):
     calls = []
 
-    def fake_extract(service, file_id, mime_type, name):
+    def fake_extract(service, file_id, mime_type, name, *, check_active=None):
         calls.append(file_id)
         return f"content::{file_id}"
 
@@ -226,7 +227,7 @@ def test_full_scan_deletes_absent_files_despite_permanently_bad_content(monkeypa
     monkeypatch.setattr(
         gd_source,
         "extract_file_content",
-        lambda service, file_id, *args: "content" if file_id == "good" else None,
+        lambda service, file_id, *args, **kwargs: "content" if file_id == "good" else None,
     )
     state = {}
     assert [row["id"] for row in gd_source._iter_rows(service, _config(), state)] == ["good"]
@@ -242,7 +243,7 @@ def test_incomplete_full_listing_does_not_reconcile_absence(monkeypatch):
     service = FakeDriveService({}, {})
     state = {"known_ids": ["keep"]}
 
-    def failed_listing(*args):
+    def failed_listing(*args, **kwargs):
         yield _file_meta("new")
         raise RuntimeError("listing failed on page two")
 
@@ -456,7 +457,9 @@ def test_file_diagnostics_report_reasons_and_retry_failed_extraction(monkeypatch
         start_token="t0",
     )
     content = {"good": "hello", "empty": " ", "failed": None}
-    monkeypatch.setattr(gd_source, "extract_file_content", lambda _, fid, *_args: content[fid])
+    monkeypatch.setattr(
+        gd_source, "extract_file_content", lambda _, fid, *_args, **_kwargs: content[fid]
+    )
     state, stats = {}, {}
     rows = list(gd_source._iter_rows(service, _config(max_file_size_mb=25), state, stats))
     assert [row["id"] for row in rows] == ["good"]  # nothing earlier to forget: no tombstones
@@ -504,7 +507,7 @@ def test_parallel_fetch_keeps_order_and_gives_each_thread_its_own_client(monkeyp
             clients.append(client)
         return client
 
-    def fake_extract(client, file_id, mime_type, name):
+    def fake_extract(client, file_id, mime_type, name, *, check_active=None):
         with lock:
             seen.add((id(client), threading.get_ident()))
         if first_two.acquire(blocking=False):
@@ -531,7 +534,7 @@ def test_parallel_fetch_without_factory_runs_inline_on_the_given_service(monkeyp
     _, service = _many_files(5)
     threads, clients = set(), set()
 
-    def fake_extract(client, file_id, *_args):
+    def fake_extract(client, file_id, *_args, **_kwargs):
         threads.add(threading.get_ident())
         clients.add(id(client))
         return "x"
@@ -546,7 +549,7 @@ def test_failure_in_one_worker_surfaces_and_stops_the_rest(monkeypatch):
     _, service = _many_files(30)
     started = []
 
-    def fake_extract(client, file_id, *_args):
+    def fake_extract(client, file_id, *_args, **_kwargs):
         started.append(file_id)
         if file_id == "f001":
             raise AssertionError("boom")  # not an extraction failure: must surface
@@ -568,7 +571,7 @@ def test_full_rescan_after_failure_refetches_only_changed_and_failed_files(monke
     fetched = []
     broken = {"f003"}
 
-    def fake_extract(client, file_id, *_args):
+    def fake_extract(client, file_id, *_args, **_kwargs):
         fetched.append(file_id)
         return None if file_id in broken else "x"
 
@@ -662,7 +665,7 @@ def test_export_over_the_google_limit_fails_the_run_with_its_reason(monkeypatch)
     doc = _file_meta("doc")
     service = FakeDriveService({"root": [doc]}, {"doc": doc})
 
-    def too_large(*_args):
+    def too_large(*_args, **_kwargs):
         raise gd_source.ExportTooLargeError("doc")
 
     monkeypatch.setattr(gd_source, "extract_file_content", too_large)
@@ -675,7 +678,10 @@ def test_export_over_the_google_limit_fails_the_run_with_its_reason(monkeypatch)
     assert "doc" not in state["versions"]
 
 
-def test_every_api_call_retries(fake_content_extraction):
+def test_every_api_call_leaves_the_retries_to_the_connector(fake_content_extraction):
+    # Was test_every_api_call_retries, which asserted num_retries=API_RETRIES on execute():
+    # googleapiclient's own loop is off now (num_retries=0), the connector retries through
+    # api_retry so that the host's check runs before every attempt.
     EXECUTE_RETRIES.clear()
     file_a = _file_meta("fileA")
     service = FakeDriveService({"root": [file_a]}, {"fileA": file_a}, start_token="t0")
@@ -688,14 +694,14 @@ def test_every_api_call_retries(fake_content_extraction):
     }
     list(gd_source._iter_rows(service, _config(), state))
     assert EXECUTE_RETRIES
-    assert set(EXECUTE_RETRIES) == {gd_source.API_RETRIES}
+    assert set(EXECUTE_RETRIES) == {0}
 
 
 def test_incomplete_full_listing_does_not_reconcile_absence_on_the_threaded_path(monkeypatch):
     service = FakeDriveService({}, {})
     state = {"known_ids": ["keep"], "versions": {"keep": "v"}}
 
-    def failed_listing(*args):
+    def failed_listing(*args, **kwargs):
         for index in range(5):
             yield _file_meta(f"new{index}")
         raise RuntimeError("listing failed on page two")
@@ -716,7 +722,9 @@ def test_withdrawn_authorization_stops_fetching_within_the_worker_count(monkeypa
     _, service = _many_files(40)
     fetched = []
     monkeypatch.setattr(
-        gd_source, "extract_file_content", lambda _c, file_id, *_a: fetched.append(file_id) or "x"
+        gd_source,
+        "extract_file_content",
+        lambda _c, file_id, *_a, **_kw: fetched.append(file_id) or "x",
     )
     checks = []
 
@@ -740,7 +748,7 @@ def test_permanent_failures_do_not_hold_the_cursor_back(monkeypatch):
     files = [_file_meta("ok"), _file_meta("word"), _file_meta("huge_doc")]
     service = FakeDriveService({"root": files}, {item["id"]: item for item in files})
 
-    def extract(_client, file_id, *_args):
+    def extract(_client, file_id, *_args, **_kwargs):
         if file_id == "word":
             raise gd_source.LoaderUnavailableError("no loader")
         if file_id == "huge_doc":
@@ -758,7 +766,7 @@ def test_permanent_failures_do_not_hold_the_cursor_back(monkeypatch):
     assert sorted(state["versions"]) == ["ok"]
 
     # A transient failure alongside them still holds the cursor.
-    def flaky(_client, file_id, *_args):
+    def flaky(_client, file_id, *_args, **_kwargs):
         return None if file_id == "ok" else extract(_client, file_id)
 
     monkeypatch.setattr(gd_source, "extract_file_content", flaky)
@@ -935,7 +943,7 @@ def test_rate_limit_mid_run_keeps_progress_and_resumes(monkeypatch):
     fetched = []
     limited = {"on": True}
 
-    def extract(_client, file_id, *_args):
+    def extract(_client, file_id, *_args, **_kwargs):
         if limited["on"] and file_id == "f3":
             raise gd_source._CutShort("rate_limit")
         fetched.append(file_id)
@@ -977,7 +985,7 @@ def test_429_on_a_download_cuts_the_run_instead_of_failing_every_file(monkeypatc
     resource = _Files()
     service.files = lambda: resource  # downloads only; listing is stubbed below
     monkeypatch.setattr(gd_source, "extract_file_content", _REAL_EXTRACT)
-    monkeypatch.setattr(gd_source, "_list_files_in_scope", lambda *_a: iter(files))
+    monkeypatch.setattr(gd_source, "_list_files_in_scope", lambda *_a, **_kw: iter(files))
     stats = {}
     rows = list(gd_source._iter_rows(service, _config(), {}, stats))
     assert rows == []
@@ -992,7 +1000,7 @@ def test_expired_token_before_anything_is_raised_so_the_host_reconnects(monkeypa
     monkeypatch.setattr(
         gd_source,
         "extract_file_content",
-        lambda *_a: (_ for _ in ()).throw(gd_source._CutShort("auth")),
+        lambda *_a, **_kw: (_ for _ in ()).throw(gd_source._CutShort("auth")),
     )
     with pytest.raises(gd_source.DriveAuthError):
         list(gd_source._iter_rows(service, _config(), {}))
@@ -1002,7 +1010,7 @@ def test_expired_token_after_rows_is_a_cut_not_an_error(monkeypatch):
     files = [_file_meta(f"f{i}") for i in range(3)]
     service = FakeDriveService({"root": files}, {item["id"]: item for item in files})
 
-    def extract(_client, file_id, *_args):
+    def extract(_client, file_id, *_args, **_kwargs):
         if file_id == "f2":
             raise gd_source._CutShort("auth")
         return "x"
@@ -1035,7 +1043,7 @@ def test_rate_limit_during_changed_file_fetch_keeps_the_token_and_what_was_fetch
         "newStartPageToken": "t1",
     }
 
-    def extract(_client, file_id, *_args):
+    def extract(_client, file_id, *_args, **_kwargs):
         if file_id == "f1":
             raise gd_source._CutShort("rate_limit")
         return "x"
@@ -1102,7 +1110,7 @@ def _delta_for(service, file_id):
 def test_edited_file_that_now_reads_empty_is_forgotten(monkeypatch):
     doc = _file_meta("doc")
     service = FakeDriveService({"root": [doc]}, {"doc": doc})
-    monkeypatch.setattr(gd_source, "extract_file_content", lambda *_a: "   ")
+    monkeypatch.setattr(gd_source, "extract_file_content", lambda *_a, **_kw: "   ")
     state = _delta_for(service, "doc")
     stats = {}
     rows = list(gd_source._iter_rows(service, _config(), state, stats))
@@ -1124,7 +1132,7 @@ def test_edited_doc_over_googles_export_limit_is_forgotten_and_named(monkeypatch
     doc = _file_meta("doc")
     service = FakeDriveService({"root": [doc]}, {"doc": doc})
 
-    def too_large(*_args):
+    def too_large(*_args, **_kwargs):
         raise gd_source.ExportTooLargeError("doc")
 
     monkeypatch.setattr(gd_source, "extract_file_content", too_large)
@@ -1140,7 +1148,7 @@ def test_missing_loader_keeps_what_an_earlier_run_ingested(monkeypatch):
     doc = _file_meta("doc")
     service = FakeDriveService({"root": [doc]}, {"doc": doc})
 
-    def no_loader(*_args):
+    def no_loader(*_args, **_kwargs):
         raise gd_source.LoaderUnavailableError("no docling")
 
     monkeypatch.setattr(gd_source, "extract_file_content", no_loader)
@@ -1166,7 +1174,7 @@ def test_a_failed_file_keeps_no_version_on_either_path(monkeypatch):
     doc = _file_meta("doc")
     service = FakeDriveService({"root": [doc]}, {"doc": doc})
 
-    def no_loader(*_args):
+    def no_loader(*_args, **_kwargs):
         raise gd_source.LoaderUnavailableError("no docling")
 
     monkeypatch.setattr(gd_source, "extract_file_content", no_loader)
@@ -1210,13 +1218,15 @@ def test_a_pdf_that_can_never_be_read_does_not_pin_the_cursor(monkeypatch, unrea
     service.files = _Files
     downloads = []
 
-    def counting(client, file_id, *args):
+    def counting(client, file_id, *args, **kwargs):
         downloads.append(file_id)
         return _REAL_EXTRACT(client, file_id, *args)
 
     monkeypatch.setattr(gd_source, "extract_file_content", counting)
     monkeypatch.setattr(
-        gd_source, "_stream_media", lambda request, buffer: buffer.write(request.execute())
+        gd_source,
+        "_stream_media",
+        lambda request, buffer, **_kwargs: buffer.write(request.execute()),
     )
     state, stats = {}, {}
     rows = list(gd_source._iter_rows(service, _config(), state, stats))
@@ -1238,7 +1248,7 @@ def test_file_edited_into_an_unreadable_one_is_forgotten_and_named(monkeypatch):
     doc = _file_meta("doc")
     service = FakeDriveService({"root": [doc]}, {"doc": doc})
 
-    def unreadable(*_args):
+    def unreadable(*_args, **_kwargs):
         raise gd_source.UnreadableFileError("PdfReadError: broken")
 
     monkeypatch.setattr(gd_source, "extract_file_content", unreadable)
@@ -1255,7 +1265,7 @@ def test_unreadable_files_do_not_free_a_transient_failure(monkeypatch):
     files = [_file_meta("locked"), _file_meta("flaky")]
     service = FakeDriveService({"root": files}, {item["id"]: item for item in files})
 
-    def extract(_client, file_id, *_args):
+    def extract(_client, file_id, *_args, **_kwargs):
         if file_id == "locked":
             raise gd_source.UnreadableFileError("locked")
 
@@ -1282,7 +1292,7 @@ def test_a_loader_failure_on_an_ingested_file_keeps_its_memory_and_the_cursor(mo
     service = FakeDriveService({"root": [doc]}, {"doc": doc})
 
     @contextmanager
-    def fake_download(_service, _file_id, _suffix):
+    def fake_download(_service, _file_id, _suffix, **_kwargs):
         yield "/nonexistent/drive_file.docx"
 
     class _Engine:
@@ -1322,7 +1332,7 @@ def test_the_size_bound_also_holds_on_the_changes_feed(monkeypatch):
     )
     running, peak, lock = [0], [0], threading.Lock()
 
-    def extract(_client, _file_id, *_args):
+    def extract(_client, _file_id, *_args, **_kwargs):
         with lock:
             running[0] += 1
             peak[0] = max(peak[0], running[0])
@@ -1362,7 +1372,7 @@ def test_cut_run_does_not_resurrect_the_version_of_a_file_it_forgot(monkeypatch)
     files = [_file_meta("gone"), _file_meta("next")]
     service = FakeDriveService({"root": files}, {item["id"]: item for item in files})
 
-    def extract(_client, file_id, *_args):
+    def extract(_client, file_id, *_args, **_kwargs):
         if file_id == "next":
             raise gd_source._CutShort("rate_limit")
         return "   "  # "gone" was edited to blank: forgotten
@@ -1381,3 +1391,120 @@ def test_zero_workers_from_the_environment_is_an_error_not_the_default(monkeypat
         gd_source.google_drive_source(folder_id="root", service=object())
     monkeypatch.setenv("GOOGLE_DRIVE_MAX_WORKERS", "3")
     gd_source.google_drive_source(folder_id="root", service=object())
+
+
+# ---------------------------------------------------------------------------
+# Authorization checkpoint and the retries: the host's check runs before every attempt and
+# every wait, so a revoked connection stops a retry instead of sleeping through it.
+# ---------------------------------------------------------------------------
+class _Revoked(Exception):
+    pass
+
+
+class _CountedRequest:
+    """A request answering every execute() with ``error``, counting how often it was asked."""
+
+    def __init__(self, error):
+        self._error = error
+        self.executions = 0
+
+    def execute(self, num_retries=0):
+        self.executions += 1
+        raise self._error
+
+
+def _service_with_start_page_token_request(request):
+    return SimpleNamespace(changes=lambda: SimpleNamespace(getStartPageToken=lambda **_: request))
+
+
+def test_a_revoked_connection_stops_a_retry_before_it_waits(waits):
+    """googleapiclient used to retry inside execute(), so a revoked connection kept sleeping."""
+    request = _CountedRequest(_HttpError(503))
+    service = _service_with_start_page_token_request(request)
+    checks = []
+
+    def check_active():
+        checks.append(1)
+        if len(checks) == 1:  # the first attempt runs unchecked; this is before its backoff wait
+            raise _Revoked
+
+    # pytest.raises(_Revoked) also proves it is not wrapped in the RuntimeError that a failed
+    # start-page-token request becomes.
+    with pytest.raises(_Revoked):
+        gd_source._get_start_page_token(service, check_active=check_active)
+
+    assert request.executions == 1, "exactly the first request was made"
+    assert waits == [], "the revoked run did not wait"
+
+
+def test_a_revoked_connection_is_not_a_failed_fetch_of_the_changed_file(waits):
+    # fetch_changed turns a failed metadata request into a RuntimeError (or a deletion for a
+    # 404); a revoked connection must pass through its blanket handler as it is.
+    request = _CountedRequest(_HttpError(503))
+    client = SimpleNamespace(
+        files=lambda: SimpleNamespace(get=lambda **_: request), close=lambda: None
+    )
+    service = FakeDriveService({"root": []}, {})
+    service.changes_by_token["t0"] = {
+        "changes": [{"fileId": "fileA", "removed": False}],
+        "newStartPageToken": "t1",
+    }
+
+    def check_active():
+        if request.executions:  # revoked while the first attempt's backoff is pending
+            raise _Revoked
+
+    with pytest.raises(_Revoked):
+        list(
+            gd_source._iter_rows(
+                service,
+                _config(max_workers=2),
+                {"page_token": "t0"},
+                service_factory=lambda: client,
+                check_active=check_active,
+            )
+        )
+
+    assert request.executions == 1
+    assert waits == []
+
+
+# googleapiclient's policy with API_RETRIES: N retries are N + 1 attempts, and retry n waits up
+# to 2**n seconds. The detailed status table is in test_google_api_retry.py.
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_a_transient_status_is_retried_api_retries_times_with_googles_backoff(waits, status):
+    request = _CountedRequest(_HttpError(status))
+
+    # What the failed request becomes is the connector's business (_CutShort for a 429 or 401,
+    # else RuntimeError); only the number of attempts is pinned here.
+    with pytest.raises((RuntimeError, gd_source._CutShort)):
+        gd_source._get_start_page_token(_service_with_start_page_token_request(request))
+
+    # The run is cut short or failed only once the retries are spent (_raise_if_cut).
+    assert request.executions == gd_source.API_RETRIES + 1
+    assert len(waits) == gd_source.API_RETRIES
+    assert all(0 <= wait <= 2 ** (retry + 1) for retry, wait in enumerate(waits))
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404])
+def test_a_permanent_status_is_not_retried_and_a_403_without_a_reason_is_permanent(waits, status):
+    request = _CountedRequest(_HttpError(status))
+
+    # What the failed request becomes is the connector's business (_CutShort for a 429 or 401,
+    # else RuntimeError); only the number of attempts is pinned here.
+    with pytest.raises((RuntimeError, gd_source._CutShort)):
+        gd_source._get_start_page_token(_service_with_start_page_token_request(request))
+
+    assert request.executions == 1
+    assert waits == []
+
+
+@pytest.fixture(autouse=True)
+def waits(monkeypatch):
+    """The backoff waits ``api_retry`` asked for, in order, without sleeping for real.
+
+    A fake that raises a 5xx or 429 is retried by the connector, so every test needs this.
+    """
+    recorded: list[float] = []
+    monkeypatch.setattr("time.sleep", recorded.append)
+    return recorded

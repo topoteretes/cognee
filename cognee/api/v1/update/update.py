@@ -22,6 +22,7 @@ from cognee.modules.cognify.config import (
     get_cognify_config,
     resolve_extractor,
 )
+from cognee.modules.data.exceptions import StoredFileNotRemovedError
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -29,6 +30,12 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("update")
+
+# What a caller is told when the full rebuild stops at a file it could not remove.
+REBUILD_INTERRUPTED = (
+    "The update stored the document's new content but did not finish: its memory has not "
+    "been rebuilt. Run the update again to rebuild it."
+)
 
 
 async def update(
@@ -206,6 +213,7 @@ async def update(
     from cognee.modules.users.exceptions import PermissionDeniedError
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.ingestion.resolve_dlt_sources import check_dlt_replacement, is_dlt_input
+    from cognee.tasks.ingestion.screen_server_paths import screen_server_paths
 
     if isinstance(data, list):
         if len(data) != 1:
@@ -213,6 +221,11 @@ async def update(
                 f"update() replaces exactly one document; got a list of {len(data)} items."
             )
         data = data[0]
+
+    # Decide a caller string before anything is dropped: with the gate closed an
+    # explicit server path is refused here, not after the full rebuild has
+    # already dropped the document's memory, and both paths store the rest as text.
+    data = screen_server_paths(data)
 
     # Authorize before the id is resolved: a caller without write access must
     # not learn from 404-versus-further whether a (dataset, data) pair exists.
@@ -338,17 +351,23 @@ async def update(
     else:
         pinned_item = DataItem(data=data, data_id=pinned_id)
 
-    await add(
-        data=pinned_item,
-        dataset_id=dataset_id,
-        user=user,
-        node_set=node_set,
-        vector_db_config=vector_db_config,
-        graph_db_config=graph_db_config,
-        preferred_loaders=preferred_loaders,
-        incremental_loading=incremental_loading,
-        data_cache=data_cache,
-    )
+    try:
+        await add(
+            data=pinned_item,
+            dataset_id=dataset_id,
+            user=user,
+            node_set=node_set,
+            vector_db_config=vector_db_config,
+            graph_db_config=graph_db_config,
+            preferred_loaders=preferred_loaders,
+            incremental_loading=incremental_loading,
+            data_cache=data_cache,
+        )
+    except StoredFileNotRemovedError as error:
+        # The re-add stored the new content and then could not remove a file
+        # the row left. The memory dropped above is not rebuilt yet, so the
+        # error states that, not just that the content was stored.
+        raise StoredFileNotRemovedError(error.not_removed, REBUILD_INTERRUPTED) from error
 
     cognify_runs = await cognify(
         datasets=[dataset_id],
