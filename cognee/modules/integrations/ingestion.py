@@ -176,7 +176,7 @@ _PROVIDERS: dict[str, _Provider] = {
         service_builder=_vercel_service,
     ),
     # A bot token from @BotFather, not an OAuth access token: Telegram has no OAuth for bots,
-    # so a host passes the token the user pasted (Cloud has no such connect flow yet).
+    # so a host passes the token the user pasted (Cloud: its API-key connect flow).
     "telegram": _Provider(
         prefix="telegram",
         source_module="cognee.tasks.ingestion.connectors.telegram",

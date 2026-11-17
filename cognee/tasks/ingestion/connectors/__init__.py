@@ -18,7 +18,7 @@ from .notion import notion_source
 from .obsidian import obsidian_source
 from .onenote import list_onenote_notebooks, onenote_source
 from .slack import build_slack_service, slack_source
-from .telegram import build_telegram_service, telegram_source
+from .telegram import build_telegram_service, telegram_account_id, telegram_source
 from .vercel import build_vercel_service, vercel_source
 
 __all__ = [
@@ -45,6 +45,7 @@ __all__ = [
     "obsidian_source",
     "onenote_source",
     "slack_source",
+    "telegram_account_id",
     "telegram_source",
     "vercel_source",
 ]

@@ -360,3 +360,36 @@ def test_chat_not_found_on_the_wire_resolves_a_username_to_nothing():
     with pytest.raises(TelegramAPIError) as info:
         module.resolve_usernames(client, {}, selection, module._StoredMessages(list))
     _assert_no_token(info.value)
+
+
+def test_the_account_id_is_the_bot_id_the_source_checks_its_state_against():
+    """A host keys a connection by this id, so a second bot never inherits the first bot's
+    table and state (which the source would refuse with failed_bot_mismatch on every run)."""
+    client, _ = _client({"ok": True, "result": {"id": 123456789, "is_bot": True}})
+    assert module.telegram_account_id(client) == "123456789"
+    assert client._open.requests[0].full_url.endswith("/getMe")
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [{"ok": True, "result": {"is_bot": True}}, {"ok": True, "result": {"id": True}}],
+)
+def test_an_account_id_answer_without_the_bot_id_raises(answer):
+    client, _ = _client(answer)
+    with pytest.raises(TelegramAPIError):
+        module.telegram_account_id(client)
+
+
+def test_a_rejected_token_raises_on_the_account_id_call_without_the_token():
+    client, _ = _client(_http_error(401, {"ok": False, "description": "Unauthorized"}))
+    with pytest.raises(TelegramAuthError) as info:
+        module.telegram_account_id(client)
+    _assert_no_token(info.value)
+
+
+def test_the_account_id_call_checks_the_host_before_its_request():
+    """F37: a host can stop the account id call like every other request."""
+    calls = []
+    client, _ = _client({"ok": True, "result": {"id": 5, "is_bot": True}})
+    assert module.telegram_account_id(client, check_active=lambda: calls.append(1)) == "5"
+    assert calls == [1]

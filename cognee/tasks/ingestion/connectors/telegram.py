@@ -177,8 +177,8 @@ class TelegramBotMismatchError(TelegramSourceError):
 
 
 class TelegramUnexpectedError(TelegramSourceError):
-    """A run failed on something this source did not expect (``__cause__`` is the original),
-    counted as ``failed_provider``."""
+    """A run failed on something this source did not expect, a defect of its own rather than
+    Telegram's answer (``__cause__`` is the original), counted as ``failed_unexpected``."""
 
 
 class TelegramStagingError(TelegramSourceError):
@@ -192,8 +192,9 @@ def new_stats() -> dict[str, int]:
     became no row (a chat outside the selection, a message without text), ``backlog`` 1 when the
     run read a full page, ``gap`` update ids that may have expired at Telegram before this run
     (see :func:`count_gap`). ``failed`` is 1 when the run stopped or raised, with one reason key
-    set (``failed_provider`` for any failure without a reason of its own, a failed staging read
-    included).
+    set: ``failed_unexpected`` for a failure that is not Telegram's (a defect of this source),
+    ``failed_provider`` for any other failure without a reason of its own, a failed staging read
+    included.
     """
     return dict.fromkeys(
         (
@@ -206,6 +207,7 @@ def new_stats() -> dict[str, int]:
             "failed_conflict",
             "failed_unavailable",
             "failed_provider",
+            "failed_unexpected",
             "failed_bot_mismatch",
             "backlog",
             "gap",
@@ -408,6 +410,24 @@ def build_telegram_service(bot_token: str) -> TelegramBotClient:
     A bot token is not an OAuth access token: Telegram has no OAuth for bots.
     """
     return TelegramBotClient(bot_token)
+
+
+def telegram_account_id(service: Any, *, check_active: Callable[[], None] | None = None) -> str:
+    """The bot's id (``getMe``): the account a host keys a connection by.
+
+    It is the id the source checks its state against, so a host that keys the connection by it
+    gives a second bot its own table and state, instead of a table whose state belongs to the
+    first bot (which the source refuses with ``failed_bot_mismatch`` on every run).
+    """
+    return _bot_id(service.call("getMe", check_active=check_active))
+
+
+def _bot_id(me: Any) -> str:
+    """The bot id of a ``getMe`` answer, read one way wherever it is read."""
+    bot_id = me.get("id") if isinstance(me, dict) else None
+    if isinstance(bot_id, bool) or not isinstance(bot_id, int):
+        raise TelegramAPIError("Telegram getMe: HTTP 200 without the bot's id", status=200)
+    return str(bot_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1040,6 +1060,7 @@ _STOP_REASONS: tuple[tuple[type[TelegramSourceError], str], ...] = (
 )
 # A run that hits one of these raises, after counting it.
 _RAISE_REASONS: tuple[tuple[type[TelegramSourceError], str], ...] = (
+    (TelegramUnexpectedError, "failed_unexpected"),
     (TelegramBotMismatchError, "failed_bot_mismatch"),
     (TelegramAPIError, "failed_provider"),
 )
@@ -1062,10 +1083,25 @@ def classify_sync_error(error: BaseException) -> str | None:
     return None
 
 
+def _counted(stats: dict[str, int], error: Exception) -> TelegramSourceError:
+    """Count a failure that ends the run and return it typed, for the caller to raise: the stats
+    are complete on every exit and a host classifies it under the key counted here (and counts
+    it once). A failure that is not Telegram's is a defect of this source: ``failed_unexpected``."""
+    typed = (
+        error
+        if isinstance(error, TelegramSourceError)
+        else TelegramUnexpectedError(
+            f"Telegram: the run failed unexpectedly ({type(error).__name__})."
+        )
+    )
+    stats["failed"] = 1
+    if not any(stats[key] for key in stats if key.startswith("failed_")):
+        stats[_reason(typed, _RAISE_REASONS) or "failed_provider"] = 1
+    return typed
+
+
 def _check_owner(state: dict, me: Any, resource_name: str) -> None:
-    if not isinstance(me, dict) or me.get("id") is None:
-        raise TelegramAPIError("Telegram getMe: HTTP 200 without the bot's id", status=200)
-    owner, current = state.get("bot_id"), str(me["id"])
+    owner, current = state.get("bot_id"), _bot_id(me)
     if owner is not None and owner != current:
         raise TelegramBotMismatchError(
             f"The sync state of resource_name '{resource_name}' belongs to another bot. Give "
@@ -1099,6 +1135,19 @@ def sync_rows(
             "Upgrade cognee before syncing."
         )
     budget = _WaitBudget()
+    host_stops: list[BaseException] = []
+    host_check = check_active
+
+    def active() -> None:
+        # The host's own stop (a revoked connection) is not a failure of the run: kept apart so
+        # it passes through unwrapped and uncounted.
+        try:
+            host_check()
+        except BaseException as stop:
+            host_stops.append(stop)
+            raise
+
+    check_active = active if host_check is not None else None
     try:
         me = client.call("getMe", check_active=check_active, budget=budget)
         _check_owner(state, me, resource_name)
@@ -1114,12 +1163,16 @@ def sync_rows(
             client, state, selection, stored, check_active=check_active, budget=budget
         )
         updates = fetch_page(client, state, now, check_active=check_active, budget=budget)
-    except TelegramSourceError as error:
-        stats["failed"] += 1
-        stop = _reason(error, _STOP_REASONS)
-        if stop is None:
-            stats[_reason(error, _RAISE_REASONS) or "failed_provider"] = 1
+    except Exception as error:
+        if any(error is stop for stop in host_stops):
             raise
+        stop = _reason(error, _STOP_REASONS) if isinstance(error, TelegramSourceError) else None
+        if stop is None:
+            typed = _counted(stats, error)
+            if typed is error:
+                raise
+            raise typed from error
+        stats["failed"] = 1
         stats[stop] = 1
         logger.warning("Telegram: run stopped (%s); the next sync reads the same updates.", stop)
         return
@@ -1144,16 +1197,10 @@ def sync_rows(
         )
         yield from rows
     except Exception as error:
-        # Whatever stops the run here is counted, so the stats are complete on every exit.
-        stats["failed"] = 1
-        if not any(stats[key] for key in stats if key.startswith("failed_")):
-            stats["failed_provider"] = 1
-        if isinstance(error, TelegramSourceError):
+        typed = _counted(stats, error)
+        if typed is error:
             raise
-        # Typed, so a host classifies it under the key counted here and counts it once.
-        raise TelegramUnexpectedError(
-            f"Telegram: the run failed unexpectedly ({type(error).__name__})."
-        ) from error
+        raise typed from error
     # Only reached once every row is out: a run stopped mid-way saves nothing.
     state.update(new_state)
 

@@ -169,7 +169,7 @@ def test_telegram_names_are_pinned_and_a_dlt_table_name():
 
 
 def test_telegram_service_is_built_from_a_bot_token_sent_only_in_the_path():
-    # Telegram has no OAuth for bots, so the connector is SDK-only for Cloud: the builder takes
+    # Telegram has no OAuth for bots, so a host connects it by API key: the builder takes
     # the bot token a user pasted. It goes into the request path, never into a header.
     from cognee.tasks.ingestion.connectors.telegram import TelegramBotClient
 
@@ -299,7 +299,7 @@ async def test_an_unexpected_telegram_failure_is_counted_once(monkeypatch):
         classify_error=ingestion.error_classifier("telegram"),
     )
     assert counts["failed"] == 1
-    assert counts["failed_provider"] == 1
+    assert counts["failed_unexpected"] == 1
     assert "failed_ingestion" not in counts
 
 

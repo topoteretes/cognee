@@ -947,6 +947,7 @@ STATS_KEYS = {
     "failed_conflict",
     "failed_unavailable",
     "failed_provider",
+    "failed_unexpected",
     "failed_bot_mismatch",
     "backlog",
     "gap",
@@ -1957,8 +1958,63 @@ def test_an_unexpected_failure_while_planning_is_counted_and_raised(monkeypatch)
     with pytest.raises(module.TelegramUnexpectedError) as info:
         run(bot, {}, stats=stats)
     assert isinstance(info.value.__cause__, KeyError)
-    assert module.classify_sync_error(info.value) == "failed_provider"
-    assert [key for key, value in stats.items() if value] == ["failed", "failed_provider"]
+    assert module.classify_sync_error(info.value) == "failed_unexpected"
+    assert [key for key, value in stats.items() if value] == ["failed", "failed_unexpected"]
+
+
+def test_an_unexpected_failure_before_the_page_is_counted_and_raised(monkeypatch):
+    """F38: a failure other than Telegram's while the page is fetched raised with every count
+    at zero; it is counted and typed like one while the page is planned, and the cursor stays."""
+
+    def broken(*args, **kwargs):
+        raise KeyError("result")
+
+    monkeypatch.setattr(module, "fetch_page", broken)
+    bot = FakeBot()
+    state = {"last_update_id": 7}
+    stats = new_stats()
+    with pytest.raises(module.TelegramUnexpectedError) as info:
+        run(bot, state, stats=stats)
+    assert isinstance(info.value.__cause__, KeyError)
+    assert module.classify_sync_error(info.value) == "failed_unexpected"
+    assert [key for key, value in stats.items() if value] == ["failed", "failed_unexpected"]
+    assert state["last_update_id"] == 7
+
+
+def test_the_hosts_stop_from_check_active_passes_through_unchanged():
+    """A host stops a walk by raising from ``check_active``; that is not a failure of the run,
+    so it is neither wrapped nor counted."""
+
+    class Inactive(Exception):
+        pass
+
+    def stop():
+        raise Inactive
+
+    bot = FakeBot()
+    stats = new_stats()
+    rows = sync_rows(
+        bot,
+        {},
+        stats,
+        selection=_selection(None, False),
+        resource_name=NAME,
+        staged_ids=never_read,
+        check_active=stop,
+    )
+    with pytest.raises(Inactive):
+        list(rows)
+    assert not any(stats.values())
+
+
+def test_a_getme_id_that_is_not_a_number_is_refused_like_the_account_id_call():
+    """F36: the source and ``telegram_account_id`` read the bot id the same way, so a host never
+    keys a connection by an id the source would read differently."""
+    bot = FakeBot(bot_id="99")
+    stats = new_stats()
+    with pytest.raises(module.TelegramAPIError):
+        run(bot, {}, stats=stats)
+    assert stats["failed_provider"] == 1
 
 
 @pytest.mark.parametrize(

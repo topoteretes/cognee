@@ -18,10 +18,12 @@ Bundled with the Cognee SDK (a core that does not read per-row structure,
 client is the standard library's `urllib`.
 
 **Auth is a bot token from @BotFather.** Telegram has no OAuth for bots, so there is no
-authorize step and no access token to refresh. The connector is therefore **SDK-only for Cognee
-Cloud**: Cloud connects every provider through OAuth, and it can offer Telegram only once it
-gains a flow where a user pastes a credential. The `_PROVIDERS["telegram"]` entry
-(`cognee.modules.integrations.ingestion`) is already there for a host that has the token.
+authorize step and no access token to refresh: a host stores the token the user pasted and hands
+it to `_PROVIDERS["telegram"]` (`cognee.modules.integrations.ingestion`), whose service builder
+wraps it. A token does not expire; a revoked one surfaces as `failed_auth`. Key the connection
+by `telegram_account_id(service, check_active=...)`, the bot's id from `getMe`: it is the id the
+source checks its state against, so connecting another bot gives it its own table instead of one
+whose state belongs to the first bot (refused with `failed_bot_mismatch` on every run).
 
 Use a **dedicated bot** for cognee:
 
@@ -263,7 +265,8 @@ exit:
 | `failed_conflict` | `getUpdates` answered 409: a webhook is set, or another process polls this bot. Run stops, nothing changes |
 | `failed_rate_limit` | a 429 the retries did not get past, or whose wait does not fit the run's wait budget. Run stops, nothing changes |
 | `failed_unavailable` | a 5xx or no answer after the retries. Run stops, nothing changes |
-| `failed_provider` | any other failure (an unexpected one is raised as `TelegramUnexpectedError`, the original as its cause): another 4xx, an HTTP 200 that is not a Bot API answer, a `getMe` without the bot's id, a staging read that fails, an unexpected error while the page is turned into rows, a state of a newer version. The run raises |
+| `failed_provider` | any other failure Telegram's side caused: another 4xx, an HTTP 200 that is not a Bot API answer, a `getMe` without a numeric bot id, a staging read that fails, a state of a newer version. The run raises |
+| `failed_unexpected` | a failure that is not Telegram's (a defect of this source), at any point of the run, raised as `TelegramUnexpectedError` with the original as its cause. The run raises and the cursor stays |
 | `failed_bot_mismatch` | the state of this `resource_name` belongs to another bot (`TelegramBotMismatchError`). The run raises |
 
 A run that stops keeps its cursor: nothing was confirmed and the next sync reads the same page.
