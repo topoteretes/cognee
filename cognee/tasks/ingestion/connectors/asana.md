@@ -187,8 +187,8 @@ missing tasks each count their own streak, a success resets it, and a 403 or 404
 so a task that keeps answering 403 or 404 never stops a run) or a rejected token once the
 listing pass is complete (a run resuming a pass that earlier runs listed emits no project row,
 and its first task read is the first request; when such a run kept nothing it raises instead,
-see below), the run ends cleanly and reports its reason: `failed_rate_limit`, `failed_budget`, `failed_unavailable`, `failed_auth` or
-`failed_offset_expired` (below). It never sleeps on a 429: it does not read `Retry-After`,
+see below), the run ends cleanly and reports its reason: `failed_rate_limit`, `failed_budget`,
+`failed_unavailable` or `failed_auth`. It never sleeps on a 429: it does not read `Retry-After`,
 because the walk holds its dataset's staging lock and dlt rolls back the state of a
 failed run.
 
@@ -231,21 +231,13 @@ next run continues at the page it stopped at (the project is read again first, o
 run cut inside the listing reads no task and forgets nothing, and neither cursors nor sync
 tokens nor the stored selection move: the pass renders, forgets and advances only when every
 selected project is listed, and only then is `state["listing"]` cleared (a project's offset goes
-when the project finishes). A stored offset that Asana rejects (HTTP 400) lists that project
-again from its first page in the same run, dropping the gids it had listed (the fresh listing is
-complete on its own, and a known task it lacks is checked before it is forgotten); the other
-projects of the pass are kept, and a 400 on the restarted listing in the same run raises. The
-project is marked `relisted` until a later run resumes it from an offset Asana accepts (or it
-finishes its listing, turns unresolved, or the selection changes). A project
-whose offset is rejected twice in a row (no accepted offset between), and that the run then lists
-no further than it had, has offsets that expire between runs faster than runs list it. The run
-names its stop `failed_offset_expired`, whether the budget or a 429 cut it, and logs what would
-finish the project: a run that lists it in one go (a larger `max_requests`, or a higher rate
-limit). It still keeps the fresh offset it was given. A raise would not: dlt drops the state of a
-run that raises, so the stored offset would stay the rejected one, and every later run would be
-rejected on it again, even once Asana accepts new offsets. Kept, the next run judges an offset
-this run was given, and the project continues as soon as Asana accepts one. A changed selection drops the pass and
-every offset, because what was kept described another set of projects. A run that raises keeps the
+when the project finishes). A stored offset that Asana rejects (HTTP 400, see Known gaps) lists
+that project again from its first page in the same run, dropping the gids it had listed (the
+fresh listing is complete on its own, and a known task it lacks is checked before it is
+forgotten); the other projects of the pass are kept, and a 400 on the restarted listing in the
+same run raises. A run cut after the restart keeps the fresh offset it was given and is named by
+its cut, so the next run sends an offset Asana issued, not the rejected one. A changed selection
+drops the pass and every offset, because what was kept described another set of projects. A run that raises keeps the
 state it started with. A run that completes the listing but is cut before any task read or check got
 an answer keeps the whole listing too, so the next run starts from it instead of listing again
 first. A pass that is not cut commits at its end and keeps no `listing`.
@@ -285,7 +277,7 @@ saying that `max_requests` is too small and giving the numbers (the budget, the 
 spent, how many of them re-read projects Asana would not show). No ids or names are in the
 message. A 429 never raises this: it is the provider's own limit and clears with time. The state
 is left as it was. A run that kept a project's fresh offset kept something, so a project
-whose offsets expire never raises this; it stops with `failed_offset_expired` (above).
+whose offsets expire never raises this.
 
 **A project Asana will not show.** A 403 or 404 on `GET /projects/{gid}` (that call only; a 401
 and every other error still raise) makes the project **unresolved** for the pass: it is skipped
@@ -307,13 +299,15 @@ Known gaps:
 - A mistyped project gid also ends as unresolved (404): the run is clean, and the project never
   syncs. Nothing here tells a typo, a deleted project and a missing access apart: the log tells
   403 from 404, and everything else treats them alike.
-- A page offset is stored between runs. Whether and when Asana expires one is not verified; a
-  rejected one (HTTP 400) costs its project's listing pages again, from the first page.
+- A page offset is stored between runs. Asana documents that an offset expires, not when or
+  with which status: 400 is what it answers to an offset it never issued, and is assumed for an
+  expired one (`_EXPIRED_OFFSET_STATUSES`) until a live check. Another status raises
+  `AsanaAPIError` as before the fix. A rejected offset costs its project's listing pages again.
 - A project whose offsets keep expiring between runs, in a selection whose runs are cut (by the
   budget or a 429) before the project lists to its end, never finishes its listing: every run
-  stops with `failed_offset_expired`, the pass never completes and no edit of the selection is
-  rendered until a run lists the project in one go or Asana accepts an offset again. The stop
-  says so on every run; nothing raises, because the fresh offset kept may be accepted next time.
+  stops with `failed_budget` or `failed_rate_limit`, the pass never completes and no edit of the
+  selection is rendered until a run lists the project in one go or Asana accepts an offset
+  again. Nothing tells this apart from an ordinary cut, because no expiry has been observed yet.
 - Three tasks that keep answering 5xx or nothing in the retry tail stop every run with
   `failed_unavailable`, so the check phase never runs and tasks deleted in Asana stay known; and
   one check that keeps answering 5xx, with a budget of just the listing plus one request, makes
@@ -341,8 +335,7 @@ every way a run can end:
 | `unresolved` | selected projects Asana would not show (403 or 404) this run, skipped and asked again next run |
 
 and exactly one reason key when a run stopped: `failed_rate_limit`, `failed_budget`,
-`failed_unavailable` (5xx or no answer), `failed_auth` or `failed_offset_expired` (a project whose
-page offsets expire between runs faster than runs list it; it names the stop whatever cut it). A run that raises carries `failed_auth`
+`failed_unavailable` (5xx or no answer) or `failed_auth`. A run that raises carries `failed_auth`
 for a rejected token and `failed_budget` for a budget too small; any other raise carries no
 reason key: the host names it (for Asana it has no classifier and records
 `failed_ingestion`, next to the key above when there is one). What `check_active` raises is the
@@ -350,8 +343,8 @@ host's own stop and adds no count.
 
 State (version 1, `state["v"]`): `selection`, `known_ids`, `subtasks`, `multi`, `retry`,
 `pending`, `listing` (only while a listing pass is unfinished: `selection`, `done` per finished
-project and `partial` per project cut inside, with its page offset, the tasks it listed so far, its events
-progress and `relisted` while it restarted after a rejected offset) and, per project, `cursor`,
+project and `partial` per project cut inside, with its page offset, the tasks it listed so far
+and its events progress) and, per project, `cursor`,
 `seen`, `sync` and `tasks` (the gids last listed). It holds ids, timestamps and offsets, never
 text. `known_ids` grows with the number of rows; `listing` and the per-project `tasks` hold the
 ids and timestamps of the listed tasks again, so the state can exceed `known_ids` until a pass
@@ -404,8 +397,7 @@ completes.
   per minute, so the next run (a minute later) usually continues.
 - **A plan with a low per-minute limit** ends a run at the limit, long before `max_requests`: the
   run stops with `failed_rate_limit`, keeps what it rendered and the listing it finished, and
-  the next run continues (a project whose offsets expire between runs stops it with
-  `failed_offset_expired` instead, see Known gaps). A first sync of a big selection then takes as many runs as the limit
+  the next run continues. A first sync of a big selection then takes as many runs as the limit
   needs (a task costs three requests, and every pass lists its projects again). The connector does
   not pace its requests, and `max_requests` only bounds a run, it is not tuned to a plan. The
   per-plan limits are not checked against Asana here.

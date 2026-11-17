@@ -7,8 +7,9 @@ Copied from cognee.tests.unit.tasks.connectors.fake_asana (cognee dev, 2026-10-2
 It models what was observed against a real workspace: ``/events`` answers 412 with a fresh sync
 token when the token is missing or stale, a listing pages through ``next_page.offset`` (an
 opaque token that stands for a position in the list as it is when the page is asked for, so
-items added or removed meanwhile shift it, and one the fake never issued, or one
-``expire_offsets`` expired, answers 400), and an
+items added or removed meanwhile shift it; one the fake never issued answers 400, and one
+``expire_offsets`` expired answers the status it is given, 400 unless a test says otherwise:
+Asana documents that offsets expire, not with which status, so that is not verified), and an
 edited comment (or a new one) leaves the task's ``modified_at`` alone: it arrives only as a story
 event, an edited one with ``parent: null`` and the task under ``resource.target``. An endpoint
 the connector does not use is not answered: a call to it raises ``AssertionError``.
@@ -64,6 +65,8 @@ class FakeAsana:
         # issued offset token -> (the listing it belongs to, the position it stands for)
         self._offsets: dict[str, tuple[str, int]] = {}
         self._issued = 0
+        self._expired: set[str] = set()  # tokens ``expire_offsets`` took back
+        self.expired_status = 400  # what an expired token answers
         self.events_page_size = 100
         self._clock = 0
         self._counter = 0
@@ -371,9 +374,15 @@ class FakeAsana:
         self._offsets[token] = (scope, position)
         return token
 
-    def expire_offsets(self) -> None:
-        """Asana stops accepting every offset issued so far: each answers 400 from now on."""
+    def expire_offsets(self, status: int = 400) -> None:
+        """Asana stops accepting every offset issued so far: each answers ``status`` from now on.
+
+        Asana's docs say an offset expires but not with which status; 400 is what it answers to
+        one it never issued, and is assumed for an expired one until a live check (SDK-1485).
+        """
+        self._expired |= set(self._offsets)
         self._offsets.clear()
+        self.expired_status = status
 
     def offset_position(self, token: str) -> int:
         """The position an issued offset token stands for, for tests to read."""
@@ -383,6 +392,8 @@ class FakeAsana:
         limit = min(int(params.get("limit", 20)), self.page_size)
         offset = params.get("offset")
         issued = self._offsets.get(offset)
+        if offset in self._expired:
+            return _error(self.expired_status, "offset: Invalid offset")
         if (
             offset is not None
             and offset != self.stuck_offset

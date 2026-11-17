@@ -55,9 +55,11 @@ REASONS = {
     "failed_rate_limit",
     "failed_budget",
     "failed_unavailable",
-    "failed_offset_expired",
     "failed_ingestion",
 }
+# A walker that stops making progress loops in the tests that run until the listing ends: fail
+# it by time, not by a CI job timeout.
+pytestmark = pytest.mark.timeout(60)
 # What one task costs to read: the task, its comments and its subtasks.
 TASK_REQUESTS = 3
 # What a run spends before it renders a task of a one project selection: the project, its
@@ -1672,8 +1674,9 @@ def test_the_stored_progress_of_an_unresolved_project_is_not_touched_by_a_queue(
 
 
 def test_an_expired_offset_lists_that_project_again_and_forgets_only_what_a_check_confirms():
-    """SDK-1485: a stored page offset Asana no longer accepts (HTTP 400) raised on every later
-    run, so the connection never synced again. Only the cut project starts over; a task the fresh
+    """SDK-1485: a stored page offset Asana no longer accepts raised on every later run, so the
+    connection never synced again. The fake answers 400 for it, an assumption about Asana that
+    is not verified live (``_EXPIRED_OFFSET_STATUSES``). Only the cut project starts over; a task the fresh
     listing lacks is still checked before it is forgotten."""
     fake = _long_project(tasks=6, page_size=2)
     fake.add_project("P0")
@@ -1771,13 +1774,21 @@ def test_a_400_on_the_first_page_of_a_fresh_listing_raises_and_does_not_restart(
     assert raised.value.status == 400 and _task_pages(fake) == [None] and state == {}
 
 
+def _run_until_listed(run, state: dict, *, runs: int) -> None:
+    """Run until the listing pass completes, failing after ``runs`` runs instead of looping."""
+    for _ in range(runs):
+        if "listing" not in state:
+            return
+        run()
+    assert "listing" not in state, f"the listing did not finish in {runs} runs"
+
+
 @pytest.mark.parametrize("cut", ["budget", "rate_limit"])
-def test_a_project_whose_offset_expires_every_run_reports_it_and_keeps_its_fresh_offset(cut):
+def test_a_project_whose_offset_expires_every_run_reports_the_cut_and_keeps_its_fresh_offset(cut):
     """Each run lists the same 8 of 20 tasks before it is cut, and Asana rejects the offset by
-    the next run. A first restart is an ordinary stop (the expiry may be a one-off). A second
-    one that lists no further names the stop ``failed_offset_expired``, whatever cut it, and
-    keeps the offset it was given, so the next run judges a new offset, not the rejected one:
-    once Asana accepts offsets again the project continues within the same limit."""
+    the next run. Every run is an ordinary stop named by its cut, and keeps the offset it was
+    given (raising would keep the rejected one, since dlt drops the state of a run that
+    raises): once Asana accepts offsets again the project continues within the same limit."""
     fake = _long_project(tasks=20, page_size=2)
     state: dict = {}
 
@@ -1792,54 +1803,55 @@ def test_a_project_whose_offset_expires_every_run_reports_it_and_keeps_its_fresh
         fake.rate_limit(6)
     run()
     assert len(state["listing"]["partial"]["P1"]["listed"]) == 8
-    fake.expire_offsets()
-
-    _rows, stats = run()  # the first restart is an ordinary stop
-
-    assert _reasons(stats) == {f"failed_{cut}"}
-    for _ in range(2):  # and every run after it, while the offsets keep expiring
+    for _ in range(3):  # every run, while the offsets keep expiring
         stored = state["listing"]["partial"]["P1"]["offset"]
         fake.expire_offsets()
 
         _rows, stats = run()
 
-        assert _reasons(stats) == {"failed_offset_expired"}
+        assert _reasons(stats) == {f"failed_{cut}"}
         progress = state["listing"]["partial"]["P1"]
-        assert len(progress["listed"]) == 8 and progress["relisted"] is True
+        assert len(progress["listed"]) == 8
         assert progress["offset"] not in (None, stored), "the fresh offset is kept"
 
-    runs = 0
-    while "listing" in state:  # Asana accepts offsets again: the same limit finishes it
-        run()
-        runs += 1
-        assert runs < 6, "the listing finishes"
+    _run_until_listed(run, state, runs=6)  # Asana accepts offsets again
 
 
 def test_an_offset_that_expires_now_and_then_never_stops_the_listing_for_good():
-    """Expire, resume from an accepted offset, expire again: the accepted offset shows the
-    expiry is not every run, so the second restart is a first one again and the listing goes
-    on. Without that, the restart was compared with the depth of several runs and every later
-    run raised, though Asana no longer rejected anything."""
     fake = _long_project(tasks=30, page_size=2)
     state: dict = {}
     budget = {"max_requests": 6}  # the project, its events once, then four pages
     _sync(fake, state, **budget)
     fake.expire_offsets()
     _sync(fake, state, **budget)  # restarts
-    assert state["listing"]["partial"]["P1"]["relisted"] is True
-
     _sync(fake, state, **budget)  # the stored offset is accepted
-
-    progress = state["listing"]["partial"]["P1"]
-    assert "relisted" not in progress and len(progress["listed"]) > 8
+    assert len(state["listing"]["partial"]["P1"]["listed"]) > 8
     fake.expire_offsets()
-    runs = 0
-    while "listing" in state:
-        _sync(fake, state, **budget)  # never raises
-        runs += 1
-        assert runs < 10, "the listing finishes"
+
+    _run_until_listed(lambda: _sync(fake, state, **budget), state, runs=10)  # never raises
+
     _sync(fake, state)  # the tasks the small budget did not reach are read
     assert not state["pending"] and len(state["known_ids"]) == 31  # the project and 30 tasks
+
+
+@pytest.mark.parametrize("status", [404, 410, 412, 500])
+def test_an_offset_rejected_with_another_status_raises_and_does_not_restart(status):
+    """Only ``_EXPIRED_OFFSET_STATUSES`` restart a listing. If a live check shows Asana answers
+    an expired offset otherwise, this test names the status to add."""
+    fake = _long_project(tasks=6, page_size=2)
+    fake.fail("/tasks", 429, after=1)
+    state: dict = {}
+    _sync(fake, state)
+    fake.heal()
+    fake.expire_offsets(status=status)
+    before = copy.deepcopy(state)
+    fake.calls.clear()
+
+    with pytest.raises(AsanaAPIError) as raised:
+        _sync(fake, state)
+
+    assert raised.value.status == status and state == before
+    assert None not in _task_pages(fake), "no restart"
 
 
 # --- a budget that cannot make progress raises ---
@@ -3719,6 +3731,36 @@ def test_a_clean_stop_resumes_from_pending_and_loses_nothing_that_changed_meanwh
     assert "Edit two of 4." in staged["task:4"], "the latest edit, not the one that was pending"
     assert set(staged) == {"project:P1", "task:1", "task:2", "task:3", "task:4"}
     assert done.cognee_sync_stats["deleted"] == 2
+
+
+def test_an_expired_offset_restarts_through_real_dlt_runs_and_keeps_the_fresh_offset(tmp_path):
+    """The restart rests on dlt keeping a cut run's resource state: the offset a restarted
+    listing was given, not the rejected one, is what the next run sends."""
+    fake = _long_project(tasks=6, page_size=2)
+    _run(tmp_path, _source(fake))
+    for gid in "123456":
+        fake.edit_task(gid, notes=f"Edit of {gid}.")
+    fake.fail("/tasks", 429, after=1)  # the first page, then the cut
+    _run(tmp_path, _source(fake))
+    stored = _resource_state(tmp_path, TABLE)["listing"]["partial"]["P1"]["offset"]
+    fake.heal()
+    fake.expire_offsets()
+    fake.fail("/tasks", 429, after=2)  # the rejected page, the first page again, then the cut
+    restarted = _source(fake)
+
+    _run(tmp_path, restarted)
+
+    fresh = _resource_state(tmp_path, TABLE)["listing"]["partial"]["P1"]["offset"]
+    assert fresh not in (None, stored) and _reasons(restarted.cognee_sync_stats) == {
+        "failed_rate_limit"
+    }
+    fake.heal()
+    fake.calls.clear()
+    done = _source(fake)
+    staged = _run(tmp_path, done)
+    assert _task_pages(fake)[0] == fresh, "the next run resumes at the kept offset"
+    assert all(f"Edit of {gid}." in staged[f"task:{gid}"] for gid in "123456")
+    assert done.cognee_sync_stats["failed"] == 0
 
 
 def test_a_rejected_token_with_nothing_emitted_raises_through_dlt_and_the_next_run_is_whole(

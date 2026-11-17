@@ -64,19 +64,16 @@ Design
   listing does), the source stops cleanly, keeps what it emitted, queues the tasks it did not
   reach in ``state["pending"]`` and reports the reason in
   ``cognee_sync_stats`` (``failed_rate_limit``, ``failed_budget``, ``failed_unavailable``,
-  ``failed_auth``, ``failed_offset_expired``). It never sleeps on a 429: ``dlt`` rolls back
-  the state of a failed run and the walk holds its dataset's staging lock.
+  ``failed_auth``). It never sleeps on a 429: ``dlt`` rolls back the state of a failed run and
+  the walk holds its dataset's staging lock.
 * **The listing is a pass that can span runs.** A project whose listing finished, and the events
   and page offset of one cut inside, are kept in ``state["listing"]`` (ids, timestamps and
   offsets, never text) and the finished projects' rows are emitted at once. A run cut inside the
   listing (a 429 or a spent budget) renders nothing and forgets nothing; the next run continues
   at the page it stopped at, and the pass completes, renders and forgets only when every
-  selected project is listed. A stored offset Asana answers 400 to lists that project again
-  from its first page. One rejected twice in a row, whose new listing the run then cut no
-  deeper, stops the run with ``failed_offset_expired``: its offsets expire between runs
-  faster than runs list it. The run keeps the fresh offset, so the next run judges an offset
-  this run was given, and the project continues as soon as Asana accepts one again. A changed
-  selection starts the pass over.
+  selected project is listed. A stored offset Asana rejects (``_EXPIRED_OFFSET_STATUSES``)
+  lists that project again from its first page, once per run; the run keeps the fresh offset.
+  A changed selection starts the pass over.
 * **Budget.** ``max_requests`` bounds every request of a run, the listing's and the reads' (a
   task costs three, so at least three), so a run holds the staging lock for at most that many
   requests plus the client's retries of each (``_RETRIES``); there is no deadline or other
@@ -102,7 +99,7 @@ import re
 import time
 from collections.abc import Callable, Iterable, Iterator
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, TypedDict
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import dlt_utils
@@ -130,6 +127,10 @@ _OVERLAP_SECONDS = 60
 _OUTAGE_STREAK = 3
 # Requests that read one task: the task, its comments and its subtasks.
 _TASK_REQUESTS = 3
+# What Asana answers to a stored page offset it no longer accepts. Its docs say an offset
+# expires, not with which status: 400 is what it answers to an offset it never issued, and is
+# assumed for an expired one until a live check says otherwise (SDK-1485).
+_EXPIRED_OFFSET_STATUSES = frozenset({400})
 # A gid goes into the URL of its own read, so no ``.``, ``/``, ``?``, ``#`` or ``%`` may get
 # through. Asana's gids are digits; only the character set is checked.
 _GID = re.compile(r"[0-9A-Za-z]+")
@@ -632,6 +633,21 @@ def render_project(gid: str, project: dict) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Extraction
 # ---------------------------------------------------------------------------
+class _ListingProgress(TypedDict):
+    """The progress inside a project cut in its listing, kept in ``state["listing"]["partial"]``.
+
+    Ids, timestamps and offsets, never text. A plain dict at runtime, so dlt stores it as is.
+    """
+
+    token: str | None  # the Events sync token to ask next
+    polled: bool  # the Events feed is read to its end
+    events: list[str]  # task gids the events named
+    renamed: bool  # a project or section rename was among them
+    gap: bool  # the feed had a gap (HTTP 412): every task is read
+    offset: str | None  # where the next page starts
+    listed: dict[str, str]  # task gid -> modified_at, listed so far
+
+
 class _CutShort(Exception):
     """Internal: stop the run here, keeping the state reached so far."""
 
@@ -649,10 +665,8 @@ class _Walker:
     projects of a task that is in more than one), ``selection`` (the selected project gids),
     ``retry`` (tasks kept after a failure), ``pending`` (tasks a stopped run did not reach),
     ``listing`` (only while a listing pass is unfinished: its selection, the result of each
-    project listed so far and the progress inside the ones cut: page ``offset``, ``listed``,
-    the events feed's progress, and ``relisted`` while its listing restarted after a rejected
-    offset and no stored offset has been accepted since) and, per project, the ``cursor``, the
-    tasks ``seen`` near it, the Events ``sync`` token and the ``tasks`` last listed. Only the
+    project listed so far and the progress inside the ones cut, ``_ListingProgress``) and, per
+    project, the ``cursor``, the tasks ``seen`` near it, the Events ``sync`` token and the ``tasks`` last listed. Only the
     final commit (or ``commit_listing``) writes it, so a run that raises leaves it as it was.
     """
 
@@ -688,7 +702,7 @@ class _Walker:
         self.held_pending: set[str] = set()
         self.held_retry: set[str] = set()
         self.listing: dict[str, dict] = {}  # project gid -> its ``_list_project`` result
-        self.partial: dict[str, dict] = {}  # project gid -> the progress inside a cut project
+        self.partial: dict[str, _ListingProgress] = {}  # project gid -> its progress, if cut
         self.unresolved: dict[str, int] = {}  # project gid -> the 403 or 404 Asana answered
         self.next_projects: dict[str, dict[str, Any]] = {}
         self.project_rows: list[dict[str, Any]] = []  # of the projects this run listed
@@ -704,11 +718,6 @@ class _Walker:
         # Tasks in a row that answered 5xx or nothing; the retry tail starts its own count.
         self.outage = 0
         self.listed = False
-        # project gid -> how many tasks it had listed when its offset was rejected twice in a
-        # row (``_read_task_pages``), and the projects whose new listing got no further than that
-        # (``commit_listing``): they name the stop ``failed_offset_expired``.
-        self.relisted_again: dict[str, int] = {}
-        self.stalled: set[str] = set()
 
     # -- requests ----------------------------------------------------------
     def _call(self, path: str, params: dict[str, Any] | None = None):
@@ -730,10 +739,9 @@ class _Walker:
             self.stats["failed"] += 1
             raise _CutShort("rate_limit") from None
         except AsanaAuthError as exc:
-            # A rejection inside the listing raises: no row is out before the listing ends. Once
-            # the pass is listed it stops the run, keeping what it reached; a stop that kept
-            # nothing raises after all (``_iter_rows``). It never counts as one failed task: a
-            # revoked token would then fail every task until the budget runs out.
+            # Inside the listing it raises. Once the pass is listed it stops the run instead of
+            # failing each task in turn, which would spend the budget on 401s; a stop that kept
+            # nothing raises after all (``_iter_rows``).
             if self.listed:
                 self.stats["failed"] += 1
                 raise _CutShort("auth", exc) from None
@@ -785,7 +793,7 @@ class _Walker:
         return [item for page, _ in self._pages(path, params) for item in page]
 
     # -- 1. List -----------------------------------------------------------
-    def _poll_events(self, project_gid: str, progress: dict) -> None:
+    def _poll_events(self, project_gid: str, progress: _ListingProgress) -> None:
         """Read a project's Events feed into ``progress``, one page at a time.
 
         ``progress["token"]`` is the sync token to ask next, ``events`` the task gids named so
@@ -822,40 +830,31 @@ class _Walker:
             progress["renamed"] = progress["renamed"] or _renamed(events)
             progress.update(token=next_token, polled=not more)
 
-    def _read_task_pages(self, project_gid: str, progress: dict) -> None:
+    def _read_task_pages(self, project_gid: str, progress: _ListingProgress) -> None:
         """List a project's tasks page by page into ``progress["listed"]`` (gid -> modified_at).
 
-        ``progress["offset"]`` is where the next page starts, saved after every page, so a run
-        cut inside a project resumes at the page it stopped at. A stored offset that answers
-        400 is taken as one Asana no longer accepts (expiry is not documented), so the project
-        is listed again from its first page, once: a 400 on any other page raises. The restart
-        marks the project ``relisted`` until a stored offset of it is accepted again, so a
-        project whose offset is rejected twice in a row is recorded with what it had listed,
-        see ``commit_listing``.
+        The offset is saved after every page, so a cut run resumes there. A stored offset Asana
+        rejects restarts the project at its first page, once: a rejection of any other page
+        raises. The fresh pass is complete on its own, and a task it lacks is still checked
+        before it is forgotten.
         """
         stored = progress["offset"]
         try:
             self._read_task_pages_from(project_gid, progress)
         except AsanaAPIError as exc:
-            if exc.status != 400 or stored is None or progress["offset"] != stored:
+            if (
+                exc.status not in _EXPIRED_OFFSET_STATUSES
+                or stored is None
+                or progress["offset"] != stored
+            ):
                 raise
-            # Only this project's listing restarts. What it had listed goes too: the fresh pass
-            # over its pages is complete on its own, and a task it lacks is checked before it is
-            # forgotten, like any other.
             logger.warning("Asana: a stored page offset was rejected; the project is listed again.")
-            if progress.get("relisted"):
-                self.relisted_again[project_gid] = len(progress["listed"])
-            progress.update(offset=None, listed={}, relisted=True)
+            progress.update(offset=None, listed={})
             self._read_task_pages_from(project_gid, progress)
 
-    def _read_task_pages_from(self, project_gid: str, progress: dict) -> None:
+    def _read_task_pages_from(self, project_gid: str, progress: _ListingProgress) -> None:
         params = {"project": project_gid, "opt_fields": "modified_at"}
-        resumed = progress["offset"] is not None
         for page, offset in self._pages("/tasks", params, offset=progress["offset"]):
-            if resumed:
-                # Asana accepted a stored offset, so the restart before it was a one-off.
-                progress.pop("relisted", None)
-                resumed = False
             for task in page:
                 gid, when = task.get("gid"), task.get("modified_at")
                 if not isinstance(gid, str) or not _GID.fullmatch(gid):
@@ -1177,29 +1176,12 @@ class _Walker:
     def commit_listing(self) -> bool:
         """After a stop before the pass is rendered: keep its listing, move nothing else.
 
-        ``state["listing"]`` holds the selection of the pass, per finished project the ids and
-        timestamps ``_list_project`` returned, and per project cut inside its progress so far
-        (events, task gids with their timestamps, page offset): never text. The ids can exceed
-        ``known_ids`` until the pass completes. The next run of the same selection lists only
-        what is left. The project rows of this run are out, so their ids join ``known_ids`` (a
-        later deselection then forgets them). Nothing is rendered, forgotten or advanced
-        (``selection``, the cursors and the sync tokens stay as the last complete pass left
-        them), because a pass that has not listed every project knows neither which task left
-        nor what is left to render. ``_commit`` clears it when the pass completes. A run that
-        added nothing to what the state holds leaves it as it is, and returns ``False``.
-
-        A project listed again after its offset was rejected twice in a row, and cut before it
-        listed more tasks than it dropped, is ``stalled``: its offsets expire between runs
-        faster than runs list it. Its fresh offset is kept all the same. Raising instead would
-        keep the rejected one (dlt drops the state of a run that raises), and every later run
-        would be rejected on that same offset, even once Asana accepts new ones.
+        ``state["listing"]`` holds the pass's selection, the finished projects' results and the
+        cut projects' ``_ListingProgress``. Nothing is rendered, forgotten or advanced until the
+        pass completes, since an unfinished pass knows neither what left nor what to render. The
+        project rows already out join ``known_ids``. Returns whether the state changed.
         """
         kept: dict = self.state.get("listing") or {}
-        self.stalled = {
-            gid
-            for gid, dropped in self.relisted_again.items()
-            if gid in self.partial and len(self.partial[gid]["listed"]) <= dropped
-        }
         if self.listing == kept.get("done", {}) and self.partial == kept.get("partial", {}):
             return False
         self.state["v"] = STATE_VERSION
@@ -1247,8 +1229,8 @@ def new_stats() -> dict[str, int]:
     """The counts of a run, every key present from its start so a host finds them on any exit.
 
     ``unresolved`` counts the projects Asana would not show this run. A reason key
-    (``failed_rate_limit``, ``failed_budget``, ``failed_unavailable``, ``failed_auth``,
-    ``failed_offset_expired``) joins them only when a run stops for it. A run that raises
+    (``failed_rate_limit``, ``failed_budget``, ``failed_unavailable``, ``failed_auth``) joins
+    them only when a run stops for it. A run that raises
     ``AsanaSourceError`` adds one to ``failed`` and a reason key only for a rejected token
     (``failed_auth``), or for a stop that kept nothing (``failed_budget``, ``failed_auth``); any
     other such raise is classified by the host from the exception. What ``check_active`` raises
@@ -1282,10 +1264,7 @@ def _iter_rows(
         yield from walker.rows()
     except _CutShort as cut:
         changed = walker.commit_progress()
-        # A stalled project names the stop whatever cut it (the budget or a 429): the cut is
-        # only where the run ended, the stall is why the pass cannot finish.
-        reason = "offset_expired" if walker.stalled else cut.reason
-        stats[f"failed_{reason}"] = 1
+        stats[f"failed_{cut.reason}"] = 1
         if cut.reason == "auth" and not changed:
             # Nothing was kept, so every later run stops at the same request: the token is
             # rejected, as on a run that is rejected inside its listing.
@@ -1301,17 +1280,7 @@ def _iter_rows(
                 f"({_TASK_REQUESTS} requests) or one check of a missing task (1 request) could "
                 "answer, so the next run would stop at the same place. Raise max_requests."
             ) from None
-        if reason == "offset_expired":
-            logger.warning(
-                "Asana sync stopped early (offset_expired, cut by %s): Asana rejected the stored "
-                "page offset of %d project(s) twice in a row, and this run listed it no further. "
-                "Its offsets expire between runs faster than runs list it; a run that lists it "
-                "in one go (a larger max_requests, or a higher rate limit) finishes it. The fresh "
-                "offset is kept, so it continues if Asana accepts it.",
-                cut.reason,
-                len(walker.stalled),
-            )
-        elif cut.reason == "auth":
+        if cut.reason == "auth":
             logger.warning(
                 "Asana sync stopped early (auth): Asana rejected the token. The connection needs "
                 "authorizing again; the next run with an accepted token resumes."
