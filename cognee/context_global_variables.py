@@ -536,8 +536,8 @@ def set_database_global_context_variables(
         async context manager. Nothing is applied until it is awaited or entered.
 
     Raises (on await or enter):
-        CogneeValidationError: ``dataset`` is not a ``UUID``; it is ``None`` with
-            access control on; or ``permission_type`` is given without ``user_id``.
+        CogneeValidationError: ``dataset`` is not a ``UUID``; or, with access control
+            on, it is ``None`` or ``permission_type`` is given without ``user_id``.
         OSError: Access control is on but the backends cannot isolate datasets.
         PermissionDeniedError: ``user_id`` lacks ``permission_type`` on the dataset.
         DatasetNotFoundError: The dataset does not exist (access control on).
