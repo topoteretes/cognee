@@ -105,8 +105,8 @@ class RememberKwargs(TypedDict, total=False):
     both (``_ADD_ONLY`` / ``_COGNIFY_ONLY`` / ``_SHARED``), so callers tune
     those steps without calling them directly. Skills and code options are
     read only by their ``content_type`` routes (``index_vectors`` also by
-    ``MemorySource`` imports). Presort options are read only
-    by the presort routes and raise ``TypeError`` on the add+cognify path.
+    ``MemorySource`` imports). Presort options are read only by the presort
+    routes and raise ``TypeError`` on the add+cognify path.
     """
 
     graph_model: Any
@@ -1243,8 +1243,8 @@ async def remember(
         **kwargs: Additional options -- see ``RememberKwargs``. On the
             add+cognify path each option is forwarded to ``add()``,
             ``cognify()``, or both, and an option outside that routing raises
-            ``TypeError``. ``branch`` (without
-            ``content_type``) clones that branch of a repository URL; see ``add()``.
+            ``TypeError``. ``branch`` (without ``content_type``) clones that branch
+            of a repository URL; see ``add()``.
 
     Returns:
         RememberResult, DryRunEstimate, PresortReport, or dict: a promise-like
