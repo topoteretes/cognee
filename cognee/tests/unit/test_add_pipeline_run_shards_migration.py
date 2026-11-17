@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 
-from cognee.modules.pipelines.models import PipelineRunShard
+from cognee.modules.pipelines.models import PipelineRunShard, PipelineRunShardItem
 
 _MIGRATION_PATH = (
     Path(__file__).resolve().parents[2]
@@ -70,39 +70,29 @@ def _references(engine: sa.Engine, table: str) -> set[tuple[str, str, str]]:
     }
 
 
-def test_upgrade_creates_both_tables():
-    """The shard table as its model declares it. The item table as this revision
-    made it, keyed by its data row: the revision after this one gives it the
-    shape its model declares (``test_key_pipeline_run_shard_items_by_position``).
-    """
+def test_upgrade_creates_both_tables_as_the_models_declare_them():
     engine = _engine_before_upgrade()
 
     _run(engine, migration.upgrade)
 
-    # The same columns as the model: a column on one side only is the gap the
+    # The same columns as the models: a column on one side only is the gap the
     # lockstep guard exists to catch.
     assert _columns(engine, SHARDS) == set(PipelineRunShard.__table__.columns.keys())
-    assert _columns(engine, ITEMS) == {
-        "shard_id",
-        "data_id",
-        "status",
-        "error_class",
-        "error_message",
-    }
+    assert _columns(engine, ITEMS) == set(PipelineRunShardItem.__table__.columns.keys())
     assert _indexes(engine, SHARDS) == set(migration.SHARD_INDEXES)
     assert _indexes(engine, ITEMS) == set(migration.ITEM_INDEXES)
     assert {index.name for index in PipelineRunShard.__table__.indexes} == set(
         migration.SHARD_INDEXES
     )
-    # And the same types, NULL rules and primary key as the table the model
-    # creates by itself.
+    assert {index.name for index in PipelineRunShardItem.__table__.indexes} == set(
+        migration.ITEM_INDEXES
+    )
+    # And the same types, NULL rules and primary keys as the tables the models
+    # create by themselves.
     from_models = sa.create_engine("sqlite://")
-    PipelineRunShard.__table__.create(from_models)
-    assert _shape(engine, SHARDS) == _shape(from_models, SHARDS)
-    assert {name: key for name, (_, _, key) in _shape(engine, ITEMS).items() if key} == {
-        "shard_id": 1,
-        "data_id": 2,
-    }
+    for table in (PipelineRunShard.__table__, PipelineRunShardItem.__table__):
+        table.create(from_models)
+        assert _shape(engine, table.name) == _shape(from_models, table.name)
     # A shard goes with its dataset, an item row with its shard and its data item.
     assert _references(engine, SHARDS) == {("dataset_id", "datasets", "CASCADE")}
     assert _references(engine, ITEMS) == {

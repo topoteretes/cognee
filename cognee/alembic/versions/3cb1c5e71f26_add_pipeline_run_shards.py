@@ -4,10 +4,11 @@ Revision ID: 3cb1c5e71f26
 Revises: e3f1a9c5b7d2
 Create Date: 2026-11-11 02:30:00.000000
 
-A run whose data items go to workers cuts them into shards, one per worker:
-one pipeline_run_shards row per shard, and one pipeline_run_shard_items row per
-data item of it. The rows are how a shard reaches its worker and how the
-worker's answer comes back, and they stay as the record of the run.
+A run whose items go to workers cuts them into shards, one per worker: one
+pipeline_run_shards row per shard, and one pipeline_run_shard_items row per
+item of it (a data row, or a value that is no row). The rows are how a shard
+reaches its worker and how the worker's answer comes back, and they stay as the
+record of the run.
 
 Idempotent: every table and index is inspector-guarded on its own, so an
 upgrade or downgrade interrupted between two statements finishes on rerun.
@@ -71,13 +72,15 @@ def upgrade() -> None:
         op.create_table(
             ITEMS,
             sa.Column("shard_id", sa.Uuid(), nullable=False),
-            sa.Column("data_id", sa.Uuid(), nullable=False),
+            sa.Column("item_index", sa.Integer(), nullable=False),
+            sa.Column("data_id", sa.Uuid(), nullable=True),
+            sa.Column("value", sa.JSON(), nullable=True),
             sa.Column("status", sa.String(length=32), nullable=False),
             sa.Column("error_class", sa.String(), nullable=True),
             sa.Column("error_message", sa.String(), nullable=True),
             sa.ForeignKeyConstraint(["shard_id"], [f"{SHARDS}.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["data_id"], ["data.id"], ondelete="CASCADE"),
-            sa.PrimaryKeyConstraint("shard_id", "data_id"),
+            sa.PrimaryKeyConstraint("shard_id", "item_index"),
         )
     _create_missing_indexes(ITEMS, ITEM_INDEXES)
 
