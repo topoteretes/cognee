@@ -770,22 +770,24 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         rows, texts = self._data_point_rows(data_points)
 
         # Which rows would an upsert write at all? Asked in a short read of its own, so no
-        # transaction stays open across the embedding request. The write classifies
-        # again inside its transaction, which settles anything that changed meanwhile;
-        # a row found unchanged here and deleted before that write is not written by this
-        # call, as if the call had completed before the delete. A changed row whose text
+        # transaction stays open across the embedding request. A changed row whose text
         # is the same is embedded too, although the upsert keeps its stored vector.
         async with self.get_async_session() as session:
             missing, changed = await self._classify(session, collection_name, rows)
-        written_ids = {row["id"] for row in missing + changed}
-        to_write = [row for row in rows if row["id"] in written_ids]
-        if not to_write:
+        if not missing and not changed:
             return
 
-        vectors = await self.embed_data([texts[row["id"]] for row in to_write])
-        for row, vector in zip(to_write, vectors, strict=True):
-            row["vector"] = vector
-        await self._write_data_point_rows(collection_name, to_write)
+        # The write classifies every row again inside its transaction. A row left out
+        # here that was deleted or changed during the embedding request comes back
+        # without a vector: the transaction is left without writing, those rows are
+        # embedded, and the write runs again. Each round embeds only rows that have no
+        # vector yet, so the rounds end once every row has one.
+        vectors: dict = {}
+        to_embed = missing + changed
+        while to_embed:
+            embedded = await self.embed_data([texts[row["id"]] for row in to_embed])
+            vectors.update(zip([row["id"] for row in to_embed], embedded, strict=True))
+            to_embed = await self._write_data_point_rows(collection_name, rows, vectors)
 
     @staticmethod
     def _data_point_rows(data_points: list[DataPoint]) -> tuple[list[dict], dict]:
@@ -817,8 +819,15 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         rows = sorted(rows_by_id.values(), key=lambda row: _row_order(row["id"]))
         return rows, texts
 
-    async def _write_data_point_rows(self, collection_name: str, rows: list[dict]) -> None:
-        """Write ``rows`` (``id``, ``payload``, ``vector``), locking only the rows it changes.
+    async def _write_data_point_rows(
+        self, collection_name: str, rows: list[dict], vectors: dict
+    ) -> list[dict]:
+        """Write ``rows`` (``id``, ``payload``) with ``vectors`` (by id), locking only the
+        rows it changes.
+
+        Returns the rows the write needs but ``vectors`` lacks, having written nothing
+        (an empty list once the write is committed): the caller embeds them and calls
+        again, so no transaction stays open across an embedding request.
 
         ``ON CONFLICT DO UPDATE`` locks every conflicting row until commit, even when
         its ``WHERE`` is false, so an id many concurrent writers share (the same entity
@@ -853,6 +862,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         async with self.get_async_session() as session:
             missing, changed = await self._classify(session, collection_name, rows)
+            # A lost-race row (below) was missing here, so it has a vector too.
+            unembedded = [row for row in missing + changed if row["id"] not in vectors]
+            if unembedded:
+                return unembedded
+            missing = [{**row, "vector": vectors[row["id"]]} for row in missing]
+            changed = [{**row, "vector": vectors[row["id"]]} for row in changed]
 
             inserted_ids: set = set()
             for batch in _batches(missing):
@@ -884,6 +899,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 )
                 await session.execute(upsert_statement)
             await session.commit()
+        return []
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """Create the underlying index collection (table) for the given name/property pair."""

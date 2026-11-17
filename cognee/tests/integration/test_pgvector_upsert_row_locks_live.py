@@ -135,7 +135,9 @@ async def _rows(adapter: PGVectorAdapter, collection: str) -> dict[UUID, dict]:
 
 
 def _assert_vector(stored: list[float], expected: list[float]) -> None:
-    assert stored == pytest.approx(expected, abs=1e-6)
+    # New collections store halfvec (about three significant digits); two stub vectors
+    # of different calls differ by far more than this.
+    assert stored == pytest.approx(expected, abs=1e-3)
 
 
 async def _wait_until_blocked(adapter: PGVectorAdapter, holder_pid: int) -> None:
@@ -520,12 +522,12 @@ async def test_concurrent_calls_inserting_the_same_new_ids(embeddings, collectio
     assert all(sorted(r["payload"]["belongs_to_set"]) == ["A", "B"] for r in rows.values())
 
 
-async def test_unchanged_row_deleted_before_the_write_is_not_written(
+async def test_unchanged_row_deleted_during_the_embedding_is_written(
     adapter, collection, embeddings
 ):
-    """A row found stored unchanged is left out before the embedding. Deleted while the
-    call embeds the other rows, it is not written by this call: the call took effect when
-    it found the row unchanged, before the delete. The next upsert of it inserts it."""
+    """A row found stored unchanged is left out of the embedding. Deleted while the call
+    embeds the other rows, the write finds it missing: it is embedded then and inserted,
+    so the call never leaves a row out that it was asked to store."""
     kept = _Point(text="kept", belongs_to_set=["A"])
     await adapter.create_data_points(collection, [kept])
     same = kept.model_copy(update={"updated_at": kept.updated_at + 5})
@@ -540,7 +542,42 @@ async def test_unchanged_row_deleted_before_the_write_is_not_written(
     await asyncio.wait_for(write, NO_WAIT_SECONDS)
     embeddings.gate = None
 
-    assert set(await _rows(adapter, collection)) == {new.id}
+    assert embeddings.requests[-1] == ["kept"]
+    rows = await _rows(adapter, collection)
+    assert set(rows) == {kept.id, new.id}
+    assert rows[kept.id]["payload"]["belongs_to_set"] == ["A"]
+    _assert_vector(rows[kept.id]["vector"], embeddings.embedded["kept"][-1])
+    _assert_vector(rows[new.id]["vector"], embeddings.embedded["new"][0])
 
-    await adapter.create_data_points(collection, [same])
-    assert (await _rows(adapter, collection))[kept.id]["payload"]["belongs_to_set"] == ["A"]
+
+async def test_unchanged_row_changed_during_the_embedding_is_upserted(
+    adapter, collection, embeddings
+):
+    """A row found stored unchanged and then changed by another writer while the call
+    embeds (here a tag removed) is upserted like any changed row: the call's tag is
+    merged back in, as a single upsert would have done."""
+    kept = _Point(text="kept", belongs_to_set=["A"])
+    await adapter.create_data_points(collection, [kept])
+    same = kept.model_copy(update={"updated_at": kept.updated_at + 5})
+    new = _Point(text="new")
+
+    embeddings.gate = asyncio.Event()
+    write = asyncio.create_task(adapter.create_data_points(collection, [same, new]))
+    await asyncio.wait_for(embeddings.reached.wait(), NO_WAIT_SECONDS)
+    async with adapter.engine.begin() as writer:
+        await writer.execute(
+            text(
+                f'UPDATE "{collection}" SET payload = '
+                "jsonb_set(payload::jsonb, '{belongs_to_set}', '[]'::jsonb)::json WHERE id = :id"
+            ),
+            {"id": kept.id},
+        )
+    embeddings.gate.set()
+    await asyncio.wait_for(write, NO_WAIT_SECONDS)
+    embeddings.gate = None
+
+    rows = await _rows(adapter, collection)
+    assert set(rows) == {kept.id, new.id}
+    assert rows[kept.id]["payload"]["belongs_to_set"] == ["A"]
+    # Same text: the upsert keeps the stored vector.
+    _assert_vector(rows[kept.id]["vector"], embeddings.embedded["kept"][0])
