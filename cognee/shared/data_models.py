@@ -7,6 +7,13 @@ it into stored graph nodes, so callers get entities, entity types, timestamps an
 relationships without defining a schema. A custom ``graph_model`` is the alternative when a
 domain needs its own node types (see ``KnowledgeGraph``).
 
+The models here are plain Pydantic ``BaseModel`` classes, not ``DataPoint`` subclasses: they
+describe the answer a structured-output call must return and are never stored as they are.
+Graph construction (``expand_with_nodes_and_edges``) turns a filled ``KnowledgeGraph`` into
+``Entity``, ``EntityType`` and ``Timestamp`` data points, which ``add_data_points`` writes
+to the graph and vector stores. A ``graph_model`` that subclasses ``DataPoint`` skips that
+conversion: the LLM fills the stored node classes directly.
+
 ``SummarizedContent`` and ``DefaultContentPrediction`` are the default summarization and
 classification response models in the cognify config. ``SummarizedCode`` is the response
 model for LLM code summaries. The chunking enums configure the engines in
