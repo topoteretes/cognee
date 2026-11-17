@@ -786,7 +786,7 @@ class TursoAdapter(GraphDBInterface):
             mean_degree = (2 * num_edges) / num_nodes if num_nodes else None
             edge_density = num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0
 
-            # The Turso engine has no recursive CTEs (0.7.x), so connected
+            # The adapter avoids recursive CTEs (see docs/turso-local.md), so connected
             # components are computed here with union-find over the edge list.
             # Isolated nodes count as components of size one, as before.
             node_ids = [row[0] for row in await session.execute(text("SELECT id FROM graph_node"))]
