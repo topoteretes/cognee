@@ -384,9 +384,9 @@ def test_unsound_multiword_fuzzy_class_match_is_rejected():
     )
 
     # The fuzzy hit dragged "acme" into a class match; the soundness rule drops it and
-    # the extracted type survives untouched.
+    # the extracted type survives with only its name formatting normalized.
     assert str(EntityType.id_for("EnterpriseCustomer")) not in data_points_by_id
-    assert data_points_by_id[str(Entity.id_for("acme"))].is_a.name == "enterprise customer acme"
+    assert data_points_by_id[str(Entity.id_for("acme"))].is_a.name == "enterprisecustomeracme"
 
 
 def _same_name_two_types(first_type: str, second_type: str) -> list[KnowledgeGraph]:
