@@ -32,10 +32,20 @@ class BaseRetriever(ABC):
 
     A custom class is registered with ``use_retriever(search_type, cls)``
     (``register_retriever.py``) and takes precedence over the built-in retriever for that
-    type (``AGENTIC_COMPLETION`` excepted, which is always built in). It is constructed with
-    the search call's keyword arguments (``user``, ``dataset``, ``top_k``, ``node_name``,
-    ``session_id``, ...), so its ``__init__`` should accept ``**kwargs``. The concurrent
-    session turn runs only for the built-in
+    type. Four cases are decided before registered classes are looked up:
+
+    - ``AGENTIC_COMPLETION`` always uses the built-in retriever.
+    - ``CYPHER`` and ``NATURAL_LANGUAGE`` raise ``SearchTypeDisabledError`` unless
+      ``ALLOW_CYPHER_QUERY=true``.
+    - A ``HYBRID_COMPLETION`` request the hybrid lanes cannot serve (a custom
+      ``node_type``, ``neighborhood_depth``, ``feedback_influence`` above 0, or no chunk
+      collection) runs as ``GRAPH_COMPLETION``; ``HYBRID_COMPLETION_DECOMPOSITION`` raises
+      ``QueryValidationError`` instead.
+    - ``FEELING_LUCKY`` is resolved to another type first.
+
+    The class is constructed with the search call's keyword arguments (``user``,
+    ``dataset``, ``top_k``, ``node_name``, ``session_id``, ...), so its ``__init__`` should
+    accept ``**kwargs``. The concurrent session turn runs only for the built-in
     ``CompletionRetriever``, ``GraphCompletionRetriever`` and ``HybridRetriever`` classes;
     every other retriever takes the sequential path, where its own
     ``get_completion_from_context`` is responsible for honouring
