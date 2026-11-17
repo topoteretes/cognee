@@ -231,11 +231,11 @@ next run continues at the page it stopped at (the project is read again first, o
 run cut inside the listing reads no task and forgets nothing, and neither cursors nor sync
 tokens nor the stored selection move: the pass renders, forgets and advances only when every
 selected project is listed, and only then is `state["listing"]` cleared (a project's offset goes
-when the project finishes). A stored offset that Asana rejects (HTTP 400, see Known gaps) lists
-that project again from its first page in the same run, dropping the gids it had listed (the
-fresh listing is complete on its own, and a known task it lacks is checked before it is
-forgotten); the other projects of the pass are kept, and a 400 on the restarted listing in the
-same run raises. A run cut after the restart keeps the fresh offset it was given and is named by
+when the project finishes). A stored offset that Asana refuses (any 4xx but 401, 403 and 429
+on the first page asked from it, see Known gaps) lists that project again from its first page in
+the same run, dropping the gids it had listed (the fresh listing is complete on its own, and a
+known task it lacks is checked before it is forgotten); the other projects of the pass are kept,
+and any failure of the restarted listing raises, since it sends no offset. A run cut after the restart keeps the fresh offset it was given and is named by
 its cut, so the next run sends an offset Asana issued, not the rejected one. A changed selection
 drops the pass and every offset, because what was kept described another set of projects. A run that raises keeps the
 state it started with. A run that completes the listing but is cut before any task read or check got
@@ -260,8 +260,11 @@ string gid. An entry with no `project` (absent or null, for example a task on so
 list) is not a project membership and is skipped: a task with one selected project and one such
 entry is selected, and a task with such entries only is in no project (a render read does not
 build a document for it, a check forgets it).
-A confirmed-live task is not remembered: the next pass lists again and finds it in the fresh
-listing, and only a pass that misses it again asks again.
+A confirmed-live task is queued in `pending`, so the next pass reads it once it lists it: the
+events that named it were spent on the pass that missed it, and its `modified_at` can be older
+than the window. A queued task the next pass does not list is not read; a check that keeps it
+again queues it again, so `pending` can stay above zero on a pass that otherwise completed, at
+no request of its own (a task whose memberships name a selected project is normally listed by it).
 
 Every answer to a check, like every answer to a task read, counts as progress for the run: a
 run that got one commits (cursors, `pending`, tombstones). A run cut before any answer keeps the
@@ -300,14 +303,20 @@ Known gaps:
   syncs. Nothing here tells a typo, a deleted project and a missing access apart: the log tells
   403 from 404, and everything else treats them alike.
 - A page offset is stored between runs. Asana documents that an offset expires, not when or
-  with which status: 400 is what it answers to an offset it never issued, and is assumed for an
-  expired one (`_EXPIRED_OFFSET_STATUSES`) until a live check. Another status raises
-  `AsanaAPIError` as before the fix. A rejected offset costs its project's listing pages again.
+  with which status (400 for one it never issued), so any 4xx outside `_NOT_AN_OFFSET_REFUSAL`
+  restarts the project: a 4xx that the offset did not cause costs one request before it raises
+  on the restarted listing, and the warning names the status. A refused offset, or a transient
+  4xx such as 408 or 409 on that first page, costs the project's listing pages again.
 - A project whose offsets keep expiring between runs, in a selection whose runs are cut (by the
   budget or a 429) before the project lists to its end, never finishes its listing: every run
   stops with `failed_budget` or `failed_rate_limit`, the pass never completes and no edit of the
   selection is rendered until a run lists the project in one go or Asana accepts an offset
-  again. Nothing tells this apart from an ordinary cut, because no expiry has been observed yet.
+  again. Nothing tells this apart from an ordinary cut, and the state keeps no count of the
+  restarts, because no expiry has been observed yet.
+- How Asana delivers the events of a subtask that is in no project is not verified. Renames and
+  deletions are assumed to reach the parent's project feeds, which refreshes the parent through
+  the subtask index; if completing or reassigning such a subtask reaches no feed and leaves the
+  parent's `modified_at` alone, the parent's subtask lines stay as they were until it changes.
 - Three tasks that keep answering 5xx or nothing in the retry tail stop every run with
   `failed_unavailable`, so the check phase never runs and tasks deleted in Asana stay known; and
   one check that keeps answering 5xx, with a budget of just the listing plus one request, makes
@@ -339,7 +348,8 @@ and exactly one reason key when a run stopped: `failed_rate_limit`, `failed_budg
 for a rejected token and `failed_budget` for a budget too small; any other raise carries no
 reason key: the host names it (for Asana it has no classifier and records
 `failed_ingestion`, next to the key above when there is one). What `check_active` raises is the
-host's own stop and adds no count.
+host's own stop: it adds nothing to `failed` and no reason key (the refused request still counts
+in `requests`).
 
 State (version 1, `state["v"]`): `selection`, `known_ids`, `subtasks`, `multi`, `retry`,
 `pending`, `listing` (only while a listing pass is unfinished: `selection`, `done` per finished

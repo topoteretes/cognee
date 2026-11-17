@@ -8,8 +8,8 @@ It models what was observed against a real workspace: ``/events`` answers 412 wi
 token when the token is missing or stale, a listing pages through ``next_page.offset`` (an
 opaque token that stands for a position in the list as it is when the page is asked for, so
 items added or removed meanwhile shift it; one the fake never issued answers 400, and one
-``expire_offsets`` expired answers the status it is given, 400 unless a test says otherwise:
-Asana documents that offsets expire, not with which status, so that is not verified), and an
+``expire_offsets`` expired answers the status it was given, see ``_NOT_AN_OFFSET_REFUSAL`` in the
+source for what is known of Asana's), and an
 edited comment (or a new one) leaves the task's ``modified_at`` alone: it arrives only as a story
 event, an edited one with ``parent: null`` and the task under ``resource.target``. An endpoint
 the connector does not use is not answered: a call to it raises ``AssertionError``.
@@ -65,8 +65,7 @@ class FakeAsana:
         # issued offset token -> (the listing it belongs to, the position it stands for)
         self._offsets: dict[str, tuple[str, int]] = {}
         self._issued = 0
-        self._expired: set[str] = set()  # tokens ``expire_offsets`` took back
-        self.expired_status = 400  # what an expired token answers
+        self._expired: dict[str, int] = {}  # token ``expire_offsets`` took back -> its answer
         self.events_page_size = 100
         self._clock = 0
         self._counter = 0
@@ -107,8 +106,15 @@ class FakeAsana:
             "parent": parent,
         }
 
-    def _emit(self, task_gid: str, event: dict) -> None:
-        for project_gid in self.tasks[task_gid]["projects"]:
+    def _emit(self, task_gid: str, event: dict, *, to_parent: bool = False) -> None:
+        """Queue ``event`` in the feeds of the task's projects and, with ``to_parent``, of its
+        parent's. Only a subtask's rename and deletion are assumed to reach the parent's feeds;
+        how Asana routes a subtask's events is not verified (asana.md, Known gaps)."""
+        task = self.tasks[task_gid]
+        feeds = set(task["projects"])
+        if to_parent and task["parent"] in self.tasks:
+            feeds |= set(self.tasks[task["parent"]]["projects"])
+        for project_gid in sorted(feeds):
             self.events[project_gid].append(event)
 
     # -- changes the way Asana makes them -----------------------------------
@@ -135,18 +141,15 @@ class FakeAsana:
         self._emit(gid, {"action": "changed", "resource": story, "parent": None})
 
     def rename_subtask(self, gid: str, name: str) -> None:
-        """A subtask rename moves neither its parent's ``modified_at`` nor any ``parent`` field.
-
-        The event goes to the parent's projects and to the subtask's own, when it is in one.
-        """
+        """A subtask rename moves neither its parent's ``modified_at`` nor any ``parent`` field."""
         self.tasks[gid]["name"] = name
-        parent = self.tasks[gid]["parent"]
-        for project_gid in sorted({*self.tasks[parent]["projects"], *self.tasks[gid]["projects"]}):
-            event = {"action": "changed", "resource": task_ref(gid), "parent": None}
-            self.events[project_gid].append(event)
+        event = {"action": "changed", "resource": task_ref(gid), "parent": None}
+        self._emit(gid, event, to_parent=True)
 
     def delete_task(self, gid: str) -> None:
-        self._emit(gid, {"action": "deleted", "resource": task_ref(gid), "parent": None})
+        self._emit(
+            gid, {"action": "deleted", "resource": task_ref(gid), "parent": None}, to_parent=True
+        )
         del self.tasks[gid]
 
     def move_task(self, gid: str, projects) -> None:
@@ -375,14 +378,9 @@ class FakeAsana:
         return token
 
     def expire_offsets(self, status: int = 400) -> None:
-        """Asana stops accepting every offset issued so far: each answers ``status`` from now on.
-
-        Asana's docs say an offset expires but not with which status; 400 is what it answers to
-        one it never issued, and is assumed for an expired one until a live check (SDK-1485).
-        """
-        self._expired |= set(self._offsets)
+        """Asana stops accepting every offset issued so far: each answers ``status`` from now on."""
+        self._expired.update(dict.fromkeys(self._offsets, status))
         self._offsets.clear()
-        self.expired_status = status
 
     def offset_position(self, token: str) -> int:
         """The position an issued offset token stands for, for tests to read."""
@@ -393,7 +391,7 @@ class FakeAsana:
         offset = params.get("offset")
         issued = self._offsets.get(offset)
         if offset in self._expired:
-            return _error(self.expired_status, "offset: Invalid offset")
+            return _error(self._expired[offset], "offset: Invalid offset")
         if (
             offset is not None
             and offset != self.stuck_offset
