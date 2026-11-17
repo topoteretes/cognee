@@ -70,6 +70,17 @@ async def _pipeline_call_of(**cognify_kwargs):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("graph_model", [None, KnowledgeGraph], ids=["None", "KnowledgeGraph"])
+async def test_the_default_graph_model_is_portable_however_it_is_given(graph_model):
+    """``None`` is the default graph model too: what decides is the model the
+    call resolved, not the value it was given."""
+    resolver, default_tasks_kwargs = await _resolver_of(graph_model=graph_model)
+
+    assert resolver.portable is not None
+    assert default_tasks_kwargs["graph_model"] is KnowledgeGraph
+
+
+@pytest.mark.asyncio
 async def test_plain_call_is_portable_with_the_settings_it_resolved():
     resolver, _ = await _resolver_of(chunk_size=1024, early_chunk_indexing=False)
 
