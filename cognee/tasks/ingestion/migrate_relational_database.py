@@ -8,7 +8,14 @@ from cognee.infrastructure.databases.relational.get_migration_relational_engine 
     get_migration_relational_engine,
 )
 from cognee.modules.engine.models import ColumnValue, TableRow, TableType
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_authoritative_sources,
+    get_configured_ontology_resolver,
+)
+from cognee.modules.ontology.schema_alignment import align_tables_with_ontology
 from cognee.tasks.schema.ingest_database_schema import ingest_database_schema
+from cognee.tasks.schema.models import SchemaTable
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
 
@@ -16,7 +23,12 @@ logger = logging.getLogger(__name__)
 
 
 async def migrate_relational_database(
-    graph_db, schema, migrate_column_data=True, schema_only=False
+    graph_db,
+    schema,
+    migrate_column_data=True,
+    schema_only=False,
+    ontology_resolver: BaseOntologyResolver | None = None,
+    authoritative_sources: dict[str, str | None] | None = None,
 ):
     """
     Migrates data from a relational database into a graph database.
@@ -28,6 +40,13 @@ async def migrate_relational_database(
     Then, for every foreign key defined in the schema:
       - Establishes relationships between TableRow nodes based on foreign key relationships
 
+    When an ontology is configured (``ontology_resolver``, else ``ONTOLOGY_FILE_PATH``),
+    each table node also gets a ``realizes`` edge to the ontology class its name
+    resolves to, plus that class's ``is_a`` chain — the link between the technical
+    schema and the business model. ``authoritative_sources`` (table name to owner,
+    else ``ONTOLOGY_AUTHORITATIVE_SOURCES``) says which tables are the system of
+    record; it is stamped on the ``realizes`` edge as ``authoritative`` / ``owner``.
+
     Both TableType and TableRow inherit from DataPoint to maintain consistency with Cognee data model.
     """
     # Create a mapping of node_id to node objects for referencing in edge creation
@@ -36,6 +55,23 @@ async def migrate_relational_database(
 
     else:
         node_mapping, edge_mapping = await complete_database_ingestion(schema, migrate_column_data)
+
+    if ontology_resolver is None:
+        ontology_resolver = get_configured_ontology_resolver()
+    if authoritative_sources is None:
+        authoritative_sources = get_configured_authoritative_sources()
+    entity_types, alignment_edges = align_tables_with_ontology(
+        {
+            node.id: node.name
+            for node in node_mapping.values()
+            if isinstance(node, (SchemaTable, TableType))
+        },
+        ontology_resolver,
+        authoritative_sources,
+    )
+    for entity_type in entity_types:
+        node_mapping.setdefault(str(entity_type.id), entity_type)
+    edge_mapping.extend(alignment_edges)
 
     def _remove_duplicate_edges(edge_mapping):
         seen = set()

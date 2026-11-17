@@ -6,6 +6,12 @@ from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY
+from cognee.modules.ontology.query_grounding import (
+    GroundedConcept,
+    ground,
+    with_grounding_block,
+)
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.hybrid.candidates import HybridCandidates
@@ -25,6 +31,7 @@ from cognee.modules.retrieval.hybrid.context import (
 from cognee.modules.retrieval.hybrid.entities import (
     build_entities,
     entity_collections,
+    pin_grounded_entities,
     search_entities,
 )
 from cognee.modules.retrieval.hybrid.external_metadata import project_external_metadata
@@ -41,6 +48,7 @@ from cognee.modules.retrieval.utils.completion import (
     generate_completion_batch,
 )
 from cognee.modules.retrieval.utils.conflict_context import attach_chunk_conflicts
+from cognee.modules.retrieval.utils.document_sources import name_chunk_documents
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -168,6 +176,7 @@ class HybridRetriever(BaseRetriever):
         # and fails open: flag off, no node, or any error yields {}, keeping
         # ranking byte-identical to an un-personalized run.
         personal_weights = await load_preference_weights()
+        concepts = await ground(query)
 
         # One check decides for both lanes whether the DLT collections are read.
         include_dlt = await dlt_rows_indexed(self._unified_engine.vector)
@@ -190,7 +199,7 @@ class HybridRetriever(BaseRetriever):
                 personal_influence=get_base_config().personalization_influence,
                 collections=chunk_collections(include_dlt),
             ),
-            self._retrieve_entities_and_facts(query, query_vector, include_dlt),
+            self._retrieve_entities_and_facts(query, query_vector, include_dlt, concepts=concepts),
         )
         project_external_metadata(
             chunk_objects.get("chunks", []),
@@ -200,6 +209,8 @@ class HybridRetriever(BaseRetriever):
         await attach_chunk_conflicts(
             chunk_objects.get("chunks", []), graph_engine=self._unified_engine.graph
         )
+        if self.include_references:
+            await name_chunk_documents(chunk_objects.get("chunks", []))
         return HybridCandidates(
             chunks=chunk_objects["chunks"],
             chunk_summaries=chunk_objects["chunk_summaries"],
@@ -208,7 +219,12 @@ class HybridRetriever(BaseRetriever):
         )
 
     async def _retrieve_entities_and_facts(
-        self, query: str, query_vector: list[float], include_dlt: bool = False
+        self,
+        query: str,
+        query_vector: list[float],
+        include_dlt: bool = False,
+        *,
+        concepts: list[GroundedConcept],
     ) -> tuple[list[dict], FactCandidates]:
         """Entity lane, run concurrently with the chunk lane so the graph round trip for
         edge bullets overlaps the chunk pipeline's ranking and summary loading.
@@ -237,6 +253,10 @@ class HybridRetriever(BaseRetriever):
                 query_vector=query_vector,
             ),
         )
+        # Ontology concepts the query names lead the entity lane: the tables that
+        # realize a class, and the relations of an individual, are what "customer"
+        # or "Acme" means in the business model.
+        entity_hits = pin_grounded_entities(entity_hits, concepts)
         entities, reachable_ids = await build_entities(
             self._unified_engine.graph,
             entity_hits,
@@ -244,6 +264,12 @@ class HybridRetriever(BaseRetriever):
             edge_rank_by_id(edge_hits),
             self.node_name,
             self.node_name_filter_operator,
+            pinned_ids={concept.node_id for concept in concepts},
+            pinned_class_ids={
+                concept.node_id
+                for concept in concepts
+                if concept.category == ONTOLOGY_CLASS_CATEGORY
+            },
         )
         from cognee.modules.retrieval.utils.resolved_context import (
             apply_entity_resolutions,
@@ -276,9 +302,14 @@ class HybridRetriever(BaseRetriever):
                     for q, objects in zip(query_batch, retrieved_objects)
                 ]
             )
-            return format_hybrid_context_batch(global_contexts, retrieved_objects)
+            contexts = format_hybrid_context_batch(global_contexts, retrieved_objects)
+            return [
+                await with_grounding_block(q, context) for q, context in zip(query_batch, contexts)
+            ]
         global_context = await self._build_global_context_section(query, retrieved_objects)
-        return format_hybrid_context(global_context, retrieved_objects)
+        return await with_grounding_block(
+            query, format_hybrid_context(global_context, retrieved_objects)
+        )
 
     async def _build_global_context_section(
         self, query: str | None, retrieved_objects: Any = None

@@ -23,6 +23,7 @@ import json
 import logging
 
 from cognee.modules.integrations.credentials import (
+    REVOKED_BY_PROVIDER,
     STATUS_ACTIVE,
     get_credential_by_account,
     revoke_credential_by_account,
@@ -54,7 +55,9 @@ async def handle_github_event(raw_body: bytes, headers: dict[str, str]) -> None:
         # The org removed (or suspended) the app on GitHub's side — the
         # local credential must stop minting tokens. Idempotent, so
         # redelivery is harmless.
-        await revoke_credential_by_account(_PROVIDER, installation_id)
+        await revoke_credential_by_account(
+            _PROVIDER, installation_id, revoked_by=REVOKED_BY_PROVIDER
+        )
         logger.info("GitHub installation %s %s; credential revoked", installation_id, action)
         return
 

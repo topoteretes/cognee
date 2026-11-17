@@ -1,4 +1,6 @@
+import time
 from collections.abc import Coroutine
+from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -11,6 +13,7 @@ from cognee.infrastructure.llm.config import (
 from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.retry_config import raise_if_quota_error
 from cognee.infrastructure.llm.types import TranscriptionReturnType
+from cognee.modules.observability.llm_calls import capture_enabled, capture_llm_call
 from cognee.shared.logging_utils import get_logger
 
 T = TypeVar("T", bound="BaseModel | str")
@@ -79,6 +82,63 @@ async def _record_session_usage_after(
         )
     except Exception:
         logger.debug("Ignoring exception in _record_session_usage_after", exc_info=True)
+    return result
+
+
+async def _capture_llm_call_after(
+    coro: Coroutine,
+    *,
+    text_input: str,
+    system_prompt: str,
+    response_model: Any,
+    framework: str,
+) -> T:
+    """Run the LLM coroutine and record it for LLM call capture, failed calls included.
+
+    A no-op wrapper while capture is off. Capture never raises, and an error
+    from the call is re-raised unchanged after it is recorded.
+    """
+    if not capture_enabled():
+        return await coro
+
+    model = get_llm_context_config().llm_model
+    started_at = datetime.now(timezone.utc)
+    started = time.perf_counter()
+
+    def record(
+        output: Any,
+        status: str,
+        error_class: str | None = None,
+        tokens_in: int | None = None,
+        tokens_out: int | None = None,
+    ) -> None:
+        capture_llm_call(
+            started_at=started_at,
+            duration_ms=(time.perf_counter() - started) * 1000,
+            model=model,
+            framework=framework,
+            response_type=getattr(response_model, "__name__", str(response_model)),
+            system_prompt=system_prompt,
+            text_input=text_input,
+            output=output,
+            status=status,
+            error_class=error_class,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+        )
+
+    try:
+        result = await coro
+    except Exception as error:
+        record(None, "error", error_class=type(error).__name__)
+        raise
+
+    try:
+        tokens_in, tokens_out = _exact_usage_from_result(result)
+        record(result, "ok", tokens_in=tokens_in, tokens_out=tokens_out)
+    except Exception:
+        logger.warning("LLM call capture failed", exc_info=True)
+
     return result
 
 
@@ -159,7 +219,13 @@ class LLMGateway:
 
         # Wrap so usage is recorded against any active session tracker.
         # No-op when no tracker is installed.
-        return _fail_fast_on_quota(_record_session_usage_after(inner, text_input=text_input))
+        return _capture_llm_call_after(
+            _fail_fast_on_quota(_record_session_usage_after(inner, text_input=text_input)),
+            text_input=text_input,
+            system_prompt=system_prompt,
+            response_model=response_model,
+            framework=framework,
+        )
 
     @staticmethod
     def supports_answer_streaming() -> bool:

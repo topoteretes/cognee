@@ -1,6 +1,8 @@
+import asyncio
 import hashlib
 import json
 import os
+import posixpath
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -11,6 +13,8 @@ from fastapi import UploadFile
 from rdflib import Graph
 
 from cognee.base_config import get_base_config
+from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.files.storage.StorageManager import StorageManager
 from cognee.modules.ontology.rdf_xml.parse_rdf_content import FALLBACK_FORMATS, parse_rdf_content
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
     detect_rdf_format,
@@ -119,6 +123,17 @@ class OntologyMetadata:
 
 
 class OntologyService:
+    """Per-user store of uploaded ontologies, kept in cognee's file storage.
+
+    Layout under the data root: ``<user id>/metadata.json`` (the index, keyed by
+    ontology key) and ``<user id>/<blake2s of the key>.owl``. Every read and write
+    goes through ``get_file_storage``, so the files follow the data root (to S3
+    when it is an ``s3://`` URL) and are sealed when file encryption is on.
+
+    The index is read, changed and written back without a lock: two concurrent
+    uploads or deletes by one user can lose an entry.
+    """
+
     def __init__(self):
         pass
 
@@ -127,30 +142,42 @@ class OntologyService:
         base_config = get_base_config()
         return base_config.data_root_directory
 
-    def _get_user_dir(self, user_id: str) -> Path:
-        base_dir = os.path.normpath(os.path.abspath(os.path.expanduser(os.fspath(self.base_dir))))
-        user_dir = os.path.normpath(os.path.abspath(os.path.join(base_dir, str(user_id))))
-        base_prefix = base_dir if base_dir.endswith(os.sep) else f"{base_dir}{os.sep}"
-        if user_dir != base_dir and not user_dir.startswith(base_prefix):
+    def _storage(self) -> StorageManager:
+        return get_file_storage(os.fspath(self.base_dir))
+
+    def _get_user_dir(self, user_id: str) -> str:
+        """The user's folder as a path relative to the data root.
+
+        Raises:
+            ValueError: If the user id would leave the data root
+        """
+        # Checked against a stand-in root, so the rule is the same for a local
+        # folder and an S3 prefix.
+        root = "/data-root"
+        user_dir = posixpath.normpath(posixpath.join(root, str(user_id)))
+        if user_dir != root and not user_dir.startswith(f"{root}/"):
             raise ValueError("Invalid user id")
-        user_dir = Path(user_dir)
-        user_dir.mkdir(parents=True, exist_ok=True)
-        return user_dir
+        relative_dir = posixpath.relpath(user_dir, root)
+        return "" if relative_dir == "." else relative_dir
 
-    def _get_metadata_path(self, user_dir: Path) -> Path:
-        return user_dir / "metadata.json"
+    def _get_metadata_path(self, user_dir: str) -> str:
+        return posixpath.join(user_dir, "metadata.json")
 
-    def _load_metadata(self, user_dir: Path) -> dict:
+    async def _load_metadata(self, user_dir: str) -> dict:
         metadata_path = self._get_metadata_path(user_dir)
-        if metadata_path.exists():
-            with open(metadata_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+        if await self._storage().file_exists(metadata_path):
+            return json.loads(await self._read_file(metadata_path))
         return {}
 
-    def _save_metadata(self, user_dir: Path, metadata: dict):
-        metadata_path = self._get_metadata_path(user_dir)
-        with open(metadata_path, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
+    async def _save_metadata(self, user_dir: str, metadata: dict):
+        await self._storage().store(
+            self._get_metadata_path(user_dir), json.dumps(metadata, indent=2), overwrite=True
+        )
+
+    async def _read_file(self, file_path: str) -> bytes:
+        async with self._storage().open(file_path, "rb") as file:
+            # The read is blocking IO (a network request on S3): keep it off the event loop.
+            return await asyncio.to_thread(file.read)
 
     def _validate_ontology_key(self, ontology_key: str) -> str:
         normalized_key = ontology_key.strip()
@@ -158,10 +185,10 @@ class OntologyService:
             raise ValueError("Invalid ontology key")
         return normalized_key
 
-    def _get_ontology_path(self, user_dir: Path, ontology_key: str) -> Path:
+    def _get_ontology_path(self, user_dir: str, ontology_key: str) -> str:
         normalized_key = self._validate_ontology_key(ontology_key)
         storage_name = hashlib.blake2s(normalized_key.encode("utf-8"), digest_size=16).hexdigest()
-        return user_dir / f"{storage_name}.owl"
+        return posixpath.join(user_dir, f"{storage_name}.owl")
 
     async def upload_ontology(
         self, ontology_key: str, file: UploadFile, user, description: str | None = None
@@ -176,16 +203,16 @@ class OntologyService:
             raise UnsupportedOntologyFormatError()
 
         user_dir = self._get_user_dir(str(user.id))
-        metadata = self._load_metadata(user_dir)
+        metadata = await self._load_metadata(user_dir)
 
         if ontology_key in metadata:
             raise DuplicateOntologyKeyError(f"Ontology key '{ontology_key}' already exists")
 
         content = await file.read()
 
-        file_path = self._get_ontology_path(user_dir, ontology_key)
-        with open(file_path, "wb") as f:
-            f.write(content)
+        await self._storage().store(
+            self._get_ontology_path(user_dir, ontology_key), BytesIO(content), overwrite=True
+        )
 
         ontology_metadata = {
             "filename": filename,
@@ -196,7 +223,7 @@ class OntologyService:
             "description": description,
         }
         metadata[ontology_key] = ontology_metadata
-        self._save_metadata(user_dir, metadata)
+        await self._save_metadata(user_dir, metadata)
 
         return OntologyMetadata(
             ontology_key=ontology_key,
@@ -247,14 +274,15 @@ class OntologyService:
             )
         return results
 
-    def _locate_ontologies(self, ontology_key: list[str], user) -> list[tuple[Path, dict]]:
+    async def _locate_ontologies(self, ontology_key: list[str], user) -> list[tuple[str, dict]]:
         """Resolve each key to its stored file path and metadata entry.
 
         Raises:
             ValueError: If any ontology key (or its file) is not found
         """
         user_dir = self._get_user_dir(str(user.id))
-        metadata = self._load_metadata(user_dir)
+        metadata = await self._load_metadata(user_dir)
+        storage = self._storage()
 
         located = []
         for key in ontology_key:
@@ -263,13 +291,13 @@ class OntologyService:
                 raise ValueError(f"Ontology key '{key}' not found")
 
             file_path = self._get_ontology_path(user_dir, key)
-            if not file_path.is_file():
+            if not await storage.is_file(file_path):
                 raise ValueError(f"Ontology file for key '{key}' not found")
 
             located.append((file_path, metadata[key]))
         return located
 
-    def get_ontology_files(self, ontology_key: list[str], user) -> list[OntologyFile]:
+    async def get_ontology_files(self, ontology_key: list[str], user) -> list[OntologyFile]:
         """
         Retrieve ontologies as file objects ready for ``RDFLibOntologyResolver``.
 
@@ -283,40 +311,36 @@ class OntologyService:
             ValueError: If any ontology key not found
         """
         files = []
-        for file_path, entry in self._locate_ontologies(ontology_key, user):
-            with open(file_path, "rb") as f:
-                content = f.read()
+        for file_path, entry in await self._locate_ontologies(ontology_key, user):
             files.append(
                 OntologyFile(
-                    content,
-                    filename=entry.get("filename") or file_path.name,
+                    await self._read_file(file_path),
+                    filename=entry.get("filename") or posixpath.basename(file_path),
                     content_type=entry.get("content_type"),
                     rdf_format=entry.get("format"),
                 )
             )
         return files
 
-    def delete_ontology(self, ontology_key: str, user) -> None:
+    async def delete_ontology(self, ontology_key: str, user) -> None:
         ontology_key = self._validate_ontology_key(ontology_key)
         user_dir = self._get_user_dir(str(user.id))
-        metadata = self._load_metadata(user_dir)
+        metadata = await self._load_metadata(user_dir)
 
         if ontology_key not in metadata:
             raise ValueError(f"Ontology key '{ontology_key}' not found")
 
-        file_path = self._get_ontology_path(user_dir, ontology_key)
-
-        if file_path.is_file():
-            file_path.unlink()
+        # A file that is already gone is not an error: the index entry still goes.
+        await self._storage().remove(self._get_ontology_path(user_dir, ontology_key))
 
         del metadata[ontology_key]
-        self._save_metadata(user_dir, metadata)
+        await self._save_metadata(user_dir, metadata)
 
-    def list_ontologies(self, user) -> dict:
+    async def list_ontologies(self, user) -> dict:
         user_dir = self._get_user_dir(str(user.id))
-        return self._load_metadata(user_dir)
+        return await self._load_metadata(user_dir)
 
-    def load_ontology_graph(self, ontology_key: str, user) -> Graph:
+    async def load_ontology_graph(self, ontology_key: str, user) -> Graph:
         """
         Parse the stored ontology for ``ontology_key`` into an ``rdflib.Graph``.
 
@@ -328,7 +352,7 @@ class OntologyService:
             OntologyParseError: If the stored file is not parseable RDF
         """
         try:
-            ((file_path, entry),) = self._locate_ontologies([ontology_key], user)
+            ((file_path, entry),) = await self._locate_ontologies([ontology_key], user)
         except ValueError as error:
             raise OntologyNotFoundError(str(error)) from error
 
@@ -341,15 +365,19 @@ class OntologyService:
             candidate_formats.remove(stored_format)
             candidate_formats.insert(0, stored_format)
 
+        content = await self._read_file(file_path)
         try:
-            graph, _ = parse_rdf_content(file_path.read_bytes(), candidate_formats)
+            # Parsing with rdflib is CPU-bound: keep it off the event loop.
+            graph, _ = await asyncio.to_thread(parse_rdf_content, content, candidate_formats)
         except ValueError as error:
             raise OntologyParseError(
                 f"Unable to parse ontology '{ontology_key}'. {error}"
             ) from error
         return graph
 
-    def export_ontology(self, ontology_key: str, user, export_format: str = "turtle") -> bytes:
+    async def export_ontology(
+        self, ontology_key: str, user, export_format: str = "turtle"
+    ) -> bytes:
         """
         Serialize the stored ontology for ``ontology_key`` in ``export_format``.
 
@@ -363,9 +391,12 @@ class OntologyService:
             OntologySerializationError: If the ontology cannot be written in ``export_format``
         """
         rdflib_format = EXPORT_FORMATS[export_format][0]
-        graph = self.load_ontology_graph(ontology_key, user)
+        graph = await self.load_ontology_graph(ontology_key, user)
         try:
-            serialized = graph.serialize(format=rdflib_format, encoding="utf-8")
+            # Serializing with rdflib is CPU-bound too.
+            serialized = await asyncio.to_thread(
+                graph.serialize, format=rdflib_format, encoding="utf-8"
+            )
         except ValueError as error:
             raise OntologySerializationError(
                 f"Ontology '{ontology_key}' cannot be serialized as {export_format}: {error}"

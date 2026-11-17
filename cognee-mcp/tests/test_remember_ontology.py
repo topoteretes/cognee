@@ -81,7 +81,7 @@ async def test_local_resolves_for_default_user(monkeypatch, missing):
         OntologyFile(b"first OWL", "one.owl", "application/rdf+xml", rdf_format="xml"),
         OntologyFile(b"second TTL", "two.ttl", "text/turtle", rdf_format="turtle"),
     ]
-    lookup = Mock(return_value=stored)
+    lookup = AsyncMock(return_value=stored)
     if missing:
         lookup.side_effect = ValueError("Ontology key 'one' not found")
     monkeypatch.setattr(OntologyService, "get_ontology_files", lookup)
@@ -112,7 +112,7 @@ async def test_local_resolves_for_default_user(monkeypatch, missing):
         # would give the same tool call two user-resolution paths. The lookup below is
         # what has to agree with the write, and it does.
         assert "user" not in kwargs
-    lookup.assert_called_once_with(["one", "two"], user)
+    lookup.assert_awaited_once_with(["one", "two"], user)
 
 
 @pytest.mark.asyncio

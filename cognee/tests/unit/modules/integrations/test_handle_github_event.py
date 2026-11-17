@@ -45,7 +45,7 @@ async def test_installation_deleted_revokes_the_credential(mocks):
         {"x-github-event": "installation"},
     )
 
-    mocks.revoke.assert_awaited_once_with("github", "42")
+    mocks.revoke.assert_awaited_once_with("github", "42", revoked_by="provider")
     mocks.sync.assert_not_awaited()
 
 
@@ -183,4 +183,4 @@ async def test_a_paused_connection_still_revokes_on_uninstall(mocks):
         {"x-github-event": "installation"},
     )
 
-    mocks.revoke.assert_awaited_once_with("github", "42")
+    mocks.revoke.assert_awaited_once_with("github", "42", revoked_by="provider")

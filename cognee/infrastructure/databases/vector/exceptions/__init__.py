@@ -1,6 +1,7 @@
 from .exceptions import (
     CollectionNotFoundError,
     EmbeddingDimensionMismatchError,
+    PgvectorVersionError,
     SharedDatabasePruneError,
     StoredVectorWidthMismatchError,
 )
@@ -8,6 +9,7 @@ from .exceptions import (
 __all__ = [
     "CollectionNotFoundError",
     "EmbeddingDimensionMismatchError",
+    "PgvectorVersionError",
     "SharedDatabasePruneError",
     "StoredVectorWidthMismatchError",
 ]

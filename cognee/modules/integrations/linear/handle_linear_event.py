@@ -29,6 +29,7 @@ import json
 import logging
 
 from cognee.modules.integrations.credentials import (
+    REVOKED_BY_PROVIDER,
     STATUS_ACTIVE,
     get_credential_by_account,
     revoke_credential_by_account,
@@ -67,7 +68,9 @@ async def handle_linear_event(raw_body: bytes, headers: dict[str, str]) -> None:
         # The workspace revoked the app on Linear's side — the local
         # credential must stop being used. Idempotent, so redelivery is
         # harmless.
-        await revoke_credential_by_account(_PROVIDER, organization_id)
+        await revoke_credential_by_account(
+            _PROVIDER, organization_id, revoked_by=REVOKED_BY_PROVIDER
+        )
         logger.info("Linear app revoked for organization %s; credential revoked", organization_id)
         return
 

@@ -185,7 +185,7 @@ tasks in a row answering 5xx or nothing; the fresh tasks, the retry tail and the
 missing tasks each count their own streak, a success resets it, and a 403 or 404 never counts,
 so a task that keeps answering 403 or 404 never stops a run) or a rejected token after rows
 were emitted, the run ends cleanly. It never sleeps on a 429: it does not read `Retry-After`,
-because the walk holds cognee's process-wide staging lock and dlt rolls back the state of a
+because the walk holds its dataset's staging lock and dlt rolls back the state of a
 failed run.
 
 - If a task read or a check of a missing task got an answer (any answer, a failure or a task
@@ -353,7 +353,7 @@ completes.
   is time: size the budget well above one pass, or each pass settles only a few tasks before the
   next one lists again (measured in the tests: two projects of six tasks at two a page, ten
   listing requests a pass, take five runs at a budget of 3 to forget one deleted task).
-- **Lock hold time.** A run holds cognee's process-wide staging lock while it walks. The listing
+- **Lock hold time.** A run holds its dataset's staging lock while it walks. The listing
   and the reads share `max_requests`, so a run holds the lock for at most that many requests plus
   the client's retries of each (three attempts, backing off 1 s then 2 s). There is no wall-clock
   deadline, no cap on projects or pages and no other limit. `check_active` is called before each

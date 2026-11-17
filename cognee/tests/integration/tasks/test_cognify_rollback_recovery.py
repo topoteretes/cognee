@@ -17,6 +17,7 @@ from cognee.context_global_variables import (
     set_database_global_context_variables,
     vector_db_config,
 )
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import LLMGateway
@@ -26,6 +27,7 @@ from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.data.models import Data
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.graph.models import Edge, Node
+from cognee.modules.pipelines.exceptions import CognifyFailedError
 from cognee.modules.pipelines.models import PipelineContext, PipelineRun, PipelineRunStatus
 from cognee.modules.pipelines.run_ownership import pipeline_run_ownership
 from cognee.modules.pipelines.tasks.task import Task
@@ -210,15 +212,18 @@ async def _mock_structured_output(
             description="Summary for rollback test",
         )
     if response_model == KnowledgeGraph:
+        # One pair of people per document, so each document's graph writes are
+        # distinguishable: "Carol knows Dave" for the second, "Alice knows Bob" else.
+        first, second = ("Carol", "Dave") if "Carol" in _text_input else ("Alice", "Bob")
         return KnowledgeGraph(
             nodes=[
-                KGNode(id="Alice", name="Alice", type="Person", description="Person A"),
-                KGNode(id="Bob", name="Bob", type="Person", description="Person B"),
+                KGNode(id=first, name=first, type="Person", description="Person A"),
+                KGNode(id=second, name=second, type="Person", description="Person B"),
             ],
             edges=[
                 KGEdge(
-                    source_node_id="Alice",
-                    target_node_id="Bob",
+                    source_node_id=first,
+                    target_node_id=second,
                     relationship_name="knows",
                 )
             ],
@@ -226,78 +231,293 @@ async def _mock_structured_output(
     return "test"
 
 
+async def _evidence_rows(dataset_id) -> list:
+    from cognee.modules.provenance.edge_evidence import ProvenanceEdgeEvidence
+
+    async with get_relational_engine().get_async_session() as session:
+        statement = select(ProvenanceEdgeEvidence).where(
+            ProvenanceEdgeEvidence.dataset_id == dataset_id
+        )
+        return list((await session.execute(statement)).scalars().all())
+
+
+async def _readable_extracted_evidence_data_ids(dataset_id) -> set:
+    """Documents whose extracted-edge evidence the lookups count (citations,
+    conflict review). Structural rows are left out: the indexing run, which
+    completes, writes them for every document's chunks."""
+    from cognee.modules.provenance.edge_evidence.lookup import get_edge_sources
+
+    rows = await _evidence_rows(dataset_id)
+    edge_ids = {row.edge_id for row in rows if row.evidence_kind == "extracted"}
+    return {record.data_id for record in await get_edge_sources(dataset_id, edge_ids)}
+
+
+async def _graph_node_names() -> set:
+    graph_engine = await get_graph_engine()
+    nodes, _edges = await graph_engine.get_graph_data()
+    return {properties.get("name") for _id, properties in nodes}
+
+
 @pytest.mark.asyncio
-async def test_cognify_rollback_integration_keeps_preexisting_data_when_pipeline_fails_mid_execution(
+async def test_cognify_rollback_keeps_the_documents_the_failed_run_completed(
     clean_test_environment, monkeypatch
 ):
-    # Test 1: add->cognify (failure mid execution), rollback removes only failed run artifacts.
+    """Two documents, the second fails after its writes: the first keeps its nodes,
+    edges and completed stamp, the second's writes are gone and it is unstamped,
+    the run is errored, and the next cognify processes only the second."""
+    from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus, is_item_stamped
+
     user = await get_default_user()
     dataset_name = "rollback_integration_dataset"
     dataset = await create_authorized_dataset(dataset_name, user)
 
-    add_old = await cognee.add("Older baseline data", dataset_name=dataset_name, user=user)
-    old_data_id = add_old.data_ingestion_info[0]["data_id"]
-
-    preexisting_run_id = uuid4()
-    preexisting_nodes = [Person(name="Legacy-A"), Person(name="Legacy-B")]
-    preexisting_edge = [
-        (preexisting_nodes[0].id, preexisting_nodes[1].id, "related_to", {"edge_text": "legacy"})
-    ]
-
-    async with _dataset_context(dataset.id, dataset.owner_id):
-        await add_data_points(
-            preexisting_nodes,
-            custom_edges=preexisting_edge,
-            ctx=PipelineContext(
-                user=user,
-                dataset=dataset,
-                data_item=SimpleNamespace(id=old_data_id),
-                pipeline_name="cognify_pipeline",
-                pipeline_run_id=preexisting_run_id,
-            ),
-        )
-
-    nodes_before, edges_before = await _count_nodes_edges_for_run(dataset.id, preexisting_run_id)
-    assert len(nodes_before) >= 2
-    assert len(edges_before) >= 1
-
-    add_new = await cognee.add(
-        "Data that will fail during cognify", dataset_name=dataset_name, user=user
+    add_result = await cognee.add(
+        ["First document: Alice knows Bob.", "Second document: Carol knows Dave."],
+        dataset_name=dataset_name,
+        user=user,
     )
-    assert add_new is not None
+    first_id, second_id = (item["data_id"] for item in add_result.data_ingestion_info[:2])
 
     monkeypatch.setattr(LLMGateway, "acreate_structured_output", _mock_structured_output)
     cognify_module = importlib.import_module("cognee.api.v1.cognify.cognify")
     original_get_default_tasks = cognify_module.get_default_tasks
 
-    async def _forced_failure_task(*_args, **_kwargs):
-        raise RuntimeError("forced failure after default cognify tasks")
+    async def _fail_second_document(data, ctx: PipelineContext):
+        if ctx.data_item.id == second_id:
+            raise RuntimeError("forced failure after default cognify tasks")
+        return data
 
     async def _patched_get_default_tasks(*args, **kwargs):
         tasks = await original_get_default_tasks(*args, **kwargs)
-        # Append a deterministic failure task to avoid coupling this test to any single built-in task.
-        tasks.append(Task(_forced_failure_task))
+        # Fail after the real tasks, so the second document's writes exist and
+        # the rollback has to remove them.
+        tasks.append(Task(_fail_second_document))
         return tasks
 
     monkeypatch.setattr(cognify_module, "get_default_tasks", _patched_get_default_tasks)
 
+    before_failed_run = datetime.now(timezone.utc)
     # raise_on_error=False: this test inspects the errored run info directly;
     # the default would raise CognifyFailedError here (COG-6276).
     cognify_result = await cognee.cognify(datasets=[dataset_name], user=user, raise_on_error=False)
     run_info = cognify_result[dataset.id]
     assert run_info.status == "PipelineRunErrored"
-
     failed_run_id = run_info.pipeline_run_id
-    failed_nodes, failed_edges = await _count_nodes_edges_for_run(dataset.id, failed_run_id)
-    assert failed_nodes == []
-    assert failed_edges == []
 
-    # Pre-existing data from older run must remain untouched.
-    remaining_old_nodes, remaining_old_edges = await _count_nodes_edges_for_run(
-        dataset.id, preexisting_run_id
+    nodes, edges = await _count_nodes_edges_for_run(dataset.id, failed_run_id)
+    assert {node.data_id for node in nodes} == {first_id}
+    assert {edge.data_id for edge in edges} == {first_id}
+    names = await _graph_node_names()  # entity names are stored lowercased
+    assert {"alice", "bob"} <= names
+    assert names.isdisjoint({"carol", "dave"})
+    first_record = await _get_data_record(first_id)
+    assert first_record.pipeline_status["cognify_pipeline"][str(dataset.id)] == (
+        DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
     )
-    assert len(remaining_old_nodes) >= 2
-    assert len(remaining_old_edges) >= 1
+    assert not is_item_stamped(await _get_data_record(second_id), "cognify_pipeline", dataset.id)
+    # The kept document's evidence stays readable although its run errored, and
+    # conflict review sees it as new; the failed document's stays hidden.
+    from cognee.modules.provenance.edge_evidence.lookup import get_touched_entity_ids
+
+    rows = await _evidence_rows(dataset.id)
+    assert {row.data_id for row in rows} == {first_id, second_id}
+    assert await _readable_extracted_evidence_data_ids(dataset.id) == {first_id}
+    first_rows = [
+        row for row in rows if row.data_id == first_id and row.evidence_kind == "extracted"
+    ]
+    touched = await get_touched_entity_ids(dataset.id, before_failed_run)
+    assert {str(row.source_node_id) for row in first_rows} <= touched
+    assert all(
+        row.pipeline_run_id == failed_run_id
+        for row in rows
+        if row.data_id == second_id and row.evidence_kind == "extracted"
+    )
+
+    # The next cognify skips the first document and processes only the second.
+    monkeypatch.setattr(cognify_module, "get_default_tasks", original_get_default_tasks)
+    cognify_result = await cognee.cognify(datasets=[dataset_name], user=user)
+    run_info = cognify_result[dataset.id]
+    assert run_info.status == "PipelineRunCompleted"
+    outcomes = {
+        entry["data_id"]: type(entry["run_info"]).__name__ for entry in run_info.data_ingestion_info
+    }
+    assert outcomes == {first_id: "PipelineRunAlreadyCompleted", second_id: "PipelineRunCompleted"}
+
+    nodes, _edges = await _count_nodes_edges_for_run(dataset.id, run_info.pipeline_run_id)
+    assert {node.data_id for node in nodes} == {second_id}
+    nodes, _edges = await _count_nodes_edges_for_run(dataset.id, failed_run_id)
+    assert {node.data_id for node in nodes} == {first_id}
+    assert {"alice", "bob", "carol", "dave"} <= await _graph_node_names()
+    assert is_item_stamped(await _get_data_record(second_id), "cognify_pipeline", dataset.id)
+    assert await _readable_extracted_evidence_data_ids(dataset.id) == {first_id, second_id}
+
+
+@pytest.mark.asyncio
+async def test_cognify_rollback_keeps_nothing_when_the_push_to_s3_fails(
+    clean_test_environment, monkeypatch
+):
+    """S3 storage: every item completes and is stamped, then the graph push
+    fails. The writes never reached S3, so the whole run is rolled back and
+    every stamp cleared; the next cognify extracts both documents again
+    instead of skipping documents another process does not have."""
+    from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
+    from cognee.modules.pipelines.models.DataItemStatus import is_item_stamped
+
+    run_tasks_module = importlib.import_module("cognee.modules.pipelines.operations.run_tasks")
+
+    user = await get_default_user()
+    dataset_name = "rollback_push_failure_dataset"
+    dataset = await create_authorized_dataset(dataset_name, user)
+    add_result = await cognee.add(
+        ["First document: Alice knows Bob.", "Second document: Carol knows Dave."],
+        dataset_name=dataset_name,
+        user=user,
+    )
+    data_ids = {item["data_id"] for item in add_result.data_ingestion_info[:2]}
+    monkeypatch.setattr(LLMGateway, "acreate_structured_output", _mock_structured_output)
+
+    # Simulate S3 storage: the writes become durable only through the push,
+    # and the push fails after every item has completed.
+    async def _push_fails(_self):
+        raise OSError("S3 push failed")
+
+    monkeypatch.setattr(run_tasks_module, "writes_durable_before_push", lambda *_: False)
+    monkeypatch.setattr(LadybugAdapter, "push_to_s3", _push_fails, raising=False)
+
+    with pytest.raises(CognifyFailedError, match="S3 push failed"):
+        await cognee.cognify(datasets=[dataset_name], user=user, early_chunk_indexing=False)
+
+    for data_id in data_ids:
+        assert not is_item_stamped(await _get_data_record(data_id), "cognify_pipeline", dataset.id)
+    names = await _graph_node_names()
+    assert names.isdisjoint({"alice", "bob", "carol", "dave"})
+
+    # The push works again: the next cognify extracts both documents.
+    async def _push_ok(_self):
+        return None
+
+    monkeypatch.setattr(LadybugAdapter, "push_to_s3", _push_ok, raising=False)
+    run_info = (await cognee.cognify(datasets=[dataset_name], user=user))[dataset.id]
+    assert run_info.status == "PipelineRunCompleted"
+    outcomes = {
+        entry["data_id"]: type(entry["run_info"]).__name__ for entry in run_info.data_ingestion_info
+    }
+    assert outcomes == {data_id: "PipelineRunCompleted" for data_id in data_ids}
+    assert {"alice", "bob", "carol", "dave"} <= await _graph_node_names()
+
+
+@pytest.mark.asyncio
+async def test_non_incremental_cognify_rollback_clears_the_failed_documents_stale_stamp(
+    clean_test_environment, monkeypatch
+):
+    """``cognify(incremental_loading=False, data_cache=False)`` takes the regular item
+    path, which reprocesses stamped documents and never stamps. A document that fails half-way in such a run still carries the earlier
+    run's stamp, which is no proof this run finished it: its writes from the failed
+    run are removed and its stamp cleared, so the next cognify re-extracts it. The
+    document that completed in the failed run keeps its stamp, and the earlier run's
+    artifacts of both stay untouched."""
+    from cognee.modules.pipelines.models.DataItemStatus import is_item_stamped
+
+    user = await get_default_user()
+    dataset = await create_authorized_dataset("rollback_non_incremental_dataset", user)
+    add_result = await cognee.add(
+        ["First document: Alice knows Bob.", "Second document: Carol knows Dave."],
+        dataset_name=dataset.name,
+        user=user,
+    )
+    first_id, second_id = (item["data_id"] for item in add_result.data_ingestion_info[:2])
+    data_ids = {first_id, second_id}
+    names_by_id = {first_id: {"alice", "bob"}, second_id: {"carol", "dave"}}
+    monkeypatch.setattr(LLMGateway, "acreate_structured_output", _mock_structured_output)
+
+    earlier_run = (await cognee.cognify(datasets=[dataset.name], user=user))[dataset.id]
+    assert earlier_run.status == "PipelineRunCompleted"
+    for data_id in data_ids:
+        assert is_item_stamped(await _get_data_record(data_id), "cognify_pipeline", dataset.id)
+    earlier_nodes, _edges = await _count_nodes_edges_for_run(
+        dataset.id, earlier_run.pipeline_run_id
+    )
+    assert {node.data_id for node in earlier_nodes} == data_ids
+
+    # Re-extraction yields new entities ("<name>-rerun"), so the failed run's writes
+    # are rows of their own and not the earlier run's, which the ledger keeps once.
+    async def _rerun_extraction(*args, **kwargs):
+        from cognee.shared.data_models import KnowledgeGraph
+
+        graph = await _mock_structured_output(*args, **kwargs)
+        if isinstance(graph, KnowledgeGraph):
+            for node in graph.nodes:
+                node.id, node.name = f"{node.id}-rerun", f"{node.name}-rerun"
+            for edge in graph.edges:
+                edge.source_node_id = f"{edge.source_node_id}-rerun"
+                edge.target_node_id = f"{edge.target_node_id}-rerun"
+        return graph
+
+    monkeypatch.setattr(LLMGateway, "acreate_structured_output", _rerun_extraction)
+
+    def _rerun(names):
+        return {f"{name}-rerun" for name in names}
+
+    # Items run one at a time (data_per_batch=1): the second item to reach the
+    # failure task fails after its writes, once the first has fully completed.
+    cognify_module = importlib.import_module("cognee.api.v1.cognify.cognify")
+    original_get_default_tasks = cognify_module.get_default_tasks
+    processed = []
+    failed_run_ids = set()
+
+    async def _fail_second_item(data, ctx: PipelineContext):
+        processed.append(ctx.data_item.id)
+        failed_run_ids.add(ctx.pipeline_run_id)
+        if len(processed) == 2:
+            raise RuntimeError("forced failure after default cognify tasks")
+        return data
+
+    async def _patched_get_default_tasks(*args, **kwargs):
+        tasks = await original_get_default_tasks(*args, **kwargs)
+        tasks.append(Task(_fail_second_item))
+        return tasks
+
+    monkeypatch.setattr(cognify_module, "get_default_tasks", _patched_get_default_tasks)
+    # On the regular item path the item's error is re-raised once the run is
+    # recorded as errored and rolled back; cognify wraps it as CognifyFailedError.
+    with pytest.raises(CognifyFailedError, match="forced failure"):
+        await cognee.cognify(
+            datasets=[dataset.name],
+            user=user,
+            incremental_loading=False,
+            data_cache=False,
+            data_per_batch=1,
+        )
+    completed_id, failed_id = processed
+    assert {completed_id, failed_id} == data_ids
+    (failed_run_id,) = failed_run_ids
+    assert failed_run_id != earlier_run.pipeline_run_id
+
+    nodes, edges = await _count_nodes_edges_for_run(dataset.id, failed_run_id)
+    assert {node.data_id for node in nodes} == {completed_id}
+    assert {edge.data_id for edge in edges} == {completed_id}
+    assert is_item_stamped(await _get_data_record(completed_id), "cognify_pipeline", dataset.id)
+    assert not is_item_stamped(await _get_data_record(failed_id), "cognify_pipeline", dataset.id)
+    earlier_nodes, _edges = await _count_nodes_edges_for_run(
+        dataset.id, earlier_run.pipeline_run_id
+    )
+    assert {node.data_id for node in earlier_nodes} == data_ids
+    names = await _graph_node_names()
+    assert {"alice", "bob", "carol", "dave"} | _rerun(names_by_id[completed_id]) <= names
+    assert names.isdisjoint(_rerun(names_by_id[failed_id]))
+
+    # The next cognify re-extracts only the document the failed run did not finish.
+    monkeypatch.setattr(cognify_module, "get_default_tasks", original_get_default_tasks)
+    next_run = (await cognee.cognify(datasets=[dataset.name], user=user))[dataset.id]
+    assert next_run.status == "PipelineRunCompleted"
+    outcomes = {
+        entry["data_id"]: type(entry["run_info"]).__name__ for entry in next_run.data_ingestion_info
+    }
+    assert outcomes == {
+        completed_id: "PipelineRunAlreadyCompleted",
+        failed_id: "PipelineRunCompleted",
+    }
+    assert _rerun(names_by_id[failed_id]) <= await _graph_node_names()
 
 
 @pytest.mark.asyncio
@@ -506,7 +726,8 @@ async def test_startup_recovery_finds_a_run_buried_under_a_newer_completed_run(
     clean_test_environment,
 ):
     """An abandoned run must be closed even when a newer run of the same pipeline on
-    the same dataset completed after it: "newest row per dataset" would hide it."""
+    the same dataset completed after it: "newest row per dataset" would hide it.
+    Closing it must not replace the newer run as the dataset's newest row either."""
     user = await get_default_user()
     dataset = await create_authorized_dataset("recovery_buried_run_dataset", user)
 
@@ -574,8 +795,10 @@ async def test_startup_recovery_finds_a_run_buried_under_a_newer_completed_run(
         PipelineRunStatus.DATASET_PROCESSING_STARTED,
         PipelineRunStatus.DATASET_PROCESSING_ERRORED,
     ]
-    assert rows[-1].pipeline_run_id == abandoned_run_id
-    assert rows[-1].error_class == "AbandonedPipelineRunError"
+    closing_row = [row for row in rows if row.pipeline_run_id == abandoned_run_id][-1]
+    assert closing_row.error_class == "AbandonedPipelineRunError"
+    # Closed beneath the newer run: the dataset's newest row is still that run's.
+    assert rows[-1].pipeline_run_id == completed_run_id
     assert by_run[completed_run_id] == [
         PipelineRunStatus.DATASET_PROCESSING_STARTED,
         PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
