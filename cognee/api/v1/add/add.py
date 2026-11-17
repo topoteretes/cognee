@@ -92,11 +92,11 @@ async def add(
           after another.
 
     What you must provide:
-        - No LLM key: add() makes no LLM call of its own and validates only the
-          embedding side of the provider config. Images, audio and video are the
-          exception: their loaders need an LLM to describe or transcribe them, and they
-          raise when none is configured. Text, documents, code, web pages and databases
-          ingest on a keyless install.
+        - An LLM key only for images, audio and video: their loaders need an LLM to
+          describe or transcribe them, and they raise when none is configured. Otherwise
+          add() makes no LLM call and validates only the embedding side of the provider
+          config, so text, documents, code, web pages and databases ingest on a keyless
+          install.
         - A ``user`` when acting for someone; without one the default user is used
           (created on first use).
         - Then ``cognify()`` (or ``remember()``) to make the data searchable.
