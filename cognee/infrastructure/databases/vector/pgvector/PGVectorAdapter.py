@@ -145,6 +145,13 @@ def _row_order(row_id: Any) -> str:
     return str(row_id)
 
 
+def _batches(rows: list[dict]) -> list[list[dict]]:
+    """``rows`` in consecutive slices of ``QUERY_BATCH_SIZE``, one statement each."""
+    return [
+        rows[start : start + QUERY_BATCH_SIZE] for start in range(0, len(rows), QUERY_BATCH_SIZE)
+    ]
+
+
 PgvectorVersion = tuple[int, ...]
 
 # Collection tables in the engine's current schema (the dataset's own schema in
@@ -825,9 +832,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                         )
 
     @staticmethod
-    def _merged_payload_sql(collection_name: str) -> str:
-        """The ``ON CONFLICT`` payload as jsonb SQL: the incoming one with ``belongs_to_set``
+    def _merged_payload_sql(collection_name: str, incoming: str) -> str:
+        """The upserted payload as jsonb SQL: the incoming one with ``belongs_to_set``
         unioned with the stored row's, so an upsert never drops a tag the row already carries.
+
+        ``incoming`` names the relation holding the incoming row's ``payload`` column:
+        ``EXCLUDED`` in the upsert, the incoming rows in ``_classify_sql``, so the two
+        cannot disagree on what an upsert would write.
 
         A side whose ``belongs_to_set`` is absent or JSON ``null`` (a DataPoint's default)
         counts as empty: ``COALESCE`` alone leaves a JSON ``null`` in place, and
@@ -835,10 +846,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """
         quoted_table = f'"{collection_name}"'
         stored_tags = f"NULLIF({quoted_table}.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
-        incoming_tags = "NULLIF(EXCLUDED.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
+        incoming_tags = f"NULLIF({incoming}.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
         return f"""
             jsonb_set(
-                EXCLUDED.payload::jsonb,
+                {incoming}.payload::jsonb,
                 '{{belongs_to_set}}',
                 (
                     SELECT COALESCE(jsonb_agg(DISTINCT val), '[]'::jsonb)
@@ -863,30 +874,83 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
 
     @staticmethod
-    def _payload_changed_sql(collection_name: str) -> str:
-        """``ON CONFLICT`` condition: the merged payload differs from the stored one.
+    def _payload_changed_sql(collection_name: str, incoming: str) -> str:
+        """SQL condition: the merged payload differs from the stored one. The upsert's
+        ``ON CONFLICT`` condition and ``_classify_sql``'s filter (``incoming`` as in
+        ``_merged_payload_sql``).
 
         The timestamps are stamped on every write and read by no one, so they are left
         out: an unchanged re-upsert writes no new row version and no HNSW index entry.
         """
         volatile = "- 'created_at' - 'updated_at'"
-        merged = PGVectorAdapter._merged_payload_sql(collection_name)
+        merged = PGVectorAdapter._merged_payload_sql(collection_name, incoming)
         stored = f'"{collection_name}".payload::jsonb'
         return f"(({merged}) {volatile}) IS DISTINCT FROM ({stored} {volatile})"
 
     @classmethod
+    def _classify_sql(cls, table: str, collection_name: str) -> str:
+        """The incoming rows an upsert would write, each with whether its id is missing.
+
+        A plain ``SELECT``: it takes no row lock and waits for none. An existing row
+        the upsert would leave as it is (``_payload_changed_sql`` false) is not returned.
+        ``$1`` and ``$2`` are parallel arrays: the ids, and the payloads as JSON text.
+        ``table`` is the schema-qualified name; the conditions refer to it by its bare
+        name, as the upsert's conflict clause does.
+        """
+        stored = f'"{collection_name}"'
+        return (
+            f"SELECT incoming.id, {stored}.id IS NULL AS missing "
+            "FROM unnest($1::uuid[], $2::text[]) AS incoming(id, payload) "
+            f"LEFT JOIN {table} ON {stored}.id = incoming.id "
+            f"WHERE {stored}.id IS NULL "
+            f"OR {cls._payload_changed_sql(collection_name, 'incoming')}"
+        )
+
+    async def _classify(
+        self, connection, collection_name: str, rows: list[dict]
+    ) -> tuple[list[dict], list[dict]]:
+        """Split ``rows`` into (missing, changed) against the table as ``connection``
+        sees it, dropping rows whose upsert would change nothing. Keeps the input order
+        within each list."""
+        statement = self._classify_sql(self._qualified_table(collection_name), collection_name)
+        is_missing: dict[str, bool] = {}
+        for batch in _batches(rows):
+            records = await connection.fetch(
+                statement,
+                [row["id"] for row in batch],
+                [json.dumps(row["payload"]) for row in batch],
+            )
+            is_missing.update((str(record["id"]), record["missing"]) for record in records)
+        missing = [row for row in rows if is_missing.get(str(row["id"])) is True]
+        changed = [row for row in rows if is_missing.get(str(row["id"])) is False]
+        return missing, changed
+
+    @staticmethod
+    def _data_point_insert_sql(table: str) -> str:
+        """Insert a row unless its id exists, returning the id only when inserted.
+
+        ``DO NOTHING`` takes no lock on an existing row; it waits only while another
+        transaction's insert of the same id is uncommitted.
+        """
+        return (
+            f"INSERT INTO {table} (id, payload, vector) VALUES ($1, $2, $3) "
+            "ON CONFLICT (id) DO NOTHING RETURNING id"
+        )
+
+    @classmethod
     def _data_point_upsert_sql(cls, table: str, collection_name: str) -> str:
-        """The statement ``create_data_points`` runs per row: insert, or on a conflicting
-        id merge ``belongs_to_set``, keep the vector unless the text changed, and skip the
-        update altogether when nothing but the timestamps differs. ``table`` is the
-        schema-qualified name; the conflict clause refers to the target by its bare name.
+        """The statement ``create_data_points`` runs per changed row: insert, or on a
+        conflicting id merge ``belongs_to_set``, keep the vector unless the text changed,
+        and skip the update altogether when nothing but the timestamps differs. ``table``
+        is the schema-qualified name; the conflict clause refers to the target by its
+        bare name.
         """
         return (
             f"INSERT INTO {table} (id, payload, vector) VALUES ($1, $2, $3) "
             "ON CONFLICT (id) DO UPDATE SET "
-            f"payload = ({cls._merged_payload_sql(collection_name)})::json, "
+            f"payload = ({cls._merged_payload_sql(collection_name, 'EXCLUDED')})::json, "
             f"vector = {cls._vector_if_text_changed_sql(collection_name)} "
-            f"WHERE {cls._payload_changed_sql(collection_name)}"
+            f"WHERE {cls._payload_changed_sql(collection_name, 'EXCLUDED')}"
         )
 
     @classmethod
@@ -896,7 +960,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         return (
             f"INSERT INTO {table} (id, payload, vector) VALUES ($1, $2, $3) "
             "ON CONFLICT (id) DO UPDATE SET "
-            f"payload = ({cls._merged_payload_sql(collection_name)})::json, "
+            f"payload = ({cls._merged_payload_sql(collection_name, 'EXCLUDED')})::json, "
             "vector = EXCLUDED.vector"
         )
 
@@ -908,6 +972,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     )
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict.
+
+        Only the rows an upsert would write are embedded: a re-run over data already
+        stored would otherwise embed every row and then write none of them.
 
         The rows reach Postgres as plain ``(id, payload, vector)`` tuples over the binary
         write pool: no ORM object per row, and the vector in the column's binary form
@@ -921,26 +988,52 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 payload_schema=type(data_points[0]),
             )
 
-        data_vectors = await self.embed_data(
-            [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
-        )
-        # zip() below stops at the shorter list, so a provider that answers with fewer
-        # vectors than inputs would store part of the batch and report success.
-        if len(data_vectors) != len(data_points):
-            raise ValueError(
-                f"The embedding provider returned {len(data_vectors)} vectors for "
-                f"{len(data_points)} inputs; nothing was written to {collection_name!r}."
-            )
+        rows, texts = self._data_point_rows(data_points)
 
-        # Dedup by id within the batch: the same id twice would otherwise be two
-        # upserts of one row, and entity extraction may still emit same-UUID5
-        # rows in one batch. The last payload wins, with the duplicates'
-        # belongs_to_set arrays unioned so a tag that only appears on one
-        # duplicate isn't dropped (mirrors the in-batch tag merge in
-        # Neo4jAdapter.add_nodes). The rows are then written in ``_row_order``
-        # so concurrent batches cannot deadlock.
+        # Which rows would an upsert write at all? Asked in a short read of its own, on a
+        # connection given back before the embedding request, so no transaction stays
+        # open across it. A changed row whose text is the same is embedded too, although
+        # the upsert keeps its stored vector.
+        pool = await self._get_write_pool()
+        async with pool.acquire() as connection:
+            missing, changed = await self._classify(connection, collection_name, rows)
+        if not missing and not changed:
+            return
+
+        # The write classifies every row again inside its transaction. A row left out
+        # here that was deleted or changed during the embedding request comes back
+        # without a vector: the transaction is left without writing, those rows are
+        # embedded, and the write runs again. Each round embeds only rows that have no
+        # vector yet, so the rounds end once every row has one.
+        vectors: dict[str, Any] = {}
+        to_embed = missing + changed
+        while to_embed:
+            embedded = await self.embed_data([texts[str(row["id"])] for row in to_embed])
+            # zip() below stops at the shorter list, so a provider that answers with
+            # fewer vectors than inputs would store part of the batch and report success.
+            if len(embedded) != len(to_embed):
+                raise ValueError(
+                    f"The embedding provider returned {len(embedded)} vectors for "
+                    f"{len(to_embed)} inputs; nothing was written to {collection_name!r}."
+                )
+            vectors.update(zip([str(row["id"]) for row in to_embed], embedded))
+            to_embed = await self._write_data_point_rows(collection_name, rows, vectors)
+
+    @staticmethod
+    def _data_point_rows(data_points: list[DataPoint]) -> tuple[list[dict], dict[str, str]]:
+        """One ``id``/``payload`` row per id, in ``_row_order``, and each id's text to
+        embed (keyed by the id's text).
+
+        The same id twice would otherwise be two upserts of one row, and entity
+        extraction may emit same-UUID5 rows in one batch. The last duplicate's payload
+        and text win, with the duplicates' belongs_to_set arrays unioned so a tag that
+        only appears on one duplicate isn't dropped (mirrors the in-batch tag merge in
+        Neo4jAdapter.add_nodes). The rows are written in ``_row_order`` so concurrent
+        batches cannot deadlock.
+        """
         rows_by_id: dict[str, dict] = {}
-        for data_point, vector in zip(data_points, data_vectors):
+        texts: dict[str, str] = {}
+        for data_point in data_points:
             # Strip NUL bytes: the json column accepts \u0000 on insert, but
             # the payload::jsonb casts in search/merge queries reject it.
             payload = sanitize_relational_payload(serialize_data(data_point.model_dump()))
@@ -951,11 +1044,69 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 incoming_tags = (payload or {}).get("belongs_to_set") or []
                 if existing_tags or incoming_tags:
                     merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
-                    payload = {**payload, "belongs_to_set": merged_tags}
-            rows_by_id[key] = {"id": data_point.id, "payload": payload, "vector": vector}
+                    payload = {**(payload or {}), "belongs_to_set": merged_tags}
+            rows_by_id[key] = {"id": data_point.id, "payload": payload}
+            texts[key] = DataPoint.get_embeddable_data(data_point)
         rows = sorted(rows_by_id.values(), key=lambda row: _row_order(row["id"]))
+        return rows, texts
 
-        await self._write_rows(collection_name, rows, self._data_point_upsert_sql)
+    async def _write_data_point_rows(
+        self, collection_name: str, rows: list[dict], vectors: dict[str, Any]
+    ) -> list[dict]:
+        """Write ``rows`` (``id``, ``payload``) with ``vectors`` (by the id's text),
+        locking only the rows it changes, in one transaction on the write pool.
+
+        Returns the rows the write needs but ``vectors`` lacks, having written nothing
+        (an empty list once the write is committed): the caller embeds them and calls
+        again, so no transaction stays open across an embedding request.
+
+        ``ON CONFLICT DO UPDATE`` locks every conflicting row until commit, even when
+        its ``WHERE`` is false, so an id many concurrent writers share (the same entity
+        extracted from many documents) queued every writer behind every other one,
+        although nearly all of them changed nothing. So only the rows that need it
+        take a row lock: a lock-free classify drops the unchanged rows, the missing
+        ones are inserted with ``DO NOTHING`` (which locks no existing row), and only
+        what is left goes through the upsert. All inserts of the call precede all its
+        upserts, each phase in ``_row_order``: a writer waiting for another's insert
+        holds no updated row's lock yet, so the two phases form no wait cycle.
+        """
+
+        def params(batch: list[dict]) -> list[tuple]:
+            return [
+                (row["id"], json.dumps(row["payload"]), vectors[str(row["id"])]) for row in batch
+            ]
+
+        table = self._qualified_table(collection_name)
+        pool = await self._get_write_pool()
+        async with pool.acquire() as connection, connection.transaction():
+            missing, changed = await self._classify(connection, collection_name, rows)
+            # A lost-race row (below) was missing here, so it has a vector too.
+            unembedded = [row for row in missing + changed if str(row["id"]) not in vectors]
+            if unembedded:
+                return unembedded
+
+            inserted_ids: set[str] = set()
+            if missing:
+                inserted = await connection.fetchmany(
+                    self._data_point_insert_sql(table), params(missing)
+                )
+                inserted_ids = {str(record["id"]) for record in inserted}
+
+            # An id another writer inserted after the classify: classified again, it
+            # is now an existing row, written below only if the upsert would change it.
+            lost_race = [row for row in missing if str(row["id"]) not in inserted_ids]
+            still_missing, changed_since = await self._classify(
+                connection, collection_name, lost_race
+            )
+
+            to_upsert = sorted(
+                changed + still_missing + changed_since, key=lambda row: _row_order(row["id"])
+            )
+            if to_upsert:
+                await connection.executemany(
+                    self._data_point_upsert_sql(table, collection_name), params(to_upsert)
+                )
+        return []
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """Create the underlying index collection (table) for the given name/property pair."""
