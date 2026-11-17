@@ -50,7 +50,14 @@ from cognee.tasks.ingestion.ingest_dlt_source import _row_content_hash
 TABLE = "asana_test"
 TOKEN = "SECRET-asana-token-123"
 ROW_COLUMNS = {"id", "title", "content", "url", "_deleted", NODE_SET_COLUMN}
-REASONS = {"failed_auth", "failed_rate_limit", "failed_budget", "failed_unavailable"}
+REASONS = {
+    "failed_auth",
+    "failed_rate_limit",
+    "failed_budget",
+    "failed_unavailable",
+    "failed_offset_expired",
+    "failed_ingestion",
+}
 # What one task costs to read: the task, its comments and its subtasks.
 TASK_REQUESTS = 3
 # What a run spends before it renders a task of a one project selection: the project, its
@@ -625,6 +632,22 @@ def test_a_renamed_subtask_refreshes_its_parent_through_the_subtask_index():
     assert "- [ ] Pick two fonts" in _tasks(rows)["task:1"]["content"]
 
 
+def test_a_renamed_subtask_that_is_in_a_selected_project_refreshes_its_parent_too():
+    """A subtask added to a selected project is a document of its own and a line of its parent's:
+    its rename event named only its own document, and the parent kept the old line."""
+    fake = _workspace(tasks=2)
+    fake.add_task("10", "Pick fonts", parent="1", projects=("P1",))
+    state: dict = {}
+    rows, _ = _sync(fake, state)
+    assert {"task:1", "task:10"} <= set(_tasks(rows)) and state["subtasks"] == {"10": "1"}
+    fake.rename_subtask("10", "Pick two fonts")
+
+    rows, _ = _sync(fake, state)
+
+    assert set(_tasks(rows)) == {"task:1", "task:10"}
+    assert "- [ ] Pick two fonts" in _tasks(rows)["task:1"]["content"]
+
+
 def test_the_subtask_index_is_dropped_with_its_parent():
     fake = _workspace(tasks=2)
     fake.add_task("10", "Pick fonts", parent="1")
@@ -700,6 +723,21 @@ def test_an_events_answer_without_a_sync_token_is_an_error():
 
     with pytest.raises(AsanaResponseError, match="no sync token"):
         _sync(fake, {})
+
+
+@pytest.mark.parametrize("has_more", [{}, {"has_more": None}, {"has_more": "false"}])
+def test_an_events_answer_without_has_more_raises_and_is_not_read_as_the_end(has_more):
+    """Read as the end of the feed, a missing has_more would stop it short."""
+    fake = _workspace()
+    state: dict = {}
+    _sync(fake, state)
+    before = copy.deepcopy(state)
+    fake.answers["/events"] = {"data": [], "sync": "S2", **has_more}
+
+    with pytest.raises(AsanaResponseError, match="no has_more"):
+        _sync(fake, state)
+
+    assert state == before
 
 
 def _state_with_sync(fake: FakeAsana, token: str) -> dict:
@@ -1633,22 +1671,35 @@ def test_the_stored_progress_of_an_unresolved_project_is_not_touched_by_a_queue(
 # --- a rejected offset ---
 
 
-def test_an_offset_asana_rejects_raises_on_every_run_and_leaves_the_state_alone():
+def test_an_expired_offset_lists_that_project_again_and_forgets_only_what_a_check_confirms():
+    """SDK-1485: a stored page offset Asana no longer accepts (HTTP 400) raised on every later
+    run, so the connection never synced again. Only the cut project starts over; a task the fresh
+    listing lacks is still checked before it is forgotten."""
     fake = _long_project(tasks=6, page_size=2)
-    fake.fail("/tasks", 429, after=1)
+    fake.add_project("P0")
+    fake.add_task("7", projects=("P0",))
+    selection = {"project_gids": ["P0", "P1"]}
     state: dict = {}
-    _sync(fake, state)
+    _sync(fake, state, **selection)  # a complete pass: every task is known
+    fake.fail("/tasks", 429, after=2)  # P0's page and P1's first page, then the cut
+    _sync(fake, state, **selection)
+    stale = state["listing"]["partial"]["P1"]["offset"]
+    assert sorted(state["listing"]["done"]) == ["P0"]
     fake.heal()
-    state["listing"]["partial"]["P1"]["offset"] = "never-issued"
-    before = copy.deepcopy(state)
+    fake.expire_offsets()
+    fake.delete_task("2")  # listed on the page before the cut: the fresh listing must lack it
+    fake.calls.clear()
 
-    for _ in range(2):
-        with pytest.raises(AsanaAPIError) as raised:
-            list(_iter_rows(fake, state, new_stats(), project_gids=["P1"]))
-        assert raised.value.status == 400 and state == before
+    rows, stats = _sync(fake, state, **selection)
+
+    pages = _task_pages(fake)
+    assert pages[:2] == [stale, None] and len(pages) == 4, "P1 again from page 1, P0 not at all"
+    assert _projects_requested(fake) == ["P1"]
+    assert _tombstones(rows) == {"task:2"} and _checked(fake) == ["2"]
+    assert stats["deleted"] == 1 and _reasons(stats) == set() and "listing" not in state
 
 
-def test_an_offset_issued_for_another_listing_is_rejected_too():
+def test_an_offset_issued_for_another_listing_lists_the_project_again_too():
     fake = _long_project(tasks=6, page_size=2)
     fake.add_project("P2")
     for n in range(1, 5):
@@ -1661,11 +1712,134 @@ def test_an_offset_issued_for_another_listing_is_rejected_too():
     foreign = fake.respond("/tasks", {"project": "P2", "opt_fields": "modified_at", "limit": 2})
     token = foreign.json()["next_page"]["offset"]
     state["listing"]["partial"]["P1"]["offset"] = token
+    fake.calls.clear()
+
+    rows, stats = _sync(fake, state, project_gids=["P1", "P2"])
+
+    assert _task_pages(fake)[:2] == [token, None]
+    assert set(_tasks(rows)) == {f"task:{n}" for n in range(1, 7)} | {
+        f"task:2{n}" for n in range(1, 5)
+    }
+    assert stats["failed"] == 0
+
+
+def test_a_rejected_offset_restarts_its_project_once_and_a_second_400_raises():
+    fake = _long_project(tasks=6, page_size=2)
+    fake.fail("/tasks", 429, after=1)
+    state: dict = {}
+    _sync(fake, state)
+    fake.heal()
+    before = copy.deepcopy(state)
+    fake.fail("/tasks", 400)
+    fake.calls.clear()
+    stats = new_stats()
 
     with pytest.raises(AsanaAPIError) as raised:
-        list(_iter_rows(fake, state, new_stats(), project_gids=["P1", "P2"]))
+        list(_iter_rows(fake, state, stats, project_gids=["P1"]))
 
-    assert raised.value.status == 400
+    assert raised.value.status == 400 and state == before
+    assert _task_pages(fake) == [before["listing"]["partial"]["P1"]["offset"], None]
+    assert (stats["failed"], _reasons(stats)) == (1, set())
+
+
+def test_a_400_on_a_page_after_the_stored_offset_raises_and_does_not_restart():
+    fake = _long_project(tasks=8, page_size=2)
+    fake.fail("/tasks", 429, after=1)
+    state: dict = {}
+    _sync(fake, state)
+    fake.heal()
+    before = copy.deepcopy(state)
+    stored = state["listing"]["partial"]["P1"]["offset"]
+    fake.fail("/tasks", 400, times=1, after=1)  # the stored page answers, the next one is a 400
+    fake.calls.clear()
+
+    with pytest.raises(AsanaAPIError) as raised:
+        _sync(fake, state)
+
+    assert raised.value.status == 400 and state == before
+    assert _task_pages(fake)[0] == stored and None not in _task_pages(fake), "no restart"
+
+
+def test_a_400_on_the_first_page_of_a_fresh_listing_raises_and_does_not_restart():
+    fake = _long_project(tasks=4, page_size=2)
+    fake.fail("/tasks", 400, times=1)
+    state: dict = {}
+
+    with pytest.raises(AsanaAPIError) as raised:
+        _sync(fake, state)
+
+    assert raised.value.status == 400 and _task_pages(fake) == [None] and state == {}
+
+
+@pytest.mark.parametrize("cut", ["budget", "rate_limit"])
+def test_a_project_whose_offset_expires_every_run_reports_it_and_keeps_its_fresh_offset(cut):
+    """Each run lists the same 8 of 20 tasks before it is cut, and Asana rejects the offset by
+    the next run. A first restart is an ordinary stop (the expiry may be a one-off). A second
+    one that lists no further names the stop ``failed_offset_expired``, whatever cut it, and
+    keeps the offset it was given, so the next run judges a new offset, not the rejected one:
+    once Asana accepts offsets again the project continues within the same limit."""
+    fake = _long_project(tasks=20, page_size=2)
+    state: dict = {}
+
+    def run():
+        # The project, its events once, then four pages: by the budget, or by Asana's limit.
+        if cut == "budget":
+            return _sync(fake, state, max_requests=6)
+        fake.new_window()
+        return _sync(fake, state)
+
+    if cut == "rate_limit":
+        fake.rate_limit(6)
+    run()
+    assert len(state["listing"]["partial"]["P1"]["listed"]) == 8
+    fake.expire_offsets()
+
+    _rows, stats = run()  # the first restart is an ordinary stop
+
+    assert _reasons(stats) == {f"failed_{cut}"}
+    for _ in range(2):  # and every run after it, while the offsets keep expiring
+        stored = state["listing"]["partial"]["P1"]["offset"]
+        fake.expire_offsets()
+
+        _rows, stats = run()
+
+        assert _reasons(stats) == {"failed_offset_expired"}
+        progress = state["listing"]["partial"]["P1"]
+        assert len(progress["listed"]) == 8 and progress["relisted"] is True
+        assert progress["offset"] not in (None, stored), "the fresh offset is kept"
+
+    runs = 0
+    while "listing" in state:  # Asana accepts offsets again: the same limit finishes it
+        run()
+        runs += 1
+        assert runs < 6, "the listing finishes"
+
+
+def test_an_offset_that_expires_now_and_then_never_stops_the_listing_for_good():
+    """Expire, resume from an accepted offset, expire again: the accepted offset shows the
+    expiry is not every run, so the second restart is a first one again and the listing goes
+    on. Without that, the restart was compared with the depth of several runs and every later
+    run raised, though Asana no longer rejected anything."""
+    fake = _long_project(tasks=30, page_size=2)
+    state: dict = {}
+    budget = {"max_requests": 6}  # the project, its events once, then four pages
+    _sync(fake, state, **budget)
+    fake.expire_offsets()
+    _sync(fake, state, **budget)  # restarts
+    assert state["listing"]["partial"]["P1"]["relisted"] is True
+
+    _sync(fake, state, **budget)  # the stored offset is accepted
+
+    progress = state["listing"]["partial"]["P1"]
+    assert "relisted" not in progress and len(progress["listed"]) > 8
+    fake.expire_offsets()
+    runs = 0
+    while "listing" in state:
+        _sync(fake, state, **budget)  # never raises
+        runs += 1
+        assert runs < 10, "the listing finishes"
+    _sync(fake, state)  # the tasks the small budget did not reach are read
+    assert not state["pending"] and len(state["known_ids"]) == 31  # the project and 30 tasks
 
 
 # --- a budget that cannot make progress raises ---
@@ -2318,7 +2492,13 @@ def test_a_task_missing_from_a_complete_listing_is_tombstoned():
 
 @pytest.mark.parametrize(
     ("prefix", "status"),
-    [("/tasks", 500), ("/events", 403), ("/events", 404), ("/projects/P1", 500)],
+    [
+        ("/tasks", 500),
+        ("/tasks", 400),
+        ("/events", 403),
+        ("/events", 404),
+        ("/projects/P1", 500),
+    ],
 )
 def test_a_listing_that_fails_forgets_nothing_and_moves_no_state(prefix, status):
     fake = _workspace()
@@ -2355,6 +2535,7 @@ def test_a_listing_that_fails_forgets_nothing_and_moves_no_state(prefix, status)
         {"data": [], "next_page": {}},
         {"data": [], "next_page": "x"},
         {"data": [], "next_page": {"offset": ""}},
+        {"data": []},  # no next_page at all: null marks the last page, a missing key nothing
     ],
 )
 def test_a_listing_answer_of_the_wrong_shape_raises_and_is_not_read_as_empty(answer):
@@ -2799,6 +2980,31 @@ def test_a_rejected_token_after_rows_stops_cleanly_and_queues_the_rest():
     assert stats["failed"] == 0 and state["pending"] == []
 
 
+def test_a_rejected_token_on_a_pass_earlier_runs_listed_raises_at_its_first_request():
+    """A run resuming a listed pass emits no project row, so a 401 on its first task read was a
+    failed task, and so was every next one until the budget ran out: ``failed_budget`` after 1500
+    requests, never ``failed_auth``. It keeps nothing, so every later run would stop at the same
+    request: it raises, as a run rejected inside its listing does."""
+    fake = _workspace(tasks=5)
+    state: dict = {}
+    _sync(fake, state, max_requests=LISTING_REQUESTS)  # listed, cut before a task answers
+    assert sorted(state["listing"]["done"]) == ["P1"]
+    before = copy.deepcopy(state)
+    fake.fail("/tasks", 401)
+    fake.calls.clear()
+    stats = new_stats()
+
+    with pytest.raises(AsanaAuthError):
+        list(_iter_rows(fake, state, stats, project_gids=["P1"]))
+
+    assert len(fake.calls) == 1 and state == before
+    assert (stats["failed"], stats["requests"], stats["kept"]) == (1, 1, 0)
+    assert _reasons(stats) == {"failed_auth"}
+    fake.heal()
+    rows, stats = _sync(fake, state)
+    assert set(_tasks(rows)) == {f"task:{n}" for n in range(1, 6)} and stats["failed"] == 0
+
+
 def test_a_pending_task_older_than_the_overlap_window_is_still_read_next_run():
     """The cursor moves to the newest task on a stop, and only tasks near it are re-checked by
     their timestamp: an edited task an hour older than the newest is found through ``pending``."""
@@ -3109,13 +3315,39 @@ def test_every_count_is_present_as_a_non_negative_int_on_every_way_a_run_ends(in
 
     assert set(new_stats()) <= set(stats) <= set(new_stats()) | REASONS
     assert all(type(value) is int and value >= 0 for value in stats.values())
-    assert len(_reasons(stats)) <= 1, "at most one reason"
+    # A stop names its reason; a raise names one only for a rejected token, the host names
+    # the rest from the exception.
+    expected = 0 if _name in ("completed", "listing 500", "wrong shape") else 1
+    assert len(_reasons(stats)) == expected, "one reason on a stop or a rejected token"
     assert (stats["failed"] > 0) == (index > 0), "failed says whether anything went wrong"
     assert stats["kept"] == len(state.get("retry", [])) and stats["pending"] == len(
         state.get("pending", [])
     )
     if _reasons(stats):
         assert stats["failed"] >= 1
+
+
+@pytest.mark.parametrize(
+    ("prefix", "status", "reason"),
+    [
+        ("/tasks", 500, set()),
+        ("/tasks", None, set()),  # no answer at all
+        ("/events", 503, set()),
+        ("/tasks", 400, set()),
+        ("/events", 403, set()),
+        ("/projects/P1", 401, {"failed_auth"}),
+    ],
+)
+def test_a_run_that_raises_names_a_reason_only_for_a_rejected_token(prefix, status, reason):
+    """The host names a raise from its exception; a second key here would make two."""
+    fake = _workspace()
+    fake.fail(prefix, status)
+    stats = new_stats()
+
+    with pytest.raises(AsanaAPIError):
+        list(_iter_rows(fake, {}, stats, project_gids=["P1"]))
+
+    assert stats["failed"] == 1 and _reasons(stats) == reason
 
 
 def test_failed_counts_failures_and_never_the_kept_or_pending_tasks():
@@ -3232,7 +3464,8 @@ def test_refuses_a_core_that_does_not_read_per_row_node_sets(monkeypatch):
 def test_a_listed_gid_that_could_reach_another_endpoint_is_refused():
     fake = _workspace()
     fake.answers["/tasks"] = {
-        "data": [{"gid": "1/../../projects/P1", "modified_at": "2026-10-01T10:00:00.000Z"}]
+        "data": [{"gid": "1/../../projects/P1", "modified_at": "2026-10-01T10:00:00.000Z"}],
+        "next_page": None,
     }
 
     with pytest.raises(AsanaResponseError, match="usable gid"):
@@ -3419,6 +3652,20 @@ def test_a_slow_task_with_a_retry_after_never_stops_the_others_across_real_runs(
     assert sleeps == [1, 2] * 3
 
 
+def _staged(tmp_path, table: str) -> dict[str, str]:
+    """The staged ``id -> content`` of ``table``, without running anything."""
+    query = f'SELECT id, content FROM "{table}" ORDER BY id'
+    with _pipeline(tmp_path).sql_client() as sql, sql.execute_query(query) as cursor:
+        return {row[0]: row[1] for row in cursor.fetchall()}
+
+
+def _resource_state(tmp_path, name: str) -> dict:
+    for source in _pipeline(tmp_path).state["sources"].values():
+        if name in source.get("resources", {}):
+            return copy.deepcopy(source["resources"][name])
+    raise AssertionError(f"no resource state for {name}")
+
+
 def test_two_sources_with_their_own_resource_names_stay_apart_in_one_dataset(tmp_path):
     team_a, team_b = _workspace(), FakeAsana()
     team_b.add_project("P1", "Other")
@@ -3430,6 +3677,13 @@ def test_two_sources_with_their_own_resource_names_stay_apart_in_one_dataset(tmp
 
     assert run(team_a, "asana_a") == ["project:P1", "task:1", "task:2", "task:3"]
     assert run(team_b, "asana_b") == ["project:P1", "task:1", "task:2"]
+
+    # The two share row ids ("task:2"): an edit in A reaches A's row only, B's rows and state stay.
+    b_rows, b_state = _staged(tmp_path, "asana_b"), _resource_state(tmp_path, "asana_b")
+    team_a.edit_task("2", notes="Only in A.")
+    assert "Only in A." in _run(tmp_path, _source(team_a, "asana_a"))["task:2"]
+    assert _staged(tmp_path, "asana_b") == b_rows
+    assert _resource_state(tmp_path, "asana_b") == b_state
 
     team_b.delete_task("2")
     assert run(team_b, "asana_b") == ["project:P1", "task:1"]

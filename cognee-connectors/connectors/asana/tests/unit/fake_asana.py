@@ -7,7 +7,8 @@ Copied from cognee.tests.unit.tasks.connectors.fake_asana (cognee dev, 2026-10-2
 It models what was observed against a real workspace: ``/events`` answers 412 with a fresh sync
 token when the token is missing or stale, a listing pages through ``next_page.offset`` (an
 opaque token that stands for a position in the list as it is when the page is asked for, so
-items added or removed meanwhile shift it, and one the fake never issued answers 400), and an
+items added or removed meanwhile shift it, and one the fake never issued, or one
+``expire_offsets`` expired, answers 400), and an
 edited comment (or a new one) leaves the task's ``modified_at`` alone: it arrives only as a story
 event, an edited one with ``parent: null`` and the task under ``resource.target``. An endpoint
 the connector does not use is not answered: a call to it raises ``AssertionError``.
@@ -62,6 +63,7 @@ class FakeAsana:
         self.event_feed: list[tuple[str, bool]] = []
         # issued offset token -> (the listing it belongs to, the position it stands for)
         self._offsets: dict[str, tuple[str, int]] = {}
+        self._issued = 0
         self.events_page_size = 100
         self._clock = 0
         self._counter = 0
@@ -78,9 +80,14 @@ class FakeAsana:
         self.projects[gid] = {"name": name, "notes": notes}
         self.events.setdefault(gid, [])
 
-    def add_task(
-        self, gid: str, name: str | None = None, *, projects=("P1",), parent=None, **fields
-    ):
+    def add_task(self, gid: str, name: str | None = None, *, projects=None, parent=None, **fields):
+        """A task in ``projects`` (default ``("P1",)``), or a subtask of ``parent``.
+
+        A subtask is in no project unless ``projects`` names some: Asana lets a subtask be added
+        to a project too, and the project's listing then holds it.
+        """
+        if projects is None:
+            projects = ("P1",) if parent is None else ()
         self.tasks[gid] = {
             "name": name or f"Task {gid}",
             "notes": "",
@@ -93,7 +100,7 @@ class FakeAsana:
             "comments": [],  # [{"gid", "author", "text", "created_at"}]
             "modified_at": self.stamp(),
             **fields,
-            "projects": list(projects) if parent is None else [],
+            "projects": list(projects),
             "parent": parent,
         }
 
@@ -125,10 +132,13 @@ class FakeAsana:
         self._emit(gid, {"action": "changed", "resource": story, "parent": None})
 
     def rename_subtask(self, gid: str, name: str) -> None:
-        """A subtask rename moves neither its parent's ``modified_at`` nor any ``parent`` field."""
+        """A subtask rename moves neither its parent's ``modified_at`` nor any ``parent`` field.
+
+        The event goes to the parent's projects and to the subtask's own, when it is in one.
+        """
         self.tasks[gid]["name"] = name
         parent = self.tasks[gid]["parent"]
-        for project_gid in self.tasks[parent]["projects"]:
+        for project_gid in sorted({*self.tasks[parent]["projects"], *self.tasks[gid]["projects"]}):
             event = {"action": "changed", "resource": task_ref(gid), "parent": None}
             self.events[project_gid].append(event)
 
@@ -355,9 +365,15 @@ class FakeAsana:
         ]
 
     def _issue_offset(self, scope: str, position: int) -> str:
-        token = f"tok{len(self._offsets)}-{position * 7919 % 10007}"
+        # A count of its own, not of ``_offsets``: an expired token must never be issued again.
+        self._issued += 1
+        token = f"tok{self._issued}-{position * 7919 % 10007}"
         self._offsets[token] = (scope, position)
         return token
+
+    def expire_offsets(self) -> None:
+        """Asana stops accepting every offset issued so far: each answers 400 from now on."""
+        self._offsets.clear()
 
     def offset_position(self, token: str) -> int:
         """The position an issued offset token stands for, for tests to read."""
