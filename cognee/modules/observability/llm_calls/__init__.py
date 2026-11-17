@@ -7,6 +7,22 @@ call it describes is unaffected. The stage, caller, run and chunk the call belon
 to are read from the current context, so callers pass only what they know about the call;
 a task that makes one LLM call per chunk wraps each in ``chunk_scope(chunk.id)``.
 
+``stage`` is set by ``pipeline_stage()`` in graph extraction (``extraction``),
+LLM summaries (``summarization``) and answer generation (``query``). ``caller``
+is set by ``caller_scope()`` in:
+
+- ``search_in_datasets_context``: every LLM call a search or recall makes
+- ``improve.<stage name>``: each improve stage, e.g. ``improve.distill_sessions``
+- ``analyze_turn_for_session_context``: session turn analysis
+- ``test_llm_connection``: the startup connection check
+- ``generate_agent_trace_feedback``: agent trace step summaries
+- ``_extract_batch_from_traces``: agent-context lessons from traces
+- ``detect_pii._llm_assess``: LLM-assisted PII detection when presorting files
+
+Calls made elsewhere are still captured, without a ``caller``. With tracing on,
+the default ``litellm_native`` adapter also writes both to its LLM spans, as
+``cognee.pipeline.stage`` and ``cognee.llm.caller``.
+
 Records are local JSONL files (see ``writer``); shipping them anywhere else is
 a deployment's choice, not this module's.
 """

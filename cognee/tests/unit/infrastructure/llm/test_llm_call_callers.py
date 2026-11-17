@@ -1,3 +1,4 @@
+import importlib
 import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -123,3 +124,139 @@ async def test_the_connection_check_is_the_caller_of_its_llm_call(monkeypatch):
     await llm_utils.test_llm_connection()
 
     assert seen == {"caller": "test_llm_connection", "stage": None}
+
+
+def _recording_llm(seen, result):
+    async def fake_llm(*args, **kwargs):
+        seen.update(_labels())
+        return result
+
+    return fake_llm
+
+
+@pytest.mark.asyncio
+async def test_agent_trace_feedback_is_the_caller_of_its_llm_call(monkeypatch):
+    from cognee.infrastructure.session import session_agent_trace
+
+    seen = {}
+    monkeypatch.setattr(session_agent_trace, "read_query_prompt", lambda name: "prompt")
+    monkeypatch.setattr(
+        session_agent_trace.LLMGateway,
+        "acreate_structured_output",
+        _recording_llm(seen, SimpleNamespace(session_feedback="done")),
+    )
+
+    await session_agent_trace.generate_agent_trace_feedback(
+        origin_function="tool", status="success", method_return_value={"ok": True}
+    )
+
+    assert seen == {"caller": "generate_agent_trace_feedback", "stage": None}
+
+
+@pytest.mark.asyncio
+async def test_trace_batch_extraction_is_the_caller_of_its_llm_call(monkeypatch):
+    from cognee.infrastructure.session import agent_context_extraction
+
+    async def no_lessons(*args, **kwargs):
+        return []
+
+    seen = {}
+    monkeypatch.setattr(agent_context_extraction, "build_trace_batch", lambda traces: "batch")
+    monkeypatch.setattr(agent_context_extraction, "read_query_prompt", lambda name: "prompt")
+    monkeypatch.setattr(agent_context_extraction, "_existing_agent_lessons", no_lessons)
+    monkeypatch.setattr(
+        agent_context_extraction.LLMGateway,
+        "acreate_structured_output",
+        _recording_llm(seen, SimpleNamespace(lessons=[])),
+    )
+
+    await agent_context_extraction._extract_batch_from_traces(
+        session_manager=MagicMock(), user_id="u", session_id="s", traces=[object()]
+    )
+
+    assert seen == {"caller": "_extract_batch_from_traces", "stage": None}
+
+
+@pytest.mark.asyncio
+async def test_pii_assessment_is_the_caller_of_its_llm_call(monkeypatch):
+    from cognee.tasks.presort.models import FileRecord
+
+    detect_pii = importlib.import_module("cognee.tasks.presort.detect_pii")
+
+    seen = {}
+    monkeypatch.setattr(detect_pii, "render_prompt", lambda *args, **kwargs: "prompt")
+    monkeypatch.setattr(
+        detect_pii.LLMGateway,
+        "acreate_structured_output",
+        _recording_llm(seen, SimpleNamespace(contains_personal_data=False)),
+    )
+
+    await detect_pii._llm_assess(FileRecord(path="/notes.txt", name="notes.txt"), "text")
+
+    assert seen == {"caller": "detect_pii._llm_assess", "stage": None}
+
+
+def test_span_enrichment_writes_the_caller_and_the_stage(monkeypatch):
+    otel_trace = pytest.importorskip("opentelemetry.trace")
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native import (
+        native_adapter,
+    )
+    from cognee.modules.observability import trace_context
+
+    class Span:
+        def __init__(self):
+            self.attributes = {}
+
+        def is_recording(self):
+            return True
+
+        def set_attribute(self, key, value):
+            self.attributes[key] = value
+
+    span = Span()
+    monkeypatch.setattr(trace_context, "is_tracing_enabled", lambda: True)
+    monkeypatch.setattr(otel_trace, "get_current_span", lambda: span)
+
+    with caller_scope("search_in_datasets_context"), pipeline_stage("query"):
+        native_adapter._enrich_llm_span("openai/gpt-5-mini", "LiteLLM-Native")
+
+    assert span.attributes["cognee.llm.caller"] == "search_in_datasets_context"
+    assert span.attributes["cognee.pipeline.stage"] == "query"
+    assert span.attributes["cognee.llm.model"] == "openai/gpt-5-mini"
+
+
+@pytest.mark.asyncio
+async def test_the_native_plain_text_and_fallback_paths_enrich_their_span(monkeypatch):
+    from litellm.exceptions import ContentPolicyViolationError
+
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native import (
+        native_adapter,
+    )
+
+    enriched = []
+    monkeypatch.setattr(
+        native_adapter, "_enrich_llm_span", lambda model, name: enriched.append(model)
+    )
+    adapter = native_adapter.NativeLiteLLMAdapter(
+        api_key="key",
+        model="primary",
+        max_completion_tokens=100,
+        fallback_model="fallback",
+        fallback_api_key="fallback-key",
+    )
+
+    async def plain_text(*args, **kwargs):
+        return "answer"
+
+    async def structured(text_input, system_prompt, response_model, *, model, **kwargs):
+        if model == "primary":
+            raise ContentPolicyViolationError("blocked", model="primary", llm_provider="openai")
+        return SessionTurnAnalysis()
+
+    monkeypatch.setattr(adapter, "_acreate_str_output", plain_text)
+    monkeypatch.setattr(adapter, "_acreate_structured", structured)
+
+    await adapter.acreate_structured_output("text", "prompt", str)
+    await adapter.acreate_structured_output("text", "prompt", SessionTurnAnalysis)
+
+    assert enriched == ["primary", "fallback"]

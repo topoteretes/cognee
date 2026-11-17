@@ -21,6 +21,7 @@ import re
 from dataclasses import dataclass
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.pipeline_stage import caller_scope
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.session_context_builder import (
     apply_candidate_updates,
@@ -251,11 +252,12 @@ async def _extract_batch_from_traces(
         raise RuntimeError("Batch agent-context extraction: system prompt not found")
 
     existing = await _existing_agent_lessons(session_manager, user_id, session_id)
-    result = await LLMGateway.acreate_structured_output(
-        text_input=build_extraction_input(batch, existing),
-        system_prompt=system_prompt,
-        response_model=AgentContextExtraction,
-    )
+    with caller_scope("_extract_batch_from_traces"):
+        result = await LLMGateway.acreate_structured_output(
+            text_input=build_extraction_input(batch, existing),
+            system_prompt=system_prompt,
+            response_model=AgentContextExtraction,
+        )
     candidates = list(result.lessons)[:MAX_BATCH_LESSONS]
     if not candidates:
         return []
