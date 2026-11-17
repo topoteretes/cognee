@@ -34,7 +34,8 @@ class BaseRetriever(ABC):
     (``register_retriever.py``) and takes precedence over the built-in retriever for that
     type (``AGENTIC_COMPLETION`` excepted, which is always built in). It is constructed with
     the search call's keyword arguments (``user``, ``dataset``, ``top_k``, ``node_name``,
-    ``session_id``, ...), so its ``__init__`` should accept ``**kwargs``. The concurrent session turn runs only for the built-in
+    ``session_id``, ...), so its ``__init__`` should accept ``**kwargs``. The concurrent
+    session turn runs only for the built-in
     ``CompletionRetriever``, ``GraphCompletionRetriever`` and ``HybridRetriever`` classes;
     every other retriever takes the sequential path, where its own
     ``get_completion_from_context`` is responsible for honouring
