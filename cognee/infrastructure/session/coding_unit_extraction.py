@@ -45,6 +45,7 @@ per session; the windows sealed before the failure are not extracted again.
 """
 
 import asyncio
+import hashlib
 import json
 import re
 import time
@@ -127,6 +128,9 @@ PITFALL_SLUG_MAX_WORDS = 5
 # the candidate's problem, error and fix need.
 PITFALL_TOOL_MAX_CHARS = 32
 PITFALL_SLUG_MAX_CHARS = 48
+# Hex characters of the hash that tells apart errors sharing a generic first line; it
+# takes its room from the slug.
+PITFALL_DETAIL_HASH_CHARS = 8
 PITFALL_QUALIFIER_MAX_CHARS = 24
 PITFALL_KEY_MAX_CHARS = 120
 # A failure candidate whose problem, error and fix get less room than this is dropped:
@@ -170,6 +174,8 @@ class ErrorGroup:
     tool: str
     error_line: str
     failures: list
+    # The error's last line when it has more than one (``last_error_line``), else "".
+    detail_line: str = ""
     last_index: int = 0
     # What worked, trace entries: the change that fixed the failure (see ``find_fixes``).
     fixes: list = field(default_factory=list)
@@ -177,6 +183,13 @@ class ErrorGroup:
     @property
     def fixed(self) -> bool:
         return bool(self.fixes)
+
+    @property
+    def error_text(self) -> str:
+        """The error as shown: its first line, and its last when that is another line."""
+        if not self.detail_line:
+            return self.error_line
+        return f"{self.error_line} … {self.detail_line}"
 
 
 def relative_path(path: str, repo_root: str) -> str:
@@ -298,11 +311,28 @@ def render_trace_line(entry, repo_root: str = "") -> str:
 def normalized_error_line(error_message: str) -> str:
     """The first line of an error, redacted, lowercased and whitespace-collapsed.
 
-    No error format is parsed: when the first line is generic (``Traceback (most recent
-    call last):``, ``Exit code 1``, a test runner's header), different errors of one
-    program share it, and so share a group and a pitfall key."""
+    No error format is parsed, so the first line can be generic (``Traceback (most recent
+    call last):``, ``Exit code 1``, a test runner's header) and shared by different errors
+    of one program; ``last_error_line`` is what tells those apart."""
     first = str(error_message or "").strip().splitlines()
     return " ".join(redact_text(first[0]).lower().split()) if first else ""
+
+
+def last_error_line(error_message: str) -> str:
+    """The last non-empty line of an error, normalized like the first; ``""`` when the
+    error is one line (or its last line says the same as its first).
+
+    Where the first line is generic, the last one usually names the error (a traceback's
+    ``KeyError: 'id'``, a runner's summary). It is part of a group's identity and, as a
+    short hash, of its pitfall key, so unrelated errors that open alike neither share a
+    group nor replace each other's lesson. A last line that carries something of the run
+    (a path, a duration) splits one error into two keys: two similar lessons, never a
+    deleted one."""
+    lines = [line for line in str(error_message or "").strip().splitlines() if line.strip()]
+    if len(lines) < 2:
+        return ""
+    last = " ".join(redact_text(lines[-1]).lower().split())
+    return "" if last == normalized_error_line(error_message) else last
 
 
 def pitfall_slug(error_line: str) -> str:
@@ -334,9 +364,16 @@ def pitfall_qualifier(entry) -> str:
 
 
 def pitfall_key(group: ErrorGroup) -> str:
-    """``pitfall:<tool>:<slug>[:<qualifier>]``, every part and the whole bounded."""
+    """``pitfall:<tool>:<slug>[:<qualifier>]``, every part and the whole bounded.
+
+    The slug of a multi-line error ends in a hash of its last line (``last_error_line``):
+    ``exit-code-3f9a1c0b``. A one-line error has the slug alone."""
     tool = _key_part(group.tool, PITFALL_TOOL_MAX_CHARS) or "tool"
     slug = pitfall_slug(group.error_line) or "error"
+    if group.detail_line:
+        digest = hashlib.sha1(group.detail_line.encode("utf-8")).hexdigest()
+        room = PITFALL_SLUG_MAX_CHARS - PITFALL_DETAIL_HASH_CHARS - 1
+        slug = f"{slug[:room].strip('-')}-{digest[:PITFALL_DETAIL_HASH_CHARS]}"
     key = f"{PITFALL_KEY_PREFIX}:{tool}:{slug}"
     qualifier = pitfall_qualifier(group.failures[0])
     key = f"{key}:{qualifier}" if qualifier else key
@@ -420,23 +457,28 @@ def find_fixes(traces: list, last_index: int, failure) -> list:
 
 
 def group_repeated_errors(traces: list) -> list[ErrorGroup]:
-    """Failed traces grouped by tool and first error line, each paired with its fix.
+    """Failed traces grouped by tool and error (its first line, and its last when it has
+    more than one), each paired with its fix.
 
     A group counts when it failed at least twice, or once and something fixed it
     (``find_fixes``). In order of first failure; the rendered section
     shows the first ``MAX_ERROR_GROUPS``, the deterministic candidates cover every
     fixed group.
     """
-    groups: dict[tuple[str, str], ErrorGroup] = {}
+    groups: dict[tuple[str, str, str], ErrorGroup] = {}
     for index, entry in enumerate(traces):
         if entry.status != "error":
             continue
         line = normalized_error_line(entry.error_message)
         if not line:
             continue
-        key = (entry.origin_function, line)
+        detail = last_error_line(entry.error_message)
+        key = (entry.origin_function, line, detail)
         group = groups.setdefault(
-            key, ErrorGroup(tool=entry.origin_function, error_line=line, failures=[])
+            key,
+            ErrorGroup(
+                tool=entry.origin_function, error_line=line, failures=[], detail_line=detail
+            ),
         )
         group.failures.append(entry)
         group.last_index = index
@@ -462,7 +504,7 @@ def render_error_groups(groups: list[ErrorGroup], repo_root: str = "") -> str:
         lines.append(
             f"- {group.tool} failed {len(group.failures)}x: "
             f"{render_trace_input(failure, repo_root) or '(no input)'} | "
-            f"error: {_clip(group.error_line, MAX_TRACE_TEXT_CHARS)}"
+            f"error: {_clip(group.error_text, MAX_TRACE_TEXT_CHARS)}"
         )
         if group.fixed:
             lines.append(f"  What worked: {render_fixes(group.fixes, repo_root)}")
@@ -515,7 +557,7 @@ def build_failure_candidates(
         problem, error_line, worked = fit_parts(
             [
                 f"{group.tool} {render_trace_input(failure, repo_root)}".strip(),
-                group.error_line,
+                group.error_text,
                 render_fixes(group.fixes, repo_root),
             ],
             room,

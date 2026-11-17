@@ -93,10 +93,14 @@ the number of turns), in this order:
    redacted with the rule failure lessons use before it is cut, so a secret cut short
    cannot slip past it.
 4. `REPEATED ERRORS AND WHAT WORKED`: failed traces grouped by tool and normalized first
-   error line (at least two failures, or one that something fixed). No error format is
-   parsed: when the first line is generic (`Traceback (most recent call last):`,
-   `Exit code 1`, a test runner's header), different errors of one program share it, and
-   so share a group and a pitfall key. What worked: for a failure on a file, the first
+   error line, plus the last line of an error that has more than one (at least two
+   failures, or one that something fixed). No error format is parsed. The first line is
+   often generic (`Traceback (most recent call last):`, `Exit code 1`, a test runner's
+   header) and the last one usually names the error (`KeyError: 'id'`), so the two together
+   keep unrelated errors of one program in separate groups, each with its own fix and its
+   own pitfall key. A last line that carries something of the run (a path, a duration)
+   gives one error two groups: two similar lessons, never one replacing an unrelated one.
+   What worked: for a failure on a file, the first
    later successful call that changed that file. For a shell failure, the first later
    success that runs the same command, flags and paths aside (`python a.py` after a failed
    `.venv/bin/python a.py -v`; `uv run ruff check .` never reruns `uv run pytest`; no
@@ -171,7 +175,8 @@ Edit on an unchanged string fails with "No changes to make" → rewrite the file
   `state`, `other`.
 - `State-Key` appears on state lessons (`test-baseline`, `footprint:<feature>`) and
   pitfalls (`pitfall:<tool>:<error-slug>[:<qualifier>]`, the slug taken from the
-  first error line, the qualifier being the file extension or the command's first word by
+  first error line and, for an error of more than one line, ending in an 8-character hash
+  of its last line (`exit-code-3f9a1c0b`), the qualifier being the file extension or the command's first word by
   its basename (`uv` for `uv run pytest`), never a path; each part and the whole key are
   bounded, and a candidate whose key would leave no room for its problem, error and fix is
   not stored).

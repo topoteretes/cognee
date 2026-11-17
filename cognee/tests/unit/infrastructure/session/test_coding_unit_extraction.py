@@ -6,6 +6,7 @@ extraction input, and the once-per-unit guarantee (watermark plus lock).
 """
 
 import asyncio
+import re
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -258,7 +259,7 @@ class TestRepeatedErrors:
         failing = {"command": "cat -x notes.txt"}
         traces = [
             _trace("Bash", status="error", params=failing, error="cat: illegal option -- x"),
-            _trace("Bash", status="error", params=failing, error="cat: illegal option -- x\nusage"),
+            _trace("Bash", status="error", params=failing, error="cat: illegal option -- x"),
             _trace("Bash", params={"command": "cat notes.txt"}),
         ]
         (group,) = group_repeated_errors(traces)
@@ -398,9 +399,9 @@ class TestRepeatedErrors:
         )
         assert group.fixes == [edit]
 
-    def test_a_traceback_keys_on_its_first_line(self):
-        # No error format is parsed: two tracebacks of one program share their first line,
-        # so they are one group and one key (the documented limit).
+    def test_tracebacks_that_end_differently_have_their_own_keys(self):
+        # No error format is parsed: the first line of every traceback is the same, so
+        # the last line is what tells a KeyError from an ImportError.
         def traceback(last_line):
             return (
                 "Traceback (most recent call last):\n"
@@ -414,8 +415,74 @@ class TestRepeatedErrors:
             _trace("Bash", status="error", params=command, error=traceback("ImportError: no x")),
             _trace("Bash", status="error", params=command, error=traceback("ImportError: no x")),
         ]
-        keys = {pitfall_key(group) for group in group_repeated_errors(traces)}
-        assert keys == {"pitfall:Bash:traceback-most-recent-call-last:python"}
+        groups = group_repeated_errors(traces)
+        assert [len(group.failures) for group in groups] == [2, 2]
+        assert [group.detail_line for group in groups] == ["keyerror: 'id'", "importerror: no x"]
+        keys = [pitfall_key(group) for group in groups]
+        assert len(set(keys)) == 2
+        for key in keys:
+            assert re.fullmatch(
+                r"pitfall:Bash:traceback-most-recent-call-last-[0-9a-f]{8}:python", key
+            )
+        # The same error gives the same key in another session.
+        again = group_repeated_errors(traces[:2])
+        assert pitfall_key(again[0]) == keys[0]
+
+    def test_unrelated_failures_of_one_runner_each_keep_their_fix(self):
+        # Both open with "Exit code 1" under `uv`: as one group, the second failure hid
+        # the fix of the first and neither became a pitfall.
+        auth = _trace("Edit", params={"file_path": f"{REPO}/src/auth.py"})
+        migration = _trace("Write", params={"file_path": f"{REPO}/alembic/001_users.py"})
+        traces = [
+            _trace(
+                "Bash",
+                status="error",
+                params={"command": "uv run pytest tests/test_auth.py"},
+                error="Exit code 1\nFAILED tests/test_auth.py::test_login - AssertionError",
+            ),
+            auth,
+            _trace("Bash", params={"command": "uv run pytest tests/test_auth.py"}),
+            _trace(
+                "Bash",
+                status="error",
+                params={"command": "uv run alembic upgrade head"},
+                error="Exit code 1\nsqlalchemy.exc.OperationalError: no such table: users",
+            ),
+            migration,
+            _trace("Bash", params={"command": "uv run alembic upgrade head"}),
+        ]
+        groups = group_repeated_errors(traces)
+        assert [group.fixes for group in groups] == [[auth], [migration]]
+        keys = [pitfall_key(group) for group in groups]
+        assert len(set(keys)) == 2
+        assert all(key.startswith("pitfall:Bash:exit-code-") for key in keys)
+        contents = [candidate.content for _, candidate in build_failure_candidates(groups, REPO)]
+        assert "no such table: users" in contents[1]
+        assert "src/auth.py" in contents[0] and "alembic/001_users.py" in contents[1]
+
+    def test_a_one_line_error_keeps_its_plain_key(self):
+        assert cue.last_error_line("No changes to make: same string") == ""
+        assert cue.last_error_line("Exit code 1\n\n  exit CODE   1 \n") == ""
+        failure = _trace(
+            "Edit",
+            status="error",
+            params={"file_path": f"{REPO}/src/app.py"},
+            error="No changes to make: old_string and new_string are the same",
+        )
+        (group,) = group_repeated_errors([failure, failure])
+        assert pitfall_key(group) == "pitfall:Edit:no-changes-to-make:py"
+
+    def test_a_hashed_key_stays_within_its_bounds(self):
+        error = "word " * 40 + ": head\nlast line"
+        failure = _trace(
+            "T" * 80, status="error", params={"command": "p" * 80 + " run"}, error=error
+        )
+        (group,) = group_repeated_errors([failure, failure])
+        key = pitfall_key(group)
+        assert len(key) <= cue.PITFALL_KEY_MAX_CHARS
+        _tool, slug, qualifier = key.split(":")[1:]
+        assert len(slug) <= cue.PITFALL_SLUG_MAX_CHARS
+        assert re.search(r"-[0-9a-f]{8}$", slug) and qualifier
 
     def test_the_error_line_is_the_first_line(self):
         error = "Exit code 1\ncat: illegal option -- x"
