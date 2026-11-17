@@ -303,6 +303,37 @@ async def test_an_unexpected_telegram_failure_is_counted_once(monkeypatch):
     assert "failed_ingestion" not in counts
 
 
+def test_asana_service_sends_the_token_as_a_bearer_header_and_shows_it_nowhere(monkeypatch):
+    from cognee.tasks.ingestion.connectors.asana import AsanaAuthError
+
+    token = "SECRET-asana-token-123"
+    sent: list[dict] = []
+
+    class Rejected:
+        status_code = 401
+        headers: dict = {}
+
+        @staticmethod
+        def json():
+            return {"errors": [{"message": f"Not Authorized: {token}"}]}
+
+    def request(method, url, **kwargs):
+        sent.append(kwargs["headers"])
+        return Rejected()
+
+    monkeypatch.setattr("requests.request", request)
+    service = ingestion.build_service("asana", token)
+
+    with pytest.raises(AsanaAuthError) as raised:
+        service.request("GET", "/projects/1201234567890123")
+
+    assert [headers["Authorization"] for headers in sent] == [f"Bearer {token}"]
+    assert token not in repr(service)
+    assert token not in str(raised.value) and token not in repr(raised.value)
+    assert token not in raised.value.detail
+    assert str(raised.value) == "Asana /projects/{gid}: HTTP 401", "no id, no body"
+
+
 def test_onenote_names_are_pinned_and_a_dlt_table_name():
     # Same rule as the Linear pin: the literal is deliberate. One notebook is one scope, and
     # the Cloud control plane only tracks tables that start with the provider prefix.
