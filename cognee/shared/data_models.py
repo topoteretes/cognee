@@ -104,8 +104,7 @@ else:
         skipped. ``relationship_name`` is normalized into the stored edge name.
         ``description`` becomes the stored edge's text and, with the default
         ``SUMMARY_METHOD=from_extraction``, a line of the chunk's summary. An edge
-        drawn from a timestamp is reversed so the
-        timestamp is the target.
+        drawn from a timestamp is reversed so the timestamp is the target.
         """
 
         source_node_id: str
