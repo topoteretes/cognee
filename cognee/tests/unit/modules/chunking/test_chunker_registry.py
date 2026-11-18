@@ -11,8 +11,10 @@ from cognee.modules.chunking.chunker_registry import (
     get_default_chunker,
     register_chunker,
     require_chunker_stamp,
+    resolve_chunker,
     stamps_every_chunk,
 )
+from cognee.modules.chunking.CsvChunker import CsvChunker
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import get_cognify_config
 
@@ -56,15 +58,62 @@ def test_a_chunker_cannot_share_the_chunker_id_of_another_registered_one():
         register_chunker("Mine", TweakedTextChunker)
 
 
-def test_a_name_can_be_registered_again():
+def test_a_class_can_be_registered_again_and_a_name_can_take_a_new_cut():
+    class ClauseChunkerV2(Chunker):
+        chunker_id = "clause_chunker_test_v2"
+
+    register_chunker("ClauseChunker", ClauseChunker)
+    register_chunker("ClauseChunker", ClauseChunker)
+    register_chunker("ClauseChunker", ClauseChunkerV2)
+
+    assert chunker_registry.registered_chunkers["ClauseChunker"] is ClauseChunkerV2
+
+
+def test_a_name_cannot_take_another_class_with_the_same_chunker_id():
+    """Documents the first class cut would pass for the second one's."""
+
     class ClauseChunkerRevised(Chunker):
         chunker_id = ClauseChunker.chunker_id
 
     register_chunker("ClauseChunker", ClauseChunker)
-    register_chunker("ClauseChunker", ClauseChunker)
-    register_chunker("ClauseChunker", ClauseChunkerRevised)
+    with pytest.raises(ValueError, match="has the chunker_id of ClauseChunker"):
+        register_chunker("ClauseChunker", ClauseChunkerRevised)
 
-    assert chunker_registry.registered_chunkers["ClauseChunker"] is ClauseChunkerRevised
+
+def test_the_name_text_chunker_cannot_be_repointed():
+    class TweakedTextChunker(TextChunker):
+        chunker_id = "tweaked_text_chunker_test"
+
+    with pytest.raises(ValueError, match="names the built-in TextChunker"):
+        register_chunker("TextChunker", TweakedTextChunker)
+    register_chunker("TextChunker", TextChunker)
+
+
+def test_a_chunker_cannot_take_the_id_of_a_built_in_chunker_that_is_not_registered():
+    """Documents a per-call CsvChunker cut carry csv_chunker_v1 too."""
+
+    class TweakedCsvChunker(CsvChunker):
+        pass
+
+    with pytest.raises(ValueError, match="has the chunker_id of CsvChunker"):
+        register_chunker("Mine", TweakedCsvChunker)
+
+
+def test_a_call_that_names_no_chunker_gets_the_default(monkeypatch):
+    assert resolve_chunker(None) is TextChunker
+    assert resolve_chunker(ClauseChunker) is ClauseChunker
+
+    register_chunker("ClauseChunker", ClauseChunker)
+    monkeypatch.setenv("DEFAULT_CHUNKER", "ClauseChunker")
+    get_cognify_config.cache_clear()
+    assert resolve_chunker(None) is ClauseChunker
+
+
+def test_a_blank_default_chunker_setting_counts_as_unset(monkeypatch):
+    monkeypatch.setenv("DEFAULT_CHUNKER", "")
+    get_cognify_config.cache_clear()
+
+    assert get_default_chunker() is TextChunker
 
 
 def test_a_registered_chunker_must_stamp_its_chunks():

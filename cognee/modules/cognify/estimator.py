@@ -35,7 +35,7 @@ from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from cognee.infrastructure.llm.utils import get_llm_tokenizer
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.chunking.chunker_registry import resolve_chunker
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -516,13 +516,14 @@ async def _chunks_from_data_items(
 async def estimate_remember_dry_run(
     data: Any,
     *,
-    chunker: type[Any] = TextChunker,
+    chunker: type[Any] | None = None,
     chunk_size: int,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
     summary_method: str | None = None,
 ) -> DryRunEstimate:
     """Estimate ``remember(data)`` for permanent add+cognify inputs."""
+    chunker = resolve_chunker(chunker)
     from cognee.tasks.ingestion.screen_server_paths import screen_server_paths
 
     # The same entry decision add() makes, so a closed gate refuses what a real
@@ -544,7 +545,7 @@ async def estimate_cognify_dry_run(
     datasets,
     *,
     user=None,
-    chunker: type[Any] = TextChunker,
+    chunker: type[Any] | None = None,
     chunk_size: int,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
@@ -555,6 +556,7 @@ async def estimate_cognify_dry_run(
     Resolves datasets read-only: unlike a real run it never creates a missing
     dataset, so estimating a typo'd name fails loudly instead of writing one.
     """
+    chunker = resolve_chunker(chunker)
     if user is None:
         user = await get_default_user()
     if isinstance(datasets, (str, UUID)):

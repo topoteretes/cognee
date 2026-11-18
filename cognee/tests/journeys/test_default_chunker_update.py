@@ -244,3 +244,42 @@ async def test_a_registered_chunker_that_does_not_stamp_its_chunks_fails_the_run
     assert await _stored_chunks(dataset_id, default_user) == [], "unstamped chunks were stored"
     if mock_llm is not None:
         assert _graph_extractions(mock_llm) == 0, "the run failed after paying for extraction"
+
+
+DATED_V1 = (
+    "# Founding\n\nThe Quillon ropewalk was founded on 3 March 1947 by Adaeze Wren.\n\n"
+    "# Charter\n\nIts charter was signed by Tomas Ferreira in the harbour office.\n\n"
+    "# Opening\n\nThe ropewalk opened to the public the following 27 April with a parade.\n\n"
+)
+DATED_V2 = DATED_V1.replace("1947", "1948")
+DATED_V3 = DATED_V2.replace("Tomas Ferreira", "Ingrid Solvay")
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_a_chunk_re_dated_by_an_edit_keeps_its_chunker_id(
+    clean_env, default_user, mock_llm, use_chunker
+):
+    """Changing a year re-dates a later section's "the following 27 April".
+
+    The re-dated chunk is written again from the stored node; without its id the
+    next update would find a chunk the default chunker did not stamp and rebuild.
+    """
+    use_chunker()
+    await cognee.add(DATED_V1, dataset_name=DATASET)
+    await cognee.cognify(datasets=[DATASET])
+    dataset_id = await _support.dataset_id_by_name(DATASET, default_user)
+    row = (await get_dataset_data(dataset_id))[0]
+
+    redated = await cognee.update(
+        data_id=row.id, data=DATED_V2, dataset_id=dataset_id, user=default_user
+    )
+    assert redated["status"] == "incremental", redated
+    assert redated["redated_chunks"] == 1, "the edit did not re-date the later section"
+    chunks = await _stored_chunks(dataset_id, default_user)
+    assert {chunk["chunker_id"] for chunk in chunks} == {SectionChunker.chunker_id}
+
+    following = await cognee.update(
+        data_id=row.id, data=DATED_V3, dataset_id=dataset_id, user=default_user
+    )
+    assert following["status"] == "incremental", f"the next update rebuilt: {following}"

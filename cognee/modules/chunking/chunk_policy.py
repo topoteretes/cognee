@@ -184,21 +184,6 @@ def _assemble_final_chunks(
     return region_chunks, kept_final_index
 
 
-def stored_chunker_id(stored_chunks: list[dict]) -> str | None:
-    """The chunker every stored chunk agrees on, or None when unknown.
-
-    None means "cannot tell" — legacy chunks predate the field, and a document
-    whose chunks disagree has already been through something this path should
-    not reason about. Both fall through to the tiling check, so v1 graphs are
-    unaffected.
-    """
-    ids = {node.get("chunker_id") for node in stored_chunks}
-    if len(ids) != 1:
-        return None
-    only = ids.pop()
-    return only or None
-
-
 async def diff_region_policy(request: ChunkPlanRequest) -> ChunkPlan:
     """The default policy: replace only the regions the edit touched.
 
@@ -266,5 +251,4 @@ __all__ = [
     "ChunkPolicy",
     "IncrementalPlanError",
     "diff_region_policy",
-    "stored_chunker_id",
 ]

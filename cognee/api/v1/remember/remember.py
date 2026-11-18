@@ -1176,7 +1176,8 @@ async def remember(
         session_id: Optional session ID. When set, stores data in the
             session cache instead of the permanent graph.
         chunk_size: Max tokens per chunk. Auto-calculated when *None*.
-        chunker: Text chunking strategy. Defaults to *TextChunker*.
+        chunker: Text chunking strategy. None uses the chunker DEFAULT_CHUNKER
+                 names (TextChunker when unset).
         custom_prompt: Custom prompt for entity extraction.
         run_in_background: If *True*, run as a background task.
         self_improvement: If *True* (default), automatically runs
@@ -2205,11 +2206,6 @@ async def _remember_inner(
 
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
-
-    if chunker is None:
-        from cognee.modules.chunking.chunker_registry import get_default_chunker
-
-        chunker = get_default_chunker()
 
     # Route kwargs to add(), cognify(), or both
     remaining = dict(kwargs)
