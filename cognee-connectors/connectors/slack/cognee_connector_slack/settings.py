@@ -33,11 +33,6 @@ class SlackSettings(ConnectorSettings):
     # Env: SLACK_SIGNING_SECRET
     signing_secret: str = ""
 
-    # Per-dataset selections remain opt-in. Disable this worker when an
-    # external scheduler calls sync_due_slack_history instead.
-    # Env: SLACK_HISTORY_SYNC_ENABLED
-    history_sync_enabled: bool = True
-
 
 slack_settings = SlackSettings()
 

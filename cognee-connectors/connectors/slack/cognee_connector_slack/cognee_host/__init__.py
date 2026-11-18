@@ -9,12 +9,6 @@ Copied from cognee.modules.integrations.slack.__init__ (cognee dev, 2026-10-27),
 whose import-time ``use_integration(SlackIntegration())`` became the explicit
 :func:`register`; the two routers cognee's ``api/client.py`` mounted by hand are
 what :func:`routers` returns.
-
-The history import (``history``, ``history_client``) reports its progress through
-``cognee.modules.integrations.sync_progress`` when the installed cognee has it
-(newer than 1.6.6); on an older cognee it runs the same way with every report
-dropped (:mod:`cognee_connector_slack.cognee_host.compat`), so :func:`register`
-and :func:`routers` work on any cognee >= 1.6.5.
 """
 
 from __future__ import annotations
