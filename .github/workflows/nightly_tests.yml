@@ -42,7 +42,7 @@ env:
   ENV: 'dev'
 
 jobs:
-  # TEMPORARY test branch: only the postgres datasheets mock arm, pool defaults 2+10.
+  # TEMPORARY test branch: only the postgres datasheets mock arm, pool defaults unchanged (baseline).
   perf-datasheets-mock:
     name: Performance — Datasheets (mock LLM)
     uses: ./.github/workflows/performance_report.yml

@@ -64,7 +64,7 @@ QUERY_BATCH_SIZE = 1000
 # Lean pool_size limits connection fan-out across datasets (only pool_size connections are
 # retained while idle); the large max_overflow keeps burst headroom, since overflow
 # connections close on release instead of idling.
-_ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 10}
+_ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 20}
 
 # pgvector builds HNSW indexes on vector up to 2,000 dimensions and on halfvec up to
 # 4,000; a larger embedding stays unindexed and is searched by a full scan.
