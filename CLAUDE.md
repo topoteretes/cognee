@@ -627,7 +627,7 @@ LLM_API_KEY="your_gemini_api_key"
 #### Anthropic Claude (requires anthropic extra)
 ```bash
 LLM_PROVIDER="anthropic"
-LLM_MODEL="claude-3-5-sonnet-20241022"
+LLM_MODEL="claude-sonnet-5-5"
 LLM_API_KEY="your_anthropic_api_key"
 ```
 
