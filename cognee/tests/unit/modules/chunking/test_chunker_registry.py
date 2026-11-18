@@ -10,8 +10,8 @@ from cognee.modules.chunking.Chunker import Chunker
 from cognee.modules.chunking.chunker_registry import (
     get_default_chunker,
     register_chunker,
-    require_chunker_stamp,
     resolve_chunker,
+    stamp_chunk,
     stamps_every_chunk,
 )
 from cognee.modules.chunking.CsvChunker import CsvChunker
@@ -99,6 +99,16 @@ def test_a_chunker_cannot_take_the_id_of_a_built_in_chunker_that_is_not_register
         register_chunker("Mine", TweakedCsvChunker)
 
 
+def test_a_chunker_cannot_take_the_id_of_the_code_docs_pipeline():
+    """The code-docs pipeline stamps its chunks with an id but has no chunker class."""
+
+    class DocstringChunker(Chunker):
+        chunker_id = "code_docs"
+
+    with pytest.raises(ValueError, match="chunker_id of the code-docs pipeline"):
+        register_chunker("Mine", DocstringChunker)
+
+
 def test_a_call_that_names_no_chunker_gets_the_default(monkeypatch):
     assert resolve_chunker(None) is TextChunker
     assert resolve_chunker(ClauseChunker) is ClauseChunker
@@ -116,27 +126,39 @@ def test_a_blank_default_chunker_setting_counts_as_unset(monkeypatch):
     assert get_default_chunker() is TextChunker
 
 
-def test_a_registered_chunker_must_stamp_its_chunks():
-    """Stored without the id, a chunk could later be updated by another chunker unnoticed."""
-    register_chunker("ClauseChunker", ClauseChunker)
-
-    require_chunker_stamp(ClauseChunker, SimpleNamespace(chunker_id=ClauseChunker.chunker_id))
-    for wrong in (None, "", TextChunker.chunker_id):
-        with pytest.raises(CogneeConfigurationError, match="ClauseChunker yielded a chunk"):
-            require_chunker_stamp(ClauseChunker, SimpleNamespace(chunker_id=wrong))
+def test_a_chunk_cut_without_an_id_gets_its_chunkers_id():
+    """A chunker that forgets to stamp cannot store a chunk no chunker owns."""
+    for missing in (None, ""):
+        chunk = SimpleNamespace(chunker_id=missing)
+        stamp_chunk(ClauseChunker, chunk)
+        assert chunk.chunker_id == ClauseChunker.chunker_id
 
 
-def test_only_a_chunker_the_deployment_registered_is_held_to_its_stamp():
-    """TextChunker and per-call chunkers are older than the id; their chunks may lack it."""
-    unstamped = SimpleNamespace(chunker_id=None)
+def test_a_chunk_cut_with_another_chunkers_id_fails():
+    """Stored with it, the document would be updated as if that chunker cut it."""
+    stamp_chunk(ClauseChunker, SimpleNamespace(chunker_id=ClauseChunker.chunker_id))
+    with pytest.raises(CogneeConfigurationError, match="ClauseChunker yielded a chunk"):
+        stamp_chunk(ClauseChunker, SimpleNamespace(chunker_id=TextChunker.chunker_id))
 
-    require_chunker_stamp(TextChunker, unstamped)
-    require_chunker_stamp(ClauseChunker, unstamped)  # not registered: passed per call
-    assert not stamps_every_chunk(TextChunker)
-    assert not stamps_every_chunk(ClauseChunker)
 
+def test_registration_does_not_change_how_a_chunker_stamps():
+    """A per-call chunker follows the same rule as a registered one."""
+    assert stamps_every_chunk(ClauseChunker)  # not registered: passed per call
     register_chunker("ClauseChunker", ClauseChunker)
     assert stamps_every_chunk(ClauseChunker)
+
+    # TextChunker cut chunks before they carried an id, and keeps updating those.
+    assert not stamps_every_chunk(TextChunker)
+
+
+def test_a_chunker_without_an_id_leaves_its_chunks_without_one():
+    class UnnamedChunker(Chunker):
+        pass
+
+    chunk = SimpleNamespace(chunker_id=None)
+    stamp_chunk(UnnamedChunker, chunk)
+    assert chunk.chunker_id is None
+    assert not stamps_every_chunk(UnnamedChunker)
 
 
 def test_the_default_is_text_chunker_unless_the_setting_names_another(monkeypatch):

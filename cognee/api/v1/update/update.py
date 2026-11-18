@@ -140,7 +140,7 @@ async def update(
                  so the first update after a deployment changes its default chunker
                  rebuilds the document once and later updates are chunk-level again.
                  Chunks stored before cognee 1.5.4 carry no chunker id: TextChunker
-                 still updates them chunk-level, a registered chunker rebuilds them.
+                 still updates them chunk-level, any other chunker rebuilds them.
         policy: Decides which chunks exist after the edit and what happens to the old
                  ones. Replaceable without touching storage or update orchestration.
                  Chunk-level path only; not exposed on the HTTP route.

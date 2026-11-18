@@ -35,6 +35,9 @@ from cognee.infrastructure.databases.exceptions.exceptions import (
 )
 from cognee.infrastructure.databases.postgres.deadlock import is_deadlock
 from cognee.infrastructure.databases.relational import get_relational_config
+from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+    DEFAULT_POOL_TIMEOUT,
+)
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 
@@ -152,6 +155,10 @@ class SqlCacheAdapter(CacheDBInterface):
             # same value must work here — SQLAlchemy itself needs the class.
             if pool_args.get("poolclass", "").lower() == "nullpool":
                 pool_args["poolclass"] = NullPool
+            elif not is_sqlite:
+                # The Postgres cache waits for a pooled connection as long as cognee's
+                # other Postgres pools do.
+                pool_args.setdefault("pool_timeout", DEFAULT_POOL_TIMEOUT)
             if is_sqlite:
                 # Concurrency tuning: wait out writer locks instead of failing
                 # with SQLITE_BUSY when several processes share one cache.db.

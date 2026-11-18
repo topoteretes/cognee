@@ -361,15 +361,19 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                             from cognee.modules.chunking.LangchainChunker import LangchainChunker
 
                             chunker_class = LangchainChunker
-                        except ImportError:
-                            fmt.warning("LangchainChunker not available, using the default chunker")
+                        except ImportError as error:
+                            raise CliCommandInnerException(
+                                "LangchainChunker needs langchain: pip install 'cognee[langchain]'"
+                            ) from error
                     elif args.chunker == "CsvChunker":
                         try:
                             from cognee.modules.chunking.CsvChunker import CsvChunker
 
                             chunker_class = CsvChunker
-                        except ImportError:
-                            fmt.warning("CsvChunker not available, using the default chunker")
+                        except ImportError as error:
+                            raise CliCommandInnerException(
+                                f"CsvChunker could not be imported: {error}"
+                            ) from error
 
                     data_to_add = args.data[0] if len(args.data) == 1 else args.data
 

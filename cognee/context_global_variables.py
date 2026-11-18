@@ -61,9 +61,12 @@ current_dataset_id: ContextVar[UUID | None] = ContextVar("current_dataset_id", d
 llm_config: ContextVar[LLMConfig | None] = ContextVar("llm_config", default=None)
 embedding_config = ContextVar("embedding_config", default=None)
 session_user = ContextVar("session_user", default=None)
-# Labels the LLM calls in this context with the stage that made them, for
-# tracing (see pipeline_stage).
+# Labels the pipeline stage (extraction | summarization | query) whose LLM
+# config is currently active on `llm_config`, for tracing (see pipeline_stage).
 current_pipeline_stage: ContextVar[str | None] = ContextVar("current_pipeline_stage", default=None)
+# Names the enclosing piece of cognee work that LLM calls in this context belong
+# to, independent of the model stage (see caller_scope).
+current_caller: ContextVar[str | None] = ContextVar("current_caller", default=None)
 
 
 async def set_session_user_context_variable(user):

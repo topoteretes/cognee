@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 
 from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.chunking.Chunker import Chunker
-from cognee.modules.chunking.chunker_registry import require_chunker_stamp
+from cognee.modules.chunking.chunker_registry import stamp_chunk
 from cognee.modules.chunking.incremental_chunking import (
     IncrementalPlan,
     IncrementalPlanError,
@@ -91,7 +91,7 @@ async def _chunk_region(
     chunker = chunker_cls(document, get_text, max_chunk_size)
     chunks = [chunk async for chunk in chunker.read()]
     for chunk in chunks:
-        require_chunker_stamp(chunker_cls, chunk)
+        stamp_chunk(chunker_cls, chunk)
     return chunks
 
 
