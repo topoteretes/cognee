@@ -34,8 +34,8 @@ from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from cognee.infrastructure.llm.utils import get_llm_tokenizer
-from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.chunking.chunker_registry import resolve_chunker
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets

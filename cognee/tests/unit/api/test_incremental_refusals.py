@@ -386,16 +386,68 @@ async def test_a_document_built_by_another_chunker_is_refused_by_name(monkeypatc
     remove_files.assert_awaited_once_with(staged, update_applied=False)
 
 
+def _stub_staging(monkeypatch, stored: list[dict]):
+    """Stub everything ``_stage_and_plan`` reads, leaving the chunker check and the planner."""
+    from cognee.api.v1.update import incremental
+
+    old_text = "".join(node["text"] for node in stored)
+
+    async def _get_data(*_args, **_kwargs):
+        return SimpleNamespace(
+            id=uuid4(), raw_data_location="/tmp/old.txt", content_hash="OLD", external_metadata={}
+        )
+
+    async def _read(location):
+        return old_text if location == "/tmp/old.txt" else "new\n"
+
+    async def _stored_chunks(*_args, **_kwargs):
+        return stored
+
+    async def _stage(*_args, **_kwargs):
+        return SimpleNamespace(raw_data_location="/tmp/new.txt", content_hash="NEW")
+
+    monkeypatch.setattr(incremental, "_remove_unreferenced_files", AsyncMock())
+    monkeypatch.setattr(incremental, "get_data", _get_data)
+    monkeypatch.setattr(incremental, "_read_processed_text", _read)
+    monkeypatch.setattr(incremental, "_get_stored_chunks", _stored_chunks)
+    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock(return_value={}))
+    monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=True))
+    monkeypatch.setattr(incremental, "_stage_new_content", _stage)
+    monkeypatch.setattr(incremental, "_build_document", lambda *a, **k: SimpleNamespace(id=uuid4()))
+
+    planner = AsyncMock(side_effect=RuntimeError("reached the planner"))
+
+    async def plan_with(chunker):
+        await incremental._stage_and_plan(
+            uuid4(),
+            "new",
+            SimpleNamespace(id=uuid4()),
+            SimpleNamespace(id=uuid4()),
+            None,
+            None,
+            chunker=chunker,
+            policy=planner,
+        )
+
+    return plan_with, planner
+
+
+def _stored_with_ids(*chunker_ids) -> list[dict]:
+    return [
+        {"id": str(uuid4()), "text": f"para {n}\n", "chunk_index": n, "chunker_id": chunker_id}
+        for n, chunker_id in enumerate(chunker_ids)
+    ]
+
+
 @pytest.mark.asyncio
 async def test_a_registered_chunker_does_not_patch_chunks_that_carry_no_chunker_id(monkeypatch):
-    """Chunks without an id predate it (cognee before 1.5.4) or have mixed origins.
+    """Chunks without an id predate it (cognee before 1.5.4).
 
     A chunker a deployment registered stamps every chunk it cuts, so it did not
     cut these. Patching them with it would leave the document cut by two
     chunkers, so the document is rebuilt with it instead. TextChunker, the
     chunker of that old data, is not refused: it reaches the planner.
     """
-    from cognee.api.v1.update import incremental
     from cognee.modules.chunking import chunker_registry
     from cognee.modules.chunking.Chunker import Chunker
 
@@ -407,49 +459,13 @@ async def test_a_registered_chunker_does_not_patch_chunks_that_carry_no_chunker_
         "registered_chunkers",
         {"TextChunker": TextChunker, "ClauseChunker": ClauseChunker},
     )
-    stored = [{"id": str(uuid4()), "text": "para\n", "chunk_index": 0}]
-
-    async def _get_data(*_args, **_kwargs):
-        return SimpleNamespace(
-            id=uuid4(), raw_data_location="/tmp/old.txt", content_hash="OLD", external_metadata={}
-        )
-
-    async def _read(location):
-        return "para\n" if location == "/tmp/old.txt" else "new\n"
-
-    async def _stored_chunks(*_args, **_kwargs):
-        return stored
-
-    async def _stage(*_args, **_kwargs):
-        return SimpleNamespace(raw_data_location="/tmp/new.txt", content_hash="NEW")
-
-    planned = AsyncMock(side_effect=RuntimeError("reached the planner"))
-    monkeypatch.setattr(incremental, "_remove_unreferenced_files", AsyncMock())
-    monkeypatch.setattr(incremental, "get_data", _get_data)
-    monkeypatch.setattr(incremental, "_read_processed_text", _read)
-    monkeypatch.setattr(incremental, "_get_stored_chunks", _stored_chunks)
-    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock(return_value={}))
-    monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=True))
-    monkeypatch.setattr(incremental, "_stage_new_content", _stage)
-    monkeypatch.setattr(incremental, "_build_document", lambda *a, **k: SimpleNamespace(id=uuid4()))
-
-    async def plan_with(chunker):
-        await incremental._stage_and_plan(
-            uuid4(),
-            "new",
-            SimpleNamespace(id=uuid4()),
-            SimpleNamespace(id=uuid4()),
-            None,
-            None,
-            chunker=chunker,
-            policy=planned,
-        )
+    plan_with, planner = _stub_staging(monkeypatch, _stored_with_ids(None))
 
     with pytest.raises(IncrementalUpdateNotPossible) as raised:
         await plan_with(ClauseChunker)
     assert raised.value.reason is RefusalReason.UNSUPPORTED_CHUNKER
     assert "clause_chunker_test" in str(raised.value)
-    planned.assert_not_awaited()
+    planner.assert_not_awaited()
 
     with pytest.raises(RuntimeError, match="reached the planner"):
         await plan_with(TextChunker)
@@ -1016,53 +1032,35 @@ async def test_text_chunker_does_not_patch_a_document_another_chunker_cut_part_o
     monkeypatch, stored_ids, refused
 ):
     """Only this chunker's id and no id count as its own; any other id is refused."""
-    from cognee.api.v1.update import incremental
+    plan_with, _ = _stub_staging(monkeypatch, _stored_with_ids(*stored_ids))
 
-    stored = [
-        {"id": str(uuid4()), "text": f"para {n}\n", "chunk_index": n, "chunker_id": chunker_id}
-        for n, chunker_id in enumerate(stored_ids)
-    ]
-    old_text = "".join(node["text"] for node in stored)
-
-    async def _get_data(*_args, **_kwargs):
-        return SimpleNamespace(
-            id=uuid4(), raw_data_location="/tmp/old.txt", content_hash="OLD", external_metadata={}
-        )
-
-    async def _read(location):
-        return old_text if location == "/tmp/old.txt" else "new\n"
-
-    async def _stored_chunks(*_args, **_kwargs):
-        return stored
-
-    async def _stage(*_args, **_kwargs):
-        return SimpleNamespace(raw_data_location="/tmp/new.txt", content_hash="NEW")
-
-    planned = AsyncMock(side_effect=RuntimeError("reached the planner"))
-    monkeypatch.setattr(incremental, "_remove_unreferenced_files", AsyncMock())
-    monkeypatch.setattr(incremental, "get_data", _get_data)
-    monkeypatch.setattr(incremental, "_read_processed_text", _read)
-    monkeypatch.setattr(incremental, "_get_stored_chunks", _stored_chunks)
-    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock(return_value={}))
-    monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=True))
-    monkeypatch.setattr(incremental, "_stage_new_content", _stage)
-    monkeypatch.setattr(incremental, "_build_document", lambda *a, **k: SimpleNamespace(id=uuid4()))
-
-    call = incremental._stage_and_plan(
-        uuid4(),
-        "new",
-        SimpleNamespace(id=uuid4()),
-        SimpleNamespace(id=uuid4()),
-        None,
-        None,
-        chunker=TextChunker,
-        policy=planned,
-    )
     if refused:
         with pytest.raises(IncrementalUpdateNotPossible) as raised:
-            await call
+            await plan_with(TextChunker)
         assert raised.value.reason is RefusalReason.UNSUPPORTED_CHUNKER
         assert "section_chunker_v1" in str(raised.value)
     else:
         with pytest.raises(RuntimeError, match="reached the planner"):
-            await call
+            await plan_with(TextChunker)
+
+
+@pytest.mark.asyncio
+async def test_a_chunker_class_that_is_not_a_chunker_subclass_is_still_compared(monkeypatch):
+    """extract_chunks_from_documents takes any class with read(); such a class has no chunker_id."""
+
+    class DuckChunker:
+        def __init__(self, document, get_text, max_chunk_size):
+            pass
+
+        async def read(self):
+            return
+            yield
+
+    plan_with, _ = _stub_staging(monkeypatch, _stored_with_ids(None))
+    with pytest.raises(RuntimeError, match="reached the planner"):
+        await plan_with(DuckChunker)
+
+    plan_with, _ = _stub_staging(monkeypatch, _stored_with_ids("text_chunker_v1"))
+    with pytest.raises(IncrementalUpdateNotPossible) as raised:
+        await plan_with(DuckChunker)
+    assert raised.value.reason is RefusalReason.UNSUPPORTED_CHUNKER

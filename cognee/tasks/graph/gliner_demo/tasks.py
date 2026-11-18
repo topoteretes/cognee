@@ -21,8 +21,8 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from cognee.infrastructure.llm.utils import resolve_chunk_size
-from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.chunking.chunker_registry import resolve_chunker
+from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.cognify.chunking_tasks import build_chunking_tasks, resolve_chunks_per_batch
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument

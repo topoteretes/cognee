@@ -1036,16 +1036,18 @@ async def _stage_and_plan(
         # before 1.5.4). TextChunker keeps updating those, as it always has. A
         # chunker the deployment registered stamps every chunk it cuts, so it did
         # not cut them: patching them with it would leave two cuts in one document.
+        # getattr: a chunker passed per call need not subclass Chunker.
+        own_id = getattr(chunker, "chunker_id", "")
         stored_ids = {node.get("chunker_id") or None for node in stored_chunks}
-        foreign = sorted(i for i in stored_ids if i is not None and i != chunker.chunker_id)
+        foreign = sorted(i for i in stored_ids if i is not None and i != own_id)
         if foreign:
             raise IncrementalUpdateNotPossible(
-                f"document was chunked by {', '.join(foreign)}, not {chunker.chunker_id}",
+                f"document was chunked by {', '.join(foreign)}, not {own_id}",
                 RefusalReason.UNSUPPORTED_CHUNKER,
             )
         if None in stored_ids and stamps_every_chunk(chunker):
             raise IncrementalUpdateNotPossible(
-                f"document's chunks do not all carry {chunker.chunker_id}",
+                f"document's chunks do not all carry {own_id}",
                 RefusalReason.UNSUPPORTED_CHUNKER,
             )
 

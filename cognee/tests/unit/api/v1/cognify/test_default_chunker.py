@@ -103,23 +103,29 @@ async def test_a_remember_dry_run_estimates_with_the_configured_default(monkeypa
     assert estimate.await_args.kwargs["chunker"] is ClauseChunker
 
 
+class _ChunkingStepReached(Exception):
+    """Stops a task builder once it has handed its chunker to the chunking step."""
+
+
 @pytest.mark.asyncio
 async def test_the_task_builders_use_the_configured_default(monkeypatch):
     """Custom pipelines build their task lists from these; naming no chunker means the default."""
     from cognee.tasks.graph.gliner_demo import tasks as gliner_tasks
 
     use_default(monkeypatch, "ClauseChunker", ClauseChunker)
-    resolved = AsyncMock(return_value=64)
-    monkeypatch.setattr(cognify_module, "resolve_chunk_size", resolved)
+    monkeypatch.setattr(cognify_module, "resolve_chunk_size", AsyncMock(return_value=64))
 
     for builder in (cognify_module.get_indexing_tasks, cognify_module.get_default_tasks):
-        with patch.object(cognify_module, "build_chunking_tasks", return_value=()) as build:
-            try:
-                await builder()
-            except Exception:
-                pass  # only the chunker handed to the chunking step matters here
+        with (
+            patch.object(
+                cognify_module, "build_chunking_tasks", side_effect=_ChunkingStepReached
+            ) as build,
+            pytest.raises(_ChunkingStepReached),
+        ):
+            await builder()
         assert build.call_args.args[0] is ClauseChunker, builder.__name__
 
-    with patch.object(gliner_tasks, "Task") as task:
+    # require_gliner2 is stubbed as in the GLiNER tests: the runtime is an optional install.
+    with patch.object(gliner_tasks, "Task") as task, patch.object(gliner_tasks, "require_gliner2"):
         gliner_tasks.build_gliner_schema_task(None, None, max_chunk_size=64)
     assert task.call_args.kwargs["chunker"] is ClauseChunker

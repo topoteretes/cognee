@@ -10,7 +10,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingCo
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import resolve_chunk_size
 from cognee.infrastructure.llm.config import LLMConfig
-from cognee.modules.chunking.chunker_registry import get_default_chunker, resolve_chunker
+from cognee.modules.chunking.chunker_registry import resolve_chunker
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.chunking_tasks import build_chunking_tasks, resolve_chunks_per_batch
 from cognee.modules.cognify.config import (
@@ -467,8 +467,7 @@ async def cognify(
             graph_model=graph_model,
         )
 
-    if chunker is None:
-        chunker = get_default_chunker()
+    chunker = resolve_chunker(chunker)
 
     # After the argument checks and the remote route: a cognify that raises above,
     # or runs remotely, must not install anything locally. Awaited, so the pipeline

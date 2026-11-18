@@ -17,7 +17,7 @@ from cognee.api.v1.update.incremental import (
 from cognee.api.v1.update.result import Fallback, UpdateError, UpdateResult
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
 from cognee.modules.chunking.Chunker import Chunker
-from cognee.modules.chunking.chunker_registry import get_default_chunker
+from cognee.modules.chunking.chunker_registry import resolve_chunker
 from cognee.modules.cognify.config import (
     ensure_extractor_runtime,
     get_cognify_config,
@@ -278,8 +278,7 @@ async def update(
     # One chunker decision for both paths too, made the way cognify() makes it.
     # Without it a document cut by the deployment's default chunker is compared
     # with TextChunker, refused, and rebuilt in full on every update.
-    if chunker is None:
-        chunker = get_default_chunker()
+    chunker = resolve_chunker(chunker)
 
     if fallback is None:
         # Chunk-level incremental path: diff the new text against the stored

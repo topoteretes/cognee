@@ -1528,12 +1528,12 @@ async def remember(
             )
 
         from cognee.infrastructure.llm import resolve_chunk_size
-        from cognee.modules.chunking.chunker_registry import get_default_chunker
+        from cognee.modules.chunking.chunker_registry import resolve_chunker
         from cognee.modules.cognify.estimator import estimate_remember_dry_run
 
         return await estimate_remember_dry_run(
             data,
-            chunker=chunker or get_default_chunker(),
+            chunker=resolve_chunker(chunker),
             chunk_size=await resolve_chunk_size(chunk_size),
             graph_model=graph_model_class,
             custom_prompt=custom_prompt,
