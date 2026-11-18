@@ -1,7 +1,7 @@
 """Slack HTTP routes for a cognee server.
 
-Copied from cognee.api.v1.slack.routers (get_slack_router, get_slack_channels_router,
-get_slack_history_router and the package ``__init__``; cognee dev, 2026-10-27) into
+Copied from cognee.api.v1.slack.routers (get_slack_router, get_slack_channels_router
+and the package ``__init__``; cognee dev, 2026-10-27) into
 one module. :func:`routers` lists what a host mounts, with the prefix and tags
 cognee's ``api/client.py`` used; each factory keeps its original module docstring as
 its own.
@@ -17,7 +17,6 @@ from cognee.modules.integrations.credentials import (
     update_provider_metadata,
 )
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
-from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from fastapi import APIRouter, Depends, HTTPException
@@ -27,24 +26,12 @@ from cognee_connector_slack.cognee_host.handle_slack_command import handle_slack
 from cognee_connector_slack.cognee_host.handle_slack_event import handle_slack_event
 from cognee_connector_slack.cognee_host.handle_slack_interactive import handle_slack_interactive
 from cognee_connector_slack.cognee_host.handle_slack_link import confirm_link
-from cognee_connector_slack.cognee_host.history_sync import (
-    configure_slack_sync,
-    run_history_import,
-    slack_history_lifespan,
-)
-from cognee_connector_slack.cognee_host.persistence import PROVIDER, get_by_team, is_active
+from cognee_connector_slack.cognee_host.persistence import PROVIDER
 from cognee_connector_slack.cognee_host.verify_slack_signature import verify_slack_request
-from cognee_connector_slack.history_models import (
-    SlackHistoryError,
-    SlackHistoryRequest,
-    SlackHistoryResult,
-    SlackSyncSettings,
-)
-from cognee_connector_slack.settings import slack_settings
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["get_slack_channels_router", "get_slack_history_router", "get_slack_router", "routers"]
+__all__ = ["get_slack_channels_router", "get_slack_router", "routers"]
 
 
 def routers() -> list[tuple[APIRouter, str, list[str]]]:
@@ -53,7 +40,7 @@ def routers() -> list[tuple[APIRouter, str, list[str]]]:
     The same two routers cognee's ``api/client.py`` mounted, with the same prefix
     and tags: the public, signature-verified webhook receiver (``/commands``,
     ``/events``, ``/interactive``) and the authenticated settings routes (the
-    channel allowlist, ``/link``, the history import and its sync controls).
+    channel allowlist and ``/link``).
     """
     return [
         (get_slack_router(), "/api/v1/slack", ["slack"]),
@@ -89,62 +76,6 @@ def get_slack_router():
         return await handle_slack_interactive(raw_body)
 
     return slack_router
-
-
-def get_slack_history_router():
-    """Authenticated Slack history selection and sync controls."""
-    router = APIRouter(lifespan=slack_history_lifespan)
-
-    @router.post("/history/{team_id}/import", response_model=SlackHistoryResult)
-    async def import_history(
-        team_id: str,
-        selection: SlackHistoryRequest,
-        user: Annotated[User, Depends(get_authenticated_user)],
-    ):
-        """Fetch and index the selection; returns only after native indexing succeeds.
-
-        This is a long-running request. For interactive use, the Slack import
-        dialog acknowledges immediately and reports its background result.
-        """
-        try:
-            return await run_history_import(team_id, selection, user=user)
-        except SlackHistoryError as error:
-            raise HTTPException(400, str(error)) from error
-        except PermissionDeniedError as error:
-            raise HTTPException(
-                403, "Read, write and delete access to the target dataset is required."
-            ) from error
-
-    @router.put("/history/{team_id}/sync", response_model=SlackSyncSettings)
-    async def set_sync(
-        team_id: str,
-        settings: SlackSyncSettings,
-        user: Annotated[User, Depends(get_authenticated_user)],
-    ):
-        try:
-            return await configure_slack_sync(team_id, settings, user=user)
-        except (SlackHistoryError, ValueError) as error:
-            raise HTTPException(400, str(error)) from error
-        except PermissionDeniedError as error:
-            raise HTTPException(
-                403, "Read, write and delete access to the target dataset is required."
-            ) from error
-
-    @router.get("/history/{team_id}")
-    async def history_status(team_id: str, user: Annotated[User, Depends(get_authenticated_user)]):
-        credential = await get_by_team(team_id)
-        if not is_active(credential) or credential.user_id != user.id:
-            raise HTTPException(404, "Slack connection not found.")
-        metadata = credential.provider_metadata or {}
-        return {
-            "sync": metadata.get("history_sync") or {},
-            "reports": metadata.get("history_reports") or {},
-            "worker_enabled": bool(
-                slack_settings.history_sync_enabled and slack_settings.client_id
-            ),
-        }
-
-    return router
 
 
 class ChannelDTO(OutDTO):
@@ -190,7 +121,6 @@ def get_slack_channels_router():
     integration — it does not belong on the generic integrations router either.
     """
     router = APIRouter()
-    router.include_router(get_slack_history_router())
 
     @router.get("/channels")
     async def get_channels(
