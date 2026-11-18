@@ -167,9 +167,12 @@ _NEXT_BATCH_BOUND = """
 # ``ref`` is every key of the batch with its place in its array, which becomes the
 # order of the rows. ``run`` is the batch's run refs taken apart once, keeping the
 # first run that names a key; a key no run ref names was attached without a run.
+# Ids pass through ``::uuid::text`` to be stored in the canonical form the adapter
+# writes (lookups by dataset and run compare text), and a malformed id fails the batch.
 _COPY_REFS = """
     INSERT INTO {schema}.{ref_table} ({ref_key}, source_ref_key, dataset_id, pipeline_run_id)
-    SELECT {ref_columns}, ref.source_ref_key, split_part(ref.source_ref_key, ':', 3),
+    SELECT {ref_columns}, ref.source_ref_key,
+           split_part(ref.source_ref_key, ':', 3)::uuid::text,
            run.pipeline_run_id
       FROM (
             SELECT {artifact_columns}, item.source_ref_key, item.position
@@ -184,7 +187,7 @@ _COPY_REFS = """
                     SELECT {artifact_columns},
                            substring(item.run_ref FROM '^[^:]*:[^:]*:[^:]*:(.*)$')
                                AS source_ref_key,
-                           split_part(item.run_ref, ':', 3) AS pipeline_run_id,
+                           split_part(item.run_ref, ':', 3)::uuid::text AS pipeline_run_id,
                            item.position
                       FROM {schema}.{table} AS artifact
                      CROSS JOIN LATERAL unnest(artifact.source_run_refs)

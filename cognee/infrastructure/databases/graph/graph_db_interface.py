@@ -260,8 +260,9 @@ class GraphDBInterface(ABC):
               the write is rollbackable by run. Ignored when source_ref_key is None. (default None)
             - replace (bool): When True, every node that already exists is stored with the
               incoming properties, even where the adapter would otherwise keep the stored
-              node. An adapter that always replaces may ignore it. Callers pass it only as
-              True, so an adapter written before it existed keeps working. (default False)
+              node. An adapter that always replaces may ignore it, but must accept it:
+              entity consolidation and the consolidate_entity_descriptions pipeline pass
+              it, and fail with TypeError on an adapter that does not. (default False)
         """
         raise NotImplementedError
 

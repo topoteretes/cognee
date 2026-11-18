@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 import pytest
 import pytest_asyncio
 from sqlalchemy import event, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from cognee.infrastructure.databases.exceptions import PostgresGraphLayoutError
@@ -36,6 +37,7 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
 )
 from cognee.modules.engine.models import Entity
 from cognee.modules.migrations.migration import MigrationContext
+from cognee.modules.migrations.versions import postgres_graph_provenance_columns
 from cognee.modules.migrations.versions import postgres_graph_source_ref_tables as migration
 
 pytestmark = pytest.mark.asyncio
@@ -544,6 +546,46 @@ async def test_key_named_by_several_run_refs_takes_the_first_one(graph):
     ]
 
 
+async def _build_old_node(engine, keys: list[str], run_refs: list[str]) -> None:
+    """A graph in the earlier layout with one node "n" holding these keys and run refs."""
+    async with engine.begin() as connection:
+        for statement in _OLD_LAYOUT:
+            await connection.execute(text(statement))
+        await connection.execute(
+            text("""
+                INSERT INTO graph_node (id, source_ref_keys, source_run_refs)
+                VALUES ('n', CAST(:keys AS varchar[]), CAST(:run_refs AS varchar[]))
+            """),
+            {"keys": keys, "run_refs": run_refs},
+        )
+
+
+async def test_ids_are_copied_in_the_form_the_adapter_looks_them_up_by(graph):
+    """An id that parses but is not in canonical form is stored canonical."""
+    dataset, run = str(DATASETS[0]), str(RUNS[0])
+    key = make_source_ref_key(DATASETS[0], UUID(int=3001)).replace(dataset, dataset.upper())
+    run_ref = make_source_run_ref(RUNS[0], key).replace(f":{run}:", f":{run.upper()}:")
+    await _build_old_node(graph.engine, [key], [run_ref])
+
+    await migration.migrate(_context(graph))
+
+    assert await _rows(
+        graph.engine, "SELECT dataset_id, pipeline_run_id FROM graph_node_source_ref"
+    ) == [(dataset, run)]
+    assert await graph.find_node_source_refs_by_dataset(dataset) == {"n": [key]}
+    assert await graph.find_node_source_refs_by_pipeline_run(run) == {"n": [key]}
+
+
+async def test_malformed_id_stops_the_migration(graph):
+    """A key whose dataset id does not parse fails the copy instead of being stored."""
+    await _build_old_node(graph.engine, [f"source_ref:v1:not-a-uuid:{UUID(int=3001)}"], [])
+
+    with pytest.raises(DBAPIError, match="invalid input syntax for type uuid"):
+        await migration.migrate(_context(graph))
+
+    assert await _has_old_layout(graph.engine)
+
+
 async def test_migration_creates_the_tables_the_adapter_creates(old_graph):
     """The frozen DDL and the adapter's schema must describe the same tables."""
     await migration.migrate(_context(old_graph))
@@ -694,6 +736,29 @@ async def test_graph_in_the_default_schema_is_converted():
         await migration.migrate(_context(adapter))
 
         await _assert_adapter_reports_the_old_refs(adapter)
+    finally:
+        async with adapter.engine.begin() as connection:
+            await connection.execute(text(drop))
+        await adapter.close()
+
+
+async def test_running_the_chain_again_keeps_a_converted_graph_converted():
+    """The earlier columns migration must not add the arrays back to a converted graph.
+
+    It looks for the graph in ``public`` only, so this test uses the default schema.
+    """
+    adapter = PostgresDemoAdapter(_url())
+    drop = "DROP TABLE IF EXISTS " + ", ".join(_GRAPH_TABLES) + " CASCADE"
+    try:
+        async with adapter.engine.begin() as connection:
+            await connection.execute(text(drop))
+        await adapter.initialize()
+
+        await postgres_graph_provenance_columns.migrate(_context(adapter))
+
+        assert "source_ref_keys" not in await _columns_of(adapter.engine, "graph_node")
+        await adapter.add_nodes([("n", {"name": "n", "type": "Thing"})], source_ref_key=_key(0, 1))
+        assert [row[0] for row in await _node_refs(adapter, "n")] == [_key(0, 1)]
     finally:
         async with adapter.engine.begin() as connection:
             await connection.execute(text(drop))
