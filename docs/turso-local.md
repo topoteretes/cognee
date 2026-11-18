@@ -164,7 +164,6 @@ that silently ran on SQLite would fail.
 | No approximate vector index (`libsql_vector_idx` / `vector_top_k` are not supported) | similarity search is an exact `vector_distance_cos` scan | ~16–20 ms for top-15 over 20k × 384-dim rows on a laptop; fine for local datasets, not for millions of rows |
 | Recursive CTEs exist since 0.8, but one seeded from `json_each()` and read twice in the query aborts the process (0.8.3) | k-hop neighborhoods (that shape), connected components | one query per hop; union-find in Python; `test_turso_engine_bugs.py` reproduces the abort and starts failing once a pyturso release fixes it |
 | No scalar subquery in `ON CONFLICT DO UPDATE SET` | vector upsert that merged `belongs_to_set` in SQL | tags are read and merged in Python, then a plain `excluded.payload` upsert |
-| Up to 0.7.2 `json_each().value` returned a string element's raw JSON text, escapes included (`B\u00fccher` for `Bücher`); fixed in 0.8, the workaround is kept. Payloads are written with `json.dumps`, which escapes non-ASCII characters, quotes and backslashes | node set names in vector search filters and tag removal | names are compared on the decoded element (`payload ->> je.fullkey`); tag removal filters the names in Python inside one write transaction |
 | Bind parameters must be `None`, numbers, `str` or `bytes` (no `register_adapter`) | raw `text()` statements binding `datetime`/`UUID` | SQLAlchemy-typed columns are unaffected; raw statements use a typed `bindparam` |
 | Quoted identifiers are stored lowercased in `sqlite_master` | `has_collection` by exact name, PascalCase collection detection | case-insensitive lookup; collections detected by schema (`id, payload, vector`) |
 | Parenthesized joins in a FROM clause (`JOIN (a JOIN b ON …)`) are rejected | SQLAlchemy emits them for joined-table inheritance (`User`/`Tenant` are `Principal` subclasses) | the dialect's compiler (`turso/compiler.py`) flattens the tree into a left-deep join chain |
@@ -183,8 +182,9 @@ be retired.
    attribute 'has_stop'`. cognee's dialect sets it.
 2. The dialect's reflection mixin returns `[]` for indexes, foreign keys and unique constraints
    although `PRAGMA index_list` / `foreign_key_list` work; with it, cognee's idempotent migrations
-   collide on existing indexes and Alembic batch operations would drop constraints. cognee's
-   dialect restores stock SQLite reflection. Fixed upstream in 0.8.
+   collide on existing indexes and Alembic batch operations would drop constraints (0.7.2).
+   Fixed upstream in 0.8; cognee's dialect restored stock SQLite reflection until the pin moved
+   to 0.8.3.
 3. Scalar subquery in `ON CONFLICT DO UPDATE SET`: `Parse error: Subquery is not supported in this
    position` (0.7.2 and 0.8.3).
 4. An outer `json_each()` over an unaliased column is misresolved inside `UPDATE`/`DELETE`: on
@@ -206,7 +206,7 @@ be retired.
 9. `json_each().value` returned a string element's raw JSON text instead of the decoded string
    (0.7.2; fixed in 0.8, which returns `Bücher`): for the stored array `["B\u00fccher"]` (how `json.dumps` writes `["Bücher"]`) it
    returned the escape text `B\u00fccher` itself, where stock SQLite returns `Bücher`.
-   `payload ->> je.fullkey` and `json_extract(payload, je.fullkey)` decode correctly.
+   cognee compared names on `payload ->> je.fullkey` until the pin moved to 0.8.3.
 10. A join condition was dropped (0.7.2; fixed in 0.8, pinned by `test_turso_engine_bugs.py`): with `u=(2,1)`, `a=(1,1)`, `p=(3,1)` and `b` empty
     (`id INTEGER PRIMARY KEY, k INTEGER`), `SELECT u.id, a.id FROM u JOIN a ON u.id = a.id AND
     a.k = 1 JOIN p ON p.k = a.k LEFT JOIN b ON u.k = b.k` returned `(2, 1)`; stock SQLite returns
