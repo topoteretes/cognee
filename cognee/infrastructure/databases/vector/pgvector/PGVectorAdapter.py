@@ -48,6 +48,7 @@ from cognee.shared.logging_utils import get_logger
 from ...relational.sqlalchemy.SqlAlchemyAdapter import (
     DEFAULT_MAX_OVERFLOW,
     DEFAULT_POOL_SIZE,
+    DEFAULT_POOL_TIMEOUT,
     SQLAlchemyAdapter,
 )
 from ..embeddings.EmbeddingGateway import EmbeddingGateway
@@ -64,7 +65,7 @@ QUERY_BATCH_SIZE = 1000
 # Lean pool_size limits connection fan-out across datasets (only pool_size connections are
 # retained while idle); the large max_overflow keeps burst headroom, since overflow
 # connections close on release instead of idling.
-_ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 20}
+_ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 10}
 
 # pgvector builds HNSW indexes on vector up to 2,000 dimensions and on halfvec up to
 # 4,000; a larger embedding stays unindexed and is searched by a full scan.
@@ -97,7 +98,8 @@ _HNSW_MAX_EF_SEARCH = 1000
 _PG_MAX_IDENTIFIER_BYTES = 63
 # Vectors reach Postgres in binary through an asyncpg pool of the adapter's own
 # (``_get_write_pool``): connections open on demand and close after this long idle.
-# Its size follows the adapter's pool args (``_write_pool_size``).
+# Its size follows the adapter's pool args (``_write_pool_size``), and so does how long
+# a write waits for a free connection (their ``pool_timeout``, as on the SQLAlchemy pool).
 _WRITE_POOL_IDLE_SECONDS = 60.0
 # SQLAlchemy's asyncpg dialect consumes these connect_args itself; asyncpg.connect
 # does not accept them.
@@ -438,6 +440,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self._write_pool_loop = None
         self._write_pool_lock = LoopAgnosticLock()
         self._write_pool_max_size = _write_pool_size(effective_pool_args)
+        self._write_pool_acquire_timeout = effective_pool_args.get(
+            "pool_timeout", DEFAULT_POOL_TIMEOUT
+        )
 
         # Reuse engine and sessionmaker if the relational engine is provided and is the same database as the one configured for pgvector
         db_name1 = make_url(relational_db.db_uri).database
@@ -672,7 +677,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         statement = statement_for(self._qualified_table(collection_name), collection_name)
         params = [(row["id"], json.dumps(row["payload"]), row["vector"]) for row in rows]
         pool = await self._get_write_pool()
-        async with pool.acquire() as connection, connection.transaction():
+        async with (
+            pool.acquire(timeout=self._write_pool_acquire_timeout) as connection,
+            connection.transaction(),
+        ):
             await connection.executemany(statement, params)
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
@@ -1064,7 +1072,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # open across it. A changed row whose text is the same is embedded too, although
         # the upsert keeps its stored vector.
         pool = await self._get_write_pool()
-        async with pool.acquire() as connection:
+        async with pool.acquire(timeout=self._write_pool_acquire_timeout) as connection:
             missing, changed = await self._classify(connection, collection_name, rows)
         if not missing and not changed:
             return
@@ -1147,7 +1155,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         table = self._qualified_table(collection_name)
         pool = await self._get_write_pool()
-        async with pool.acquire() as connection, connection.transaction():
+        async with (
+            pool.acquire(timeout=self._write_pool_acquire_timeout) as connection,
+            connection.transaction(),
+        ):
             missing, changed = await self._classify(connection, collection_name, rows)
             # A lost-race row (below) was missing here, so it has a vector too.
             unembedded = [row for row in missing + changed if str(row["id"]) not in vectors]

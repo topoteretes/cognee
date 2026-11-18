@@ -254,8 +254,8 @@ async def test_write_gate_is_rebuilt_for_a_new_event_loop():
 
 def test_resolve_engine_args_defaults_match_the_per_dataset_pgvector_sizing():
     args = _resolve_engine_args({})
-    assert (args["pool_size"], args["max_overflow"]) == (2, 20)
-    assert args["pool_timeout"] == 280  # stock 30s before this change
+    assert (args["pool_size"], args["max_overflow"]) == (2, 10)
+    assert args["pool_timeout"] == 360
     assert args["pool_recycle"] == 280
     assert args["pool_pre_ping"] is True
     assert "poolclass" not in args
@@ -263,7 +263,7 @@ def test_resolve_engine_args_defaults_match_the_per_dataset_pgvector_sizing():
 
 def test_resolve_engine_args_honors_configured_pool_args():
     assert _resolve_engine_args({"pool_size": 7})["pool_size"] == 7
-    assert _resolve_engine_args({"pool_size": 7})["max_overflow"] == 20
+    assert _resolve_engine_args({"pool_size": 7})["max_overflow"] == 10
 
 
 def test_resolve_engine_args_keeps_the_nullpool_escape_hatch():
