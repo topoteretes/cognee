@@ -444,8 +444,8 @@ def _stored_with_ids(*chunker_ids) -> list[dict]:
 async def test_a_registered_chunker_does_not_patch_chunks_that_carry_no_chunker_id(monkeypatch):
     """Chunks without an id predate it (cognee before 1.5.4).
 
-    A chunker a deployment registered stamps every chunk it cuts, so it did not
-    cut these. Patching them with it would leave the document cut by two
+    Every chunk a chunker with an id cuts is stamped with it, registered or not,
+    so it did not cut these. Patching them with it would leave the document cut by two
     chunkers, so the document is rebuilt with it instead. TextChunker, the
     chunker of that old data, is not refused: it reaches the planner.
     """

@@ -1033,9 +1033,9 @@ async def _stage_and_plan(
         # indistinguishable from a document that was never cognified.
         # Any id other than this chunker's means another chunker cut part of the
         # document. Chunks with no id were stored before chunks carried one (cognee
-        # before 1.5.4). TextChunker keeps updating those, as it always has. A
-        # chunker the deployment registered stamps every chunk it cuts, so it did
-        # not cut them: patching them with it would leave two cuts in one document.
+        # before 1.5.4). TextChunker keeps updating those, as it always has. Every
+        # chunk any other chunker with an id cuts is stamped (``stamp_chunk``), so it
+        # did not cut them: patching them with it would leave two cuts in one document.
         # getattr: a chunker passed per call need not subclass Chunker.
         own_id = getattr(chunker, "chunker_id", "")
         stored_ids = {node.get("chunker_id") or None for node in stored_chunks}

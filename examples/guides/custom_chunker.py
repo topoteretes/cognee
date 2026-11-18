@@ -7,7 +7,7 @@ SectionChunker cuts a Markdown document at its headings, so a section never shar
 a chunk with the next one. A section over the token budget is cut further by
 TextChunker. It has what update() needs to replace only the chunks an edit touched
 (the full list is in cognee/modules/chunking/chunker_registry.py):
-- its own chunker_id, stamped on every chunk;
+- its own chunker_id, which cognee stamps on every chunk it cuts;
 - chunks that join back to the document's text, with no overlap.
 
 Editing one section below re-extracts that section only: update() reports

@@ -5,8 +5,8 @@ section of a document it cut must take the chunk-level path and extract that
 section only. A document another chunker cut is rebuilt once, with the default,
 and is chunk-level from its next update. That includes documents stored before
 chunks carried a chunker id (cognee before 1.5.4), which TextChunker goes on
-updating chunk-level. A registered chunker that leaves its id off a chunk fails
-the run before anything is stored.
+updating chunk-level. A chunker that leaves its id off its chunks gets them
+stamped, so the rebuild does not fail after dropping the document's memory.
 """
 
 from __future__ import annotations
@@ -76,6 +76,9 @@ class SectionChunker(TextChunker):
 
 class PreStampTextChunker(TextChunker):
     """TextChunker as it stored chunks before cognee 1.5.4: no chunker id on them."""
+
+    # Chunkers had no id then, so nothing stamps one on these chunks.
+    chunker_id = ""
 
     async def read(self):
         async for chunk in super().read():
@@ -229,21 +232,24 @@ async def test_chunks_stored_before_chunker_ids_stay_chunk_level_with_text_chunk
 
 @pytest.mark.journey
 @pytest.mark.asyncio
-async def test_a_registered_chunker_that_does_not_stamp_its_chunks_fails_the_run(
+async def test_a_chunker_that_does_not_stamp_its_chunks_gets_them_stamped(
     clean_env, default_user, mock_llm, use_chunker
 ):
+    """The rebuild drops the document's memory before it cuts; the cut must not fail."""
+    dataset_id, row = await _ingest(default_user, chunker=TextChunker, chunk_size=48)
     use_chunker(UnstampedSectionChunker)
-    await cognee.add(DOC_V1, dataset_name=DATASET)
 
-    if mock_llm is not None:
-        mock_llm.calls.clear()
-    with pytest.raises(CogneeConfigurationError, match="chunker_id=self.chunker_id"):
-        await cognee.cognify(datasets=[DATASET])
+    rebuilt = await cognee.update(
+        data_id=row.id, data=DOC_V2, dataset_id=dataset_id, user=default_user
+    )
+    assert rebuilt["status"] == "full_rebuild", rebuilt
+    chunks = await _stored_chunks(dataset_id, default_user)
+    assert {chunk["chunker_id"] for chunk in chunks} == {UnstampedSectionChunker.chunker_id}
 
-    dataset_id = await _support.dataset_id_by_name(DATASET, default_user)
-    assert await _stored_chunks(dataset_id, default_user) == [], "unstamped chunks were stored"
-    if mock_llm is not None:
-        assert _graph_extractions(mock_llm) == 0, "the run failed after paying for extraction"
+    result = await cognee.update(
+        data_id=row.id, data=DOC_V3, dataset_id=dataset_id, user=default_user
+    )
+    assert result["status"] == "incremental", f"the stamped document was rebuilt: {result}"
 
 
 @pytest.mark.journey
