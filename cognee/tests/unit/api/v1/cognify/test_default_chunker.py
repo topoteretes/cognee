@@ -101,3 +101,39 @@ async def test_a_remember_dry_run_estimates_with_the_configured_default(monkeypa
         await remember_module.remember("some text", dry_run=True, extractor="llm")
 
     assert estimate.await_args.kwargs["chunker"] is ClauseChunker
+
+
+class _ChunkingStepReached(Exception):
+    """Stops a task builder once it has handed its chunker to the chunking step."""
+
+
+@pytest.mark.asyncio
+async def test_the_task_builders_use_the_configured_default(monkeypatch):
+    """Custom pipelines build their task lists from these; naming no chunker means the default."""
+    from cognee.tasks.graph.gliner_demo import tasks as gliner_tasks
+
+    use_default(monkeypatch, "ClauseChunker", ClauseChunker)
+    monkeypatch.setattr(cognify_module, "resolve_chunk_size", AsyncMock(return_value=64))
+
+    for builder in (cognify_module.get_indexing_tasks, cognify_module.get_default_tasks):
+        with (
+            patch.object(
+                cognify_module, "build_chunking_tasks", side_effect=_ChunkingStepReached
+            ) as build,
+            pytest.raises(_ChunkingStepReached),
+        ):
+            await builder()
+        assert build.call_args.args[0] is ClauseChunker, builder.__name__
+
+    # Stopped at the schema task, before anything needs the optional GLiNER runtime.
+    with (
+        patch.object(gliner_tasks, "resolve_chunk_size", AsyncMock(return_value=64)),
+        patch.object(gliner_tasks, "get_configured_ontology_resolver", return_value=None),
+        patch.object(gliner_tasks, "create_remote_adapter", return_value=None),
+        patch.object(
+            gliner_tasks, "build_gliner_schema_task", side_effect=_ChunkingStepReached
+        ) as build,
+        pytest.raises(_ChunkingStepReached),
+    ):
+        await gliner_tasks.get_gliner_demo_tasks()
+    assert build.call_args.kwargs["chunker"] is ClauseChunker

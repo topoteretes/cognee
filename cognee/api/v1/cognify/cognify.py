@@ -10,7 +10,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingCo
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import resolve_chunk_size
 from cognee.infrastructure.llm.config import LLMConfig
-from cognee.modules.chunking.chunker_registry import get_default_chunker
+from cognee.modules.chunking.chunker_registry import resolve_chunker
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.chunking_tasks import build_chunking_tasks, resolve_chunks_per_batch
 from cognee.modules.cognify.config import (
@@ -467,8 +467,7 @@ async def cognify(
             graph_model=graph_model,
         )
 
-    if chunker is None:
-        chunker = get_default_chunker()
+    chunker = resolve_chunker(chunker)
 
     # After the argument checks and the remote route: a cognify that raises above,
     # or runs remotely, must not install anything locally. Awaited, so the pipeline
@@ -696,7 +695,7 @@ async def cognify(
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
-    chunker=TextChunker,
+    chunker=None,
     chunk_size: int | None = None,
     config: Config = None,
     custom_prompt: str | None = None,
@@ -706,6 +705,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     early_chunk_indexing: bool | None = None,
     **kwargs,
 ) -> list[Task]:
+    chunker = resolve_chunker(chunker)
     cognify_config = get_cognify_config()
     summary_method = summary_method or cognify_config.summary_method
     if early_chunk_indexing is None:
@@ -756,7 +756,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
 
 async def get_indexing_tasks(
-    chunker=TextChunker,
+    chunker=None,
     chunk_size: int | None = None,
     chunks_per_batch: int | None = None,
 ) -> list[Task]:
@@ -770,6 +770,7 @@ async def get_indexing_tasks(
     temporal hints are left out: nothing here reads them, and the cognify run
     computes its own when it re-chunks.
     """
+    chunker = resolve_chunker(chunker)
     return [
         *build_chunking_tasks(chunker, await resolve_chunk_size(chunk_size), temporal_hints=False),
         # LOAD: chunk and document nodes to the graph, chunk text to the vector

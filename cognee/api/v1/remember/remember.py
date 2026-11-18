@@ -1176,7 +1176,8 @@ async def remember(
         session_id: Optional session ID. When set, stores data in the
             session cache instead of the permanent graph.
         chunk_size: Max tokens per chunk. Auto-calculated when *None*.
-        chunker: Text chunking strategy. Defaults to *TextChunker*.
+        chunker: Text chunking strategy. None uses the chunker DEFAULT_CHUNKER
+                 names (TextChunker when unset).
         custom_prompt: Custom prompt for entity extraction.
         run_in_background: If *True*, run as a background task.
         self_improvement: If *True* (default), automatically runs
@@ -1527,12 +1528,12 @@ async def remember(
             )
 
         from cognee.infrastructure.llm import resolve_chunk_size
-        from cognee.modules.chunking.chunker_registry import get_default_chunker
+        from cognee.modules.chunking.chunker_registry import resolve_chunker
         from cognee.modules.cognify.estimator import estimate_remember_dry_run
 
         return await estimate_remember_dry_run(
             data,
-            chunker=chunker or get_default_chunker(),
+            chunker=resolve_chunker(chunker),
             chunk_size=await resolve_chunk_size(chunk_size),
             graph_model=graph_model_class,
             custom_prompt=custom_prompt,
@@ -2206,11 +2207,6 @@ async def _remember_inner(
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
 
-    if chunker is None:
-        from cognee.modules.chunking.chunker_registry import get_default_chunker
-
-        chunker = get_default_chunker()
-
     # Route kwargs to add(), cognify(), or both
     remaining = dict(kwargs)
     add_kwargs = {}
@@ -2390,6 +2386,12 @@ async def _remember_inner(
         # Before the run starts: add() checks too, but with run_in_background it runs
         # inside the background task, where a refusal would never reach the caller.
         require_http_requests_allowed_for(data)
+
+        # Before add() too: a DEFAULT_CHUNKER that names no registered chunker must
+        # not leave a stored document that cognify() then refuses to cut.
+        from cognee.modules.chunking.chunker_registry import resolve_chunker
+
+        chunker = resolve_chunker(chunker)
 
         result = RememberResult(
             status="running",
