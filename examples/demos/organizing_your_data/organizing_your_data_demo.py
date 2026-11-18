@@ -26,8 +26,8 @@ This demo ingests the same small corpus (two docs, two call transcripts from
 
 Rule of thumb: node sets are tags, datasets are walls.
 
-Requires a configured LLM provider (see CLAUDE.md). Wording of answers varies
-by model.
+Requires a configured LLM provider (see docs/runtime-configuration.md).
+Wording of answers varies by model.
 """
 
 import asyncio
