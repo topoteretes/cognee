@@ -19,6 +19,11 @@ import pytest
 
 import cognee.api.v1.update.update  # bind the real submodule
 from cognee.api.v1.update.incremental import RefusalReason
+from cognee.modules.chunking import chunker_registry
+from cognee.modules.chunking.Chunker import Chunker
+from cognee.modules.chunking.CsvChunker import CsvChunker
+from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 from cognee.tasks.ingestion.data_item import DataItem
 
@@ -328,3 +333,74 @@ async def test_the_extractor_is_resolved_once_and_forwarded_to_both_paths():
         incremental.assert_not_awaited()
         assert cognify_mock.await_args.kwargs["extractor"] == "gliner_demo"
         assert runtime.await_count == 2
+
+
+class ClauseChunker(Chunker):
+    chunker_id = "clause_chunker_test"
+
+
+@pytest.fixture
+def name_default_chunker(monkeypatch):
+    """Call with a registered name to set DEFAULT_CHUNKER; TextChunker until then."""
+    monkeypatch.setattr(
+        chunker_registry,
+        "registered_chunkers",
+        {"TextChunker": TextChunker, "ClauseChunker": ClauseChunker},
+    )
+    monkeypatch.delenv("DEFAULT_CHUNKER", raising=False)
+    get_cognify_config.cache_clear()
+
+    def name_default(name):
+        monkeypatch.setenv("DEFAULT_CHUNKER", name)
+        get_cognify_config.cache_clear()
+
+    yield name_default
+    monkeypatch.delenv("DEFAULT_CHUNKER", raising=False)
+    get_cognify_config.cache_clear()
+
+
+@pytest.mark.parametrize("named, expected", [(None, ClauseChunker), (CsvChunker, CsvChunker)])
+async def test_one_chunker_is_resolved_and_forwarded_to_both_paths(
+    name_default_chunker, named, expected
+):
+    """The chunker is decided once, like cognify()'s, and drives whichever path runs.
+
+    update() used to default to TextChunker, so a document cut by the deployment's
+    default chunker was refused by the chunk-level path and rebuilt on every update.
+    The rebuild's cognify() gets the same chunker, so a refused update does not
+    leave the document cut by a different one.
+    """
+    name_default_chunker("ClauseChunker")
+    data_id, dataset_id = uuid4(), uuid4()
+    incremental = AsyncMock(return_value=_engine_summary())
+    cognify_mock = AsyncMock(return_value=_full_result(dataset_id))
+    call = {
+        "data_id": data_id,
+        "data": "new content",
+        "dataset_id": dataset_id,
+        "user": SimpleNamespace(id=uuid4()),
+    }
+    if named is not None:
+        call["chunker"] = named
+
+    with _patches(data_id, incremental, _full_result(dataset_id), cognify=cognify_mock):
+        await update_module.update(**call)
+        assert incremental.await_args.kwargs["chunker"] is expected
+        cognify_mock.assert_not_awaited()
+
+        await update_module.update(**call, chunk_level_diff=False)
+        assert cognify_mock.await_args.kwargs["chunker"] is expected
+
+
+async def test_update_uses_text_chunker_when_nothing_names_another(name_default_chunker):
+    data_id, dataset_id = uuid4(), uuid4()
+    incremental = AsyncMock(return_value=_engine_summary())
+
+    with _patches(data_id, incremental, _full_result(dataset_id)):
+        await update_module.update(
+            data_id=data_id,
+            data="new content",
+            dataset_id=dataset_id,
+            user=SimpleNamespace(id=uuid4()),
+        )
+    assert incremental.await_args.kwargs["chunker"] is TextChunker

@@ -65,8 +65,9 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
         parser.add_argument(
             "--chunker",
             choices=CHUNKER_CHOICES,
-            default="TextChunker",
-            help="Text chunking strategy (default: TextChunker)",
+            default=None,
+            help="Text chunking strategy (default: the DEFAULT_CHUNKER setting, TextChunker "
+            "when unset)",
         )
         parser.add_argument(
             "--background",
@@ -354,21 +355,21 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                 try:
                     from cognee.modules.chunking.TextChunker import TextChunker
 
-                    chunker_class = TextChunker
+                    chunker_class = TextChunker if args.chunker == "TextChunker" else None
                     if args.chunker == "LangchainChunker":
                         try:
                             from cognee.modules.chunking.LangchainChunker import LangchainChunker
 
                             chunker_class = LangchainChunker
                         except ImportError:
-                            fmt.warning("LangchainChunker not available, using TextChunker")
+                            fmt.warning("LangchainChunker not available, using the default chunker")
                     elif args.chunker == "CsvChunker":
                         try:
                             from cognee.modules.chunking.CsvChunker import CsvChunker
 
                             chunker_class = CsvChunker
                         except ImportError:
-                            fmt.warning("CsvChunker not available, using TextChunker")
+                            fmt.warning("CsvChunker not available, using the default chunker")
 
                     data_to_add = args.data[0] if len(args.data) == 1 else args.data
 

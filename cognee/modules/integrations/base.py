@@ -74,6 +74,26 @@ class OAuthInstallation:
     auth_type: str = "oauth2"
 
 
+class ResourceParentError(ValueError):
+    """A ``parent`` the resource picker cannot list under; the route answers 422."""
+
+
+class ResourceParentNotSupportedError(ResourceParentError):
+    """The provider lists all its resources at once and takes no ``parent``."""
+
+
+class ResourceParentNotFoundError(ResourceParentError):
+    """The ``parent`` names no listable resource at the provider; the route answers 404."""
+
+
+def refuse_parent(provider: str, parent: str | None) -> None:
+    """For a provider that lists everything at once: a ``parent`` is a client error."""
+    if parent is not None:
+        raise ResourceParentNotSupportedError(
+            f"{provider} lists all its resources at once and takes no parent"
+        )
+
+
 class OAuthIntegration(ABC):
     """One third-party OAuth2 connector, registered under ``provider``.
 
@@ -173,9 +193,15 @@ class OAuthIntegration(ABC):
         return
 
     async def list_resources(
-        self, credential: IntegrationCredential
+        self, credential: IntegrationCredential, *, parent: str | None = None
     ) -> list[dict[str, Any]] | None:
-        """Return provider resources for a generic picker, or ``None``."""
+        """Return provider resources for a generic picker, or ``None``.
+
+        ``parent`` asks for one level of a tree: the resources directly inside it (``None``,
+        the top level). A provider that lists everything at once refuses a parent with
+        :class:`ResourceParentNotSupportedError` (:func:`refuse_parent`), before any request.
+        """
+        refuse_parent(self.provider, parent)
         return None
 
     def invalid_resource_ids(self, resource_ids: list[str]) -> list[str]:
@@ -185,6 +211,17 @@ class OAuthIntegration(ABC):
         would fail every later sync. Whether the resource exists is the sync's to find out.
         """
         return []
+
+    async def validate_resource_selection(
+        self, credential: IntegrationCredential, resource_ids: list[str]
+    ) -> None:
+        """Refuse a selection the provider cannot sync, before it is stored.
+
+        Default: accept. Raise :class:`ValueError` with a message safe to show the user
+        (the resource picker answers 422 with it); the sync must still check, since a
+        stored selection can predate a change at the provider.
+        """
+        return
 
     def dataset_name(self, credential: IntegrationCredential) -> str | None:
         """Return the provider dataset to delete on an opted-in disconnect."""

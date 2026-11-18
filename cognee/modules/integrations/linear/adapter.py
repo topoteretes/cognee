@@ -47,6 +47,7 @@ from cognee.modules.integrations.base import (
     OAuthInstallation,
     OAuthIntegration,
     WebhookVerifier,
+    refuse_parent,
 )
 from cognee.modules.integrations.credentials import (
     CredentialInactiveError,
@@ -676,7 +677,10 @@ class LinearIntegration(OAuthIntegration):
     async def sync_now(self, credential: IntegrationCredential) -> None:
         await request_sync(credential)
 
-    async def list_resources(self, credential: IntegrationCredential) -> list[dict[str, Any]]:
+    async def list_resources(
+        self, credential: IntegrationCredential, *, parent: str | None = None
+    ) -> list[dict[str, Any]]:
+        refuse_parent(self.provider, parent)
         return [
             {
                 "id": str(team["id"]),

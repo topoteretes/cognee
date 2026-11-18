@@ -16,7 +16,8 @@ from cognee.api.v1.update.incremental import (
 )
 from cognee.api.v1.update.result import Fallback, UpdateError, UpdateResult
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
-from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.chunking.Chunker import Chunker
+from cognee.modules.chunking.chunker_registry import resolve_chunker
 from cognee.modules.cognify.config import (
     ensure_extractor_runtime,
     get_cognify_config,
@@ -52,7 +53,7 @@ async def update(
     chunk_level_diff: bool = True,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
-    chunker: type = TextChunker,
+    chunker: type[Chunker] | None = None,
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
 ) -> dict:
@@ -130,9 +131,16 @@ async def update(
                  not met (first ingestion, non-text content, unverified graph adapter,
                  a code file or a DLT source manifest — those routes keep no chunks).
                  Permission errors always propagate and never trigger the fallback.
-        chunker: Chunking strategy. Must match the one that built the document's stored
-                 chunks — a mismatch is refused (and falls back) rather than surfacing
-                 as a tiling failure. Chunk-level path only.
+        chunker: Chunking strategy for both paths: the chunk-level path cuts the edited
+                 regions with it and the full rebuild cuts the whole document with it.
+                 None uses the chunker DEFAULT_CHUNKER names (TextChunker when unset),
+                 as ``cognify()`` does. The chunk-level path needs the chunker that
+                 built the document's stored chunks: a mismatch is refused
+                 (``unsupported_chunker``) and the document is rebuilt with this one,
+                 so the first update after a deployment changes its default chunker
+                 rebuilds the document once and later updates are chunk-level again.
+                 Chunks stored before cognee 1.5.4 carry no chunker id: TextChunker
+                 still updates them chunk-level, a registered chunker rebuilds them.
         policy: Decides which chunks exist after the edit and what happens to the old
                  ones. Replaceable without touching storage or update orchestration.
                  Chunk-level path only; not exposed on the HTTP route.
@@ -180,7 +188,7 @@ async def update(
                 ("preferred_loaders", preferred_loaders, None),
                 ("graph_model", graph_model, KnowledgeGraph),
                 ("custom_prompt", custom_prompt, None),
-                ("chunker", chunker, TextChunker),
+                ("chunker", chunker, None),
                 ("policy", policy, DEFAULT_CHUNK_POLICY),
                 ("extractor", extractor, None),
             )
@@ -213,6 +221,7 @@ async def update(
     from cognee.modules.users.exceptions import PermissionDeniedError
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.ingestion.resolve_dlt_sources import check_dlt_replacement, is_dlt_input
+    from cognee.tasks.ingestion.screen_server_paths import screen_server_paths
 
     if isinstance(data, list):
         if len(data) != 1:
@@ -220,6 +229,11 @@ async def update(
                 f"update() replaces exactly one document; got a list of {len(data)} items."
             )
         data = data[0]
+
+    # Decide a caller string before anything is dropped: with the gate closed an
+    # explicit server path is refused here, not after the full rebuild has
+    # already dropped the document's memory, and both paths store the rest as text.
+    data = screen_server_paths(data)
 
     # Authorize before the id is resolved: a caller without write access must
     # not learn from 404-versus-further whether a (dataset, data) pair exists.
@@ -260,6 +274,11 @@ async def update(
     cognify_config = get_cognify_config()
     resolved_extractor = resolve_extractor(extractor, cognify_config)
     await ensure_extractor_runtime(resolved_extractor, cognify_config)
+
+    # One chunker decision for both paths too, made the way cognify() makes it.
+    # Without it a document cut by the deployment's default chunker is compared
+    # with TextChunker, refused, and rebuilt in full on every update.
+    chunker = resolve_chunker(chunker)
 
     if fallback is None:
         # Chunk-level incremental path: diff the new text against the stored
@@ -373,6 +392,7 @@ async def update(
         graph_model=graph_model,
         custom_prompt=custom_prompt,
         extractor=resolved_extractor,
+        chunker=chunker,
         chunk_size=fallback_chunk_size,
         # An errored run is reported as a failed result, not raised: the
         # caller gets the document id and the error to retry this one update.

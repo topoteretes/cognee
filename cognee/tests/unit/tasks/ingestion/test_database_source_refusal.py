@@ -12,7 +12,14 @@ import cognee.infrastructure.databases.graph.config as graph_config
 import cognee.infrastructure.databases.relational.config as relational_config
 import cognee.infrastructure.databases.vector.config as vector_config
 from cognee.exceptions import CogneeValidationError
-from cognee.modules.operations import ORIGIN_API, ORIGIN_CLI, operation_origin_scope
+from cognee.modules.operations import (
+    ORIGIN_API,
+    ORIGIN_CLI,
+    ORIGIN_MCP,
+    ORIGIN_SDK,
+    operation_origin_scope,
+    remote_caller_scope,
+)
 from cognee.tasks.ingestion.create_dlt_source import (
     ALLOW_DATABASE_INGESTION_ENV,
     _require_database_ingestion_allowed,
@@ -204,34 +211,33 @@ def test_other_servers_are_allowed(servers, dsn):
 
 
 @pytest.mark.parametrize("value", ["true", "1", "yes"])
-@pytest.mark.parametrize("origin", [None, ORIGIN_API], ids=["sdk", "api"])
-def test_cognee_servers_stay_refused_with_the_switch_on(servers, monkeypatch, value, origin):
+@pytest.mark.parametrize("caller", [nullcontext, remote_caller_scope], ids=["local", "remote"])
+def test_cognee_servers_stay_refused_with_the_switch_on(servers, monkeypatch, value, caller):
     """The switch opens the feature; it never opens cognee's own storage."""
     monkeypatch.setenv(ALLOW_DATABASE_INGESTION_ENV, value)
-    scope = operation_origin_scope(origin) if origin else nullcontext()
 
-    with scope, pytest.raises(CogneeValidationError, match="cognee's own storage"):
+    with caller(), pytest.raises(CogneeValidationError, match="cognee's own storage"):
         create_dlt_source_from_connection_string("postgresql://u:p@localhost:5432/other_db")
 
 
-def test_unset_switch_refuses_api_callers_only(servers, monkeypatch):
-    """Unset is the default: the SDK (and CLI, MCP) may ingest a database, the
-    API server may not, since anyone who can register is one of its callers."""
+@pytest.mark.parametrize("origin", [ORIGIN_SDK, ORIGIN_CLI, ORIGIN_MCP, ORIGIN_API])
+def test_unset_switch_refuses_network_callers_only(servers, monkeypatch, origin):
+    """Unset is the default: a local caller (SDK, CLI, MCP over stdio) may ingest a
+    database, a network caller (an API request, MCP over sse / http) may not, since
+    anyone who can reach the server is one of its callers. The origin decides nothing."""
     dsn = f"postgresql://u:p@{FOREIGN}/shop"
 
-    _require_database_ingestion_allowed()
-    with operation_origin_scope(ORIGIN_CLI):
+    with operation_origin_scope(origin):
         _require_database_ingestion_allowed()
     with (
-        operation_origin_scope(ORIGIN_API),
-        pytest.raises(
-            CogneeValidationError, match="Set ALLOW_DATABASE_INGESTION=true in the server"
-        ),
+        operation_origin_scope(origin),
+        remote_caller_scope(),
+        pytest.raises(CogneeValidationError, match="disabled by default for network callers"),
     ):
         create_dlt_source_from_connection_string(dsn)
 
     monkeypatch.setenv(ALLOW_DATABASE_INGESTION_ENV, "true")
-    with operation_origin_scope(ORIGIN_API):
+    with remote_caller_scope():
         _require_database_ingestion_allowed()
 
 

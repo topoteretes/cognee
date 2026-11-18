@@ -21,6 +21,10 @@ class CognifyConfig(BaseSettings):
     # texts, one per line, no LLM call. "llm": one LLM call per chunk.
     summary_method: Literal["llm", "from_extraction"] = "from_extraction"
     chunks_per_batch: int | None = None
+    # The chunker every call that names none uses: cognify(), remember(), update(),
+    # the CLI, the API and cognee's own pipelines (env: DEFAULT_CHUNKER). TextChunker,
+    # or a name added with register_chunker() in every process that reads it.
+    default_chunker: str = "TextChunker"
     # Write chunks (and their documents) to the graph and vector stores right
     # after chunking, before the LLM extraction (env: EARLY_CHUNK_INDEXING).
     # On (default): chunk-based searches answer while entities are still being
@@ -72,6 +76,7 @@ class CognifyConfig(BaseSettings):
             "gliner_torch_index_url": self.gliner_torch_index_url,
             "gliner_inference_threads": self.gliner_inference_threads,
             "summary_method": self.summary_method,
+            "default_chunker": self.default_chunker,
         }
 
 

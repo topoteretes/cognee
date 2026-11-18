@@ -39,6 +39,9 @@ class _Provider:
     source_module: str
     source_name: str
     service_builder: Callable[[str], Any] | None = None
+    # Maps a failure the source raised to the stats key it counted it under, so the host does
+    # not count the same failure a second time (see ``sync_scopes``).
+    classify_error: Callable[[BaseException], str | None] | None = None
 
 
 def _google_service_builder(api: str, version: str) -> Callable[[str], Any]:
@@ -72,10 +75,40 @@ def _asana_service(access_token: str) -> Any:
     return build_asana_service(access_token)
 
 
+def _dropbox_service(access_token: str) -> Any:
+    from cognee.tasks.ingestion.connectors.dropbox import build_dropbox_service
+
+    return build_dropbox_service(access_token)
+
+
+def _evernote_service(token: str) -> Any:
+    from cognee.tasks.ingestion.connectors.evernote import build_evernote_service
+
+    return build_evernote_service(token)
+
+
 def _slack_service(access_token: str) -> Any:
     from cognee.tasks.ingestion.connectors.slack import build_slack_service
 
     return build_slack_service(access_token)
+
+
+def _vercel_service(access_token: str) -> Any:
+    from cognee.tasks.ingestion.connectors.vercel import build_vercel_service
+
+    return build_vercel_service(access_token)
+
+
+def _telegram_service(bot_token: str) -> Any:
+    from cognee.tasks.ingestion.connectors.telegram import build_telegram_service
+
+    return build_telegram_service(bot_token)
+
+
+def _telegram_error(error: BaseException) -> str | None:
+    from cognee.tasks.ingestion.connectors.telegram import classify_sync_error
+
+    return classify_sync_error(error)
 
 
 _PROVIDERS: dict[str, _Provider] = {
@@ -128,12 +161,42 @@ _PROVIDERS: dict[str, _Provider] = {
         source_name="asana_source",
         service_builder=_asana_service,
     ),
+    # One source per selected folder; the scope is the folder id (``id:...``).
+    "dropbox": _Provider(
+        prefix="dropbox",
+        source_module="cognee.tasks.ingestion.connectors.dropbox",
+        source_name="dropbox_source",
+        service_builder=_dropbox_service,
+    ),
+    # SDK-only: Evernote authorizes with OAuth 1.0a, and the builder takes the resulting token
+    # (or a developer token), which every Thrift call carries as its first argument.
+    "evernote": _Provider(
+        prefix="evernote",
+        source_module="cognee.tasks.ingestion.connectors.evernote",
+        source_name="evernote_source",
+        service_builder=_evernote_service,
+    ),
     # One resource per channel: the scope is the channel id.
     "slack": _Provider(
         prefix="slack_channel",
         source_module="cognee.tasks.ingestion.connectors.slack",
         source_name="slack_source",
         service_builder=_slack_service,
+    ),
+    "vercel": _Provider(
+        prefix="vercel",
+        source_module="cognee.tasks.ingestion.connectors.vercel",
+        source_name="vercel_source",
+        service_builder=_vercel_service,
+    ),
+    # A bot token from @BotFather, not an OAuth access token: Telegram has no OAuth for bots,
+    # so a host passes the token the user pasted (Cloud: its API-key connect flow).
+    "telegram": _Provider(
+        prefix="telegram",
+        source_module="cognee.tasks.ingestion.connectors.telegram",
+        source_name="telegram_source",
+        service_builder=_telegram_service,
+        classify_error=_telegram_error,
     ),
 }
 
@@ -183,6 +246,11 @@ def source_factory(provider: str) -> Callable[..., Any]:
     return getattr(import_module(entry.source_module), entry.source_name)
 
 
+def error_classifier(provider: str) -> Callable[[BaseException], str | None] | None:
+    """The provider's ``classify_error`` for :func:`sync_scopes`, ``None`` when it has none."""
+    return _provider(provider).classify_error
+
+
 def build_service(provider: str, access_token: str) -> Any:
     builder = _provider(provider).service_builder
     if builder is None:
@@ -191,10 +259,19 @@ def build_service(provider: str, access_token: str) -> Any:
 
 
 def empty_resource(provider: str, name: str, check_active=None):
-    """Explicitly empty a staging table and reset its cursor for re-selection."""
+    """Explicitly empty a staging table and reset its cursor for re-selection.
+
+    The ingestion that loads it also deletes the table's merge staging copy and every state
+    row of its pipeline, which hold the text of what was forgotten. ``name`` may be the table
+    or ``<dataset>.<table>``.
+    """
     import dlt
 
-    from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, PIPELINE_SCOPE_ATTR
+    from cognee.tasks.ingestion.dlt_utils import (
+        DOCUMENT_SOURCE_ATTR,
+        FORGET_TABLE_ATTR,
+        PIPELINE_SCOPE_ATTR,
+    )
 
     @dlt.resource(name=name, columns={"id": {"data_type": "text", "primary_key": True}})
     def empty():
@@ -206,6 +283,7 @@ def empty_resource(provider: str, name: str, check_active=None):
     resource = empty()
     setattr(resource, DOCUMENT_SOURCE_ATTR, provider)
     setattr(resource, PIPELINE_SCOPE_ATTR, name)
+    setattr(resource, FORGET_TABLE_ATTR, name)
     return resource
 
 
@@ -419,9 +497,12 @@ async def sync_scopes(
             raise
         except Exception as exc:
             key = (classify_error(exc) if classify_error else None) or "failed_ingestion"
-            counts["failed"] += 1
-            counts[key] = counts.get(key, 0) + 1
             # The resource name, not the scope: a scope can be a channel or folder id.
+            # A source that counted this failure under the same key before raising has said
+            # it already; its stats are added below, so counting it here too would double it.
+            if not source_counts(source).get(key):
+                counts["failed"] += 1
+                counts[key] = counts.get(key, 0) + 1
             logger.exception(
                 "%s sync failed for account %s resource %s",
                 provider,

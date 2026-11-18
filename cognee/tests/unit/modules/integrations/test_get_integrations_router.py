@@ -477,6 +477,67 @@ def test_a_null_selection_is_refused_for_a_provider_that_cannot_select_all(clien
     update.assert_not_awaited()
 
 
+def test_a_selection_the_provider_refuses_is_a_422_and_is_not_stored(client, monkeypatch):
+    integration = supported_integrations["fake"]
+    monkeypatch.setattr(
+        integration,
+        "validate_resource_selection",
+        AsyncMock(side_effect=ValueError("A selected folder is inside another")),
+    )
+
+    response, update = put_resources(
+        client, integration, ["outer", "inner"], allows_all=False, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "A selected folder is inside another"
+    update.assert_not_awaited()
+
+
+def _refusing(error):
+    return AsyncMock(side_effect=error)
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "detail"),
+    [
+        (
+            "inactive",
+            404,
+            "fake is not connected",
+        ),
+        ("outbound", 503, "ALLOW_HTTP_REQUESTS"),
+        ("provider", 502, "Could not check the fake selection; try again"),
+        ("network", 502, "Could not check the fake selection; try again"),
+    ],
+)
+def test_a_selection_check_that_fails_is_a_clear_error_and_nothing_is_stored(
+    client, monkeypatch, error, status, detail
+):
+    from cognee.modules.integrations.credentials import CredentialInactiveError
+    from cognee.modules.integrations.outbound import OutboundHttpDisabledError
+
+    secret = "sl.secret-token id:SecretFolder /Private/path"
+    raised = {
+        "inactive": CredentialInactiveError(secret),
+        "outbound": OutboundHttpDisabledError("fake"),
+        "provider": RuntimeError(f"HTTP 401 for {secret}"),
+        "network": OSError(f"cannot reach {secret}"),
+    }[error]
+    monkeypatch.setenv("ALLOW_HTTP_REQUESTS", "false")
+    integration = supported_integrations["fake"]
+    monkeypatch.setattr(integration, "validate_resource_selection", _refusing(raised))
+
+    response, update = put_resources(
+        client, integration, ["a", "b"], allows_all=False, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == status
+    assert detail in response.json()["detail"]
+    assert secret not in response.text and "SecretFolder" not in response.text
+    update.assert_not_awaited()
+
+
 def test_a_null_selection_is_still_stored_for_a_provider_that_allows_all(client, monkeypatch):
     response, update = put_resources(
         client, supported_integrations["fake"], None, allows_all=True, monkeypatch=monkeypatch
@@ -1006,6 +1067,23 @@ def test_connect_and_sync_are_refused_while_outbound_http_is_disabled(client, mo
     assert not any(name.startswith("cognee_oauth_nonce_") for name in authorize.cookies)
 
 
+@pytest.mark.parametrize("selection", [["id:"], ["id:a b"], ["/Notes"]])
+def test_a_dropbox_selection_the_source_would_refuse_is_a_422(client, monkeypatch, selection):
+    from cognee.modules.integrations.dropbox.adapter import DropboxIntegration
+
+    integration = supported_integrations["fake"]
+    monkeypatch.setattr(
+        integration, "invalid_resource_ids", DropboxIntegration().invalid_resource_ids
+    )
+
+    response, update = put_resources(
+        client, integration, selection, allows_all=False, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 422 and "Not a fake resource id" in response.json()["detail"]
+    update.assert_not_awaited()
+
+
 @pytest.fixture(autouse=True)
 def no_pause(monkeypatch):
     """No connection is paused unless a test says so (the pause lives in the database)."""
@@ -1488,3 +1566,105 @@ async def test_a_disconnect_cancelled_while_its_drop_waits_still_finishes_the_dr
     await asyncio.gather(*spawned)
     assert dropped == ["fake_acme"]
     assert len(spawned) == 1
+
+
+def test_the_resource_picker_passes_the_parent_through_one_call_path(client, monkeypatch):
+    integration = supported_integrations["fake"]
+    listed = AsyncMock(return_value=[{"id": "child", "name": "Child"}])
+    monkeypatch.setattr(integration, "resource_selection_key", "picked")
+    monkeypatch.setattr(integration, "list_resources", listed)
+    monkeypatch.setattr(
+        _router_module,
+        "_credential_or_404",
+        AsyncMock(return_value=type("Cred", (), {"provider_metadata": {}})()),
+    )
+
+    with_parent = client.get("/api/v1/integrations/fake/resources?parent=id%3Aa")
+    without = client.get("/api/v1/integrations/fake/resources")
+
+    assert with_parent.status_code == 200 and without.status_code == 200
+    assert [c.kwargs for c in listed.await_args_list] == [{"parent": "id:a"}, {"parent": None}]
+
+
+def test_a_parent_for_a_provider_that_lists_everything_is_a_422(client, monkeypatch):
+    """The base list_resources (the fake keeps it) lists nothing and refuses a parent."""
+    integration = supported_integrations["fake"]
+    monkeypatch.setattr(integration, "resource_selection_key", "picked")
+    monkeypatch.setattr(
+        _router_module,
+        "_credential_or_404",
+        AsyncMock(return_value=type("Cred", (), {"provider_metadata": {}})()),
+    )
+
+    without = client.get("/api/v1/integrations/fake/resources")
+    with_parent = client.get("/api/v1/integrations/fake/resources?parent=x")
+
+    assert without.status_code == 404, "unchanged: no selectable resources"
+    assert with_parent.status_code == 422 and "parent" in with_parent.json()["detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "module, cls",
+    [
+        ("google_drive", "GoogleDriveIntegration"),
+        ("gmail", "GoogleGmailIntegration"),
+        ("google_calendar", "GoogleCalendarIntegration"),
+        ("linear", "LinearIntegration"),
+        ("notion", "NotionIntegration"),
+        ("slack", "SlackIntegration"),
+    ],
+)
+async def test_providers_that_list_everything_refuse_a_parent_before_any_request(module, cls):
+    from importlib import import_module
+
+    from cognee.modules.integrations.base import ResourceParentNotSupportedError
+
+    adapter = getattr(import_module(f"cognee.modules.integrations.{module}.adapter"), cls)()
+    with pytest.raises(ResourceParentNotSupportedError):
+        await adapter.list_resources(object(), parent="x")
+
+
+@pytest.mark.parametrize(
+    ("parent", "status"),
+    [("id:a", 200), ("/Notes", 422), ("ns:123", 422), ("id:a\nb", 422), ("id:gone", 404)],
+)
+def test_the_dropbox_picker_lists_one_level_under_a_valid_parent(
+    client, monkeypatch, parent, status
+):
+    """Through the real router and the real Dropbox adapter; only Dropbox's HTTP is faked."""
+    from cognee.modules.integrations.dropbox import adapter as dropbox_adapter
+    from cognee.modules.integrations.dropbox import client as dropbox_client
+
+    use_integration(dropbox_adapter.DropboxIntegration())
+    bodies = []
+
+    async def dropbox_http(operation, url, **kwargs):
+        bodies.append(kwargs["json"])
+        if kwargs["json"]["path"] == "id:gone":
+            raise dropbox_client.DropboxIntegrationError(operation, "path")
+        return {
+            "entries": [
+                {".tag": "folder", "id": "id:c", "path_lower": "/a/c", "path_display": "/A/c"},
+                {".tag": "file", "id": "id:f", "path_lower": "/a/f.md", "path_display": "/A/f.md"},
+            ],
+            "cursor": "c",
+            "has_more": False,
+        }
+
+    monkeypatch.setattr(dropbox_client, "_post", dropbox_http)
+    monkeypatch.setattr(dropbox_adapter, "access_token_for", AsyncMock(return_value="sl.t"))
+    monkeypatch.setattr(
+        _router_module,
+        "_credential_or_404",
+        AsyncMock(return_value=type("Cred", (), {"provider_metadata": {}})()),
+    )
+
+    response = client.get("/api/v1/integrations/dropbox/resources", params={"parent": parent})
+
+    assert response.status_code == status, response.text
+    if status == 200:
+        assert bodies == [{"path": "id:a", "recursive": False, "limit": 2000}]
+        assert [r["id"] for r in response.json()["resources"]] == ["id:c"]
+    if status == 422:
+        assert bodies == [], "an invalid parent never reaches Dropbox"

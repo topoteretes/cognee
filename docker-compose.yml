@@ -83,7 +83,10 @@ services:
       # API and the MCP server is the point of running both (same uid 1000).
       - cognee_system:/cognee-storage/system
       - cognee_data:/cognee-storage/data
-      # Uncomment to allow ingestion of local files from host:
+      # Uncomment to allow ingestion of local files from host. Over the http
+      # transport every caller is remote, so paths are refused by default:
+      # also set ACCEPT_LOCAL_FILE_PATH=true (with COGNEE_ALLOWED_LOCAL_FILE_ROOTS=/data
+      # to limit reads to the mount).
       # - /path/to/your/data:/data
     environment:
       - DEBUG=false # Change to true if debugging

@@ -21,8 +21,9 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from cognee.infrastructure.llm.utils import resolve_chunk_size
+from cognee.modules.chunking.Chunker import Chunker
+from cognee.modules.chunking.chunker_registry import resolve_chunker
 from cognee.modules.chunking.models import DocumentChunk
-from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.chunking_tasks import build_chunking_tasks, resolve_chunks_per_batch
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
@@ -109,7 +110,8 @@ async def prepare_gliner_schema(
     max_chunk_size: int,
     model_name: str = DEFAULT_MODEL,
     threshold: float = DEFAULT_THRESHOLD,
-    chunker=TextChunker,
+    *,
+    chunker: type[Chunker],
     remote: RemoteGlinerAdapter | None = None,
 ) -> list[Document]:
     """Attach one closed schema to each document before it is chunked.
@@ -309,11 +311,12 @@ def build_gliner_schema_task(
     model_name: str | None = None,
     threshold: float = DEFAULT_THRESHOLD,
     max_chunk_size: int,
-    chunker=TextChunker,
+    chunker: type[Chunker],
     remote: RemoteGlinerAdapter | None = None,
 ) -> Task:
     """Build the document-level schema preparation task (``model_name`` as in
-    :func:`build_gliner_extraction_task`)."""
+    :func:`build_gliner_extraction_task`). ``chunker`` is the resolved one the
+    chunking step of the same task list cuts with (``get_gliner_demo_tasks``)."""
     _require_model(remote, model_name)
     schema = resolve_schema(
         entity_types,
@@ -352,7 +355,7 @@ async def get_gliner_demo_tasks(
     window_words: int = DEFAULT_WINDOW_WORDS,
     window_overlap_words: int = DEFAULT_WINDOW_OVERLAP_WORDS,
     chunk_size: int | None = None,
-    chunker=TextChunker,
+    chunker=None,
     chunks_per_batch: int | None = None,
     config: Config | None = None,
     chunk_attachment: Literal["direct", "all"] | None = None,
@@ -384,6 +387,7 @@ async def get_gliner_demo_tasks(
     remotely). Otherwise raises :class:`GlinerNotInstalledError` when
     ``gliner2`` is not installed.
     """
+    chunker = resolve_chunker(chunker)
     cognify_config = get_cognify_config()
     chunks_per_batch = resolve_chunks_per_batch(chunks_per_batch)
     if early_chunk_indexing is None:
