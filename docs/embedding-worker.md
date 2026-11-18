@@ -3,7 +3,7 @@
 Cognee can send its embeddings to a separate
 [embedding worker](https://github.com/topoteretes/embedding-worker) over
 RabbitMQ, in the same way the remote GLiNER client sends extraction to a
-`gliner_worker` (see "Remote worker" in `CLAUDE.md`). Many cognee processes can
+`gliner_worker` (see [remote GLiNER setup](architecture.md#llm-free-graph-extraction-gliner-demo)). Many cognee processes can
 then share one fleet of workers, sized and autoscaled by queue depth, and no
 embedding model or tokenizer runtime has to be loaded in the cognee process.
 
