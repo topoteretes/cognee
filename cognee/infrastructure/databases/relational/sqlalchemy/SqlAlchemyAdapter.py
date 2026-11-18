@@ -31,6 +31,10 @@ _LOCATION_CHUNK = 400
 # QueuePool sizing of a server-database engine when POOL_ARGS does not give it.
 DEFAULT_POOL_SIZE = 5
 DEFAULT_MAX_OVERFLOW = 35
+# Seconds a caller waits for a free connection from any of cognee's Postgres pools
+# (relational, graph, both pgvector pools, the Postgres session cache) before the
+# wait raises, when the pool args do not give ``pool_timeout``.
+DEFAULT_POOL_TIMEOUT = 360
 
 
 class SQLAlchemyAdapter:
@@ -155,7 +159,7 @@ class SQLAlchemyAdapter:
                 pool_args.setdefault("max_overflow", DEFAULT_MAX_OVERFLOW)
                 pool_args.setdefault("pool_pre_ping", True)
                 pool_args.setdefault("pool_recycle", 280)
-                pool_args.setdefault("pool_timeout", 280)
+                pool_args.setdefault("pool_timeout", DEFAULT_POOL_TIMEOUT)
 
             engine_kwargs = {**pool_args}
             if final_connect_args:

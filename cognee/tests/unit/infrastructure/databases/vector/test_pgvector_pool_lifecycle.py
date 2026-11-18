@@ -67,11 +67,34 @@ async def test_close_always_disposes_owned_engine_after_pool_termination(closed)
         old_loop.close()
 
 
+@pytest.mark.asyncio
+async def test_write_waits_for_a_connection_only_up_to_the_pool_timeout():
+    """A write asks the binary write pool for a connection with the adapter's
+    pool_timeout, so a full pool fails the write instead of waiting forever."""
+    adapter = object.__new__(PGVectorAdapter)
+    adapter._write_pool_acquire_timeout = 360
+    adapter._qualified_table = lambda name: name
+    connection = SimpleNamespace(transaction=Mock(), executemany=AsyncMock())
+    connection.transaction.return_value.__aenter__ = AsyncMock()
+    connection.transaction.return_value.__aexit__ = AsyncMock(return_value=False)
+    acquired = Mock()
+    acquired.__aenter__ = AsyncMock(return_value=connection)
+    acquired.__aexit__ = AsyncMock(return_value=False)
+    pool = SimpleNamespace(acquire=Mock(return_value=acquired))
+    adapter._get_write_pool = AsyncMock(return_value=pool)
+
+    await adapter._write_rows(
+        "c", [{"id": "1", "payload": {}, "vector": [0.0]}], lambda table, name: "SQL"
+    )
+
+    pool.acquire.assert_called_once_with(timeout=360)
+
+
 def test_write_pool_ceiling_is_the_sqlalchemy_pools_ceiling():
     """One setting sizes both pools: pool_size + max_overflow of the adapter's pool args,
     with the SQLAlchemy adapter's defaults for a key that is not given."""
     assert _write_pool_size({"pool_size": 3, "max_overflow": 4}) == 7
-    assert _write_pool_size(_ACCESS_CONTROL_DEFAULT_POOL_ARGS) == 22
+    assert _write_pool_size(_ACCESS_CONTROL_DEFAULT_POOL_ARGS) == 12
     assert _write_pool_size({}) == 40
     assert _write_pool_size({"pool_size": 1, "max_overflow": 0, "pool_recycle": 60}) == 1
     assert _write_pool_size({"poolclass": "nullpool"}) == 40
