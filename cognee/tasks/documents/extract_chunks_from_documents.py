@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.chunking.Chunker import Chunker
-from cognee.modules.chunking.chunker_registry import require_chunker_stamp, resolve_chunker
+from cognee.modules.chunking.chunker_registry import resolve_chunker, stamp_chunk
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.engine.utils.temporal_hints import hint_lines
@@ -65,7 +65,7 @@ async def extract_chunks_from_documents(
         async for document_chunk in document.read(
             max_chunk_size=max_chunk_size, chunker_cls=chunker
         ):
-            require_chunker_stamp(chunker, document_chunk)
+            stamp_chunk(chunker, document_chunk)
             document_token_count += document_chunk.chunk_size
             document_chunk.belongs_to_set = document.belongs_to_set
             if temporal_hints:
