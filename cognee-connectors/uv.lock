@@ -1233,7 +1233,8 @@ version = "0.1.0"
 source = { editable = "connectors/slack" }
 dependencies = [
     { name = "aiohttp" },
-    { name = "cognee-connectors-core" },
+    { name = "cognee-connectors-core", extra = ["dlt"] },
+    { name = "httpx" },
     { name = "pydantic" },
 ]
 
@@ -1246,7 +1247,8 @@ cognee = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.13.5,<4.0.0" },
     { name = "cognee", marker = "extra == 'cognee'", specifier = ">=1.6.5,<2" },
-    { name = "cognee-connectors-core", editable = "core" },
+    { name = "cognee-connectors-core", extras = ["dlt"], editable = "core" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "pydantic", specifier = ">=2.13" },
 ]
 provides-extras = ["cognee"]
