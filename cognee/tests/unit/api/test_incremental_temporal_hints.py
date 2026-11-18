@@ -161,6 +161,7 @@ async def test_writer_retires_a_redated_chunk_before_re_extracting_it(monkeypatc
         object,
         None,
         uuid4(),
+        TextChunker,
     )
 
     # The re-dated chunk's old subgraph goes first, then one extraction writes
@@ -221,6 +222,7 @@ async def test_writer_leaves_untouched_dates_alone(monkeypatch):
         object,
         None,
         uuid4(),
+        TextChunker,
     )
 
     assert deletes == [[second["id"]]]  # only the plan's replacement; nothing re-dated
@@ -347,6 +349,7 @@ async def test_an_unknown_extractor_is_refused_before_anything_is_written(monkey
             object,
             None,
             uuid4(),
+            TextChunker,
             extractor="spacy",
         )
     assert events == []

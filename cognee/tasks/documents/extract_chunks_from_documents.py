@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.chunking.Chunker import Chunker
-from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.chunking.chunker_registry import require_chunker_stamp, resolve_chunker
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.engine.utils.temporal_hints import hint_lines
@@ -33,7 +33,7 @@ async def update_document_token_count(document_id: UUID, token_count: int) -> No
 async def extract_chunks_from_documents(
     documents: list[Document],
     max_chunk_size: int,
-    chunker: Chunker = TextChunker,
+    chunker: type[Chunker] | None = None,
     temporal_hints: bool = True,
 ) -> AsyncGenerator:
     """
@@ -46,6 +46,7 @@ async def extract_chunks_from_documents(
           indexing pipeline turns it off: its chunks are only stored and embedded, the hints
           are never persisted, and the dateparser pass costs more than cutting the chunks.
     """
+    chunker = resolve_chunker(chunker)
     if not isinstance(max_chunk_size, int) or max_chunk_size <= 0:
         raise InvalidChunkSizeError(max_chunk_size)
     if not isinstance(chunker, type):
@@ -64,6 +65,7 @@ async def extract_chunks_from_documents(
         async for document_chunk in document.read(
             max_chunk_size=max_chunk_size, chunker_cls=chunker
         ):
+            require_chunker_stamp(chunker, document_chunk)
             document_token_count += document_chunk.chunk_size
             document_chunk.belongs_to_set = document.belongs_to_set
             if temporal_hints:
