@@ -147,8 +147,9 @@ def _enrich_llm_span(model: str, name: str) -> None:
     try:
         from opentelemetry import trace as otel_trace  # ty:ignore[unresolved-import]
 
-        from cognee.context_global_variables import current_pipeline_stage
+        from cognee.context_global_variables import current_caller, current_pipeline_stage
         from cognee.modules.observability.tracing import (
+            COGNEE_LLM_CALLER,
             COGNEE_LLM_MODEL,
             COGNEE_LLM_PROVIDER,
             COGNEE_PIPELINE_STAGE,
@@ -161,6 +162,9 @@ def _enrich_llm_span(model: str, name: str) -> None:
             stage = current_pipeline_stage.get()
             if stage:
                 current_span.set_attribute(COGNEE_PIPELINE_STAGE, stage)
+            caller = current_caller.get()
+            if caller:
+                current_span.set_attribute(COGNEE_LLM_CALLER, caller)
     except Exception:
         logger.debug("Ignoring exception in _enrich_llm_span", exc_info=True)
 
@@ -496,7 +500,7 @@ class NativeLiteLLMAdapter:
         # A plain string needs no schema — skip structured output entirely.
         if response_model is str:
             try:
-                return await self._acreate_str_output(
+                text = await self._acreate_str_output(
                     text_input,
                     system_prompt,
                     model=self.model,
@@ -505,6 +509,8 @@ class NativeLiteLLMAdapter:
                     api_version=self.api_version,
                     **primary_kwargs,
                 )
+                _enrich_llm_span(self.model, self.name)
+                return text
             except Exception as error:
                 # A budget error on the plain-text path must also surface as
                 # LLMPaymentRequiredError (terminal, not retried), same as the
@@ -541,7 +547,7 @@ class NativeLiteLLMAdapter:
                 self.fallback_model,
             )
             try:
-                return await self._acreate_structured(
+                result = await self._acreate_structured(
                     text_input,
                     system_prompt,
                     structured_model,
@@ -551,6 +557,8 @@ class NativeLiteLLMAdapter:
                     api_version=self.api_version,
                     **merged_kwargs,
                 )
+                _enrich_llm_span(self.fallback_model, self.name)
+                return result
             except ContentPolicyViolationError as fallback_error:
                 raise ContentPolicyFilterError(
                     "The provided input contains content that is not aligned "
