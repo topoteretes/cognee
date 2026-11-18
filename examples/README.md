@@ -70,6 +70,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`gliner_demo_llm_free_cognify.py`](guides/gliner_demo_llm_free_cognify.py) | LLM-free graph + summaries with `extractor="gliner_demo"` (needs `cognee[gliner]`) |
 | [`custom_data_models.py`](guides/custom_data_models.py) | Custom `DataPoint` subclasses and edges |
 | [`custom_prompts.py`](guides/custom_prompts.py) | Overriding the extraction prompt |
+| [`custom_chunker.py`](guides/custom_chunker.py) | Your own chunker as the deployment default (`register_chunker`, `DEFAULT_CHUNKER`), with `update()` still replacing only the edited chunks |
 | [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
 | [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Grounding extraction in an OWL ontology |
 | [`entity_deduplication.py`](guides/entity_deduplication.py) | Merging duplicate entities (dry-run, then real) |
@@ -85,6 +86,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`code_graph_example.py`](guides/code_graph_example.py) | Code-graph pipeline + `SearchType.CODE` |
 | [`gmail.py`](guides/gmail.py) | Ingest Gmail with the bundled SDK connector, incremental sync and delete propagation (needs `cognee[gmail]`) |
 | [`dropbox.py`](guides/dropbox.py) | Sync one Dropbox folder by its folder id with the bundled SDK connector (no extra) |
+| [`evernote.py`](guides/evernote.py) | Sync an Evernote account's notes with the bundled SDK connector, from a token you already hold; a note trashed or deleted at Evernote is forgotten on the next sync (needs `cognee[evernote]`) |
 | [`telegram.py`](guides/telegram.py) | Ingest the messages a Telegram bot sees with the bundled SDK connector, incremental sync and forget when the bot leaves a chat (needs a bot token) |
 | [`google_drive.py`](guides/google_drive.py) | Ingest a Drive folder with the bundled SDK connector (needs `cognee[google-drive]`) |
 | [`google_calendar.py`](guides/google_calendar.py) | Ingest a Google Calendar with the bundled SDK connector, incremental sync through Google's sync token (needs `cognee[google-calendar]`) |

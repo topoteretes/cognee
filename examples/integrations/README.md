@@ -2,7 +2,7 @@
 
 Connectors pull data from external sources (Gmail, Slack, Notion, Google Drive,
 Google Calendar, Confluence, …) into cognee memory. **Gmail, Google Drive, Google Calendar,
-Linear, Notion, Apollo, Asana, Dropbox, OneNote, Slack, Telegram, Obsidian and Vercel ship in the SDK**; install the Google extras for their client libraries
+Linear, Notion, Apollo, Asana, Dropbox, Evernote, OneNote, Slack, Telegram, Obsidian and Vercel ship in the SDK**; install the Google extras and the `evernote` extra for their client libraries
 and DLT (Linear, Notion, Apollo, Asana, Dropbox, OneNote, Slack, Telegram, Obsidian and Vercel need none). Other connectors are distributed under [topoteretes/cognee-community](https://github.com/topoteretes/cognee-community).
 
 Every connector is built on cognee's **DLT ingestion subsystem**, so they all share
@@ -34,6 +34,7 @@ Install from PyPI; you do **not** need to clone the community monorepo to use th
 | Apollo | bundled, no extra |
 | Asana | bundled, no extra |
 | Dropbox | bundled, no extra |
+| Evernote (token passed in, SDK only) | `cognee[evernote]` |
 | OneNote | bundled, no extra |
 | Telegram (SDK only: bot token) | bundled, no extra |
 | Obsidian (local vault, SDK only) | bundled, no extra |
@@ -72,6 +73,7 @@ privacy notes: [Gmail](../../cognee/tasks/ingestion/connectors/gmail.md),
 [Apollo](../../cognee/tasks/ingestion/connectors/apollo.md),
 [Asana](../../cognee/tasks/ingestion/connectors/asana.md),
 [Dropbox](../../cognee/tasks/ingestion/connectors/dropbox.md),
+[Evernote](../../cognee/tasks/ingestion/connectors/evernote.md),
 [OneNote](../../cognee/tasks/ingestion/connectors/onenote.md),
 [Slack](../../cognee/tasks/ingestion/connectors/slack.md),
 [Telegram](../../cognee/tasks/ingestion/connectors/telegram.md),

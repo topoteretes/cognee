@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.6.8"
+version = "1.6.9"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -224,6 +224,9 @@ evals = [
 aws = ["s3fs==2026.9.0", "boto3>=1.43.1,<2"]
 # dlt is a core dependency. The empty extra keeps `cognee[dlt]` installable.
 dlt = []
+# Evernote's Thrift client. evernote3 is not used: its wheel bundles its own top-level `thrift`
+# package. evernote-plus has only pre-releases; naming the version lets uv pick it.
+evernote = ["evernote-plus==1.28.1.dev2", "thrift>=0.21,<1"]
 gmail = [
     "google-api-python-client>=2.100.0,<3",
     "google-auth>=2.23.0,<3",
@@ -331,6 +334,7 @@ exclude = [
   "/deployment",
   "/cognee-mcp",
   "/cognee-connectors",
+  "/cognee-integrations",
   "/cognee-frontend",
   "/examples",
   "/helm",
@@ -368,8 +372,9 @@ constraint-dependencies = [
     "scipy>=1.16.1 ; python_version >= '3.14'",
 ]
 [tool.pytest.ini_options]
-# `pytest` with no path collects only the library test tree; cognee-mcp and
-# cognee-connectors have their own pyproject and suite. See cognee/tests/README.md for layout and credentials.
+# `pytest` with no path collects only the library test tree; cognee-mcp,
+# cognee-connectors and each plugin under cognee-integrations have their own
+# pyproject and suite. See cognee/tests/README.md for layout and credentials.
 testpaths = ["cognee/tests"]
 markers = [
     "deployment: smoke tests against a deployed cognee instance (cognee/tests/deployment/)",

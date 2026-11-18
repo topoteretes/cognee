@@ -182,15 +182,15 @@ connectors:
     display_name: "Slack"
     auth: oauth2
     tier: 1
-    sources: []
+    sources: [slack]
     hosts:
       cognee: true
       cloud: false
     status: ported
     origin:
-      cognee: "cognee/modules/integrations/slack"
+      cognee: "cognee/modules/integrations/slack, cognee/tasks/ingestion/connectors/slack.py, cognee/api/v1/slack/routers"
       cloud: null
-    env_vars: [SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET, SLACK_REDIRECT_URI, SLACK_FRONTEND_BASE_URL, SLACK_HISTORY_SYNC_ENABLED]
+    env_vars: [SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET, SLACK_REDIRECT_URI, SLACK_MEMBER_REDIRECT_URI, SLACK_FRONTEND_BASE_URL, SLACK_HISTORY_SYNC_ENABLED]
   - slug: obsidian
     package: cognee-connector-obsidian
     module: cognee_connector_obsidian

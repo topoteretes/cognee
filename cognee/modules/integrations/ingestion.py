@@ -81,6 +81,12 @@ def _dropbox_service(access_token: str) -> Any:
     return build_dropbox_service(access_token)
 
 
+def _evernote_service(token: str) -> Any:
+    from cognee.tasks.ingestion.connectors.evernote import build_evernote_service
+
+    return build_evernote_service(token)
+
+
 def _slack_service(access_token: str) -> Any:
     from cognee.tasks.ingestion.connectors.slack import build_slack_service
 
@@ -161,6 +167,14 @@ _PROVIDERS: dict[str, _Provider] = {
         source_module="cognee.tasks.ingestion.connectors.dropbox",
         source_name="dropbox_source",
         service_builder=_dropbox_service,
+    ),
+    # SDK-only: Evernote authorizes with OAuth 1.0a, and the builder takes the resulting token
+    # (or a developer token), which every Thrift call carries as its first argument.
+    "evernote": _Provider(
+        prefix="evernote",
+        source_module="cognee.tasks.ingestion.connectors.evernote",
+        source_name="evernote_source",
+        service_builder=_evernote_service,
     ),
     # One resource per channel: the scope is the channel id.
     "slack": _Provider(

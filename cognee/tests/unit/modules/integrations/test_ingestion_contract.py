@@ -105,6 +105,28 @@ def test_asana_service_is_built_from_the_connections_access_token():
     assert isinstance(ingestion.build_service("asana", "an-asana-access-token"), AsanaClient)
 
 
+def test_evernote_names_are_pinned_and_a_dlt_table_name():
+    # Same rule as the Asana pin: the literal is deliberate. One connection is one account, so
+    # there is no scope, and the Cloud control plane only tracks tables that start with the
+    # provider prefix.
+    name = ingestion.resource_name("evernote", CREDENTIAL)
+    assert name == "evernote_e8ba1b716982492b069485f8"
+    assert name == name.lower() and set(name) <= set("abcdefghijklmnopqrstuvwxyz0123456789_")
+    assert len(name) <= 63
+    assert ingestion.source_factory("evernote").__module__ == (
+        "cognee.tasks.ingestion.connectors.evernote"
+    )
+
+
+def test_evernote_service_is_built_from_a_token_without_a_network_call():
+    """Evernote is SDK-only (OAuth 1.0a): the builder takes the token a caller already holds."""
+    from cognee.tasks.ingestion.connectors.evernote import EvernoteApi
+
+    service = ingestion.build_service("evernote", "S=s1:U=1:E=1:C=1:P=1:A=app:V=2:H=secret")
+    assert isinstance(service, EvernoteApi)
+    assert "secret" not in repr(service)
+
+
 def test_vercel_names_are_pinned_and_a_dlt_table_name():
     # Same rule as the Linear pin: the literal is deliberate. One project is one scope (one
     # source, one table), and the Cloud control plane only tracks tables that start with the

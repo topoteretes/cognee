@@ -394,7 +394,9 @@ async def test_cognify_dry_run_does_not_create_missing_datasets(monkeypatch):
     )
 
     with pytest.raises(estimator.DatasetNotFoundError):
-        await estimator.estimate_cognify_dry_run(["typo-dataset"], chunk_size=128)
+        await estimator.estimate_cognify_dry_run(
+            ["typo-dataset"], chunker=TextChunker, chunk_size=128
+        )
 
     assert created == []
 

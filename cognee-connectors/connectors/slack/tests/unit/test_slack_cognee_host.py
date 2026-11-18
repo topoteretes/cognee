@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from cognee_connector_slack.cognee_host import register, routers
 from cognee_connector_slack.cognee_host.adapter import SlackIntegration
+from cognee_connector_slack.cognee_host.member_link import SlackMemberIntegration
 from cognee_connector_slack.cognee_host.verify_slack_signature import (
     verify_slack_request,
 )
@@ -22,24 +23,31 @@ from cognee_connectors_core.testing import sign_body
 _SECRET = "s3cret"
 
 
+_PROVIDERS = ("slack", "slack_member")
+
+
 @pytest.fixture
 def cognee_integrations():
-    previous = cognee_registry.supported_integrations.get("slack")
-    cognee_registry.supported_integrations.pop("slack", None)
-    yield cognee_registry.supported_integrations
-    if previous is None:
-        cognee_registry.supported_integrations.pop("slack", None)
-    else:
-        cognee_registry.supported_integrations["slack"] = previous
+    integrations = cognee_registry.supported_integrations
+    previous = {name: integrations.pop(name) for name in _PROVIDERS if name in integrations}
+    yield integrations
+    for name in _PROVIDERS:
+        integrations.pop(name, None)
+    integrations.update(previous)
 
 
-def test_register_puts_the_slack_integration_in_cognees_registry(cognee_integrations):
+def test_register_puts_the_slack_app_and_sign_in_with_slack_in_cognees_registry(
+    cognee_integrations,
+):
     register()
 
-    integration = cognee_registry.get_integration("slack")
-    assert isinstance(integration, SlackIntegration)
-    assert integration.provider == "slack"
-    assert integration.settings_cls is SlackSettings
+    app = cognee_registry.get_integration("slack")
+    member = cognee_registry.get_integration("slack_member")
+    assert isinstance(app, SlackIntegration)
+    assert isinstance(member, SlackMemberIntegration)
+    assert app.provider == "slack"
+    assert member.provider == "slack_member"
+    assert app.settings_cls is member.settings_cls is SlackSettings
 
 
 def test_register_twice_replaces_rather_than_duplicates(cognee_integrations):
@@ -48,7 +56,7 @@ def test_register_twice_replaces_rather_than_duplicates(cognee_integrations):
     register()
 
     assert cognee_registry.get_integration("slack") is not first
-    assert [name for name in cognee_integrations if name == "slack"] == ["slack"]
+    assert sorted(name for name in cognee_integrations if name in _PROVIDERS) == list(_PROVIDERS)
 
 
 def test_routers_is_the_function_even_after_the_routers_module_was_imported():
@@ -67,8 +75,8 @@ def test_routers_is_the_function_even_after_the_routers_module_was_imported():
 def _paths(router) -> set[str]:
     """Every route path on ``router``, descending into the routers it included.
 
-    FastAPI keeps a router included with a lifespan nested in ``routes`` (the history
-    router inside the channels router), so a flat scan would miss its paths.
+    FastAPI keeps a router included with a lifespan nested in ``routes``, so a flat scan
+    would miss its paths.
     """
     paths: set[str] = set()
     for route in router.routes:
@@ -85,16 +93,7 @@ def test_routers_lists_the_two_slack_routers_with_cognees_prefix_and_tags():
 
     assert [(prefix, tags) for _, prefix, tags in mounted] == [("/api/v1/slack", ["slack"])] * 2
     paths = set().union(*(_paths(router) for router, _, _ in mounted))
-    assert {
-        "/commands",
-        "/events",
-        "/interactive",
-        "/channels",
-        "/link",
-        "/history/{team_id}/import",
-        "/history/{team_id}/sync",
-        "/history/{team_id}",
-    } <= paths
+    assert paths == {"/events", "/interactive", "/channels", "/settings"}
 
 
 def _signed(body: bytes, secret: str = _SECRET, timestamp: int | None = None) -> dict[str, str]:
@@ -119,7 +118,7 @@ def hook_client(monkeypatch):
 
 
 def test_verify_slack_request_hands_the_raw_body_to_the_route(hook_client):
-    body = b"command=%2Fcognee-ask&team_id=T123"
+    body = b"payload=%7B%22type%22%3A%22message_action%22%7D&team_id=T123"
 
     response = hook_client.post("/hook", content=body, headers=_signed(body))
 
@@ -128,7 +127,7 @@ def test_verify_slack_request_hands_the_raw_body_to_the_route(hook_client):
 
 
 def test_verify_slack_request_answers_401_invalid_slack_signature(hook_client):
-    body = b"command=%2Fcognee-ask&team_id=T123"
+    body = b"payload=%7B%22type%22%3A%22message_action%22%7D&team_id=T123"
 
     tampered = hook_client.post("/hook", content=body + b"&x=1", headers=_signed(body))
     unsigned = hook_client.post("/hook", content=body)

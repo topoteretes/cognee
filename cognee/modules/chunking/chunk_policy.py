@@ -29,6 +29,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
+from cognee.modules.chunking.Chunker import Chunker
+from cognee.modules.chunking.chunker_registry import require_chunker_stamp
 from cognee.modules.chunking.incremental_chunking import (
     IncrementalPlan,
     IncrementalPlanError,
@@ -46,7 +48,7 @@ class ChunkPlanRequest:
     new_text: str
     stored_chunks: list[dict]  # full chunk nodes, in document order
     document: object  # the Document new chunks attach to
-    chunker_cls: type
+    chunker_cls: type[Chunker]
     fallback_budget: int  # token budget for chunks with none recorded
 
 
@@ -71,7 +73,7 @@ ChunkPolicy = Callable[[ChunkPlanRequest], Awaitable[ChunkPlan]]
 
 
 async def _chunk_region(
-    document, region_text: str, max_chunk_size: int, chunker_cls: type
+    document, region_text: str, max_chunk_size: int, chunker_cls: type[Chunker]
 ) -> list[DocumentChunk]:
     """Run the configured chunker over one replacement region.
 
@@ -87,7 +89,10 @@ async def _chunk_region(
         yield region_text
 
     chunker = chunker_cls(document, get_text, max_chunk_size)
-    return [chunk async for chunk in chunker.read()]
+    chunks = [chunk async for chunk in chunker.read()]
+    for chunk in chunks:
+        require_chunker_stamp(chunker_cls, chunk)
+    return chunks
 
 
 def _region_chunk_budget(stored_chunks: list[dict], region, fallback: int) -> int:
@@ -179,21 +184,6 @@ def _assemble_final_chunks(
     return region_chunks, kept_final_index
 
 
-def stored_chunker_id(stored_chunks: list[dict]) -> str | None:
-    """The chunker every stored chunk agrees on, or None when unknown.
-
-    None means "cannot tell" — legacy chunks predate the field, and a document
-    whose chunks disagree has already been through something this path should
-    not reason about. Both fall through to the tiling check, so v1 graphs are
-    unaffected.
-    """
-    ids = {node.get("chunker_id") for node in stored_chunks}
-    if len(ids) != 1:
-        return None
-    only = ids.pop()
-    return only or None
-
-
 async def diff_region_policy(request: ChunkPlanRequest) -> ChunkPlan:
     """The default policy: replace only the regions the edit touched.
 
@@ -261,5 +251,4 @@ __all__ = [
     "ChunkPolicy",
     "IncrementalPlanError",
     "diff_region_policy",
-    "stored_chunker_id",
 ]
