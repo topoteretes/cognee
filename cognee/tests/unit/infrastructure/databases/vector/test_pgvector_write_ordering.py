@@ -85,12 +85,17 @@ class _Connection:
         self.log.append(("upsert", statement, list(params)))
 
 
+_ACQUIRE_TIMEOUT = 360
+
+
 class _Pool:
     def __init__(self, connection):
         self.connection = connection
 
     @asynccontextmanager
-    async def acquire(self):
+    async def acquire(self, *, timeout):
+        # Required: every write must bound its wait for a connection.
+        assert timeout == _ACQUIRE_TIMEOUT
         self.connection.events.append("acquire")
         yield self.connection
         self.connection.events.append("release")
@@ -102,6 +107,7 @@ def _adapter(log, schema="", changed=frozenset(), unchanged=frozenset(), events=
     adapter.schema = schema
     adapter._write_locks = {}
     adapter._write_locks_guard = threading.Lock()
+    adapter._write_pool_acquire_timeout = _ACQUIRE_TIMEOUT
     adapter.connection = _Connection(log, changed, unchanged, events)
 
     async def has_collection(name):
