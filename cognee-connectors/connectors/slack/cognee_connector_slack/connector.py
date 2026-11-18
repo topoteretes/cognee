@@ -11,7 +11,7 @@ provider metadata. Inbound requests are verified with the ``slack_v0`` scheme ov
 ``SLACK_SIGNING_SECRET`` (:mod:`cognee_connector_slack.webhooks`).
 
 A tier-1 descriptor: nothing here imports cognee, and the hand-written Slack app
-(slash commands, "Remember this", App Home, the history import) stays in
+(slash commands, "Remember this", App Home) stays in
 :mod:`cognee_connector_slack.cognee_host`. Two things that adapter does are outside
 what a descriptor can say. An Enterprise Grid org-level install, whose token
 response carries ``enterprise.id`` and no ``team``, is identified by the adapter's
