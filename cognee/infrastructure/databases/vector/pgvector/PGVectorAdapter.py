@@ -64,7 +64,7 @@ QUERY_BATCH_SIZE = 1000
 # Lean pool_size limits connection fan-out across datasets (only pool_size connections are
 # retained while idle); the large max_overflow keeps burst headroom, since overflow
 # connections close on release instead of idling.
-_ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 20}
+_ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 10}
 
 # pgvector builds HNSW indexes on vector up to 2,000 dimensions and on halfvec up to
 # 4,000; a larger embedding stays unindexed and is searched by a full scan.
@@ -655,7 +655,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 max_size=self._write_pool_max_size,
                 max_inactive_connection_lifetime=_WRITE_POOL_IDLE_SECONDS,
                 init=self._init_write_connection,
-                **self._write_connect_args,
+                **{
+                    **self._write_connect_args,
+                    # TEMPORARY (test branch): tag write-pool connections for pg_stat_activity.
+                    "server_settings": {
+                        **(self._write_connect_args.get("server_settings") or {}),
+                        "application_name": "pgvector_write_pool",
+                    },
+                },
             )
             self._write_pool = pool
             self._write_pool_loop = loop

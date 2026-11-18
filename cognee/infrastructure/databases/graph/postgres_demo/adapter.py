@@ -182,7 +182,7 @@ def _select_nodeset_neighbor_ids(
 
 _DEFAULT_POOL_ARGS = {
     "pool_size": 2,
-    "max_overflow": 20,  # 22-connection ceiling, PER DATASET
+    "max_overflow": 10,  # 12-connection ceiling, PER DATASET
     "pool_pre_ping": True,
     "pool_recycle": 280,
     "pool_timeout": 280,
