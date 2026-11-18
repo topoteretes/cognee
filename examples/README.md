@@ -70,6 +70,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`gliner_demo_llm_free_cognify.py`](guides/gliner_demo_llm_free_cognify.py) | LLM-free graph + summaries with `extractor="gliner_demo"` (needs `cognee[gliner]`) |
 | [`custom_data_models.py`](guides/custom_data_models.py) | Custom `DataPoint` subclasses and edges |
 | [`custom_prompts.py`](guides/custom_prompts.py) | Overriding the extraction prompt |
+| [`custom_chunker.py`](guides/custom_chunker.py) | Your own chunker as the deployment default (`register_chunker`, `DEFAULT_CHUNKER`), with `update()` still replacing only the edited chunks |
 | [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
 | [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Grounding extraction in an OWL ontology |
 | [`entity_deduplication.py`](guides/entity_deduplication.py) | Merging duplicate entities (dry-run, then real) |

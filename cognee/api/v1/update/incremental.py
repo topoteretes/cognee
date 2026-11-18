@@ -71,11 +71,11 @@ from cognee.modules.chunking.chunk_policy import (
     ChunkPlanRequest,
     ChunkPolicy,
     IncrementalPlanError,
-    stored_chunker_id,
 )
+from cognee.modules.chunking.Chunker import Chunker
+from cognee.modules.chunking.chunker_registry import stamps_every_chunk
 from cognee.modules.chunking.external_metadata import normalize_external_metadata
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import GLINER_DEMO_EXTRACTOR, LLM_EXTRACTOR, get_cognify_config
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.conflicts.methods import retire_decisions_after_edit
@@ -398,7 +398,7 @@ def _resolve_extraction_config() -> Config:
 async def _extraction_step(
     extractor: str,
     document: Document,
-    chunker: type,
+    chunker: type[Chunker],
     graph_model: type[BaseModel],
     custom_prompt: str | None,
     cognify_config,
@@ -478,6 +478,7 @@ def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> Docume
         id=UUID(str(node["id"])),
         text=text,
         chunk_size=int(node.get("chunk_size", 0)),
+        chunker_id=node.get("chunker_id"),
         content_hash=node.get("content_hash") or chunk_content_hash(text),
         max_chunk_tokens=node.get("max_chunk_tokens"),
         chunk_index=chunk_index,
@@ -696,7 +697,8 @@ async def incremental_update(
     preferred_loaders=None,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
-    chunker: type = TextChunker,
+    *,
+    chunker: type[Chunker],
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
     extractor: str = LLM_EXTRACTOR,
 ) -> dict:
@@ -704,8 +706,9 @@ async def incremental_update(
 
     ``policy`` decides which chunks exist afterwards and what happens to the
     old ones; it is replaceable without touching storage or this orchestration.
-    ``chunker`` must match the one that built the document's stored chunks —
-    a mismatch is refused rather than discovered as a tiling failure.
+    ``chunker`` is the one ``update()`` resolved (``resolve_chunker``). It must match
+    the one that built the document's stored chunks — a mismatch is refused rather
+    than discovered as a tiling failure.
     ``extractor`` is the resolved cognify extractor (``resolve_extractor``)
     that fills the extract-and-summarize step for the fresh chunks.
     """
@@ -841,7 +844,7 @@ async def _run_incremental_update(
     preferred_loaders,
     graph_model: type[BaseModel],
     custom_prompt: str | None,
-    chunker: type,
+    chunker: type[Chunker],
     policy: ChunkPolicy,
     extractor: str,
 ) -> dict:
@@ -959,7 +962,7 @@ async def _stage_and_plan(
     user: User,
     node_set: list[str] | None,
     preferred_loaders,
-    chunker: type,
+    chunker: type[Chunker],
     policy: ChunkPolicy,
 ) -> dict:
     """Everything that can be decided WITHOUT touching live state.
@@ -1028,10 +1031,23 @@ async def _stage_and_plan(
         # chunker cuts differently — an overlapping one's output cannot tile its
         # input — and without this the mismatch would surface as a tiling failure,
         # indistinguishable from a document that was never cognified.
-        stored_chunker = stored_chunker_id(stored_chunks)
-        if stored_chunker and stored_chunker != getattr(chunker, "chunker_id", ""):
+        # Any id other than this chunker's means another chunker cut part of the
+        # document. Chunks with no id were stored before chunks carried one (cognee
+        # before 1.5.4). TextChunker keeps updating those, as it always has. A
+        # chunker the deployment registered stamps every chunk it cuts, so it did
+        # not cut them: patching them with it would leave two cuts in one document.
+        # getattr: a chunker passed per call need not subclass Chunker.
+        own_id = getattr(chunker, "chunker_id", "")
+        stored_ids = {node.get("chunker_id") or None for node in stored_chunks}
+        foreign = sorted(i for i in stored_ids if i is not None and i != own_id)
+        if foreign:
             raise IncrementalUpdateNotPossible(
-                f"document was chunked by {stored_chunker}, not {getattr(chunker, 'chunker_id', '')}",
+                f"document was chunked by {', '.join(foreign)}, not {own_id}",
+                RefusalReason.UNSUPPORTED_CHUNKER,
+            )
+        if None in stored_ids and stamps_every_chunk(chunker):
+            raise IncrementalUpdateNotPossible(
+                f"document's chunks do not all carry {own_id}",
                 RefusalReason.UNSUPPORTED_CHUNKER,
             )
 
@@ -1173,7 +1189,7 @@ async def _write_and_publish(
     graph_model: type[BaseModel],
     custom_prompt: str | None,
     pipeline_run_id: UUID,
-    chunker: type = TextChunker,
+    chunker: type[Chunker],
     extractor: str = LLM_EXTRACTOR,
 ) -> dict:
     """The write phase, ending in the one-transaction publish.
