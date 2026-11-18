@@ -2387,6 +2387,12 @@ async def _remember_inner(
         # inside the background task, where a refusal would never reach the caller.
         require_http_requests_allowed_for(data)
 
+        # Before add() too: a DEFAULT_CHUNKER that names no registered chunker must
+        # not leave a stored document that cognify() then refuses to cut.
+        from cognee.modules.chunking.chunker_registry import resolve_chunker
+
+        chunker = resolve_chunker(chunker)
+
         result = RememberResult(
             status="running",
             dataset_name=dataset_name,

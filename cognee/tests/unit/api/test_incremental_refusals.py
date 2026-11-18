@@ -190,7 +190,7 @@ async def test_unsupported_backend_refuses_before_touching_anything(monkeypatch)
     monkeypatch.setattr(incremental, "get_graph_engine", _get_graph_engine)
 
     with pytest.raises(IncrementalUpdateNotPossible) as raised:
-        await incremental_update(uuid4(), "text", uuid4(), user=None)
+        await incremental_update(uuid4(), "text", uuid4(), user=None, chunker=TextChunker)
 
     assert raised.value.reason is RefusalReason.UNSUPPORTED_BACKEND
 
@@ -215,7 +215,7 @@ async def test_declaring_the_capability_is_enough_to_pass_the_gate(monkeypatch):
     monkeypatch.setattr(incremental, "get_graph_engine", _get_graph_engine)
 
     with pytest.raises(Exception) as raised:
-        await incremental_update(uuid4(), "text", uuid4(), user=None)
+        await incremental_update(uuid4(), "text", uuid4(), user=None, chunker=TextChunker)
 
     assert not (
         isinstance(raised.value, IncrementalUpdateNotPossible)
@@ -285,6 +285,7 @@ async def test_unmarked_graph_refuses_before_incremental_work(monkeypatch):
             "replacement",
             dataset_id,
             user=SimpleNamespace(id=uuid4()),
+            chunker=TextChunker,
         )
 
     assert raised.value.reason is RefusalReason.UNSUPPORTED_BACKEND
@@ -632,7 +633,9 @@ async def test_write_without_delete_permission_is_denied(monkeypatch):
     monkeypatch.setattr(incremental, "get_authorized_dataset", _authorize)
 
     with pytest.raises(UnauthorizedDataAccessError):
-        await incremental_update(uuid4(), "text", uuid4(), user=SimpleNamespace(id=uuid4()))
+        await incremental_update(
+            uuid4(), "text", uuid4(), user=SimpleNamespace(id=uuid4()), chunker=TextChunker
+        )
 
     assert "delete" in granted, "the delete permission was never checked"
 
@@ -700,7 +703,9 @@ async def test_a_dataset_collaborator_may_update_a_row_they_do_not_own(monkeypat
     run_incremental = AsyncMock(return_value={"status": "updated"})
     monkeypatch.setattr(incremental, "_run_incremental_update", run_incremental)
 
-    result = await incremental_update(data_id, "replacement", dataset_id, user=collaborator)
+    result = await incremental_update(
+        data_id, "replacement", dataset_id, user=collaborator, chunker=TextChunker
+    )
 
     assert result == {"status": "updated"}
     run_incremental.assert_awaited()
@@ -829,7 +834,7 @@ async def test_fresh_chunks_are_extracted_in_bounded_batches(monkeypatch):
     }
 
     await incremental._write_and_publish(
-        bundle, uuid4(), SimpleNamespace(id=uuid4()), None, None, None, None, uuid4()
+        bundle, uuid4(), SimpleNamespace(id=uuid4()), None, None, None, None, uuid4(), TextChunker
     )
 
     assert batches == [3, 3, 1], f"expected bounded batches of 3, got {batches}"
@@ -901,7 +906,11 @@ async def test_chunkless_routes_refuse_before_reading_the_graph(
 
     with pytest.raises(IncrementalUpdateNotPossible) as raised:
         await incremental_update(
-            data_id, "replacement", dataset_id, user=SimpleNamespace(id=uuid4())
+            data_id,
+            "replacement",
+            dataset_id,
+            user=SimpleNamespace(id=uuid4()),
+            chunker=TextChunker,
         )
 
     assert raised.value.reason is RefusalReason.NO_BASELINE

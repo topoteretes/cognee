@@ -73,10 +73,9 @@ from cognee.modules.chunking.chunk_policy import (
     IncrementalPlanError,
 )
 from cognee.modules.chunking.Chunker import Chunker
-from cognee.modules.chunking.chunker_registry import resolve_chunker, stamps_every_chunk
+from cognee.modules.chunking.chunker_registry import stamps_every_chunk
 from cognee.modules.chunking.external_metadata import normalize_external_metadata
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import GLINER_DEMO_EXTRACTOR, LLM_EXTRACTOR, get_cognify_config
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.conflicts.methods import retire_decisions_after_edit
@@ -698,7 +697,8 @@ async def incremental_update(
     preferred_loaders=None,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
-    chunker: type[Chunker] | None = None,
+    *,
+    chunker: type[Chunker],
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
     extractor: str = LLM_EXTRACTOR,
 ) -> dict:
@@ -706,12 +706,12 @@ async def incremental_update(
 
     ``policy`` decides which chunks exist afterwards and what happens to the
     old ones; it is replaceable without touching storage or this orchestration.
-    ``chunker`` must match the one that built the document's stored chunks —
-    a mismatch is refused rather than discovered as a tiling failure.
+    ``chunker`` is the one ``update()`` resolved (``resolve_chunker``). It must match
+    the one that built the document's stored chunks — a mismatch is refused rather
+    than discovered as a tiling failure.
     ``extractor`` is the resolved cognify extractor (``resolve_extractor``)
     that fills the extract-and-summarize step for the fresh chunks.
     """
-    chunker = resolve_chunker(chunker)
     graph_engine = await get_graph_engine()
     if not getattr(graph_engine, "supports_incremental_chunk_updates", False):
         raise IncrementalUpdateNotPossible(
@@ -1189,7 +1189,7 @@ async def _write_and_publish(
     graph_model: type[BaseModel],
     custom_prompt: str | None,
     pipeline_run_id: UUID,
-    chunker: type[Chunker] | None = None,
+    chunker: type[Chunker],
     extractor: str = LLM_EXTRACTOR,
 ) -> dict:
     """The write phase, ending in the one-transaction publish.
@@ -1202,7 +1202,6 @@ async def _write_and_publish(
     stored chunks then fail the tiling gate on the next touch and the
     document self-heals via full rebuild.
     """
-    chunker = resolve_chunker(chunker)
     dataset_id = dataset.id
     staged: StagedContent = bundle["staged"]
     document = bundle["document"]

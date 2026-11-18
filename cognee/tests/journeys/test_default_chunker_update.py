@@ -246,6 +246,23 @@ async def test_a_registered_chunker_that_does_not_stamp_its_chunks_fails_the_run
         assert _graph_extractions(mock_llm) == 0, "the run failed after paying for extraction"
 
 
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_remember_refuses_an_unregistered_default_chunker_before_storing(
+    clean_env, default_user, mock_llm, use_chunker, monkeypatch
+):
+    """The setting names a chunker this process never registered: nothing is added."""
+    monkeypatch.setenv("DEFAULT_CHUNKER", "NeverRegisteredChunker")
+    get_cognify_config.cache_clear()
+
+    with pytest.raises(CogneeConfigurationError, match="DEFAULT_CHUNKER names an unknown chunker"):
+        await cognee.remember(DOC_V1, dataset_name=DATASET, self_improvement=False)
+
+    dataset_id = await _support.dataset_id_by_name(DATASET, default_user)
+    rows = await get_dataset_data(dataset_id) if dataset_id else []
+    assert rows == [], "the document was added before the refusal"
+
+
 DATED_V1 = (
     "# Founding\n\nThe Quillon ropewalk was founded on 3 March 1947 by Adaeze Wren.\n\n"
     "# Charter\n\nIts charter was signed by Tomas Ferreira in the harbour office.\n\n"
