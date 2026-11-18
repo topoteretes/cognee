@@ -207,25 +207,29 @@ def _provenance_fields(
 
 # Attaching a source ref inserts its row. A ref the node or edge already has is
 # left as it is, so it keeps the run that first attached it and, on a node, the
-# stamps and description of that write.
+# stamps and description of that write. A ref for a node or edge that does not
+# exist is skipped.
 _ATTACH_NODE_REF = text(f"""
     INSERT INTO graph_node_source_ref (
         node_id, source_ref_key, dataset_id, pipeline_run_id,
         {", ".join(_NODE_REF_STAMP_COLUMNS)}
     )
-    VALUES (
-        :node_id, :source_ref_key, :dataset_id, :pipeline_run_id,
-        {", ".join(f":{column}" for column in _NODE_REF_STAMP_COLUMNS)}
-    )
+    SELECT :node_id, :source_ref_key, :dataset_id, :pipeline_run_id,
+           {", ".join(f":{column}" for column in _NODE_REF_STAMP_COLUMNS)}
+    WHERE EXISTS (SELECT 1 FROM graph_node WHERE id = :node_id)
     ON CONFLICT (node_id, source_ref_key) DO NOTHING
 """)
 _ATTACH_EDGE_REF = text("""
     INSERT INTO graph_edge_source_ref (
         source_id, target_id, relationship_name, source_ref_key, dataset_id, pipeline_run_id
     )
-    VALUES (
-        :source_id, :target_id, :relationship_name,
-        :source_ref_key, :dataset_id, :pipeline_run_id
+    SELECT :source_id, :target_id, :relationship_name,
+           :source_ref_key, :dataset_id, :pipeline_run_id
+    WHERE EXISTS (
+        SELECT 1 FROM graph_edge
+        WHERE source_id = :source_id
+          AND target_id = :target_id
+          AND relationship_name = :relationship_name
     )
     ON CONFLICT (source_id, target_id, relationship_name, source_ref_key) DO NOTHING
 """)
@@ -242,6 +246,19 @@ _REMOVE_EDGE_REFS = text("""
 """)
 # A ref attached without a node payload has no stamps and no description.
 _NO_NODE_REF_STAMPS = dict.fromkeys(_NODE_REF_STAMP_COLUMNS)
+
+
+async def _execute_for_each(
+    session: AsyncSession, statement: TextClause, parameters: list[dict | list[dict]]
+) -> None:
+    """Run ``statement`` for every parameter set, as one batched call.
+
+    No row is locked first: every write holds the graph write lock, and a ref row
+    only inserts or deletes itself, so nothing is read and written back.
+    """
+    rows = [row for item in parameters for row in (item if isinstance(item, list) else [item])]
+    if rows:
+        await session.execute(statement, rows)
 
 
 # Every write in this adapter takes this one advisory lock first, so two write
@@ -1455,13 +1472,9 @@ class PostgresDemoAdapter(GraphDBInterface):
         statement: TextClause,
         parameters: Callable[[str], Any],
     ) -> None:
-        """Lock each node that exists and run ``statement`` with its parameters."""
-        lock = text("SELECT 1 FROM graph_node WHERE id = :id FOR UPDATE")
-        for node_id in sorted({str(node_id) for node_id in node_ids}):
-            result = await session.execute(lock, {"id": node_id})
-            if result.first() is None:
-                continue
-            await session.execute(statement, parameters(node_id))
+        """Run ``statement`` once for every node, with that node's parameters."""
+        node_ids = sorted({str(node_id) for node_id in node_ids})
+        await _execute_for_each(session, statement, [parameters(node_id) for node_id in node_ids])
 
     async def _update_edge_provenance(
         self,
@@ -1470,25 +1483,14 @@ class PostgresDemoAdapter(GraphDBInterface):
         statement: TextClause,
         parameters: Callable[[dict[str, str]], Any],
     ) -> None:
-        """Lock each edge that exists and run ``statement`` with its parameters."""
-        lock = text("""
-            SELECT 1
-            FROM graph_edge
-            WHERE source_id = :source_id
-              AND target_id = :target_id
-              AND relationship_name = :relationship_name
-            FOR UPDATE
-        """)
-        for source_id, target_id, relationship_name in _edge_identities(edges):
-            identity = {
-                "source_id": source_id,
-                "target_id": target_id,
-                "relationship_name": relationship_name,
-            }
-            result = await session.execute(lock, identity)
-            if result.first() is None:
-                continue
-            await session.execute(statement, parameters(identity))
+        """Run ``statement`` once for every edge, with that edge's parameters."""
+        identities = [
+            {"source_id": source_id, "target_id": target_id, "relationship_name": relationship}
+            for source_id, target_id, relationship in _edge_identities(edges)
+        ]
+        await _execute_for_each(
+            session, statement, [parameters(identity) for identity in identities]
+        )
 
     async def attach_node_source_refs(
         self,
