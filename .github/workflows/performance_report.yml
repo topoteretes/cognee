@@ -288,7 +288,7 @@ jobs:
           PYTHONFAULTHANDLER: 1
           # LLM + embedding config via the standard CI secrets (see e2e_tests.yml).
           # Only exercised for mode == 'llm'; the mock run hits no external APIs.
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_MODEL: 'openai/gpt-5.6-luna'  # TEMPORARY (test branch): Luna
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_ARGS: ${{ secrets.LLM_ARGS }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
@@ -335,6 +335,15 @@ jobs:
           # Capture the exit code instead of failing here: the report writes
           # its JSON/HTML even when runs fail, and the upload + metrics steps
           # must still run. The job fails at the end via REPORT_RC.
+          # TEMPORARY (test branch): sample pg_stat_activity every 0.5 s during the run.
+          SAMPLES="$RUNNER_TEMP/pg_activity.tsv"
+          ( while true; do
+              PGPASSWORD=cognee psql -h 127.0.0.1 -U cognee -d postgres -At -F $'\t' -c \
+                "SELECT now(), coalesce(datname,'-'), coalesce(nullif(application_name,''),'(none)'), count(*) FROM pg_stat_activity WHERE backend_type = 'client backend' GROUP BY 1,2,3" >> "$SAMPLES" 2>/dev/null || true
+              sleep 0.5
+            done ) &
+          SAMPLER_PID=$!
+
           set +e
           uv run python cognee/tests/performance/statistics_percentile_report.py \
             "${ARGS[@]}" \
@@ -343,6 +352,15 @@ jobs:
           REPORT_RC=$?
           set -e
           echo "REPORT_RC=$REPORT_RC" >> "$GITHUB_ENV"
+
+          kill "$SAMPLER_PID" || true
+          echo "== Samples taken: $(cut -f1 "$SAMPLES" | sort -u | wc -l)"
+          echo "== Peak client connections in one sample (all databases)"
+          awk -F'\t' '{t[$1]+=$4} END {m=0; for (k in t) if (t[k]>m) m=t[k]; print m}' "$SAMPLES"
+          echo "== Peak per database | application_name (write pool = pgvector_write_pool)"
+          awk -F'\t' '{k=$2" | "$3; if ($4>m[k]) m[k]=$4} END {for (k in m) print m[k]"\t"k}' "$SAMPLES" | sort -rn
+          echo "== Peak per database"
+          awk -F'\t' '{v[$1 SUBSEP $2]+=$4} END {for (x in v) {split(x,p,SUBSEP); if (v[x]>m[p[2]]) m[p[2]]=v[x]} for (k in m) print m[k]"\t"k}' "$SAMPLES" | sort -rn
 
       - name: Stamp run provenance into the report
         env:
