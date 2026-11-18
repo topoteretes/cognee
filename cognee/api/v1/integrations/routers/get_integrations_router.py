@@ -642,10 +642,14 @@ def get_integrations_router():
     ) -> SyncPolicyDTO:
         """Create or replace the caller's default sync policy. A pause is kept.
 
+        Two concurrent first saves of the default: the one that loses gets 409.
+
         ## Request Parameters
-        - **intervalMinutes** (int): How often the default policy runs a sync. Must be one
-          of the preset intervals or a whole number of hours within the allowed custom-hour
-          range; any other value is rejected with 400.
+        - **intervalMinutes** (int): How often the default policy runs a sync, in minutes.
+          Must be a preset (15, 30, 60, 120, 240, 360, 480, 1440 or 10080) or whole hours
+          from 1 to 23 (60 to 1380); any other value is rejected with 400. Daily (1440) and
+          weekly (10080) policies run once, at 10:00 local, on each listed weekday; shorter
+          ones run from local midnight every interval through the day.
         - **timezone** (str): IANA timezone name (for example Europe/Belgrade) the weekdays
           and the computed next due slot are interpreted in; a name not in the tz database
           is rejected with 400. Defaults to 'UTC'.
@@ -1483,13 +1487,19 @@ def get_integrations_router():
     ) -> SyncPolicyDTO:
         """Create or replace the connection's own policy, which overrides the default.
 
+        An unknown provider, or no connection of the caller's for it (or for
+        ``account_id``), is a 404; two concurrent first saves of this policy: the one that
+        loses gets 409.
+
         ## Query Parameters
         - **account_id** (str, optional): As for POST /{provider}/sync.
 
         ## Request Parameters
-        - **intervalMinutes** (int): How often this connection runs a sync. Must be one of
-          the preset intervals or a whole number of hours within the allowed custom-hour
-          range; any other value is rejected with 400.
+        - **intervalMinutes** (int): How often this connection runs a sync, in minutes.
+          Must be a preset (15, 30, 60, 120, 240, 360, 480, 1440 or 10080) or whole hours
+          from 1 to 23 (60 to 1380); any other value is rejected with 400. Daily (1440) and
+          weekly (10080) policies run once, at 10:00 local, on each listed weekday; shorter
+          ones run from local midnight every interval through the day.
         - **timezone** (str): IANA timezone name (for example Europe/Belgrade) the weekdays
           and the computed next due slot are interpreted in; a name not in the tz database
           is rejected with 400. Defaults to 'UTC'.
