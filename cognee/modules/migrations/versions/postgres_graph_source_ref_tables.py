@@ -23,12 +23,16 @@ The work is sized for a large graph on a small server:
 * all copying is ``INSERT ... SELECT`` inside Postgres; only batch bounds and row
   counts cross to this process;
 * the run of each ref comes from one pass over the batch's run refs, not from a
-  search through a node's run refs for every one of its keys.
+  search through a node's run refs for every one of its keys;
+* the ref tables' lookup indexes are dropped before the copy and built once after
+  it, so a copied row updates only its primary key. Nothing reads the ref tables
+  meanwhile: the adapter refuses a graph that still has the columns.
 
-The columns are dropped last, in one transaction for both tables, because their
-presence is the only mark of a graph that is not converted yet. A run that stops
-anywhere before that is repeated from the start by the next run: a ref already
-copied is skipped (``ON CONFLICT DO NOTHING``), so the result is the same.
+The columns are dropped last, in one transaction for both tables and together with
+the index builds, because their presence is the only mark of a graph that is not
+converted yet. A run that stops anywhere before that is repeated from the start by
+the next run: a ref already copied is skipped (``ON CONFLICT DO NOTHING``), so the
+result is the same.
 
 ``downgrade`` is the reverse with the same shape: add the columns and their GIN
 indexes, fill the arrays from the ref rows batch by batch, drop the two ref tables
@@ -119,16 +123,19 @@ _CREATE_REF_TABLES = (
             ON DELETE CASCADE
     )
     """,
-    *(
-        f"CREATE INDEX IF NOT EXISTS idx_{prefix}_source_ref_{name} "
-        f"ON {{schema}}.graph_{prefix}_source_ref ({column})"
-        for prefix in ("node", "edge")
-        for name, column in (
-            ("key", "source_ref_key"),
-            ("dataset", "dataset_id"),
-            ("run", "pipeline_run_id"),
-        )
-    ),
+)
+
+# The lookup indexes of the two ref tables: (index, table, column). The copy runs
+# without them and they are built once after it. A row inserted while they exist
+# updates all three, at a place its key or ids decide, not at the end.
+_REF_LOOKUP_INDEXES = tuple(
+    (f"idx_{prefix}_source_ref_{name}", f"graph_{prefix}_source_ref", column)
+    for prefix in ("node", "edge")
+    for name, column in (
+        ("key", "source_ref_key"),
+        ("dataset", "dataset_id"),
+        ("run", "pipeline_run_id"),
+    )
 )
 
 # The quoted schema of a table found through the search path; no row when it is absent.
@@ -164,39 +171,45 @@ _NEXT_BATCH_BOUND = """
 # The formats read here are frozen: they are what the earlier layout stored.
 #   source ref key   source_ref:v<n>:<dataset id>:<data id>[:<chunk id>]
 #   source run ref   source_run_ref:v1:<pipeline run id>:<source ref key>
-# ``ref`` is every key of the batch with its place in its array, which becomes the
-# order of the rows. ``run`` is the batch's run refs taken apart once, keeping the
-# first run that names a key; a key no run ref names was attached without a run.
+# ``entry`` is every key of the batch with its place in its array, and every run ref
+# of the batch taken apart. Grouped by node (or edge) and key, a key gets its place,
+# which becomes the order of the rows, and the first run that names it; a key no run
+# ref names was attached without a run, and a run ref for a key the node does not
+# have is dropped. Keys and run refs are grouped, never joined: a join can end up
+# comparing every key of a node with every one of its run refs, whatever the planner
+# expects of the arrays, and a node with many refs cannot afford that.
 # Ids pass through ``::uuid::text`` to be stored in the canonical form the adapter
 # writes (lookups by dataset and run compare text), and a malformed id fails the batch.
 _COPY_REFS = """
     INSERT INTO {schema}.{ref_table} ({ref_key}, source_ref_key, dataset_id, pipeline_run_id)
     SELECT {ref_columns}, ref.source_ref_key,
            split_part(ref.source_ref_key, ':', 3)::uuid::text,
-           run.pipeline_run_id
+           ref.pipeline_run_id
       FROM (
-            SELECT {artifact_columns}, item.source_ref_key, item.position
-              FROM {schema}.{table} AS artifact
-             CROSS JOIN LATERAL unnest(artifact.source_ref_keys)
-                        WITH ORDINALITY AS item(source_ref_key, position)
-             WHERE {artifact_range}
-           ) AS ref
-      LEFT JOIN (
-            SELECT DISTINCT ON ({key}, source_ref_key) {key}, source_ref_key, pipeline_run_id
+            SELECT {key}, source_ref_key,
+                   min(position) FILTER (WHERE is_key) AS position,
+                   (array_agg(pipeline_run_id ORDER BY position) FILTER (WHERE NOT is_key))[1]
+                       AS pipeline_run_id
               FROM (
+                    SELECT {artifact_columns}, item.source_ref_key, item.position,
+                           true AS is_key, NULL::text AS pipeline_run_id
+                      FROM {schema}.{table} AS artifact
+                     CROSS JOIN LATERAL unnest(artifact.source_ref_keys)
+                                WITH ORDINALITY AS item(source_ref_key, position)
+                     WHERE {artifact_range}
+                    UNION ALL
                     SELECT {artifact_columns},
-                           substring(item.run_ref FROM '^[^:]*:[^:]*:[^:]*:(.*)$')
-                               AS source_ref_key,
-                           split_part(item.run_ref, ':', 3)::uuid::text AS pipeline_run_id,
-                           item.position
+                           substring(item.run_ref FROM '^[^:]*:[^:]*:[^:]*:(.*)$'),
+                           item.position, false,
+                           split_part(item.run_ref, ':', 3)::uuid::text
                       FROM {schema}.{table} AS artifact
                      CROSS JOIN LATERAL unnest(artifact.source_run_refs)
                                 WITH ORDINALITY AS item(run_ref, position)
                      WHERE {artifact_range}
-                   ) AS run_ref
-             ORDER BY {key}, source_ref_key, position
-           ) AS run
-        ON ({run_columns}) = ({ref_columns}) AND run.source_ref_key = ref.source_ref_key
+                   ) AS entry
+             GROUP BY {key}, source_ref_key
+            HAVING bool_or(is_key)
+           ) AS ref
      ORDER BY {ref_columns}, ref.position
     ON CONFLICT DO NOTHING
 """
@@ -290,7 +303,6 @@ def _copy_refs(schema: str, artifact: _Artifact, after: tuple | None) -> str:
         ref_key=", ".join(artifact.ref_key),
         artifact_columns=_columns("artifact", artifact.key),
         ref_columns=_columns("ref", artifact.key),
-        run_columns=_columns("run", artifact.key),
         artifact_range=_batch_range("artifact", artifact.key, after),
     )
 
@@ -365,11 +377,20 @@ async def migrate(context: MigrationContext) -> None:
             return
         for statement in _CREATE_REF_TABLES:
             await connection.execute(text(statement.format(schema=schema)))
+        # The adapter creates the ref tables with their lookup indexes before the
+        # chain runs, and an earlier run of this migration may have built them.
+        for index, _table, _column in _REF_LOOKUP_INDEXES:
+            await connection.execute(text(f"DROP INDEX IF EXISTS {schema}.{index}"))
         await connection.commit()
 
         for artifact in _ARTIFACTS:
             await _run_in_batches(connection, schema, artifact, _copy_refs)
 
+        # One transaction: a graph without the columns always has its lookup indexes.
+        for index, table, column in _REF_LOOKUP_INDEXES:
+            await connection.execute(
+                text(f"CREATE INDEX IF NOT EXISTS {index} ON {schema}.{table} ({column})")
+            )
         for artifact in _ARTIFACTS:
             drops = ", ".join(f"DROP COLUMN IF EXISTS {column}" for column in _LEGACY_COLUMNS)
             await connection.execute(text(f"ALTER TABLE {schema}.{artifact.table} {drops}"))

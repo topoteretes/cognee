@@ -105,6 +105,15 @@ _OLD_GIN_INDEXES = {
     "idx_edge_source_dataset_ids",
     "idx_edge_source_run_ids",
 }
+# What the adapter looks refs up by; the primary keys are not among them.
+_REF_LOOKUP_INDEXES = {
+    "idx_node_source_ref_key",
+    "idx_node_source_ref_dataset",
+    "idx_node_source_ref_run",
+    "idx_edge_source_ref_key",
+    "idx_edge_source_ref_dataset",
+    "idx_edge_source_ref_run",
+}
 
 DATASETS = [UUID(int=1000 + n) for n in range(3)]
 RUNS = [UUID(int=2000 + n) for n in range(3)]
@@ -586,6 +595,35 @@ async def test_malformed_id_stops_the_migration(graph):
     assert await _has_old_layout(graph.engine)
 
 
+async def test_only_the_keys_of_a_node_become_rows_each_once(graph):
+    """A run ref for a key the node does not have is dropped; a repeated key keeps its first place."""
+    keys = [_key(0, 1), _key(1, 2), _key(0, 1)]
+    run_refs = [make_source_run_ref(RUNS[0], _key(2, 9)), make_source_run_ref(RUNS[1], keys[1])]
+    await _build_old_node(graph.engine, keys, run_refs)
+
+    await migration.migrate(_context(graph))
+
+    assert [row[:2] for row in await _node_refs(graph, "n")] == [
+        (keys[0], None),
+        (keys[1], str(RUNS[1])),
+    ]
+
+
+async def test_node_with_many_refs_is_copied_with_its_order_and_runs(graph):
+    """Every key of a node shared by many documents keeps its place and its own run."""
+    keys = [_key(n % 3, n, n) for n in range(3000)]
+    runs = [RUNS[n % 3] for n in range(3000)]
+    # The run refs are stored in another order than the keys they name.
+    run_refs = [make_source_run_ref(run, key) for run, key in zip(runs, keys)][::-1]
+    await _build_old_node(graph.engine, keys, run_refs)
+
+    await migration.migrate(_context(graph))
+
+    assert [row[:2] for row in await _node_refs(graph, "n")] == [
+        (key, str(run)) for key, run in zip(keys, runs)
+    ]
+
+
 async def test_migration_creates_the_tables_the_adapter_creates(old_graph):
     """The frozen DDL and the adapter's schema must describe the same tables."""
     await migration.migrate(_context(old_graph))
@@ -854,7 +892,7 @@ async def test_only_the_schema_steps_touch_a_whole_table(old_graph, monkeypatch)
         await migration.migrate(_context(old_graph))
         await migration.downgrade(_context(old_graph))
 
-    schema_steps = ("CREATE TABLE", "CREATE INDEX", "ALTER TABLE", "DROP TABLE")
+    schema_steps = ("CREATE TABLE", "CREATE INDEX", "DROP INDEX", "ALTER TABLE", "DROP TABLE")
     row_statements = [
         (statement, parameters)
         for statement, parameters in statements
@@ -912,6 +950,8 @@ async def test_finished_batches_are_kept_when_a_later_one_fails(old_graph, monke
         pytest.param("INSERT INTO", 2, id="among-the-node-batches"),
         pytest.param("INSERT INTO", 6, id="at-the-first-edge-batch"),
         pytest.param("INSERT INTO", 8, id="among-the-edge-batches"),
+        pytest.param("CREATE INDEX", 1, id="before-the-lookup-indexes-are-built"),
+        pytest.param("CREATE INDEX", 4, id="among-the-index-builds"),
         pytest.param("ALTER TABLE", 1, id="before-the-columns-are-dropped"),
         pytest.param("ALTER TABLE", 2, id="between-the-two-drops"),
     ],
@@ -936,6 +976,55 @@ async def test_interrupted_upgrade_converges_when_run_again(
 
     await _assert_adapter_reports_the_old_refs(old_graph)
     assert not await _has_old_layout(old_graph.engine)
+    assert _REF_LOOKUP_INDEXES <= await _index_names(old_graph.engine)
+
+
+async def test_lookup_indexes_are_dropped_for_the_copy_and_built_after_it(old_graph):
+    """The copy runs without the lookup indexes, even when they were there before it."""
+    # As the runner leaves a graph before the chain: the adapter has created the
+    # ref tables, with their indexes, next to the earlier layout.
+    await old_graph.initialize()
+    assert _REF_LOOKUP_INDEXES <= await _index_names(old_graph.engine)
+
+    with _statements(old_graph.engine) as statements:
+        await migration.migrate(_context(old_graph))
+
+    steps = [statement for statement, _ in statements]
+    copies = [at for at, step in enumerate(steps) if step.startswith("INSERT INTO")]
+    drops = [at for at, step in enumerate(steps) if step.startswith("DROP INDEX")]
+    builds = [at for at, step in enumerate(steps) if step.startswith("CREATE INDEX")]
+    columns_dropped = [at for at, step in enumerate(steps) if step.startswith("ALTER TABLE")]
+    assert (len(drops), len(builds)) == (6, 6)
+    assert max(drops) < min(copies)
+    assert max(copies) < min(builds) and max(builds) < min(columns_dropped)
+    assert _REF_LOOKUP_INDEXES <= await _index_names(old_graph.engine)
+    await _assert_adapter_reports_the_old_refs(old_graph)
+
+
+async def test_run_stopped_during_the_copy_leaves_no_lookup_index(old_graph):
+    """Until the next run finishes, the graph is refused, so nothing misses them."""
+    await old_graph.initialize()
+
+    with _interrupting(old_graph.engine, "INSERT INTO", 1), pytest.raises(_Interrupted):
+        await migration.migrate(_context(old_graph))
+
+    names = await _index_names(old_graph.engine)
+    assert not _REF_LOOKUP_INDEXES & names
+    assert {"graph_node_source_ref_pkey", "graph_edge_source_ref_pkey"} <= names
+    with pytest.raises(PostgresGraphLayoutError):
+        await old_graph.find_node_source_refs_by_dataset(str(DATASETS[0]))
+
+    # The next start: a new adapter is initialized on the ref tables as they were
+    # left, without their indexes, and the chain runs again.
+    restarted = PostgresDemoAdapter(_url(), schema=old_graph.schema)
+    try:
+        await restarted.initialize()
+        await migration.migrate(_context(restarted))
+
+        assert _REF_LOOKUP_INDEXES <= await _index_names(restarted.engine)
+        await _assert_adapter_reports_the_old_refs(restarted)
+    finally:
+        await restarted.close()
 
 
 async def test_interrupted_upgrade_gives_the_rows_of_an_uninterrupted_one(old_graph, monkeypatch):
