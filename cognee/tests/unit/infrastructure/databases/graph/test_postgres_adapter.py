@@ -4,6 +4,7 @@ import json
 import sys
 import types
 from copy import deepcopy
+from uuid import UUID
 
 import pytest
 
@@ -20,14 +21,27 @@ if importlib.util.find_spec("asyncpg") is None:
 
 from sqlalchemy import NullPool  # noqa: E402
 
+from cognee.infrastructure.databases.exceptions import PostgresGraphLayoutError  # noqa: E402
 from cognee.infrastructure.databases.graph.postgres_demo.adapter import (  # noqa: E402
+    _ENTITY_OWN_PROPERTIES,
+    _NODE_REF_STAMP_COLUMNS,
+    _SOURCE_STAMPS,
     PostgresDemoAdapter,
     _component_sizes,
     _prepare_edge_rows,
     _prepare_node_rows,
+    _provenance_fields,
     _resolve_engine_args,
     _select_nodeset_neighbor_ids,
+    _source_ref_rows,
 )
+from cognee.infrastructure.databases.provenance import (  # noqa: E402
+    make_chunk_source_ref_key,
+    make_source_ref_key,
+    make_source_run_ref,
+)
+from cognee.infrastructure.engine import DataPoint  # noqa: E402
+from cognee.modules.engine.models import Entity  # noqa: E402
 
 if _created_asyncpg_stub:
     del sys.modules["asyncpg"]
@@ -81,6 +95,87 @@ def test_prepare_node_rows_strips_nul_bytes_from_columns_and_nested_values():
 
     assert (row["id"], row["name"], row["type"]) == ("id", "name", "t")
     assert _stored_properties(row) == {"nested": {"k": ["v"]}}
+
+
+def test_source_stamps_are_the_source_fields_of_a_data_point():
+    """The adapter names the stamp properties itself; a new one must be added there too."""
+    assert set(_SOURCE_STAMPS) == {
+        name for name in DataPoint.model_fields if name.startswith("source_")
+    }
+    assert set(_ENTITY_OWN_PROPERTIES) <= set(Entity.model_fields)
+    assert Entity(name="n", description="d").type == "Entity"
+
+
+def test_prepare_node_rows_carries_what_the_write_leaves_on_its_source_ref_row():
+    stamps = {
+        "source_pipeline": "pipeline",
+        "source_task": "task",
+        "source_node_set": None,
+        "source_content_hash": "ha\0sh",
+    }
+    entity, other, bare = _prepare_node_rows(
+        [
+            ("a", {"type": "Entity", "description": "An entity.", "relations": [], **stamps}),
+            ("b", {"type": "TextSummary", "description": "Not an entity.", "source_user": 7}),
+            ("c", {"type": "Entity"}),
+        ]
+    )
+
+    assert {column: entity[column] for column in _NODE_REF_STAMP_COLUMNS} == {
+        "source_pipeline": "pipeline",
+        "source_task": "task",
+        "source_node_set": None,
+        "source_user": None,
+        "source_content_hash": "hash",
+        "description": "An entity.",
+    }
+    # Only an Entity's description is kept, and a stamp is stored as text.
+    assert {column: other[column] for column in _NODE_REF_STAMP_COLUMNS} == {
+        **dict.fromkeys(_NODE_REF_STAMP_COLUMNS),
+        "source_user": "7",
+    }
+    assert {column: bare[column] for column in _NODE_REF_STAMP_COLUMNS} == dict.fromkeys(
+        _NODE_REF_STAMP_COLUMNS
+    )
+    # The node itself still stores every property it was given.
+    assert _stored_properties(entity)["description"] == "An entity."
+    assert _stored_properties(other) == {"description": "Not an entity.", "source_user": 7}
+
+
+def test_source_ref_rows_take_the_dataset_from_the_key_and_normalize_the_run():
+    dataset_id, data_id, chunk_id, run_id = (UUID(int=n) for n in range(1, 5))
+    document_key = make_source_ref_key(dataset_id, data_id)
+    chunk_key = make_chunk_source_ref_key(dataset_id, data_id, chunk_id)
+
+    assert _source_ref_rows([document_key, chunk_key], str(run_id).upper()) == [
+        {"source_ref_key": key, "dataset_id": str(dataset_id), "pipeline_run_id": str(run_id)}
+        for key in (document_key, chunk_key)
+    ]
+    assert _source_ref_rows([document_key], None)[0]["pipeline_run_id"] is None
+    with pytest.raises(ValueError):
+        _source_ref_rows(["not-a-source-ref"], None)
+    with pytest.raises(ValueError):
+        _source_ref_rows([document_key], "not-a-run")
+
+
+def test_provenance_fields_are_built_from_ref_rows_in_attach_order():
+    first, second = UUID(int=2), UUID(int=1)
+    run = UUID(int=9)
+    keys = [make_source_ref_key(first, UUID(int=3)), make_source_ref_key(second, UUID(int=4))]
+    keys.append(make_source_ref_key(first, UUID(int=5)))
+
+    fields = _provenance_fields(keys, [str(run), None, str(run)])
+
+    assert fields.source_ref_keys == keys
+    # Derived the way every adapter derives them: unique and sorted.
+    assert fields.source_dataset_ids == [str(second), str(first)]
+    assert fields.source_run_ids == [str(run)]
+    assert fields.source_run_refs == [
+        make_source_run_ref(run, keys[0]),
+        make_source_run_ref(run, keys[2]),
+    ]
+    # A node or edge without ref rows aggregates to NULL.
+    assert _provenance_fields(None, None) == ([], [], [], [])
 
 
 def test_prepare_edge_rows_keeps_the_last_duplicate_triple_and_sorts_by_identity():
@@ -164,7 +259,62 @@ def _bare_adapter():
     adapter._initialized = False
     adapter._init_lock = None
     adapter._init_lock_loop = None
+    adapter._layout_is_current = True
     return adapter
+
+
+class _LayoutLookup:
+    """A session that answers the adapter's one question about graph_node's columns."""
+
+    def __init__(self, has_array_columns: bool) -> None:
+        self.has_array_columns = has_array_columns
+        self.lookups = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        pass
+
+    async def execute(self, statement, *args):
+        assert "source_ref_keys" in str(statement)
+        self.lookups += 1
+        return types.SimpleNamespace(scalar=lambda: self.has_array_columns)
+
+
+@pytest.mark.asyncio
+async def test_graph_in_the_earlier_layout_is_refused_until_it_is_converted():
+    adapter = _bare_adapter()
+    adapter._layout_is_current = False
+    session = _LayoutLookup(has_array_columns=True)
+    adapter.sessionmaker = lambda: session
+
+    for _ in range(2):
+        with pytest.raises(PostgresGraphLayoutError) as refused:
+            await adapter.find_nodes_by_source_ref("key")
+    assert "cognee-cli upgrade" in str(refused.value)
+    # Asked again each time: the graph can be converted while this adapter is alive.
+    assert session.lookups == 2
+
+    session.has_array_columns = False
+    await adapter._require_current_layout()
+    await adapter._require_current_layout()
+    # A current layout is remembered.
+    assert session.lookups == 3
+
+
+@pytest.mark.asyncio
+async def test_calls_with_nothing_to_do_do_not_look_the_layout_up():
+    adapter = _bare_adapter()
+    adapter._layout_is_current = False
+    adapter.sessionmaker = lambda: pytest.fail("the database was opened")
+
+    await adapter.add_nodes([])
+    await adapter.add_edges([])
+    await adapter.attach_node_source_refs(["n"], [])
+    await adapter.remove_edge_source_refs([], [])
+    assert await adapter.get_node_delete_data([]) == {}
+    assert await adapter.get_edge_delete_data([]) == {}
 
 
 @pytest.mark.asyncio
