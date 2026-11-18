@@ -105,6 +105,7 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
 )
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
+from cognee.modules.operations.usage_accumulator import parent_run_scope
 from cognee.modules.pipelines.methods.get_pipeline_run import get_latest_pipeline_run
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
@@ -879,55 +880,56 @@ async def _run_incremental_update(
             user,
             additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id)},
         )
-        try:
-            if bundle.get("status") == "unchanged":
-                result = await _repair_unchanged(
-                    bundle, data_id, dataset, user, pipeline_run.pipeline_run_id
-                )
-            else:
-                result = await _write_and_publish(
-                    bundle,
-                    data_id,
-                    dataset,
-                    user,
-                    node_set,
-                    graph_model,
-                    custom_prompt,
+        with parent_run_scope(pipeline_run.pipeline_run_id):
+            try:
+                if bundle.get("status") == "unchanged":
+                    result = await _repair_unchanged(
+                        bundle, data_id, dataset, user, pipeline_run.pipeline_run_id
+                    )
+                else:
+                    result = await _write_and_publish(
+                        bundle,
+                        data_id,
+                        dataset,
+                        user,
+                        node_set,
+                        graph_model,
+                        custom_prompt,
+                        pipeline_run.pipeline_run_id,
+                        chunker=chunker,
+                        extractor=extractor,
+                    )
+                    update_applied = True  # the publish is the last step of the write
+                    # An edit can remove the fact a user chose, or restate it under another
+                    # relationship; its decision must not outlive it. Read once the new
+                    # chunks' facts are written, so a fact the edit kept is still found.
+                    await retire_decisions_after_edit(dataset, user)
+                    # The audit ledger versions the data item on its new content hash
+                    # last, once the row holds it and the edit's decisions are retired:
+                    # a publish that fails must not leave the ledger recording an update
+                    # that did not happen. If this write fails the update raises with the
+                    # edit complete, and running it again records it (the unchanged
+                    # branch above), which is all that is left to do: that branch does
+                    # not retire decisions, so retiring them must not wait on the ledger.
+                    await _record_content_in_ledger(
+                        bundle["staged"].content_hash,
+                        bundle,
+                        dataset,
+                        user,
+                        pipeline_run.pipeline_run_id,
+                    )
+            except Exception as error:
+                await log_pipeline_run_error(
                     pipeline_run.pipeline_run_id,
-                    chunker=chunker,
-                    extractor=extractor,
+                    pipeline_id,
+                    RUN_PIPELINE_NAME,
+                    dataset.id,
+                    error,
                 )
-                update_applied = True  # the publish is the last step of the write
-                # An edit can remove the fact a user chose, or restate it under another
-                # relationship; its decision must not outlive it. Read once the new
-                # chunks' facts are written, so a fact the edit kept is still found.
-                await retire_decisions_after_edit(dataset, user)
-                # The audit ledger versions the data item on its new content hash
-                # last, once the row holds it and the edit's decisions are retired:
-                # a publish that fails must not leave the ledger recording an update
-                # that did not happen. If this write fails the update raises with the
-                # edit complete, and running it again records it (the unchanged
-                # branch above), which is all that is left to do: that branch does
-                # not retire decisions, so retiring them must not wait on the ledger.
-                await _record_content_in_ledger(
-                    bundle["staged"].content_hash,
-                    bundle,
-                    dataset,
-                    user,
-                    pipeline_run.pipeline_run_id,
-                )
-        except Exception as error:
-            await log_pipeline_run_error(
-                pipeline_run.pipeline_run_id,
-                pipeline_id,
-                RUN_PIPELINE_NAME,
-                dataset.id,
-                error,
+                raise
+            await log_pipeline_run_complete(
+                pipeline_run.pipeline_run_id, pipeline_id, RUN_PIPELINE_NAME, dataset.id
             )
-            raise
-        await log_pipeline_run_complete(
-            pipeline_run.pipeline_run_id, pipeline_id, RUN_PIPELINE_NAME, dataset.id
-        )
         send_telemetry(
             "Incremental Update Run Completed",
             user,

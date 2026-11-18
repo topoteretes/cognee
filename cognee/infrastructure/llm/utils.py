@@ -179,12 +179,12 @@ async def test_llm_connection() -> None:
     from litellm.exceptions import AuthenticationError
 
     # Imported here: this module loads during cognee's startup, before the
-    # context variables pipeline_stage depends on can be imported.
-    from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
+    # context variables caller_scope depends on can be imported.
+    from cognee.infrastructure.llm.pipeline_stage import caller_scope
 
     try:
         logger.info("Testing connection to LLM endpoint...")
-        with pipeline_stage("connection_test"):
+        with caller_scope("test_llm_connection"):
             await asyncio.wait_for(
                 LLMGateway.acreate_structured_output(
                     text_input="test",
