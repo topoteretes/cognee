@@ -40,6 +40,8 @@ def register_chunker(name: str, chunker: type[Chunker]) -> None:
     The class needs a ``chunker_id`` that no other class uses, registered under any
     name or built into cognee: it is how ``update()`` tells which chunker cut a stored
     document. A subclass that cuts differently from its parent declares a new one.
+    Never reuse an id, not even that of a chunker no longer registered: documents it
+    cut still carry it, and only ids registered now or built in are checked here.
     Registering a class again under its name changes nothing; "TextChunker" always
     names TextChunker.
     """
@@ -57,6 +59,14 @@ def register_chunker(name: str, chunker: type[Chunker]) -> None:
                 f"{chunker.__name__} has the chunker_id of {other.__name__} "
                 f"({chunker.chunker_id!r}); declare its own."
             )
+    # The code-docs pipeline stamps its chunks with an id it has no chunker class for.
+    from cognee.tasks.code_docs.extract_code_docs import CHUNKER_ID as CODE_DOCS_ID
+
+    if chunker.chunker_id == CODE_DOCS_ID:
+        raise ValueError(
+            f"{chunker.__name__} has the chunker_id of the code-docs pipeline "
+            f"({CODE_DOCS_ID!r}); declare its own."
+        )
     registered_chunkers[name] = chunker
 
 

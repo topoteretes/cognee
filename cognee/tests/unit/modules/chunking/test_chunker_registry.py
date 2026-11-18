@@ -99,6 +99,16 @@ def test_a_chunker_cannot_take_the_id_of_a_built_in_chunker_that_is_not_register
         register_chunker("Mine", TweakedCsvChunker)
 
 
+def test_a_chunker_cannot_take_the_id_of_the_code_docs_pipeline():
+    """The code-docs pipeline stamps its chunks with an id but has no chunker class."""
+
+    class DocstringChunker(Chunker):
+        chunker_id = "code_docs"
+
+    with pytest.raises(ValueError, match="chunker_id of the code-docs pipeline"):
+        register_chunker("Mine", DocstringChunker)
+
+
 def test_a_call_that_names_no_chunker_gets_the_default(monkeypatch):
     assert resolve_chunker(None) is TextChunker
     assert resolve_chunker(ClauseChunker) is ClauseChunker

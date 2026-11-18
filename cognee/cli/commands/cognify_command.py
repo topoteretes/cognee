@@ -124,15 +124,19 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                             from cognee.modules.chunking.LangchainChunker import LangchainChunker
 
                             chunker_class = LangchainChunker
-                        except ImportError:
-                            fmt.warning("LangchainChunker not available, using the default chunker")
+                        except ImportError as error:
+                            raise CliCommandInnerException(
+                                "LangchainChunker needs langchain: pip install 'cognee[langchain]'"
+                            ) from error
                     elif args.chunker == "CsvChunker":
                         try:
                             from cognee.modules.chunking.CsvChunker import CsvChunker
 
                             chunker_class = CsvChunker
-                        except ImportError:
-                            fmt.warning("CsvChunker not available, using the default chunker")
+                        except ImportError as error:
+                            raise CliCommandInnerException(
+                                f"CsvChunker could not be imported: {error}"
+                            ) from error
 
                     # Translate --ontology-file into the canonical ontology Config
                     # structure, built with the same factory cognify() uses for
