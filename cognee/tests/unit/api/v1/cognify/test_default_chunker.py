@@ -125,7 +125,15 @@ async def test_the_task_builders_use_the_configured_default(monkeypatch):
             await builder()
         assert build.call_args.args[0] is ClauseChunker, builder.__name__
 
-    # require_gliner2 is stubbed as in the GLiNER tests: the runtime is an optional install.
-    with patch.object(gliner_tasks, "Task") as task, patch.object(gliner_tasks, "require_gliner2"):
-        gliner_tasks.build_gliner_schema_task(None, None, max_chunk_size=64)
-    assert task.call_args.kwargs["chunker"] is ClauseChunker
+    # Stopped at the schema task, before anything needs the optional GLiNER runtime.
+    with (
+        patch.object(gliner_tasks, "resolve_chunk_size", AsyncMock(return_value=64)),
+        patch.object(gliner_tasks, "get_configured_ontology_resolver", return_value=None),
+        patch.object(gliner_tasks, "create_remote_adapter", return_value=None),
+        patch.object(
+            gliner_tasks, "build_gliner_schema_task", side_effect=_ChunkingStepReached
+        ) as build,
+        pytest.raises(_ChunkingStepReached),
+    ):
+        await gliner_tasks.get_gliner_demo_tasks()
+    assert build.call_args.kwargs["chunker"] is ClauseChunker

@@ -78,8 +78,9 @@ def _builtin_chunkers() -> list[type[Chunker]]:
 def resolve_chunker(chunker: type[Chunker] | None) -> type[Chunker]:
     """``chunker``, or the deployment's default (``get_default_chunker``) when None.
 
-    Every function that takes a chunker defaults to None and resolves it here, so a
-    caller that names none gets the same chunker on every path.
+    Every public entry point that takes a chunker defaults to None and resolves it
+    here, once, so a caller that names none gets the same chunker on every path. The
+    helpers below an entry point take the resolved class and have no default.
     """
     return chunker if chunker is not None else get_default_chunker()
 

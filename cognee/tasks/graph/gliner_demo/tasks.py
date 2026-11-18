@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from cognee.infrastructure.llm.utils import resolve_chunk_size
+from cognee.modules.chunking.Chunker import Chunker
 from cognee.modules.chunking.chunker_registry import resolve_chunker
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.cognify.chunking_tasks import build_chunking_tasks, resolve_chunks_per_batch
@@ -109,7 +110,8 @@ async def prepare_gliner_schema(
     max_chunk_size: int,
     model_name: str = DEFAULT_MODEL,
     threshold: float = DEFAULT_THRESHOLD,
-    chunker=None,
+    *,
+    chunker: type[Chunker],
     remote: RemoteGlinerAdapter | None = None,
 ) -> list[Document]:
     """Attach one closed schema to each document before it is chunked.
@@ -117,7 +119,6 @@ async def prepare_gliner_schema(
     With ``remote`` the label-bank probe runs on the worker instead of a local
     model (``model_name`` is then the worker's to choose).
     """
-    chunker = resolve_chunker(chunker)
     extractor = None
     for document in documents:
         if isinstance(document, (ImageDocument, AudioDocument)):
@@ -310,12 +311,12 @@ def build_gliner_schema_task(
     model_name: str | None = None,
     threshold: float = DEFAULT_THRESHOLD,
     max_chunk_size: int,
-    chunker=None,
+    chunker: type[Chunker],
     remote: RemoteGlinerAdapter | None = None,
 ) -> Task:
     """Build the document-level schema preparation task (``model_name`` as in
-    :func:`build_gliner_extraction_task`)."""
-    chunker = resolve_chunker(chunker)
+    :func:`build_gliner_extraction_task`). ``chunker`` is the resolved one the
+    chunking step of the same task list cuts with (``get_gliner_demo_tasks``)."""
     _require_model(remote, model_name)
     schema = resolve_schema(
         entity_types,
