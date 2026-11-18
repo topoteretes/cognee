@@ -67,8 +67,8 @@ def test_routers_is_the_function_even_after_the_routers_module_was_imported():
 def _paths(router) -> set[str]:
     """Every route path on ``router``, descending into the routers it included.
 
-    FastAPI keeps a router included with a lifespan nested in ``routes`` (the history
-    router inside the channels router), so a flat scan would miss its paths.
+    FastAPI keeps a router included with a lifespan nested in ``routes``, so a flat
+    scan would miss its paths.
     """
     paths: set[str] = set()
     for route in router.routes:
@@ -91,10 +91,9 @@ def test_routers_lists_the_two_slack_routers_with_cognees_prefix_and_tags():
         "/interactive",
         "/channels",
         "/link",
-        "/history/{team_id}/import",
-        "/history/{team_id}/sync",
-        "/history/{team_id}",
     } <= paths
+    # The history import is gone with its routes (SDK-1649).
+    assert not [path for path in paths if path.startswith("/history")]
 
 
 def _signed(body: bytes, secret: str = _SECRET, timestamp: int | None = None) -> dict[str, str]:
