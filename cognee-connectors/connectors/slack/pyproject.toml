@@ -27,10 +27,11 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    # No [dlt] extra: Slack ships no DLT source, its history import is its own flow.
-    "cognee-connectors-core>=0.1,<1",
-    # The provider's own libraries, with the ranges cognee's pyproject uses.
+    "cognee-connectors-core[dlt]>=0.2,<1",
+    # The provider's own libraries, with the ranges cognee's pyproject uses:
+    # httpx for the DLT source's Web API client.
     "aiohttp>=3.13.5,<4.0.0",
+    "httpx>=0.28.1",
     "pydantic>=2.13",
 ]
 
@@ -51,8 +52,8 @@ Documentation = "https://docs.cognee.ai"
 [project.entry-points."cognee.connectors"]
 slack = "cognee_connector_slack:CONNECTOR"
 
-# No "cognee.sources" entry point: Slack has no DLT source (docs/ARCHITECTURE.md,
-# rule 6 lists one per DLT source).
+[project.entry-points."cognee.sources"]
+slack = "cognee_connector_slack:slack_source"
 
 [project.entry-points."cognee.integrations"]
 slack = "cognee_connector_slack.cognee_host:register"
