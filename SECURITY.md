@@ -64,7 +64,7 @@ issue before disclosing it.
 
 Severity is assessed with CVSS v3.1. Where the score depends on deployment
 assumptions we rate against the default configuration documented in
-`CLAUDE.md` and `.env.template`.
+[runtime configuration](docs/runtime-configuration.md#security-considerations) and [`.env.template`](.env.template).
 
 ## Remediation windows
 
