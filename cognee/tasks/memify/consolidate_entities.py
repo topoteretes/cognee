@@ -4,7 +4,7 @@ These two tasks back the ``consolidate_entities`` memify pipeline:
 
 * :func:`detect_entity_duplicates` (extraction) loads every ``Entity`` node,
   embeds its name, and clusters near-duplicates by cosine similarity and/or
-  normalized-name equality.
+  normalized-name equality, optionally confirming each pair with an LLM.
 * :func:`merge_entity_duplicates` (enrichment) collapses each cluster into one
   canonical node: it re-points every edge from the duplicates onto the
   canonical (direction preserved), unions the descriptions, records a
@@ -19,15 +19,20 @@ the vector engine's ``delete_data_points``. No per-edge delete primitive is
 required or used.
 """
 
+import asyncio
+import itertools
 import json
 import re
 from typing import Any
 from uuid import UUID
 
 import numpy as np
+from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.engine.models.Entity import Entity
 from cognee.shared.logging_utils import get_logger
 
@@ -54,7 +59,29 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # When False (default, conservative), only entities sharing the same
     # EntityType are merged together.
     "allow_cross_type": False,
+    # Confirm every candidate pair with the LLM (names + descriptions) before merging.
+    "judge": False,
+    # Also judge protect_node_types instead of skipping them.
+    "judge_protected_types": False,
+    # Candidate pairs per LLM call.
+    "judge_batch_size": 12,
+    # Concurrent LLM calls.
+    "judge_concurrency": 4,
+    # Clusters larger than this are skipped by the judge, not compared pairwise.
+    "judge_max_cluster_size": 25,
 }
+
+JUDGE_PROMPT_FILE = "consolidate_entities_judge.txt"
+
+
+class PairVerdict(BaseModel):
+    pair_id: str
+    same: bool
+    reason: str
+
+
+class PairVerdicts(BaseModel):
+    verdicts: list[PairVerdict]
 
 
 def _resolve_config(config: dict[str, Any] | None) -> dict[str, Any]:
@@ -193,6 +220,111 @@ def _cluster_entities(
     return [cluster for cluster in clusters.values() if len(cluster) >= 2]
 
 
+def _cluster_pairs(
+    clusters: list[list[dict[str, Any]]], max_cluster_size: int
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Every member pair of each cluster, skipping clusters above ``max_cluster_size``."""
+    pairs = []
+    for cluster in clusters:
+        if len(cluster) > max_cluster_size:
+            logger.warning(
+                "consolidate_entities judge: skipping cluster of %d (> judge_max_cluster_size=%d); "
+                "first member %r. Raise similarity_threshold or judge_max_cluster_size.",
+                len(cluster),
+                max_cluster_size,
+                cluster[0]["name"],
+            )
+            continue
+        pairs.extend(itertools.combinations(cluster, 2))
+    return pairs
+
+
+def _render_pair_batch(batch: list[tuple[str, dict[str, Any], dict[str, Any]]]) -> str:
+    lines = []
+    for pair_id, left, right in batch:
+        lines.append(
+            f"pair_id: {pair_id}\n"
+            f"type: {left.get('type')}\n"
+            f"A: {left['name']}\n   {left.get('description') or '(no description)'}\n"
+            f"B: {right['name']}\n   {right.get('description') or '(no description)'}\n"
+        )
+    return "\n".join(lines)
+
+
+async def _judge_pairs(
+    pairs: list[tuple[dict[str, Any], dict[str, Any]]], cfg: dict[str, Any]
+) -> set[tuple[str, str]]:
+    """Return the ``(left_id, right_id)`` pairs the LLM confirmed; unanswered pairs are not confirmed."""
+    if not pairs:
+        return set()
+    system_prompt = read_query_prompt(JUDGE_PROMPT_FILE)
+    batch_size = max(1, int(cfg["judge_batch_size"]))
+    semaphore = asyncio.Semaphore(max(1, int(cfg["judge_concurrency"])))
+    labelled = [(f"p{index}", left, right) for index, (left, right) in enumerate(pairs)]
+    by_pair_id = {pair_id: (left["id"], right["id"]) for pair_id, left, right in labelled}
+
+    async def judge_batch(batch):
+        async with semaphore:
+            try:
+                result = await LLMGateway.acreate_structured_output(
+                    text_input=_render_pair_batch(batch),
+                    system_prompt=system_prompt,
+                    response_model=PairVerdicts,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.warning(
+                    "consolidate_entities judge: batch of %d failed, keeping nodes apart: %s",
+                    len(batch),
+                    error,
+                    exc_info=True,
+                )
+                return []
+            return result.verdicts
+
+    batches = [
+        labelled[start : start + batch_size] for start in range(0, len(labelled), batch_size)
+    ]
+    results = await asyncio.gather(*[judge_batch(batch) for batch in batches])
+
+    confirmed: set[tuple[str, str]] = set()
+    for verdicts in results:
+        for verdict in verdicts:
+            if verdict.same and verdict.pair_id in by_pair_id:
+                confirmed.add(by_pair_id[verdict.pair_id])
+    return confirmed
+
+
+def _find_root(parent: list[int], node: int) -> int:
+    while parent[node] != node:
+        parent[node] = parent[parent[node]]
+        node = parent[node]
+    return node
+
+
+def _rebuild_clusters(
+    clusters: list[list[dict[str, Any]]], confirmed: set[tuple[str, str]]
+) -> list[list[dict[str, Any]]]:
+    """Re-run union-find inside each cluster over confirmed pairs only."""
+    rebuilt = []
+    for cluster in clusters:
+        index_of = {member["id"]: index for index, member in enumerate(cluster)}
+        parent = list(range(len(cluster)))
+        for left_id, right_id in confirmed:
+            if left_id in index_of and right_id in index_of:
+                left_root = _find_root(parent, index_of[left_id])
+                right_root = _find_root(parent, index_of[right_id])
+                if left_root != right_root:
+                    parent[max(left_root, right_root)] = min(left_root, right_root)
+
+        groups: dict[int, list[dict[str, Any]]] = {}
+        for index, member in enumerate(cluster):
+            groups.setdefault(_find_root(parent, index), []).append(member)
+        rebuilt.extend(group for group in groups.values() if len(group) >= 2)
+    return rebuilt
+
+
 def _entity_type_map(
     entity_ids: set, edges: list[tuple], nodes_by_id: dict[str, dict[str, Any]]
 ) -> dict[str, str | None]:
@@ -236,13 +368,16 @@ async def detect_entity_duplicates(
     }
     type_of = _entity_type_map(entity_ids, edges, nodes_by_id)
 
+    judge = bool(cfg["judge"])
+    skip_protected = not (judge and cfg["judge_protected_types"])
+
     members: list[dict[str, Any]] = []
     for node_id, props in nodes:
         node_id = str(node_id)
         if node_id not in entity_ids:
             continue
         entity_type = type_of.get(node_id)
-        if (
+        if skip_protected and (
             entity_type in cfg["protect_node_types"]
             or props.get("type") in cfg["protect_node_types"]
         ):
@@ -265,6 +400,20 @@ async def detect_entity_duplicates(
 
     vectors = await vector_engine.embed_data([member["name"] for member in members])
     clusters = _cluster_entities(members, vectors, cfg)
+
+    if judge and clusters:
+        pairs = _cluster_pairs(clusters, int(cfg["judge_max_cluster_size"]))
+        confirmed = await _judge_pairs(pairs, cfg)
+        before = len(clusters)
+        clusters = _rebuild_clusters(clusters, confirmed)
+        logger.info(
+            "consolidate_entities judge: confirmed %d of %d candidate pair(s); "
+            "%d cluster(s) survive of %d.",
+            len(confirmed),
+            len(pairs),
+            len(clusters),
+            before,
+        )
 
     logger.info(
         "consolidate_entities: detected %d duplicate cluster(s) among %d entities.",
