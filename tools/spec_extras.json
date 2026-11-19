@@ -36,6 +36,7 @@
     "memify": "Endpoint for running enrichment pipelines over existing graphs or supplied data.",
     "ontologies": "Endpoints for uploading, listing, and deleting ontology files used during cognify.",
     "permissions": "Permission management for multi-user access control.",
+    "provenance": "Audit ledger endpoints for inspecting entity history, verifying hash chains and anchors, and exporting records.",
     "recall": "Endpoints for querying the knowledge graph and reviewing past recall history.",
     "remember": "Endpoints for ingesting data into the knowledge graph and storing session memory entries.",
     "responses": "Response generation endpoints using the knowledge graph.",
