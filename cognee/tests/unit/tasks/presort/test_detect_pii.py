@@ -131,3 +131,40 @@ async def test_llm_failure_is_swallowed(tmp_path):
     # Deterministic findings survive; the failure lands in record warnings.
     assert any(finding.source in ("filename", "content") for finding in findings)
     assert any("LLM PII assessment failed" in warning for warning in record.warnings)
+
+
+@pytest.mark.asyncio
+async def test_detect_pii_utf16_content(tmp_path):
+    # UTF-16 LE with BOM
+    bom_file = tmp_path / "notes_utf16_bom.txt"
+    bom_file.write_bytes("Reach Ada at ada@example.com or +1 555 123 4567.".encode("utf-16"))
+    bom_record = FileRecord(
+        path=str(bom_file),
+        name=bom_file.name,
+        extension="txt",
+        is_text=True,
+        size_bytes=bom_file.stat().st_size,
+    )
+
+    # UTF-16 LE without BOM
+    nobom_file = tmp_path / "notes_utf16_nobom.txt"
+    nobom_file.write_bytes(
+        "Card: 4111 1111 1111 1111, Token: sk-abcdefabcdefabcdef123456".encode("utf-16-le")
+    )
+    nobom_record = FileRecord(
+        path=str(nobom_file),
+        name=nobom_file.name,
+        extension="txt",
+        is_text=True,
+        size_bytes=nobom_file.stat().st_size,
+    )
+
+    findings = await detect_pii([bom_record, nobom_record])
+
+    bom_findings = [f for f in findings if f.path == str(bom_file)]
+    assert any(f.category == "email_address" for f in bom_findings)
+    assert any(f.category == "phone_number" for f in bom_findings)
+
+    nobom_findings = [f for f in findings if f.path == str(nobom_file)]
+    assert any(f.category == "payment_card" for f in nobom_findings)
+    assert any(f.category == "credential" for f in nobom_findings)

@@ -44,3 +44,15 @@ async def test_scan_without_subdirectories(messy_folder):
     names = {record.name for record in files}
     assert "notes.txt" in names
     assert "invoice_march.pdf" not in names
+
+
+@pytest.mark.asyncio
+async def test_scan_utf16_text_file(tmp_path):
+    utf16_file = tmp_path / "utf16_sample.txt"
+    utf16_file.write_bytes("This is a UTF-16 encoded text file.".encode("utf-16"))
+
+    files, _ = await scan_folder(tmp_path)
+    by_name = {record.name: record for record in files}
+
+    assert "utf16_sample.txt" in by_name
+    assert by_name["utf16_sample.txt"].is_text is True

@@ -20,6 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from cognee.infrastructure.files.utils.is_text_content import decode_text_content
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.pipeline_stage import caller_scope
 from cognee.infrastructure.llm.prompts import render_prompt
@@ -181,7 +182,7 @@ class PiiAssessment(BaseModel):
 def _read_sample(record: FileRecord, max_sample_bytes: int) -> str | None:
     try:
         with open(record.path, "rb") as file:
-            return file.read(max_sample_bytes).decode("utf-8", errors="replace")
+            return decode_text_content(file.read(max_sample_bytes))
     except OSError as error:
         record.warnings.append(f"could not read sample for PII scan: {error}")
         return None
