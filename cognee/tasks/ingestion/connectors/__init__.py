@@ -14,6 +14,7 @@ from .evernote import build_evernote_service, evernote_source
 from .gmail import build_gmail_service_from_access_token, gmail_source
 from .google_calendar import build_calendar_service_from_access_token, google_calendar_source
 from .google_drive import build_drive_service_from_access_token, google_drive_source
+from .hubspot import build_hubspot_service, hubspot_source
 from .linear import build_linear_service, linear_source
 from .notion import notion_source
 from .obsidian import obsidian_source
@@ -42,6 +43,8 @@ __all__ = [
     "gmail_source",
     "google_calendar_source",
     "google_drive_source",
+    "hubspot_source",
+    "build_hubspot_service",
     "linear_source",
     "list_onenote_notebooks",
     "notion_source",
