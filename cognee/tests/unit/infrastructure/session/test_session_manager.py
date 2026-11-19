@@ -312,8 +312,8 @@ class TestSessionManager:
             assert await wait_for_background_tasks(timeout=5)
 
         assert pending_spy.await_count == 2
-        
-    @pytest.mark.asyncio    
+
+    @pytest.mark.asyncio
     async def test_add_agent_trace_step_skips_extraction_in_coding_mode(
         self, sm, mock_cache, monkeypatch
     ):
