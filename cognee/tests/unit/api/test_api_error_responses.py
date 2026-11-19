@@ -421,19 +421,51 @@ class TestAddExistingDocument:
 
 
 class TestUpdateEndpoint:
-    def test_update_missing_file_returns_422_without_calling_update(self, client, monkeypatch):
-        import cognee.api.v1.update as update_pkg
-
-        update = AsyncMock()
-        monkeypatch.setattr(update_pkg, "update", update)
-
+    def test_update_without_file_or_node_set_returns_400(self, client):
+        """Nothing to update is refused by update() itself, before any work."""
         resp = client.patch(
             "/update",
             params={"data_id": str(uuid4()), "dataset_id": str(uuid4())},
         )
 
-        assert resp.status_code == 422
-        update.assert_not_awaited()
+        assert resp.status_code == 400
+        assert "UpdateRequestInvalidError" in resp.json()["detail"]
+
+    @pytest.mark.parametrize("multipart", [True, False])
+    @pytest.mark.parametrize(
+        ("form", "expected"),
+        [
+            ({"node_set": ["beta", "gamma"]}, ["beta", "gamma"]),
+            # A form cannot carry an empty list: the literal "[]" clears.
+            ({"node_set": "[]"}, []),
+        ],
+    )
+    def test_update_node_set_only_sends_no_data(self, client, form, expected, multipart):
+        import cognee.api.v1.update as update_pkg
+        from cognee.api.v1.update import UpdateResult
+
+        moved = UpdateResult(
+            status="metadata_updated",
+            data_id=uuid4(),
+            dataset_id=MOCK_DATASET_ID,
+            duration_seconds=0.1,
+        ).model_dump()
+        update_pkg.update = AsyncMock(return_value=moved)
+
+        resp = client.patch(
+            "/update",
+            params={"data_id": str(uuid4()), "dataset_id": str(uuid4())},
+            # A multipart body without a data part, as the remote client sends it,
+            # or a plain urlencoded form.
+            files={"unused": ("", b"")} if multipart else None,
+            data=form,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == UpdateResult.model_validate(moved).model_dump(mode="json")
+        kwargs = update_pkg.update.await_args.kwargs
+        assert kwargs["data"] is None
+        assert kwargs["node_set"] == expected
 
     def test_update_failed_result_returns_500_with_the_result_body(self, client):
         """A failed rebuild keeps the one result shape: the client reads the

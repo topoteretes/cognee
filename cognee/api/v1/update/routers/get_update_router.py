@@ -22,6 +22,19 @@ UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"}
 
 logger = get_logger()
 
+# The form value that clears the node set. A multipart form cannot send an empty
+# list, and a single empty field already means "keep" (it is what Swagger UI
+# sends for an untouched list field), so clearing gets a literal of its own.
+CLEAR_NODE_SET = "[]"
+
+
+def node_set_from_form(node_set: list[str] | None) -> list[str] | None:
+    """The node_set update() receives: None keeps, [] clears, a list replaces."""
+    names = [name for name in node_set or [] if name]
+    if names == [CLEAR_NODE_SET]:
+        return []
+    return names or None
+
 
 def get_update_router() -> APIRouter:
     router = APIRouter()
@@ -55,12 +68,13 @@ def get_update_router() -> APIRouter:
             description="UUID of the dataset containing the document to update.",
             examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
         ),
-        data: list[UploadFile] = File(
-            ...,
+        data: list[UploadFile] | None = File(
+            default=None,
             description=(
                 "New version of the document that replaces the existing one. With "
                 "chunk_level_diff enabled (default) only the chunks affected by the "
-                "edit are replaced; otherwise the document is deleted and re-ingested."
+                "edit are replaced; otherwise the document is deleted and re-ingested. "
+                "Omit it and send node_set to change only the document's node sets."
             ),
         ),
         node_set: list[str] | None = Form(
@@ -68,8 +82,10 @@ def get_update_router() -> APIRouter:
             examples=[["user_memories"]],
             description=(
                 "Node identifiers used to organize and filter data points in the graph. "
-                "Omit to keep the document's stored node set; passing one replaces it and "
-                "runs the full rebuild."
+                "Omit (or send empty) to keep the document's stored node set; passing one "
+                "replaces it. The single value `[]` clears it. With data the replacement "
+                "runs the full rebuild; without data it is applied in place, without "
+                "reprocessing."
             ),
         ),
         chunk_level_diff: bool = Query(
@@ -92,18 +108,21 @@ def get_update_router() -> APIRouter:
         ## Request Parameters
         - **data_id** (UUID, required, query): UUID of the existing document to update (returned by GET /api/v1/datasets/{dataset_id}/data)
         - **dataset_id** (UUID, required, query): UUID of the dataset containing the document to update
-        - **data** (List[UploadFile]): New version of the document that replaces the existing one.
+        - **data** (Optional[List[UploadFile]]): New version of the document that replaces the
+          existing one. Omit it to change only the document's node sets.
         - **node_set** (Optional[List[str]]): List of node identifiers used to organize and filter
-          data points in the knowledge graph. Not an access-control mechanism. Omitted keeps
-          the stored node set, label and metadata of the document (the update is a PATCH for
-          document metadata); passing it replaces the node set.
+          data points in the knowledge graph. Not an access-control mechanism. Omitted (or a
+          single empty field) keeps the stored node set, label and metadata of the document
+          (the update is a PATCH for document metadata); passing it replaces the node set,
+          and the single value `[]` clears it.
         - **chunk_level_diff** (bool, query, default true): Replace only the chunks affected
                  by the edit instead of re-ingesting the whole document.
 
         ## Response
         One body on every path (`UpdateResult`), a superset of the chunk-level summary
         returned before:
-        - **status**: `"incremental"` (chunks replaced), `"unchanged"` (no content change),
+        - **status**: `"incremental"` (chunks replaced), `"unchanged"` (no content change, or
+          node sets already as requested), `"metadata_updated"` (node sets replaced in place),
           `"full_rebuild"` (memory dropped and rebuilt from the new content) or `"failed"` (the rebuild's
           cognify run errored; `error` says why, and the call can be retried).
         - **regions**, **deleted_chunks**, **added_chunks**, **reused_chunks**,
@@ -120,15 +139,20 @@ def get_update_router() -> APIRouter:
         - **error**: `error_class` and `message` when `status` is `"failed"`.
 
         ## Error Codes
+        - **400 Bad Request**: neither data nor node_set was sent
         - **422 Unprocessable Entity**: data_id or dataset_id missing or not a valid UUID
         - **403 Forbidden**: User lacks write permission on the dataset
         - **404 Not Found**: data_id resolves to no document in the dataset
         - **500 Internal Server Error**: the rebuild's cognify run errored (body is the
           `UpdateResult` with status `"failed"`) or an unexpected error occurred
+        - **501 Not Implemented**: a node_set-only update on storage that cannot change
+          memberships in place (checked before anything is written)
 
         ## Notes
         - Chunk-level updates keep unaffected chunks, their entities, and their summaries
           untouched; only the edited region is re-extracted.
+        - A node_set-only update (no data) moves the document's existing memory to the new
+          node sets: no LLM call, no re-chunking, no re-embedding.
         """
         send_telemetry(
             "Update API Endpoint Invoked",
@@ -150,7 +174,7 @@ def get_update_router() -> APIRouter:
                 data=data,
                 dataset_id=dataset_id,
                 user=user,
-                node_set=node_set if node_set and node_set != [""] else None,
+                node_set=node_set_from_form(node_set),
                 chunk_level_diff=chunk_level_diff,
             )
 

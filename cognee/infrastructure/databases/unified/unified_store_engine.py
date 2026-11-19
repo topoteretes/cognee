@@ -9,6 +9,7 @@ from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBI
 
 from ..provenance.source_refs import get_data_id_from_source_ref_key
 from .capabilities import EngineCapability
+from .document_source_refs import find_document_source_refs
 from .graph_vector_store_interface import GraphVectorStoreInterface
 from .provenance_delete_planner import SourceRefRemovalResult, execute_source_ref_removal
 
@@ -171,32 +172,10 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
         """
         if not self.supports_graph_provenance_delete():
             raise UnsupportedProvenanceCapability()
-        from cognee.infrastructure.databases.provenance import parse_source_ref_key
-
         graph = self.graph
         vector = self.vector
 
-        def _document_refs(refs) -> list:
-            selected = []
-            for ref in refs:
-                try:
-                    parsed = parse_source_ref_key(ref)
-                except ValueError:
-                    continue
-                if str(parsed.data_id) == str(data_id):
-                    selected.append(ref)
-            return selected
-
-        refs_by_node = {
-            node_id: document_refs
-            for node_id, refs in (await graph.find_node_source_refs_by_dataset(dataset_id)).items()
-            if (document_refs := _document_refs(refs))
-        }
-        refs_by_edge = {
-            edge: document_refs
-            for edge, refs in (await graph.find_edge_source_refs_by_dataset(dataset_id)).items()
-            if (document_refs := _document_refs(refs))
-        }
+        refs_by_node, refs_by_edge = await find_document_source_refs(graph, dataset_id, data_id)
 
         node_data = await graph.get_node_delete_data(list(refs_by_node.keys()))
         edge_data = await graph.get_edge_delete_data(list(refs_by_edge.keys()))

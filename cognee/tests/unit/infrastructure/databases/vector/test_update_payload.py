@@ -105,6 +105,41 @@ async def test_lancedb_update_payload():
 
 
 @pytest.mark.asyncio
+async def test_lancedb_update_payload_updates_every_copy_of_a_duplicated_id():
+    """Two concurrent first writes of one shared node can store its id twice.
+
+    merge_insert refuses several source rows for one target, so a payload update
+    must send one row per id — and that row updates every stored copy.
+    """
+    import pyarrow
+
+    from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
+
+    embedder = CountingMockEmbedder()
+    with tempfile.TemporaryDirectory() as tmp:
+        engine = LanceDBAdapter(
+            url=str(Path(tmp) / "lance"), api_key=None, embedding_engine=embedder
+        )
+        collection_name = f"payload_dup_{uuid4().hex[:8]}"
+        point = PayloadPoint(text="shared entity", chunk_index=0)
+        await engine.create_collection(collection_name, payload_schema=PayloadPoint)
+        await engine.create_data_points(collection_name, [point])
+        collection = await engine.get_collection(collection_name)
+        stored = await collection.query().to_list()
+        await collection.add(pyarrow.Table.from_pylist(stored, schema=await collection.schema()))
+        assert len(await collection.query().to_list()) == 2
+        calls_before = embedder.calls
+
+        await engine.update_payload(collection_name, {str(point.id): {"chunk_index": 7}})
+
+        # A fresh handle: the one above still reads the table version it opened.
+        rows = await (await engine.get_collection(collection_name)).query().to_list()
+        assert [row["payload"]["chunk_index"] for row in rows] == [7, 7]
+        assert all(list(row["vector"]) == list(stored[0]["vector"]) for row in rows)
+        assert embedder.calls == calls_before
+
+
+@pytest.mark.asyncio
 @pytest.mark.skipif(not _port_open("localhost", 5432), reason="no local Postgres on 5432")
 async def test_pgvector_update_payload():
     # An open port is not enough: a machine can be running Postgres while

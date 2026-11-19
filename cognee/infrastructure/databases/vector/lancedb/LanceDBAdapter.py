@@ -1699,17 +1699,27 @@ class LanceDBAdapter(VectorDBInterface):
             rows = await collection.query().where(where_clause).to_list()
             if not rows:
                 return
-            records = []
+            # One source row per id: a table can hold the same id twice (two
+            # concurrent first writes of one shared node), and merge_insert
+            # refuses several source rows matching one target. The one row
+            # updates every stored copy of its id.
+            records = {}
             for row in rows:
+                if row["id"] in records:
+                    continue
                 payload = dict(row.get("payload") or {})
                 payload.update(payload_updates[str(row["id"])])
-                records.append({"id": row["id"], "vector": list(row["vector"]), "payload": payload})
+                records[row["id"]] = {
+                    "id": row["id"],
+                    "vector": list(row["vector"]),
+                    "payload": payload,
+                }
             # Build against the table's OWN arrow schema: plain dicts make
             # merge_insert re-infer types and choke on the fixed-size-list
             # vector column.
             import pyarrow
 
-            arrow_records = pyarrow.Table.from_pylist(records, schema=schema)
+            arrow_records = pyarrow.Table.from_pylist(list(records.values()), schema=schema)
             self._mark_written(collection_name)
             await collection.merge_insert("id").when_matched_update_all().execute(arrow_records)
 

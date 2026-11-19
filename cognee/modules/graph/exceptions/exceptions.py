@@ -1,6 +1,6 @@
 from fastapi import status
 
-from cognee.exceptions import CogneeValidationError
+from cognee.exceptions import CogneeConfigurationError, CogneeValidationError
 
 
 class EntityNotFoundError(CogneeValidationError):
@@ -46,4 +46,21 @@ class DimensionOutOfRangeError(CogneeValidationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         message = f"Dimension {dimension} is out of range. Valid range is 0 to {max_index}."
+        super().__init__(message, name, status_code)
+
+
+class NodeSetReassignmentNotSupportedError(CogneeConfigurationError):
+    """The document's storage cannot take a metadata-only node-set reassignment.
+
+    Raised before anything is written. Reassignment never falls back to
+    reprocessing the document: the caller decides whether a full ``update()``
+    with the content is worth its cost.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        name: str = "NodeSetReassignmentNotSupportedError",
+        status_code: int = status.HTTP_501_NOT_IMPLEMENTED,
+    ):
         super().__init__(message, name, status_code)

@@ -155,3 +155,22 @@ class DocumentSubgraphNotFoundError(CogneeValidationError):
         status_code: int = status.HTTP_404_NOT_FOUND,
     ):
         super().__init__(message, name, status_code)
+
+
+class UpdateRequestInvalidError(CogneeValidationError):
+    """update() was called with nothing to update.
+
+    A call replaces the document's content (``data``), its node sets
+    (``node_set`` with ``data=None``), or both; one of the two is required.
+    """
+
+    def __init__(
+        self,
+        message: str = (
+            "update() needs replacement data, a node_set, or both: pass data=None "
+            "with node_set=[...] to change only the document's node sets."
+        ),
+        name: str = "UpdateRequestInvalidError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)
