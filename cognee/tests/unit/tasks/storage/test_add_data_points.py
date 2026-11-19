@@ -294,6 +294,98 @@ async def test_add_data_points_with_single_datapoint(
     mock_index_nodes.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "replace_nodes, expected",
+    [
+        # Graph adapters outside this repository may not take ``replace``, so an
+        # ordinary write must not pass it at all.
+        pytest.param(False, {}, id="default"),
+        pytest.param(True, {"replace": True}, id="replace"),
+    ],
+)
+@pytest.mark.parametrize("ownership", [False, True], ids=["one-call", "per-row"])
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_replace_nodes_reaches_add_nodes_only_when_set(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    ownership,
+    replace_nodes,
+    expected,
+):
+    dp = SimplePoint(text="node")
+    mock_get_graph.side_effect = [([dp], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, _vector_engine = _make_unified_mock()
+    graph_engine.supports_per_row_source_refs = ownership
+    mock_get_unified.return_value = unified
+    # A provenance-marked graph whose batch has chunk owners takes the per-row write.
+    chunk_owners = SimpleNamespace(has_chunks=True, node_owners={}, edge_owners={})
+
+    with (
+        patch.object(adp_module, "mark_graph_provenance_if_empty", AsyncMock(return_value=True)),
+        patch.object(
+            adp_module,
+            "collect_chunk_ownership",
+            AsyncMock(
+                return_value=chunk_owners if ownership else SimpleNamespace(has_chunks=False)
+            ),
+        ),
+        patch.object(adp_module, "capture_graph_provenance", AsyncMock()),
+        patch.object(adp_module, "record_provenance_at_storage", AsyncMock()),
+    ):
+        await add_data_points([dp], ctx=_provenance_ctx(), replace_nodes=replace_nodes)
+
+    graph_engine.add_nodes.assert_awaited_once()
+    call = graph_engine.add_nodes.await_args
+    assert isinstance(call.kwargs["source_ref_key"], dict) is ownership
+    assert {key: call.kwargs[key] for key in call.kwargs if key == "replace"} == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "replace_nodes, expected",
+    [pytest.param(False, {}, id="default"), pytest.param(True, {"replace": True}, id="replace")],
+)
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_replace_nodes_reaches_the_hybrid_write_of_already_indexed_nodes(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    replace_nodes,
+    expected,
+):
+    from cognee.infrastructure.databases.unified.capabilities import EngineCapability
+
+    dp = SimplePoint(text="indexed")
+    mock_get_graph.side_effect = [([dp], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, _vector_engine = _make_unified_mock()
+    unified.has_capability = MagicMock(side_effect=lambda cap: cap == EngineCapability.HYBRID_WRITE)
+    mock_get_unified.return_value = unified
+
+    ctx = PipelineContext(extras={adp_module.SEARCH_INDEXED_IDS: {str(dp.id)}})
+
+    await add_data_points([dp], ctx=ctx, replace_nodes=replace_nodes)
+
+    graph_engine.add_nodes.assert_awaited_once()
+    call = graph_engine.add_nodes.await_args
+    assert {key: call.kwargs[key] for key in call.kwargs if key == "replace"} == expected
+
+
 class _AsyncCM:
     """Minimal async context manager yielding a fixed session."""
 

@@ -238,6 +238,8 @@ class GraphDBInterface(ABC):
         nodes: list[Node] | list[DataPoint],
         source_ref_key: str | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """
         Add multiple nodes to the graph in a single operation.
@@ -256,6 +258,11 @@ class GraphDBInterface(ABC):
               also receive a mapping of node id -> ref key here. (default None)
             - pipeline_run_id (Optional[str]): Run id recorded with the provenance stamp so
               the write is rollbackable by run. Ignored when source_ref_key is None. (default None)
+            - replace (bool): When True, every node that already exists is stored with the
+              incoming properties, even where the adapter would otherwise keep the stored
+              node. An adapter that always replaces may ignore it, but must accept it:
+              entity consolidation and the consolidate_entity_descriptions pipeline pass
+              it, and fail with TypeError on an adapter that does not. (default False)
         """
         raise NotImplementedError
 
