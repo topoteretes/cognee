@@ -34,7 +34,15 @@ async def get_specific_user_permission_datasets(
         # If there are requested datasets that user does not have access to raise error
         if len(search_datasets) != len(dataset_ids):
             raise PermissionDeniedError(
-                f"Request owner does not have necessary permission: [{permission_type}] for all datasets requested."
+                (
+                    f"Request owner does not have necessary permission: [{permission_type}] "
+                    "for all datasets requested. Grants on a deleted dataset are not "
+                    "restored when the same id is created again."
+                ),
+                remediation=(
+                    "Grant the permission again. If you cache grants, key the cache "
+                    "on the dataset id and its created_at, not the id alone."
+                ),
             )
     else:
         search_datasets = user_permission_access_datasets
@@ -43,8 +51,8 @@ async def get_specific_user_permission_datasets(
         # A user with zero datasets is a normal state (fresh install, heartbeat
         # recall before first ingestion) and get_readable_datasets converts this
         # raise into an empty list — log at DEBUG so it doesn't surface as a
-        # spurious ERROR on every such call. The line-36 raise above stays at
-        # ERROR: requesting specific unpermitted datasets is a real denial.
+        # spurious ERROR on every such call. The raise above stays at ERROR:
+        # requesting specific unpermitted datasets is a real denial.
         raise PermissionDeniedError(
             f"Request owner does not have permission: [{permission_type}] for any dataset.",
             log_level="DEBUG",
