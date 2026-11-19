@@ -1,4 +1,5 @@
-from unittest.mock import AsyncMock, patch
+import codecs
+from unittest.mock import AsyncMock, mock_open, patch
 
 import pytest
 
@@ -6,6 +7,7 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.tasks.presort.detect_pii import (
     PiiAssessment,
     PiiCategoryAssessment,
+    _read_sample,
     detect_pii,
     iban_valid,
     luhn_valid,
@@ -14,11 +16,12 @@ from cognee.tasks.presort.detect_pii import (
     scan_filename,
 )
 from cognee.tasks.presort.models import FileRecord
+from cognee.tasks.presort.scan_folder import scan_folder
 
 
 def _text_record(tmp_path, name: str, text: str) -> FileRecord:
     path = tmp_path / name
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     return FileRecord(
         path=str(path), name=name, extension=name.rsplit(".", 1)[-1], is_text=True, size_bytes=1
     )
@@ -83,6 +86,74 @@ async def test_detect_pii_deterministic(tmp_path):
 
     assert {finding.path for finding in findings} == {record.path}
     assert findings[0].category == "email_address"
+
+
+@pytest.mark.asyncio
+async def test_detect_pii_utf16_in_messy_folder(messy_folder):
+    files, _ = await scan_folder(messy_folder)
+    record = next(record for record in files if record.name == "contact_utf16.txt")
+
+    findings = await detect_pii(files, use_llm=False)
+
+    assert record.is_text
+    email = next(finding for finding in findings if finding.path == record.path)
+    assert email.category == "email_address"
+    assert email.source == "content"
+    assert email.redacted_sample == "j***@example.com"
+    assert "jane.doe@example.com" not in email.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "bom,encoding",
+    [
+        (b"", "utf-8"),
+        (codecs.BOM_UTF8, "utf-8"),
+        (codecs.BOM_UTF16_LE, "utf-16-le"),
+        (codecs.BOM_UTF16_BE, "utf-16-be"),
+        (codecs.BOM_UTF32_LE, "utf-32-le"),
+        (codecs.BOM_UTF32_BE, "utf-32-be"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_detect_pii_bom_encodings(tmp_path, bom, encoding):
+    text = "Contact: jane.doe@example.com\n"
+    (tmp_path / "contact.txt").write_bytes(bom + text.encode(encoding))
+    files, _ = await scan_folder(tmp_path)
+    record = files[0]
+
+    assert record.is_text
+    assert _read_sample(record, 65536) == text
+    findings = await detect_pii(files, use_llm=False)
+
+    assert {finding.category for finding in findings} == {"email_address"}
+    assert all(finding.source == "content" for finding in findings)
+    assert all(finding.redacted_sample == "j***@example.com" for finding in findings)
+    assert all("jane.doe@example.com" not in finding.model_dump_json() for finding in findings)
+
+
+@pytest.mark.parametrize(
+    "bom,encoding", [(codecs.BOM_UTF16_LE, "utf-16-le"), (codecs.BOM_UTF16_BE, "utf-16-be")]
+)
+@pytest.mark.asyncio
+async def test_detect_pii_odd_utf16_sample_limit(tmp_path, bom, encoding):
+    prefix = "jane.doe@example.com\n"
+    data = bom + (prefix + "X\nlater@example.com\n").encode(encoding)
+    (tmp_path / "contact.txt").write_bytes(data)
+    files, _ = await scan_folder(tmp_path)
+    record = files[0]
+    limit = len(bom + prefix.encode(encoding)) + 1  # cuts the next UTF-16 code unit
+
+    assert _read_sample(record, limit) == prefix + "\ufffd"
+    sample_file = mock_open(read_data=data)
+    with patch("cognee.tasks.presort.detect_pii.open", sample_file):
+        findings = await detect_pii(files, use_llm=False, max_sample_bytes=limit)
+    sample_file().read.assert_called_once_with(limit)
+
+    assert len(findings) == 1
+    assert findings[0].category == "email_address"
+    assert findings[0].detail == "1 email address(es)"
+    assert findings[0].redacted_sample == "j***@example.com"
+    assert not record.warnings
 
 
 @pytest.mark.asyncio
