@@ -563,11 +563,20 @@ def build_failure_candidates(
             room,
         )
         content = f"{key}{problem}{failed_with}{error_line}{arrow}{worked}"
+        # The observed failures and their fix, so the lesson clears the agent-profile
+        # evidence gate (``supported_project_candidate``) like an LLM lesson must.
+        evidence = _clip(
+            f"{group.tool} failed {len(group.failures)} times with "
+            f'"{group.error_text}"; fixed by: {render_fixes(group.fixes, repo_root)}',
+            MAX_CONTEXT_CONTENT_CHARS,
+        )
         candidates.append(
             (
                 failure.trace_id,
                 CandidateFailureLessonUpdate(
-                    content=content, confidence=FAILURE_CANDIDATE_CONFIDENCE
+                    content=content,
+                    confidence=FAILURE_CANDIDATE_CONFIDENCE,
+                    evidence=evidence,
                 ),
             )
         )
