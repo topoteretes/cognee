@@ -52,3 +52,6 @@ __all__ = [
     "telegram_source",
     "vercel_source",
 ]
+from .calendly import calendly_source
+
+__all__.append("calendly_source")
