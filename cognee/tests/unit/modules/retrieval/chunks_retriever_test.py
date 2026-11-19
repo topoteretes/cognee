@@ -56,6 +56,26 @@ async def test_get_context_success(mock_vector_engine):
 
 
 @pytest.mark.asyncio
+async def test_get_context_filters_by_source_document_name(mock_vector_engine):
+    retriever = ChunksRetriever(document_name=["doc_a"])
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
+    ):
+        await retriever.get_retrieved_objects("fruit")
+
+    mock_vector_engine.search.assert_awaited_once_with(
+        "DocumentChunk_text",
+        "fruit",
+        limit=5,
+        include_payload=True,
+        node_name=None,
+        node_name_filter_operator="OR",
+        document_name=["doc_a"],
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_completion_from_context_includes_score(mock_vector_engine):
     """Test that get_completion_from_context attaches each chunk's score to its payload."""
     mock_result1 = MagicMock()
