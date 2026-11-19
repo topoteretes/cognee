@@ -7,12 +7,35 @@ access here; emitters are pure and unit-testable.
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape, quoteattr
 
 Node = tuple[Any, dict[str, Any]]
 Edge = tuple[Any, Any, str, dict[str, Any]]
+
+# Characters outside the XML 1.0 Char production (W3C REC-xml-20081126):
+# Char ::= #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
+_ILLEGAL_XML_CHARS = re.compile(
+    r"[^\u0009\u000A\u000D\u0020-\uD7FF\uE000-\uFFFD\U00010000-\U0010FFFF]"
+)
+
+
+def _sanitize_xml(text: str) -> str:
+    """Strip characters that XML 1.0 forbids (control codes, surrogates, noncharacters)."""
+    return _ILLEGAL_XML_CHARS.sub("", text)
+
+
+def _xml_escape(value: Any) -> str:
+    """Sanitize XML 1.0 illegal characters and escape XML entities."""
+    return escape(_sanitize_xml(str(value)))
+
+
+def _xml_quoteattr(value: Any) -> str:
+    """Sanitize XML 1.0 illegal characters and quote attribute value."""
+    return quoteattr(_sanitize_xml(str(value)))
+
 
 # Properties that are internal bookkeeping rather than knowledge content.
 _SKIP_EDGE_KEYS = ("source_node_id", "target_node_id")
@@ -67,29 +90,33 @@ def write_graphml(nodes: list[Node], edges: list[Edge], destination: Path) -> No
     ]
     for key in node_keys:
         lines.append(
-            f'  <key id="n_{escape(key)}" for="node" attr.name={quoteattr(key)} attr.type="string"/>'
+            f'  <key id="n_{_xml_escape(key)}" for="node" attr.name={_xml_quoteattr(key)} attr.type="string"/>'
         )
     for key in edge_keys:
         lines.append(
-            f'  <key id="e_{escape(key)}" for="edge" attr.name={quoteattr(key)} attr.type="string"/>'
+            f'  <key id="e_{_xml_escape(key)}" for="edge" attr.name={_xml_quoteattr(key)} attr.type="string"/>'
         )
     lines.append('  <graph id="cognee" edgedefault="directed">')
 
     for node_id, properties in nodes:
-        lines.append(f"    <node id={quoteattr(str(node_id))}>")
+        lines.append(f"    <node id={_xml_quoteattr(node_id)}>")
         for key, value in (properties or {}).items():
             if value is None:
                 continue
-            lines.append(f'      <data key="n_{escape(key)}">{escape(str(_scalar(value)))}</data>')
+            lines.append(
+                f'      <data key="n_{_xml_escape(key)}">{_xml_escape(_scalar(value))}</data>'
+            )
         lines.append("    </node>")
 
     for source, target, relationship, properties in edges:
-        lines.append(f"    <edge source={quoteattr(str(source))} target={quoteattr(str(target))}>")
-        lines.append(f'      <data key="e_relationship_name">{escape(str(relationship))}</data>')
+        lines.append(f"    <edge source={_xml_quoteattr(source)} target={_xml_quoteattr(target)}>")
+        lines.append(f'      <data key="e_relationship_name">{_xml_escape(relationship)}</data>')
         for key, value in (properties or {}).items():
             if value is None or key in _SKIP_EDGE_KEYS or key == "relationship_name":
                 continue
-            lines.append(f'      <data key="e_{escape(key)}">{escape(str(_scalar(value)))}</data>')
+            lines.append(
+                f'      <data key="e_{_xml_escape(key)}">{_xml_escape(_scalar(value))}</data>'
+            )
         lines.append("    </edge>")
 
     lines.append("  </graph>")

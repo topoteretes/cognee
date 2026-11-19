@@ -691,6 +691,33 @@ class TestFormatEmitters:
         assert data["relationship_name"] == "lives_in"
         assert data["edge_text"] == "Alice lives in Berlin"
 
+    def test_graphml_handles_xml_forbidden_control_characters(self, tmp_path):
+        destination = tmp_path / "control_chars.graphml"
+        nodes = [
+            ("n\x001", {"prop\x08key": "page one\x0cpage two\x0bline three"}),
+            ("n2", {"text": "surrogate \ud800 test"}),
+        ]
+        edges = [
+            ("n\x001", "n2", "rel\x0cname", {"edge\x1fprop": "value\x01test"}),
+        ]
+        write_graphml(nodes, edges, destination)
+
+        # Must parse cleanly with standard ElementTree parser
+        root = ET.parse(destination).getroot()
+        namespace = "{http://graphml.graphdrawing.org/xmlns}"
+        graph = root.find(f"{namespace}graph")
+        assert len(graph.findall(f"{namespace}node")) == 2
+        assert len(graph.findall(f"{namespace}edge")) == 1
+
+        # Verify round-trip through networkx
+        import networkx as nx
+
+        g = nx.read_graphml(destination)
+        assert g.number_of_nodes() == 2
+        assert g.number_of_edges() == 1
+        assert g.nodes["n1"]["propkey"] == "page onepage twoline three"
+        assert g.nodes["n2"]["text"] == "surrogate  test"
+
     def test_cypher(self, tmp_path):
         destination = tmp_path / "graph.cypher"
         write_cypher(self.NODES, self.EDGES, destination)
