@@ -395,3 +395,37 @@ async def test_qa_capture_runs_no_trace_post_write(service, monkeypatch):
     await capture.remember_capture(**service.args)
 
     after.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_capture_returns_its_receipt_while_the_llm_batch_runs(service, monkeypatch):
+    import asyncio
+
+    import cognee.infrastructure.session.agent_context_extraction as ace
+    from cognee.infrastructure.background_tasks import wait_for_background_tasks
+    from cognee.infrastructure.session.session_manager import SessionManager
+
+    release = asyncio.Event()
+
+    async def slow_batch(**_):
+        await release.wait()
+        return []
+
+    live = AsyncMock(return_value=[])
+    batch = AsyncMock(side_effect=slow_batch)
+    monkeypatch.setattr(ace, "extract_live_agent_context", live)
+    monkeypatch.setattr(ace, "extract_pending_agent_context", batch)
+    monkeypatch.setattr(SessionManager, "is_auto_feedback_enabled", lambda self: True)
+    args = {**service.args, "entry": _error_trace()}
+
+    receipt = await asyncio.wait_for(capture.remember_capture(**args), timeout=5)
+
+    # The cheap steps ran before the receipt; the LLM batch is still running.
+    assert await _error_count(service) == 1
+    live.assert_awaited_once()
+    assert not release.is_set()
+    # A retry finds the receipt and starts nothing.
+    assert await capture.remember_capture(**args) == receipt
+    release.set()
+    assert await wait_for_background_tasks(timeout=5)
+    batch.assert_awaited_once()
