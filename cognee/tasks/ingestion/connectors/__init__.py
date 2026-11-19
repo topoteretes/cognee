@@ -52,3 +52,5 @@ __all__ = [
     "telegram_source",
     "vercel_source",
 ]
+from .intercom import intercom_source
+__all__.append("intercom_source")
