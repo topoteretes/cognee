@@ -8,6 +8,7 @@ backends (like S3) through the StorageManager abstraction.
 import asyncio
 import hashlib
 import logging
+import posixpath
 import zipfile
 from io import BytesIO
 
@@ -19,6 +20,31 @@ from cognee.infrastructure.files.storage.StorageManager import StorageManager
 from cognee.shared.utils import create_secure_ssl_context
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_cache_member_name(member_name: str) -> str | None:
+    """Normalized zip member name, or None when it would land outside the cache directory.
+
+    Zip member names are forward-slash separated by the zip spec; a backslash
+    is read as a separator the way the local storage backend normalizes one on
+    Windows. After normalization, an absolute name, a drive-qualified name, or
+    a name that climbs out through ``..`` cannot resolve beneath the directory
+    it is being joined to. For ``../sibling/file`` that destination is a
+    *sibling* cache directory, which the storage-root check in the local
+    backend still allows (it guards the whole root, not one cache), so the
+    containment decision has to be made here, before anything is written.
+    """
+    name = member_name.replace("\\", "/")
+    if posixpath.isabs(name):
+        return None
+    name = posixpath.normpath(name)
+    if name in ("", ".", "..") or name.startswith("../"):
+        return None
+    # Drive-qualified ("C:/..."): on Windows that is an absolute path on another
+    # volume, and nowhere is it a usable relative member name.
+    if len(name) > 1 and name[1] == ":":
+        return None
+    return name
 
 
 class StorageAwareCache:
@@ -214,15 +240,27 @@ class StorageAwareCache:
 
         # Extract files and store them using StorageManager
         with zipfile.ZipFile(zip_content, "r") as zip_file:
+            # Validate every member before writing anything, so a crafted
+            # archive is rejected whole instead of half-extracted.
+            member_names: list[tuple[zipfile.ZipInfo, str]] = []
             for file_info in zip_file.infolist():
+                member_name = _safe_cache_member_name(file_info.filename)
+                if member_name is None:
+                    raise ValueError(
+                        f"Refusing to extract zip member outside the cache directory: "
+                        f"{file_info.filename!r}"
+                    )
+                member_names.append((file_info, member_name))
+
+            for file_info, member_name in member_names:
                 if file_info.is_dir():
                     # Create directory
-                    dir_path = f"{cache_dir}/{file_info.filename}"
+                    dir_path = f"{cache_dir}/{member_name}"
                     await self.storage_manager.ensure_directory_exists(dir_path)
                 else:
                     # Extract and store file
                     file_data = zip_file.read(file_info.filename)
-                    file_path = f"{cache_dir}/{file_info.filename}"
+                    file_path = f"{cache_dir}/{member_name}"
                     await self.storage_manager.store(file_path, BytesIO(file_data), overwrite=True)
 
         # Write version info for future cache validation
