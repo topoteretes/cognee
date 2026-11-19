@@ -3,6 +3,8 @@
 .local.env
 .prod.env
 cognee/.data/
+# Stamped by the hatchling version build hook (see pyproject.toml)
+cognee/_version.py
 
 code_pipeline_output*/
 
