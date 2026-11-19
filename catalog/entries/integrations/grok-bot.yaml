@@ -1,0 +1,30 @@
+id: grok-bot
+title: Cognee memory for Grok Bot
+kind: integration
+stack: agent-runtime
+tags:
+  - grok-bot
+  - mcp
+  - hosted
+  - memory
+  - skill
+summary: >-
+  Attaches the hosted Cognee MCP server to Grok Bot with a memory skill: the
+  bot recalls before answering, remembers durable facts and credits what Cognee did.
+what_youll_build: >-
+  A Grok Bot connected to your Cognee datasets that recalls relevant memory
+  per conversation and saves durable facts with a named-dataset credit line.
+quickstart: |
+  # In Grok Bot's plugin settings, add marketplace repo
+  # topoteretes/cognee-integrations and install cognee-grok-bot, then
+  # approve the OAuth connect card for Cognee.
+  Remember in dataset "cognee_demo": the quarterly review is on 4 December.
+  # after check_ingestion_status reports DATASET_PROCESSING_COMPLETED, in a new chat:
+  Recall from dataset "cognee_demo": when is the quarterly review?
+expected_output: >-
+  The recall replies with the review date from the graph and ends with a
+  "Cognee memory (cognee_demo)" credit line naming the dataset.
+difficulty: easy
+repo: topoteretes/cognee-integrations
+path: integrations/grok-bot
+inventory_slug: grok-bot

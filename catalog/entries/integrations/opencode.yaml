@@ -1,0 +1,28 @@
+id: opencode
+title: Cognee memory plugin for OpenCode
+kind: integration
+stack: agent-runtime
+tags:
+  - opencode
+  - typescript
+  - npm
+  - plugin
+  - session-memory
+summary: >-
+  A native OpenCode plugin with per-turn recall, typed question/answer and
+  tool capture, and a durable outbox so captured memory survives restarts.
+what_youll_build: >-
+  OpenCode sessions that recall relevant memory on every user turn and store
+  QA pairs and allowed tool traces into Cognee under their own identity.
+quickstart: |
+  npx @cognee/cognee-opencode setup
+  export COGNEE_BASE_URL=http://localhost:8011
+  export COGNEE_API_KEY=your-cognee-api-key
+  npx @cognee/cognee-opencode health
+expected_output: >-
+  A healthy connection report from the plugin; after a few turns, recall adds
+  relevant memories from previous sessions to new sessions' system context.
+difficulty: medium
+repo: topoteretes/cognee-integrations
+path: integrations/opencode
+inventory_slug: opencode

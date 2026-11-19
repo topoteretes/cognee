@@ -1,0 +1,31 @@
+id: google-adk
+title: Cognee tools for Google ADK agents
+kind: integration
+stack: framework
+tags:
+  - google-adk
+  - adk
+  - gemini
+  - python
+  - tools
+summary: >-
+  Drop-in Google ADK tools for Cognee memory: store and retrieve knowledge
+  from a persistent base, optimized for ADK's long-running tool handling.
+what_youll_build: >-
+  A Google ADK agent whose remembered facts persist across runs and whose
+  search tool answers questions from the persisted knowledge.
+quickstart: |
+  pip install cognee-integration-google-adk
+  export LLM_API_KEY=your_openai_key
+  export GOOGLE_API_KEY=your_google_api_key
+  # in your ADK runner code:
+  from cognee_integration_google_adk import add_tool, search_tool
+  agent = Agent(model="gemini-2.5-flash", name="analyst", description="Analyst",
+                instruction="Analyst with a knowledge base.", tools=[add_tool, search_tool])
+expected_output: >-
+  The agent's remember tool stores the fact; a later run_debug asking about it
+  answers from the persisted knowledge base.
+difficulty: medium
+repo: topoteretes/cognee-integrations
+path: integrations/google-adk
+inventory_slug: google-adk

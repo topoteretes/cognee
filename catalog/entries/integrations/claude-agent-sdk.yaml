@@ -1,0 +1,30 @@
+id: claude-agent-sdk
+title: Cognee memory for Claude Agent SDK
+kind: integration
+stack: framework
+tags:
+  - claude-agent-sdk
+  - anthropic
+  - python
+  - mcp
+  - memory
+summary: >-
+  Lets Claude Agent SDK agents call Cognee's remember and recall MCP tools for
+  persistent storage and retrieval, with two-tier session/graph memory.
+what_youll_build: >-
+  A Claude Agent SDK agent wired to an MCP server of Cognee remember/recall
+  tools, persisting facts and context across agent instances.
+quickstart: |
+  pip install cognee-integration-claude
+  export LLM_API_KEY=your_openai_key
+  # in your async agent code:
+  server = create_sdk_mcp_server(name="cognee-tools", version="1.0.0", tools=cognee_tools())
+  options = ClaudeAgentOptions(mcp_servers={"tools": server},
+                              allowed_tools=["mcp__tools__remember", "mcp__tools__recall"])
+expected_output: >-
+  The agent calls mcp__tools__remember to store context and a later agent
+  instance answers from the same knowledge via mcp__tools__recall.
+difficulty: medium
+repo: topoteretes/cognee-integrations
+path: integrations/claude-agent-sdk
+inventory_slug: claude-agent-sdk
