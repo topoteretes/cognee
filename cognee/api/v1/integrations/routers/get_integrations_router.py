@@ -64,10 +64,15 @@ from cognee.modules.agents.registry import (
     register_agent_connection,
 )
 from cognee.modules.integrations.background import spawn_background
-from cognee.modules.integrations.base import OAuthIntegration
+from cognee.modules.integrations.base import (
+    OAuthIntegration,
+    ResourceParentError,
+    ResourceParentNotFoundError,
+)
 from cognee.modules.integrations.connect import complete_installation
 from cognee.modules.integrations.credentials import (
     REVOKED_BY_OWNER,
+    CredentialInactiveError,
     CrossUserConflictError,
     change_provider_metadata,
     get_active_credential_for_user,
@@ -1213,6 +1218,7 @@ def get_integrations_router():
     async def integration_resources(
         provider: str,
         account_id: str | None = None,
+        parent: str | None = None,
         user: User = Depends(get_authenticated_user),
     ) -> IntegrationResourceListDTO:
         """List selectable resources for a connected integration.
@@ -1231,6 +1237,10 @@ def get_integrations_router():
           /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
           An id that is not the caller's returns 404 and never falls back to another
           connection; a blank id returns 422.
+        - **parent** (Optional[str]): For a provider that lists its resources one level at a
+          time (Dropbox folders), the resource whose children to list; omitted means the top
+          level. A provider that lists everything at once, or a parent that is not a valid id,
+          answers 422; a parent the provider cannot find answers 404.
         """
         integration = _integration_or_404(provider)
         _outbound_http_or_503(provider)
@@ -1242,7 +1252,11 @@ def get_integrations_router():
         from cognee.modules.integrations.ingestion import RateLimitedError
 
         try:
-            resources = await integration.list_resources(credential)
+            resources = await integration.list_resources(credential, parent=parent)
+        except ResourceParentNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
+        except ResourceParentError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
         except RateLimitedError as error:
             # Never waited out inside the request: the client is told when to try again.
             raise HTTPException(
@@ -1279,6 +1293,29 @@ def get_integrations_router():
             ],
             selected=selected,
         )
+
+    async def _validate_selection_or_http_error(integration, credential, resource_ids):
+        """Ask the provider to check a selection, mapped like the listing route's errors.
+
+        A refused selection is 422 with the provider's message. A connection that is no
+        longer active is 404, as on the progress route; outbound HTTP switched off is 503;
+        any other provider failure (a refused token, the network, a 5xx) is 502 as when
+        listing resources, with a fixed message and the cause in the server log only.
+        """
+        provider = integration.provider
+        try:
+            await integration.validate_resource_selection(credential, resource_ids)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        except CredentialInactiveError:
+            raise HTTPException(status_code=404, detail=f"{provider} is not connected") from None
+        except OutboundHttpDisabledError as error:
+            raise HTTPException(status_code=503, detail=error.message) from None
+        except Exception:
+            logger.exception("Could not check the %s selection for its connection", provider)
+            raise HTTPException(
+                status_code=502, detail=f"Could not check the {provider} selection; try again"
+            ) from None
 
     @integrations_router.put("/{provider}/resources")
     @integrations_router.put("/{provider}/folders")
@@ -1338,6 +1375,7 @@ def get_integrations_router():
                     status_code=422,
                     detail=f"Not a {provider} resource id: {', '.join(invalid)}",
                 )
+            await _validate_selection_or_http_error(integration, credential, resource_ids)
         changed = False
 
         def select(current: dict) -> dict:

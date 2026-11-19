@@ -1,19 +1,19 @@
 """Slack request signature verification, on the core webhook verifier.
 
 Copied from cognee.modules.integrations.slack.verify_slack_signature (cognee dev,
-2026-10-27). The HMAC is now :class:`cognee_connectors_core.signatures.HmacVerifier`
+2026-11-12). The HMAC is now :class:`cognee_connectors_core.signatures.HmacVerifier`
 with the ``slack_v0`` scheme, the one ``CONNECTOR`` declares, so the hand-written
 Slack routes and a host serving the generic ``/events`` route verify deliveries the
 same way. The FastAPI dependency that sat next to the check lives in
 :mod:`cognee_connector_slack.cognee_host.verify_slack_signature`.
 
-Every inbound Slack payload — slash commands, Events API, interactivity — is
+Every inbound Slack payload — Events API, interactivity — is
 authenticated by an HMAC over ``v0:{timestamp}:{raw_body}`` keyed with the
 app's signing secret, compared against the ``X-Slack-Signature`` header
 (https://docs.slack.dev/authentication/verifying-requests-from-slack).
 
-The check MUST run over the raw request bytes, before any parsing: slash
-commands arrive form-encoded, and re-serializing a parsed dict changes key
+The check MUST run over the raw request bytes, before any parsing: interactive
+payloads arrive form-encoded, and re-serializing a parsed dict changes key
 order/escaping and breaks the HMAC. Handlers therefore take the verified raw
 body from the host's ``verify_slack_request`` dependency and parse it
 themselves instead of declaring parsed body parameters.

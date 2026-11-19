@@ -34,6 +34,11 @@ jobs:
         if: ${{ !cancelled() }}
         run: uv sync --extra dev
 
+      # The Hermes plugin is excluded: it came from topoteretes/cognee-integrations,
+      # where these rules did not apply, and catches broad exceptions on purpose so
+      # a memory failure never crashes the host agent. Each plugin that moves here
+      # is excluded by its own entry, not by a rule covering all of them.
+      #
       # Exception-handling rules are enforced without escape hatch: `--ignore-noqa`
       # makes a `# noqa` comment on these rules count as a finding, so a silent
       # `except Exception` has to be fixed (log with traceback, re-raise, or narrow
@@ -42,7 +47,7 @@ jobs:
       # Exception raise.
       - name: Ruff exception-handling rules (strict, noqa ignored)
         if: ${{ !cancelled() }}
-        run: uv run ruff check . --select BLE001,S110,S112,G201,TRY201,TRY002 --ignore-noqa
+        run: uv run ruff check . --select BLE001,S110,S112,G201,TRY201,TRY002 --ignore-noqa --extend-exclude cognee-integrations/integrations/hermes-agent
 
       - name: Ty type check
         if: ${{ !cancelled() }}

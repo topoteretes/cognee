@@ -32,6 +32,8 @@ def remote_graph_schema(graph_model: Any) -> dict | None:
     """The ``graph_model`` a remote remember or cognify sends: the model as the JSON
     schema the server rebuilds with ``graph_schema_to_graph_model``, typed ``Edge`` and
     ``FromIdentity`` fields included, or None for the server's default ``KnowledgeGraph``.
+    A schema dict is sent as the caller gave it: a class rebuilt from it would serialize
+    to a different document.
 
     A model the LLM extraction could not fill raises here, before anything is uploaded.
     """
@@ -40,6 +42,8 @@ def remote_graph_schema(graph_model: Any) -> dict | None:
 
     if graph_model is None or graph_model is KnowledgeGraph:
         return None
+    if isinstance(graph_model, dict):
+        return graph_model
     return graph_model_to_graph_schema(graph_model)
 
 

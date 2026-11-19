@@ -8,7 +8,7 @@ import threading
 from collections import Counter
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
 from sqlalchemy import URL, text
@@ -26,11 +26,13 @@ from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.dlt_row_data import DltRowData, DltRows
 from cognee.tasks.ingestion.dlt_utils import (
     DOCUMENT_COLUMN_HINTS,
+    FORGET_TABLE_ATTR,
     NODE_SET_COLUMN,
     STRUCTURE_COLUMN,
     UNSCOPED_PIPELINE_NAME,
     apply_dlt_runtime_defaults,
     document_source_tag,
+    pipeline_name_for_scope,
     pipeline_name_for_source,
 )
 from cognee.tasks.ingestion.exceptions.exceptions import (
@@ -265,6 +267,26 @@ async def ingest_dlt_source(
             raise DLTIngestionError(
                 message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
             ) from e
+        forgotten = getattr(dlt_source, FORGET_TABLE_ATTR, None)
+        if forgotten:
+            scope = forgotten.removeprefix(f"{original_dataset_name}.")
+            owner_name = pipeline_name_for_scope(scope, original_dataset_name)
+            try:
+                async with AsyncExitStack() as stack:
+                    if owner_name != pipeline_name:
+                        # <dataset>.<table> loads a pipeline of its own; the bare table's
+                        # pipeline may be loading it right now. The dataset lock is already
+                        # held, so only the pipeline's is taken, in the documented order.
+                        await stack.enter_async_context(_staging_lock(f"pipeline:{owner_name}"))
+                    await asyncio.to_thread(
+                        _purge_forgotten_table, pipeline, owner_name, destination, scope
+                    )
+            except Exception as e:
+                raise DLTIngestionError(
+                    message=f"Table '{forgotten}' was emptied but its staging copy or state "
+                    f"could not be deleted for dataset '{original_dataset_name}'; "
+                    f"forget it again: {e}"
+                ) from e
         key_hints = _dlt_key_hints(_source_tables(pipeline, dlt_source))
 
         # An incremental source can emit no rows (or only update its cursor),
@@ -339,6 +361,90 @@ async def ingest_dlt_source(
         ) from e
 
     return DltRows(row_data_list, loaded_tables=filtered_schema)
+
+
+def _purge_forgotten_table(pipeline, owner_name: str, destination, scope: str) -> None:
+    """Empty a forgotten table everywhere dlt keeps its text, and reset its state.
+
+    That is its rows and nested tables in the dataset and in ``<dataset>_staging`` (a merge
+    load never truncates it), and the ``_dlt_pipeline_state`` rows of its pipeline. Cloud
+    spells the table ``<dataset>.<table>``, which loads a pipeline of its own: the bare
+    table's pipeline (``owner_name``, named by the raw ``scope``) then supplies the nested
+    tables, restored from the destination when this process has no copy of it, and loses its
+    cursor and state.
+    """
+    import dlt
+    from dlt.common.schema.utils import get_nested_tables
+
+    owner = pipeline
+    if owner_name != pipeline.pipeline_name:
+        owner = dlt.pipeline(
+            pipeline_name=owner_name,
+            destination=destination,
+            dataset_name=pipeline.dataset_name,
+        )
+
+        # The owner never loaded the empty table, so give it the cleared state row itself:
+        # a worker with its own copy of the owner's directory restores only a newer row.
+        # ``run`` restores the owner from the destination first, which is also what supplies
+        # its schema on a pod without a local copy.
+        @dlt.resource(name=scope, write_disposition="replace")
+        def cleared():
+            dlt.current.resource_state().clear()
+            yield []
+
+        owner.run(cleared())
+    table = pipeline.default_schema.naming.normalize_table_identifier(scope)
+    nested = get_nested_tables(owner.default_schema.tables, table) if owner.schema_names else []
+    tables = [t["name"] for t in nested] or [table]
+
+    with pipeline.sql_client() as client:
+        _empty_tables(client, tables)
+        with client.with_staging_dataset():
+            _empty_tables(client, tables)
+        _delete_state_rows(client, {pipeline.pipeline_name, owner_name})
+
+
+def _empty_tables(client, tables: list[str]) -> None:
+    present = [table for table in tables if _table_exists(client, table)]
+    if present:
+        client.truncate_tables(*present)
+
+
+def _delete_state_rows(client, pipeline_names: set[str]) -> None:
+    """Delete the state rows that may hold text; dlt has no API for it.
+
+    dlt keeps a state row per state-changing load and restores from the destination the row of
+    the highest load id (``get_stored_state``), and only one at least as new as a worker's local
+    copy. Each pipeline therefore keeps that row, the cleared state its last load wrote: a worker
+    with its own pipeline directory must find it, or it keeps its old cursor and the re-selected
+    table stays empty.
+    """
+    if not _table_exists(client, "_dlt_pipeline_state"):
+        return
+    state = client.make_qualified_table_name("_dlt_pipeline_state")
+    for name in sorted(pipeline_names):
+        rows = client.execute_sql(
+            f"SELECT _dlt_load_id FROM {state} WHERE pipeline_name = %s "
+            "ORDER BY _dlt_load_id DESC LIMIT 1",
+            name,
+        )
+        if rows:
+            client.execute_sql(
+                f"DELETE FROM {state} WHERE pipeline_name = %s AND _dlt_load_id <> %s",
+                name,
+                rows[0][0],
+            )
+
+
+def _table_exists(client, table: str) -> bool:
+    from dlt.destinations.exceptions import DatabaseUndefinedRelation
+
+    try:
+        client.execute_sql(f"SELECT 1 FROM {client.make_qualified_table_name(table)} LIMIT 1")
+    except DatabaseUndefinedRelation:
+        return False
+    return True
 
 
 async def _extract_dlt_schema(

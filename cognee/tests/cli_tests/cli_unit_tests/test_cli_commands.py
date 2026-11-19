@@ -397,8 +397,8 @@ class TestCognifyCommand:
         assert "background" in actions
         assert "verbose" in actions
 
-        # Check default values
-        assert actions["chunker"].default == "TextChunker"
+        # No --chunker: the DEFAULT_CHUNKER setting decides, not the CLI.
+        assert actions["chunker"].default is None
 
     @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
@@ -434,6 +434,26 @@ class TestCognifyCommand:
             chunks_per_batch=None,
             dry_run=False,
         )
+
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_without_chunker_leaves_it_to_the_default(self, mock_asyncio_run, _mock):
+        """No --chunker passes chunker=None, so cognify() uses DEFAULT_CHUNKER."""
+        mock_cognee = MagicMock()
+        mock_cognee.cognify = AsyncMock(return_value="success")
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            args = argparse.Namespace(
+                datasets=None,
+                chunk_size=None,
+                ontology_file=None,
+                chunker=None,
+                background=False,
+                verbose=False,
+            )
+            CognifyCommand().execute(args)
+
+        assert mock_cognee.cognify.await_args.kwargs["chunker"] is None
 
     @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)

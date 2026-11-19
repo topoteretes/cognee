@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from cognee.modules.integrations.base import refuse_parent
 from cognee.modules.integrations.gmail import client as gmail_client
 from cognee.modules.integrations.gmail.gmail_settings import (
     GoogleGmailSettings,
@@ -26,7 +27,10 @@ class GoogleGmailIntegration(GoogleOAuthIntegration):
 
         await sync_gmail(credential)
 
-    async def list_resources(self, credential: IntegrationCredential) -> list[dict[str, Any]]:
+    async def list_resources(
+        self, credential: IntegrationCredential, *, parent: str | None = None
+    ) -> list[dict[str, Any]]:
+        refuse_parent(self.provider, parent)
         token = await access_token_for(credential)
         labels = await gmail_client.list_labels(token)
         return [

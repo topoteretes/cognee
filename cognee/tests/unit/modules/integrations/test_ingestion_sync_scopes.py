@@ -161,6 +161,72 @@ async def test_a_rate_limit_error_is_recorded_as_one_whatever_its_text(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_a_failure_the_source_already_counted_is_counted_once(remember):
+    """Dropbox counts an account mismatch in its own stats before raising; the loop must not
+    add the classified key on top, or one refusal reads as two."""
+    from cognee.modules.integrations.dropbox.sync import _classify_error
+    from cognee.tasks.ingestion.connectors.dropbox import (
+        DropboxAccountMismatchError,
+        _iter_rows,
+        _Session,
+        dropbox_source,
+    )
+    from cognee.tests.unit.tasks.connectors.fake_dropbox import FakeDropbox
+
+    fake = FakeDropbox()
+    fake.account = "dbid:another-account"
+
+    def make_source(scope, name, check_active):
+        return dropbox_source(
+            folder_id="",
+            account_id="dbid:AAAfakeaccount",
+            resource_name=name,
+            service=fake.client(),
+        )
+
+    async def run_the_source(source, **_kwargs):
+        # What remember() does with the resource, reduced to its walk; dlt wraps what it raises.
+        try:
+            list(
+                _iter_rows(
+                    _Session(fake.client(), None),
+                    folder_id="",
+                    account_id="dbid:AAAfakeaccount",
+                    state={},
+                    stats=source.cognee_sync_stats,
+                    max_bytes=None,
+                )
+            )
+        except DropboxAccountMismatchError as error:
+            raise RuntimeError("pipeline step failed") from error
+
+    remember.side_effect = run_the_source
+    counts = {"scanned": 0, "skipped": 0, "failed": 0}
+
+    await ingestion.sync_scopes(
+        "dropbox",
+        CREDENTIAL,
+        counts,
+        scopes=[""],
+        dataset_name="dropbox_acme",
+        make_source=make_source,
+        classify_error=_classify_error,
+    )
+
+    assert counts["failed"] == 1 and counts["failed_account"] == 1
+    assert counts.get("failed_auth", 0) == 0 and "failed_ingestion" not in counts
+
+
+@pytest.mark.asyncio
+async def test_a_failure_the_source_did_not_count_is_still_counted(remember):
+    remember.side_effect = RuntimeError("boom")
+
+    _, counts, _ = await _run(["t1"])
+
+    assert counts["failed"] == 1 and counts["failed_ingestion"] == 1
+
+
+@pytest.mark.asyncio
 async def test_a_failing_scope_is_logged_by_its_resource_name_not_its_id(remember, caplog):
     """A scope can be a channel or folder id; the hashed resource name names it in the log."""
     remember.side_effect = RuntimeError("boom")
@@ -229,3 +295,62 @@ async def test_a_failure_followed_by_a_rerun_keeps_its_traceback_in_the_log(monk
 def test_a_rate_limit_carries_the_wait_the_provider_named():
     assert ingestion.RateLimitedError("slow down", retry_after=30).retry_after == 30
     assert ingestion.RateLimitedError("slow down").retry_after is None
+
+
+@pytest.mark.parametrize("failure", ["api", "folder_not_found"])
+@pytest.mark.asyncio
+async def test_a_listing_failure_is_counted_once_with_a_reason(remember, failure):
+    from cognee.modules.integrations.dropbox.sync import _classify_error
+    from cognee.tasks.ingestion.connectors.dropbox import (
+        DropboxError,
+        _iter_rows,
+        _Session,
+        dropbox_source,
+    )
+    from cognee.tests.unit.tasks.connectors.fake_dropbox import ACCOUNT, FakeDropbox
+
+    fake = FakeDropbox()
+    folder = "id:never-listed"
+    if failure == "api":
+        folder = fake.mkdir("/Notes")
+        fake.queued["files/list_folder"] = [(403, {})]
+
+    def make_source(scope, name, check_active):
+        return dropbox_source(
+            folder_id=folder, account_id=ACCOUNT, resource_name=name, service=fake.client()
+        )
+
+    async def run_the_source(source, **_kwargs):
+        try:
+            list(
+                _iter_rows(
+                    _Session(fake.client(), None),
+                    folder_id=folder,
+                    account_id=ACCOUNT,
+                    state={},
+                    stats=source.cognee_sync_stats,
+                    max_bytes=None,
+                )
+            )
+        except DropboxError as error:
+            raise RuntimeError("pipeline step failed") from error
+
+    remember.side_effect = run_the_source
+    counts = {"scanned": 0, "skipped": 0, "failed": 0}
+
+    await ingestion.sync_scopes(
+        "dropbox",
+        CREDENTIAL,
+        counts,
+        scopes=[folder],
+        dataset_name="dropbox_acme",
+        make_source=make_source,
+        classify_error=_classify_error,
+    )
+
+    assert counts["failed"] == 1
+    reasons = {k: v for k, v in counts.items() if k.startswith("failed_") and v}
+    # A folder never listed that Dropbox does not find holds no data: it has its own key,
+    # which never blocks retiring deselected folders.
+    expected = "failed_listing" if failure == "api" else "failed_folder_not_found"
+    assert reasons == {expected: 1}
