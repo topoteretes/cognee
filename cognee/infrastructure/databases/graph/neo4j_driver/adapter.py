@@ -61,12 +61,11 @@ BASE_LABEL = "__Node__"
 # Graph provenance (COG-5522)
 #
 # The four provenance fields live in NATIVE list properties on the node /
-# relationship (Neo4j's graph-native analogue of the Postgres varchar[] columns;
-# no delimiter encoding like Ladybug/Kuzu needs). Every read normalizes a missing
-# property to []. Provenance is storage-internal, so it is stripped out of the
-# domain node/edge dicts returned to retrieval and DataPoint reconstruction —
-# the same hygiene Postgres/Ladybug get for free by holding provenance in
-# dedicated columns rather than the property blob.
+# relationship (no delimiter encoding like Ladybug/Kuzu needs). Every read
+# normalizes a missing property to []. Provenance is storage-internal, so it is
+# stripped out of the domain node/edge dicts returned to retrieval and DataPoint
+# reconstruction — the same hygiene Postgres/Ladybug get for free by holding
+# provenance outside the property blob.
 # ------------------------------------------------------------------
 PROVENANCE_COLUMNS = (
     "source_ref_keys",
@@ -351,6 +350,8 @@ class Neo4jAdapter(GraphDBInterface):
         nodes: list[DataPoint],
         source_ref_key: str | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """
         Add multiple nodes to the database in a single query.
@@ -360,6 +361,7 @@ class Neo4jAdapter(GraphDBInterface):
 
             - nodes (list[DataPoint]): A list of DataPoint instances representing the nodes to
               add.
+            - replace (bool): Ignored: every write stores the incoming properties.
 
         Returns:
         --------
