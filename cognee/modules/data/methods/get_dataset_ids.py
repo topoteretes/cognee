@@ -2,6 +2,7 @@ from uuid import UUID
 
 from cognee.modules.data.exceptions import DatasetNotFoundError, DatasetTypeError
 from cognee.modules.data.methods import get_datasets
+from cognee.modules.data.methods.normalize_dataset_name import normalize_dataset_name
 
 
 async def get_dataset_ids(datasets: list[str] | list[UUID], user, strict: bool = False):
@@ -26,6 +27,8 @@ async def get_dataset_ids(datasets: list[str] | list[UUID], user, strict: bool =
     else:
         # Convert list of dataset names to dataset UUID
         if all(isinstance(dataset, str) for dataset in datasets):
+            # Names are stored normalized (no spaces or dots), so look them up the same way.
+            datasets = [normalize_dataset_name(dataset) for dataset in datasets]
             # Get all user owned dataset objects (If a user wants to write to a dataset he is not the owner of it must be provided through UUID.)
             user_datasets = await get_datasets(user.id)
             # Filter out non name mentioned datasets
