@@ -43,6 +43,7 @@ from .api.v1.cognify import cognify
 from .api.v1.memify import memify  # deprecated (SDK-1115), removed in the next release
 from .modules.run_custom_pipeline import run_custom_pipeline
 from .api.v1.update import update
+from .api.v1.change_node_set import change_node_set
 from .api.v1.config.config import config
 from .api.v1.datasets.datasets import datasets
 from .api.v1.agents.agents import agents
