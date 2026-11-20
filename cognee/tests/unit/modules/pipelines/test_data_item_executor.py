@@ -524,6 +524,33 @@ async def test_an_executor_must_answer_for_every_item_exactly_once(
 
 
 @pytest.mark.asyncio
+async def test_two_items_stored_as_one_row_are_each_answered_for_once(monkeypatch, runner_plumbing):
+    """An item that is no data row is named after the row its tasks stored it as,
+    and the same text twice is stored as one row. Two entries then name that
+    row, and each of the two items was still answered for once."""
+    dataset, logs, _ = _setup(monkeypatch, runner_plumbing)
+    stored_as = uuid4()
+    set_data_item_executor(
+        _AnsweringExecutor(
+            lambda items: [
+                ItemOutcome(status=COMPLETED, index=at, data_id=stored_as)
+                for at in range(len(items))
+            ]
+        )
+    )
+
+    await _drive(
+        dataset,
+        _PortableResolver(),
+        ["the same text", "the same text"],
+        incremental_loading=False,
+    )
+
+    assert logs.complete.await_count == 1
+    assert logs.error.await_count == 0
+
+
+@pytest.mark.asyncio
 async def test_a_budget_rejection_in_another_process_is_raised_as_the_typed_error(
     monkeypatch, runner_plumbing
 ):
