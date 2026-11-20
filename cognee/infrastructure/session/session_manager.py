@@ -2,7 +2,12 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from cognee.context_global_variables import current_dataset_id, session_user
+from cognee.context_global_variables import (
+    current_dataset_id,
+    read_only_dataset_context,
+    session_dataset_id,
+    session_user,
+)
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.config import CacheConfig
@@ -101,7 +106,12 @@ class SessionManager:
         self._cache = cache_engine
         self.default_session_id = default_session_id
         self.session_history_last_n = session_history_last_n
-        resolved_dataset_id = dataset_id if dataset_id is not None else current_dataset_id.get()
+        if dataset_id is not None:
+            resolved_dataset_id = dataset_id
+        elif read_only_dataset_context.get():
+            resolved_dataset_id = session_dataset_id.get()
+        else:
+            resolved_dataset_id = current_dataset_id.get()
         self.dataset_id = self._normalize_dataset_id(resolved_dataset_id)
 
     @staticmethod
