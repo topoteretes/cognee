@@ -430,12 +430,11 @@ async def extract_pending_agent_context(
             )
             return []
         total = plan.total_trace_count
+        # Read the whole session and slice by position: trace writes take no lock, so
+        # traces appended after the plan would shift a tail read (last_n) forward.
         traces = await session_manager.get_agent_trace_session(
-            user_id=user_id,
-            session_id=session_id,
-            last_n=total - plan.processed_count + overlap,
+            user_id=user_id, session_id=session_id
         )
-        first = total - len(traces)  # session position of traces[0]
         touched: list[str] = []
         # A backlog larger than one window (calls that failed for several intervals)
         # is walked oldest first, sealing each window, so no trace is skipped.
@@ -446,7 +445,7 @@ async def extract_pending_agent_context(
                 session_manager=session_manager,
                 user_id=user_id,
                 session_id=session_id,
-                traces=traces[max(0, context_start - first) : end - first],
+                traces=traces[context_start:end],
             )
             await TRACE_EXTRACTION_WATERMARK.write_count(
                 session_manager, user_id, session_id, count=end

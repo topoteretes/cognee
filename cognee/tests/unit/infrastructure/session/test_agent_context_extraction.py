@@ -403,7 +403,6 @@ async def test_pending_extraction_runs_at_interval_and_sets_watermark(monkeypatc
     )
 
     assert len(touched) == 1
-    assert sm.trace_session_last_n_calls == [4]
     state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
     assert state["processed_trace_count"] == 3
 
@@ -427,7 +426,6 @@ async def test_pending_extraction_can_flush_below_interval(monkeypatch):
     )
 
     assert len(touched) == 1
-    assert sm.trace_session_last_n_calls == [3]
     state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
     assert state["processed_trace_count"] == 2
 
@@ -444,7 +442,7 @@ async def test_pending_extraction_uses_overlap_after_watermark(monkeypatch):
     )
 
     assert touched == []
-    assert sm.trace_session_last_n_calls == [5]
+    assert "step-7 " not in captured["text_input"]
     assert "step-8" in captured["text_input"]
     assert "step-12" in captured["text_input"]
     state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
@@ -540,8 +538,7 @@ async def test_the_window_after_a_failed_one_covers_its_traces(monkeypatch):
     await _write_traces(sm, 10)
 
     assert len(calls) == 1
-    assert sm.trace_session_last_n_calls[-1] == 23  # 20 not extracted + the overlap of 3
-    assert "step-0 " in calls[0]
+    assert "step-0 " in calls[0] and "step-19 " in calls[0]
     assert await TRACE_EXTRACTION_WATERMARK.read_count(sm, USER_ID, "s") == 20
 
 
@@ -749,6 +746,30 @@ async def test_a_backlog_above_the_window_is_extracted_oldest_first(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_traces_written_after_the_plan_wait_for_the_next_window(monkeypatch):
+    # Trace writes take no lock, so traces can land between the plan and the read.
+    # The window must still cover exactly the planned traces, oldest first.
+    calls = _count_llm_calls(monkeypatch)
+    sm = FakeSessionManager(traces=[_trace(f"step-{i}") for i in range(20)])
+    await TRACE_EXTRACTION_WATERMARK.write_count(sm, USER_ID, "s", count=10)
+    read_traces = sm.get_agent_trace_session
+
+    async def append_then_read(**kwargs):
+        sm.traces.extend(_trace(f"late-{i}") for i in range(3))
+        return await read_traces(**kwargs)
+
+    sm.get_agent_trace_session = append_then_read
+
+    await extract_pending_agent_context(
+        session_manager=sm, user_id=USER_ID, session_id="s", automatic=False
+    )
+
+    assert all(f"step-{i} " in calls[0] for i in range(10, 20))
+    assert "late-" not in calls[0]
+    assert await TRACE_EXTRACTION_WATERMARK.read_count(sm, USER_ID, "s") == 20
+
+
+@pytest.mark.asyncio
 async def test_an_admission_that_writes_a_trace_to_the_session_finishes(monkeypatch):
     # A host check that records its own decision as a trace in the same session
     # runs that trace's extraction; it must not wait on a lock its caller holds.
@@ -803,14 +824,16 @@ async def test_pending_extraction_reads_and_writes_through_the_shared_helper(mon
 
     sm = FakeSessionManager(traces=[_trace(f"step-{index}") for index in range(5)])
     sm.store.append(_state_row(3))
-    _patch_llm(monkeypatch, lessons=[])
+    captured = {}
+    _patch_llm(monkeypatch, lessons=[], captured=captured)
 
     await extract_pending_agent_context(
         session_manager=sm, user_id="u", session_id="s", min_new_traces=1, overlap=0
     )
 
-    # 5 total - 3 processed = 2 pending, read with no overlap.
-    assert sm.trace_session_last_n_calls == [2]
+    # 5 total - 3 processed = 2 pending, sent with no overlap.
+    assert "step-2 " not in captured["text_input"]
+    assert "step-3 " in captured["text_input"] and "step-4 " in captured["text_input"]
     assert await TRACE_EXTRACTION_WATERMARK.read_count(sm, "u", "s") == 5
     # Still exactly one state row, updated in place.
     assert len([row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND]) == 1
