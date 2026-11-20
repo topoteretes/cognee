@@ -454,6 +454,7 @@ async def test_the_adapter_describes_teams_for_the_generic_picker_and_names_its_
 async def test_install_and_manual_sync_both_start_a_full_sync(monkeypatch):
     request = AsyncMock()
     monkeypatch.setattr(adapter_module, "request_sync", request)
+    monkeypatch.setattr(adapter_module, "sync_is_paused", AsyncMock(return_value=False))
     integration = adapter_module.LinearIntegration()
     credential = _credential()
 
@@ -461,6 +462,17 @@ async def test_install_and_manual_sync_both_start_a_full_sync(monkeypatch):
     await integration.sync_now(credential)
 
     assert [call.args for call in request.await_args_list] == [(credential,), (credential,)]
+
+
+@pytest.mark.asyncio
+async def test_the_install_sync_of_a_paused_connection_does_not_start(monkeypatch):
+    request = AsyncMock()
+    monkeypatch.setattr(adapter_module, "request_sync", request)
+    monkeypatch.setattr(adapter_module, "sync_is_paused", AsyncMock(return_value=True))
+
+    await adapter_module.LinearIntegration().on_installed(_credential())
+
+    request.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -485,7 +497,7 @@ class _FakeClient:
         self.rate_limit = {"requests": 4000, "complexity": 1_000_000}
         type(self).tokens.append(token)
 
-    def execute(self, query, variables=None):
+    def execute(self, query, variables=None, **_):
         if type(self).tokens == ["old"]:
             raise source_module.LinearAuthError("rejected")
         return {"token": self.token}

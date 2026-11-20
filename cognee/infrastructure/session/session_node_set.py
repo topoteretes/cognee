@@ -52,7 +52,11 @@ SESSION_NODE_SET_STATE_KIND = "session_node_set_state"
 
 
 class SessionNodeSetConflictError(CogneeApiError):
-    """The session already carries a different ``node_set``."""
+    """The session already carries a different ``node_set``.
+
+    ``error_code`` (``session_node_set_conflict``) reaches HTTP clients as the 409's
+    ``code``, so a client can tell this permanent refusal from a retryable 409.
+    """
 
     def __init__(self, pinned: tuple[str, ...], requested: list[str]):
         super().__init__(
@@ -64,6 +68,7 @@ class SessionNodeSetConflictError(CogneeApiError):
             status_code=status.HTTP_409_CONFLICT,
             log=False,
         )
+        self.error_code = "session_node_set_conflict"
 
 
 class SessionNodeSetUnavailableError(CogneeTransientError):

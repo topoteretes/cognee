@@ -330,3 +330,59 @@ async def test_lookup_excludes_evidence_whose_document_was_deleted(monkeypatch):
 
     assert await lookup.get_edge_evidence_records([edge_id], dataset_id) == []
     await sql_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_edge_support_reports_kind_and_highest_confidence_of_active_rows(monkeypatch):
+    sql_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(sql_engine, expire_on_commit=False)
+    async with sql_engine.begin() as connection:
+        for table in (PipelineRun.__table__, ProvenanceEdgeEvidence.__table__):
+            await connection.run_sync(
+                lambda sync_connection, table=table: table.create(sync_connection)
+            )
+    monkeypatch.setattr(
+        lookup, "get_relational_engine", lambda: SimpleNamespace(get_async_session=session_factory)
+    )
+    dataset_id, edge_id = uuid4(), uuid4()
+    completed_run_id, failed_run_id = uuid4(), uuid4()
+    extracted_chunk, structural_chunk, failed_chunk = uuid4(), uuid4(), uuid4()
+    rows = (
+        (extracted_chunk, "extracted", 0.6, completed_run_id),
+        (extracted_chunk, "extracted", 0.9, None),  # same support observed again
+        (structural_chunk, "structural", None, None),
+        (failed_chunk, "extracted", 0.99, failed_run_id),  # its run never completed
+    )
+    async with session_factory() as session:
+        session.add(
+            PipelineRun(
+                pipeline_run_id=completed_run_id,
+                status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+            )
+        )
+        for chunk_id, kind, confidence, run_id in rows:
+            session.add(
+                ProvenanceEdgeEvidence(
+                    id=uuid4(),
+                    user_id=uuid4(),
+                    dataset_id=dataset_id,
+                    data_id=uuid4(),
+                    pipeline_run_id=run_id,
+                    chunk_id=chunk_id,
+                    edge_id=edge_id,
+                    source_node_id=uuid4(),
+                    destination_node_id=uuid4(),
+                    relationship_name="knows",
+                    evidence_kind=kind,
+                    confidence=confidence,
+                )
+            )
+        await session.commit()
+
+    support = await lookup.get_edge_support(dataset_id, [edge_id])
+
+    assert sorted(support, key=lambda record: record.evidence_kind) == [
+        lookup.EdgeSupportRecord(edge_id, extracted_chunk, "extracted", 0.9),
+        lookup.EdgeSupportRecord(edge_id, structural_chunk, "structural", None),
+    ]
+    await sql_engine.dispose()

@@ -13,6 +13,10 @@ from fastapi.testclient import TestClient
 from cognee.api.v1.remember.routers.get_remember_router import get_remember_router
 from cognee.modules.users.methods import get_authenticated_user
 
+# Datasets in this module are stand-ins that exist in no database; entering their
+# database context (which remember's session writes now do) is stubbed.
+pytestmark = pytest.mark.usefixtures("stub_dataset_context")
+
 MOCK_USER = SimpleNamespace(id=uuid4(), email="test@example.com", is_active=True, tenant_id=uuid4())
 
 

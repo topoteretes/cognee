@@ -44,10 +44,12 @@ it every readable dataset is, so a question no dataset knows about is not answer
 whichever is nearest; datasets within `DATASET_ROUTING_TIE_MARGIN` (default 0.001) of the
 last routed one are tied and all searched. Every unscoped search logs each dataset's distance
 at info, which is what the cutoff is tuned against (it depends on the embedding model). A
-dataset with no index rows is always searched, a routed search that retrieves nothing (judged
-on the retrieval context, not on the completion, which is written even over an empty
-context; or only datasets without searchable memory) is widened to every readable dataset, and an explicit
-dataset scope is never routed. Needs backend access control (one store per dataset) and one
+dataset with no index rows is not searched next to a routed one; with no dataset routed,
+every readable dataset is searched. A routed search that retrieves nothing (judged on the
+retrieval context, not on the completion, which is written even over an empty context) is
+widened to the datasets routing skipped, and one that hits only datasets without searchable
+memory is repeated over every readable dataset. An explicit dataset scope is never routed,
+and neither is a `CODE` search: a code dataset never has index rows. Needs backend access control (one store per dataset) and one
 embedding model across the deployment: the rows reuse the vectors the index build stored
 (nothing is embedded twice), the query is embedded with the `.env` model, and when
 the routing collection was built with another width (`EMBEDDING_MODEL` changed without a
@@ -57,8 +59,9 @@ There is no off switch: an unscoped search is always routed.
 ## When to call search() directly
 
 - You need the agentic extras as first-class parameters: `skills`, `tools`, `max_iter`,
-  `code_query`, `node_type`. (`recall()` reaches most of these through
-  `retriever_specific_config={...}`, which you assemble yourself.)
+  `code_query`. (`recall()` reaches most of these through
+  `retriever_specific_config={...}`, which you assemble yourself. `node_type` is on
+  both: see "With a `node_name` filter" below.)
 - You want raw `SearchResult` objects rather than `source`-tagged entries.
 - You want a pinned `query_type` with no router and no session layer in the path, for
   example when benchmarking one retriever.
@@ -202,6 +205,57 @@ That is why these are *not* auto-routed, even though they are valid
 - Incidental code tokens (`def`, `import`, `class Foo(`, `.py`, `refactor`,
   `lint`) do not select `CODING_RULES`. That retriever reads only the
   `coding_agent_rules` nodeset and returns nothing on an ordinary graph.
+
+### With a `node_name` filter
+
+The router picks only a type that can apply the filter (`node_name_scope` in
+`cognee/modules/search/methods/`). `CHUNKS_LEXICAL`, `CODE` and `BROAD` cannot,
+and with a filter they would raise `QueryValidationError`. A quoted phrase
+resolves to `HYBRID_COMPLETION` with `only_context=True`, whether an LLM is
+available or not. Hybrid applies the filter and retrieves both document chunks
+and DLT rows; `CHUNKS` would exclude the rows. The response contains hybrid's
+assembled context/prompt instead of a generated answer. A code question or a
+count resolves to `HYBRID_COMPLETION` normally (with `only_context=True` only
+when no LLM is available). The router logs the swap at info.
+`CODING_RULES` and `TEMPORAL` keep their routes. A pinned `query_type` is not
+rerouted: a type that cannot apply the filter raises.
+
+`node_type` says what the names are, on `recall()` exactly as on `search()`:
+`NodeSet` (the default) means node-set tags; any other graph node type
+(`SchemaColumn`, `TextDocument`, `Entity`, ...) means the named nodes of that
+type and their one-hop neighbours, a typed graph scope. With a typed scope the
+router picks only a type that applies one, so `CODING_RULES` and `TEMPORAL`
+lose their routes too (both apply node sets only) and a date question lands on
+`HYBRID_COMPLETION`, which defers to `GRAPH_COMPLETION` for the scope. Session
+sources are never scoped by `node_name`.
+
+Over HTTP (`POST /api/v1/search`, `POST /api/v1/recall`) the field is `nodeType`,
+the bare class name as a string (`"SchemaColumn"`, never a dotted module path);
+omitted means node-set tags, and anything else is a 422 naming the value. The server
+resolves the name to the class (`resolve_node_type` in
+`cognee/modules/search/methods/node_type_resolution.py`) before calling the SDK, so
+the search is the one a local caller would run. Only classes the server ships or
+imports resolve: a class a remote cognify rebuilt from a `graph_model` JSON schema
+stays loaded on the worker that served that request, so its name is refused on every
+worker rather than resolving on one. `cognee.serve()` sends the class name the same
+way, and with `node_name` given it first checks the server's `/openapi.json` once for
+the field: a server that predates it would read the names as node-set tags and
+return results for the wrong scope without an error, so a typed scope is refused
+against such a server, and against one whose schema cannot be read. The node-set
+default, and a type with no names, go to any server.
+
+```python
+# The DLT column anchors of SDK-1429, locally and over HTTP.
+await cognee.recall(
+    "Which genres sell best?",
+    query_type=SearchType.GRAPH_COMPLETION,
+    node_type=SchemaColumn,
+    node_name=["genre:name"],
+)
+# POST /api/v1/recall
+# {"query": "...", "searchType": "GRAPH_COMPLETION",
+#  "nodeType": "SchemaColumn", "nodeName": ["genre:name"]}
+```
 
 ### When a routed strategy comes up empty
 

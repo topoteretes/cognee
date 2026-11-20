@@ -1,6 +1,6 @@
 """Slack request signature verification.
 
-Every inbound Slack payload — slash commands, Events API, interactivity — is
+Every inbound Slack payload — Events API, interactivity — is
 authenticated by an HMAC over ``v0:{timestamp}:{raw_body}`` keyed with the
 app's signing secret, compared against the ``X-Slack-Signature`` header
 (https://docs.slack.dev/authentication/verifying-requests-from-slack).

@@ -12,6 +12,7 @@ request budget and the arguments checked when the source is built. No network, n
 import json
 import subprocess
 import sys
+import time
 from copy import deepcopy
 
 import dlt
@@ -399,31 +400,16 @@ def test_body_checkpoint_survives_interrupted_run_and_pipeline_reload(pipeline):
     assert rows(pipeline, table) == before
     calls = graph.content_requests()
     assert calls["pages/p2/content"] == 1
-    # Read the durable DLT state in a fresh interpreter, not the extraction context.
-    persisted = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            (
-                "import dlt,json,sys; "
-                "p=dlt.attach(sys.argv[1], pipelines_dir=sys.argv[2]); "
-                "print(json.dumps(p.state, default=str))"
-            ),
-            pipeline.pipeline_name,
-            pipeline.pipelines_dir,
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert "Checkpoint body" in json.dumps(json.loads(persisted.stdout))
+    # The failed run's body is not kept: dlt stores state with every load, so it would stay in
+    # the state history after a forget.
+    assert "Checkpoint body" not in json.dumps(resource_cache(pipeline, table))
     del graph.errors["pages/p3/content"]
     restored = dlt.attach(pipeline.pipeline_name, pipelines_dir=pipeline.pipelines_dir)
     restored.destination = pipeline.destination
     sync(restored, graph)
     assert graph.last_stats["complete"] == 1
     assert len(rows(restored, table)) == 3
-    assert graph.content_requests()["pages/p2/content"] == 1
+    assert graph.content_requests()["pages/p2/content"] == 2
     assert graph.content_requests()["pages/p3/content"] == calls["pages/p3/content"] + 1
 
 
@@ -662,7 +648,7 @@ def test_creation_order_pagination_is_stable_when_an_earlier_page_is_edited(pipe
     assert all(params["$orderby"] == "createdDateTime asc" for params in page_calls)
 
 
-def test_state_holds_no_page_text_after_a_run_and_only_unpublished_bodies_after_a_cut(pipeline):
+def test_state_holds_no_page_text_after_a_run_or_after_a_cut(pipeline):
     graph = Graph()
     graph.html["p1"] = "<p>UniqueBodyOne_Alpha</p>"
     (table,) = sync(pipeline, graph)
@@ -677,8 +663,8 @@ def test_state_holds_no_page_text_after_a_run_and_only_unpublished_bodies_after_
     cache = resource_cache(pipeline, table)
     assert graph.last_stats["complete"] == 0
     assert list(cache["published"]) == ["p1"]
-    assert list(cache["pending"]) == ["p2"]
-    assert json.dumps(cache).count("UniqueBodyTwo_Beta") == 1
+    assert "pending" not in cache
+    assert "UniqueBodyTwo_Beta" not in json.dumps(cache)
     assert "UniqueBodyOne_Alpha" not in json.dumps(cache)
     assert len(rows(pipeline, table)) == 1
     del graph.errors["pages/p3/content"]
@@ -692,7 +678,7 @@ def test_state_holds_no_page_text_after_a_run_and_only_unpublished_bodies_after_
     assert all(len(value) == 24 for value in cache["published"].values())
 
 
-def test_malformed_page_links_checkpoint_bodies_and_recover_after_attach(pipeline):
+def test_malformed_page_links_keep_no_body_and_recover_after_attach(pipeline):
     graph = Graph()
     (table,) = sync(pipeline, graph)
     before = rows(pipeline, table)
@@ -708,16 +694,13 @@ def test_malformed_page_links_checkpoint_bodies_and_recover_after_attach(pipelin
     assert calls["pages/p1/content"] == 2
     # The malformed page is refused before its body is read; the healthy edit is kept.
     assert "pages/p2/content" not in calls
-    assert (
-        resource_cache(pipeline, table)["pending"]["p1"]["text"]
-        == "Healthy edit held until full recovery"
-    )
+    assert "Healthy edit held" not in json.dumps(resource_cache(pipeline, table))
     restored = dlt.attach(pipeline.pipeline_name, pipelines_dir=pipeline.pipelines_dir)
     restored.destination = pipeline.destination
     graph.pages["a"][1]["links"] = {"oneNoteWebUrl": {"href": "https://onenote.com/p2"}}
     sync(restored, graph)
     assert graph.last_stats["complete"] == 1
-    assert graph.content_requests()["pages/p1/content"] == calls["pages/p1/content"]
+    assert graph.content_requests()["pages/p1/content"] == calls["pages/p1/content"] + 1
     assert graph.content_requests()["pages/p2/content"] == 1
     final_content = "\n".join(row[2] for row in rows(restored, table))
     assert "Healthy edit held until full recovery" in final_content
@@ -1003,7 +986,7 @@ def test_container_listing_errors_other_than_20113_are_never_no_children(
 ):
     from cognee_connector_onenote import source as onenote
 
-    monkeypatch.setattr(onenote.time, "sleep", lambda _: None)
+    monkeypatch.setattr(time, "sleep", lambda _: None)
     graph = Graph()
     if not first_sync:
         (table,) = sync(pipeline, graph)
@@ -1060,7 +1043,7 @@ def test_check_active_failure_reaches_the_host_unchanged(pipeline, monkeypatch, 
     cancelled = MyCancelled("connection revoked")
     attempts = []
     original = graph.handle
-    monkeypatch.setattr(onenote.time, "sleep", lambda _: None)
+    monkeypatch.setattr(time, "sleep", lambda _: None)
 
     def handler(request):
         attempts.append(request)
@@ -1255,7 +1238,7 @@ def test_page_without_a_web_link_syncs_with_an_empty_url(pipeline):
 def test_rate_limit_and_budget_stop_the_run_with_their_own_counts(pipeline, monkeypatch):
     from cognee_connector_onenote import source as onenote
 
-    monkeypatch.setattr(onenote.time, "sleep", lambda _: None)
+    monkeypatch.setattr(time, "sleep", lambda _: None)
     graph = Graph()
     original = graph.handle
     graph.handle = lambda request: httpx.Response(429, json={"error": {"code": "10001"}})
@@ -1272,7 +1255,7 @@ def test_retry_after_beyond_the_wait_budget_counts_as_a_rate_limit(pipeline, mon
     from cognee_connector_onenote import source as onenote
 
     delays = []
-    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    monkeypatch.setattr(time, "sleep", delays.append)
     graph = Graph()
     graph.handle = lambda request: httpx.Response(
         429, headers={"Retry-After": "999"}, json={"error": {"code": "10001"}}
@@ -1481,7 +1464,7 @@ def test_a_server_error_exhausts_five_attempts_without_counting_as_a_rate_limit(
     from cognee_connector_onenote import source as onenote
 
     delays = []
-    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    monkeypatch.setattr(time, "sleep", delays.append)
     graph = Graph()
     graph.script("notebooks", *[(500, {})] * 5)
     sync(pipeline, graph)
@@ -1495,7 +1478,7 @@ def test_a_throttled_request_waits_for_retry_after_and_the_run_completes(pipelin
     from cognee_connector_onenote import source as onenote
 
     delays = []
-    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    monkeypatch.setattr(time, "sleep", delays.append)
     graph = Graph()
     graph.script("notebooks", (429, {"Retry-After": "3"}), (503, {"Retry-After": "1"}))
     (table,) = sync(pipeline, graph)
@@ -1676,7 +1659,7 @@ def test_the_retry_wait_budget_is_one_budget_for_the_whole_sync(pipeline, monkey
     from cognee_connector_onenote import source as onenote
 
     delays = []
-    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    monkeypatch.setattr(time, "sleep", delays.append)
     graph = Graph()
     graph.script("notebooks", (429, {"Retry-After": "40"}))
     graph.script("notebooks/a/sections", (429, {"Retry-After": "40"}))

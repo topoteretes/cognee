@@ -20,6 +20,7 @@ import pytest
 from fake_calendar import FakeCalendar, HttpError, install_google_errors
 
 from cognee_connector_google_calendar.source import (
+    NUM_RETRIES,
     GoogleCalendarError,
     _iter_rows,
     _plain_text,
@@ -533,7 +534,9 @@ def test_a_dying_run_says_why_in_the_stats(cal, status, key):
 
 def test_a_failing_calendar_list_is_counted_too(cal):
     stats: dict = {}
-    cal.fail_next.append(429)
+    # The fake raises once per attempt, and the connector retries a 429 itself now
+    # (it was one raise when googleapiclient did the retrying inside execute()).
+    cal.fail_next.extend([429] * (NUM_RETRIES + 1))
 
     with pytest.raises(GoogleCalendarError, match="HTTP 429"):
         list(_iter_rows(cal, ("primary",), {}, stats))
@@ -561,7 +564,13 @@ def test_auth_and_rate_limit_end_the_run_but_keep_what_finished(cal, status, rea
     assert set(upserts) == {rid(keep)}
     assert set(state["calendars"]) == {PRIMARY}
     assert stats["failed"] == 1
-    assert [c["calendarId"] for c in cal.list_calls] == [PRIMARY, "a@group.calendar.google.com"]
+    # A 429 is retried by the connector (one call per attempt); 401 and a 403 without a
+    # body are not. This line asserted a single call per calendar before the retries moved
+    # out of googleapiclient.
+    attempts = NUM_RETRIES + 1 if status == 429 else 1
+    assert [c["calendarId"] for c in cal.list_calls] == [PRIMARY] + [
+        "a@group.calendar.google.com"
+    ] * attempts
 
 
 @pytest.mark.parametrize("reason", ["rateLimitExceeded", "userRateLimitExceeded"])
@@ -636,6 +645,50 @@ def test_check_active_is_not_swallowed_by_the_per_calendar_error_handling(cal):
 
     with pytest.raises(_Revoked):
         sync(cal, {}, ("primary", TEAM), check_active=check_active)
+
+
+def test_a_revoked_connection_stops_a_retry_before_it_waits(cal, waits):
+    """googleapiclient used to retry inside execute(), so a revoked connection kept sleeping."""
+    cal.fail_next.extend([503] * (NUM_RETRIES + 1))
+    checks: list[int] = []
+
+    def check_active():
+        checks.append(1)
+        if len(checks) == 2:  # before the first attempt, then before its backoff wait
+            raise _Revoked
+
+    with pytest.raises(_Revoked):
+        sync(cal, {}, check_active=check_active)
+
+    assert cal.api_calls == ["calendarList"], "exactly the first request was made"
+    assert waits == [], "the revoked run did not wait"
+
+
+# Which answers googleapiclient retries (http._should_retry_response), with the connector's
+# NUM_RETRIES: N retries are N + 1 attempts, and retry n waits up to 2**n seconds.
+@pytest.mark.parametrize("status", [429, 500, 503, 599])
+def test_a_transient_status_is_retried_num_retries_times_with_googles_backoff(cal, waits, status):
+    cal.fail_next.extend([status] * (NUM_RETRIES + 1))
+
+    with pytest.raises(GoogleCalendarError, match=f"HTTP {status}"):
+        sync(cal, {})
+
+    assert cal.api_calls == ["calendarList"] * (NUM_RETRIES + 1)
+    assert len(waits) == NUM_RETRIES
+    assert all(0 <= wait <= 2 ** (retry + 1) for retry, wait in enumerate(waits))
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404])
+def test_a_permanent_status_is_not_retried_and_a_403_without_a_reason_is_permanent(
+    cal, waits, status
+):
+    cal.fail_next.append(status)
+
+    with pytest.raises(GoogleCalendarError, match=f"HTTP {status}"):
+        sync(cal, {})
+
+    assert cal.api_calls == ["calendarList"]
+    assert waits == []
 
 
 # ---------------------------------------------------------------------------
@@ -719,3 +772,14 @@ def test_no_calendar_id_reaches_logs_or_error_text(cal, caplog):
     # The cause is chained for debugging and carries the same promise.
     chain = error.value.__cause__
     assert chain is not None and SECRET_TEAM not in str(chain) and PRIMARY not in str(chain)
+
+
+@pytest.fixture(autouse=True)
+def waits(monkeypatch):
+    """The backoff waits ``api_retry`` asked for, in order, without sleeping for real.
+
+    A fake that raises a 5xx or 429 is retried by the connector, so every test needs this.
+    """
+    recorded: list[float] = []
+    monkeypatch.setattr("time.sleep", recorded.append)
+    return recorded

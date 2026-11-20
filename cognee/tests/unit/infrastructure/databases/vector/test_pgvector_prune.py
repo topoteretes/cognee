@@ -22,7 +22,7 @@ def _relational_database(database_name: str):
 def _adapter_configs():
     return (
         SimpleNamespace(pool_args=(), database_connect_args={}),
-        SimpleNamespace(vector_pool_args=None),
+        SimpleNamespace(vector_pool_args=None, pgvector_collection_partitions=1),
     )
 
 

@@ -5,9 +5,10 @@ import { Tenant } from "./types";
 import { TenantContext, localInstance } from "./TenantContext";
 import { tokens } from "@/ui/theme/tokens";
 
-const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
+import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
 
 export function LocalProvider({ children }: { children: React.ReactNode }) {
+  const localApiUrl = getLocalApiUrl();
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +65,7 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [localApiUrl]);
 
   if (error && !isInitializing) {
     return (

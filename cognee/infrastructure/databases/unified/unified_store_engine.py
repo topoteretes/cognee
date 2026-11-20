@@ -165,38 +165,20 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
 
         Chunk-scoped ownership (source_ref:v2) means a document's artifacts
         may carry only their producing chunk's ref; deleting by the v1 key
-        alone would strand them. The dataset's ref maps are filtered to refs
-        whose data id is this document — any version — and the planner
-        deletes what is left unowned, detaching shared output.
+        alone would strand them. The graph is asked for the refs whose data id
+        is this document — any version — and the planner deletes what is left
+        unowned, detaching shared output. Asking for the whole dataset's refs
+        and filtering them here made one document's delete cost what the
+        dataset holds.
         """
         if not self.supports_graph_provenance_delete():
             raise UnsupportedProvenanceCapability()
-        from cognee.infrastructure.databases.provenance import parse_source_ref_key
 
         graph = self.graph
         vector = self.vector
 
-        def _document_refs(refs) -> list:
-            selected = []
-            for ref in refs:
-                try:
-                    parsed = parse_source_ref_key(ref)
-                except ValueError:
-                    continue
-                if str(parsed.data_id) == str(data_id):
-                    selected.append(ref)
-            return selected
-
-        refs_by_node = {
-            node_id: document_refs
-            for node_id, refs in (await graph.find_node_source_refs_by_dataset(dataset_id)).items()
-            if (document_refs := _document_refs(refs))
-        }
-        refs_by_edge = {
-            edge: document_refs
-            for edge, refs in (await graph.find_edge_source_refs_by_dataset(dataset_id)).items()
-            if (document_refs := _document_refs(refs))
-        }
+        refs_by_node = await graph.find_node_source_refs_by_data(dataset_id, data_id)
+        refs_by_edge = await graph.find_edge_source_refs_by_data(dataset_id, data_id)
 
         node_data = await graph.get_node_delete_data(list(refs_by_node.keys()))
         edge_data = await graph.get_edge_delete_data(list(refs_by_edge.keys()))

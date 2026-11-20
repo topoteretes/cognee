@@ -140,9 +140,6 @@ class GoogleOAuthIntegration(OAuthIntegration):
             token_expires_at=_expires_at(token_response.get("expires_in")),
         )
 
-    def state_signing_secret(self) -> str:
-        return self._require("state_secret")
-
     def frontend_base_url(self) -> str:
         return self._require("frontend_base_url")
 

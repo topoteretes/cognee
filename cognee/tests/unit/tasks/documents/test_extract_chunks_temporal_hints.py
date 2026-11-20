@@ -17,6 +17,7 @@ class _Chunk:
         self.chunk_size = 3
         self.belongs_to_set = None
         self._temporal_hints = None
+        self.chunker_id = None
 
 
 class _Document:

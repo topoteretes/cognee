@@ -9,18 +9,24 @@ from cognee.modules.engine.utils import generate_edge_name, generate_node_name
 from cognee.modules.graph.utils.expand_with_nodes_and_edges import construct_data_points_and_edges
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.exceptions import EmptyOntologyInStrictModeError
-from cognee.modules.ontology.models import AttachedOntologyNode
+from cognee.modules.ontology.models import (
+    ONTOLOGY_CLASS_CATEGORY,
+    ONTOLOGY_INDIVIDUAL_CATEGORY,
+    AttachedOntologyNode,
+)
 from cognee.modules.ontology.ontology_env_config import (
     get_ontology_env_config,
     normalize_ontology_mode,
+)
+from cognee.modules.ontology.term_matching import (
+    compact_key_index,
+    find_class_named_in,
+    multiword_match_is_sound,
 )
 from cognee.shared.data_models import KnowledgeGraph, Node
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
-
-_ONTOLOGY_CLASS_CATEGORY = "classes"
-_ONTOLOGY_INDIVIDUAL_CATEGORY = "individuals"
 
 
 @dataclass(frozen=True)
@@ -77,6 +83,18 @@ def _find_ontology_match(
     if not matched_ontology_node:
         return None
 
+    # The fuzzy cutoff is tuned for single names; on multi-word strings it accepts
+    # ``enterprise customer acme`` for ``EnterpriseCustomer`` and swallows the token
+    # that named the individual. Every content word must survive into the match.
+    if not multiword_match_is_sound(normalized_extracted_name, matched_ontology_node.name):
+        logger.debug(
+            "Rejecting unsound ontology match %r -> %r (%s)",
+            normalized_extracted_name,
+            matched_ontology_node.name,
+            node_category,
+        )
+        return None
+
     return OntologyMatch(
         node_category=node_category,
         canonical_name=matched_ontology_node.name,
@@ -93,8 +111,15 @@ def _find_ontology_matches_for_extracted_graphs(
     data_chunks: list[DocumentChunk],
     extracted_graphs: list[KnowledgeGraph],
     ontology_resolver: BaseOntologyResolver,
+    class_index: dict[str, str],
 ) -> OntologyMatchLookup:
-    """Find one ontology match for each distinct extracted name and type."""
+    """Find one ontology match for each distinct extracted name and type.
+
+    Per node: its type against the classes and its name against the individuals.
+    When the type found no class, the class its name ends with
+    (``find_class_named_in``) is looked up too. Every class lookup is cached under
+    ``("classes", key)``, whether the key came from a type or from a name.
+    """
     ontology_match_lookup: OntologyMatchLookup = {}
     for data_chunk, extracted_graph in zip(data_chunks, extracted_graphs):
         if not extracted_graph:
@@ -102,8 +127,8 @@ def _find_ontology_matches_for_extracted_graphs(
 
         for node in extracted_graph.nodes:
             for node_category, extracted_name in (
-                (_ONTOLOGY_CLASS_CATEGORY, node.type),
-                (_ONTOLOGY_INDIVIDUAL_CATEGORY, node.name),
+                (ONTOLOGY_CLASS_CATEGORY, node.type),
+                (ONTOLOGY_INDIVIDUAL_CATEGORY, node.name),
             ):
                 normalized_extracted_name = generate_node_name(extracted_name)
                 lookup_key = (node_category, normalized_extracted_name)
@@ -115,6 +140,17 @@ def _find_ontology_matches_for_extracted_graphs(
                     normalized_extracted_name,
                     node_category,
                     data_chunk,
+                )
+
+            if _get_ontology_match(ontology_match_lookup, ONTOLOGY_CLASS_CATEGORY, node.type):
+                continue
+            class_key = find_class_named_in(generate_node_name(node.name), class_index)
+            if class_key is None:
+                continue
+            lookup_key = (ONTOLOGY_CLASS_CATEGORY, generate_node_name(class_key))
+            if lookup_key not in ontology_match_lookup:
+                ontology_match_lookup[lookup_key] = _find_ontology_match(
+                    ontology_resolver, class_key, ONTOLOGY_CLASS_CATEGORY, data_chunk
                 )
 
     return ontology_match_lookup
@@ -132,6 +168,7 @@ def _get_ontology_match(
 def _canonicalize_extracted_graph(
     extracted_graph: KnowledgeGraph,
     ontology_match_lookup: OntologyMatchLookup,
+    class_index: dict[str, str],
     strict: bool = False,
 ) -> _StrictModeDropCounts:
     """Canonicalize one graph and collapse nodes matched to the same ontology entity.
@@ -156,15 +193,21 @@ def _canonicalize_extracted_graph(
     for node in extracted_graph.nodes:
         entity_type_match = _get_ontology_match(
             ontology_match_lookup,
-            _ONTOLOGY_CLASS_CATEGORY,
+            ONTOLOGY_CLASS_CATEGORY,
             node.type,
         )
+        if entity_type_match is None:
+            class_key = find_class_named_in(generate_node_name(node.name), class_index)
+            if class_key is not None:
+                entity_type_match = _get_ontology_match(
+                    ontology_match_lookup, ONTOLOGY_CLASS_CATEGORY, class_key
+                )
         if entity_type_match is not None:
             node.type = entity_type_match.canonical_name
 
         entity_match = _get_ontology_match(
             ontology_match_lookup,
-            _ONTOLOGY_INDIVIDUAL_CATEGORY,
+            ONTOLOGY_INDIVIDUAL_CATEGORY,
             node.name,
         )
         if entity_match is None:
@@ -229,17 +272,21 @@ def canonicalize_extracted_graphs(
     if strict:
         ensure_ontology_usable_in_strict_mode(ontology_resolver)
 
+    class_index = compact_key_index(ontology_resolver, ONTOLOGY_CLASS_CATEGORY)
     ontology_match_lookup = _find_ontology_matches_for_extracted_graphs(
         data_chunks,
         extracted_graphs,
         ontology_resolver,
+        class_index,
     )
 
     run_drop_counts = _StrictModeDropCounts()
     for extracted_graph in extracted_graphs:
         if extracted_graph:
             run_drop_counts.add(
-                _canonicalize_extracted_graph(extracted_graph, ontology_match_lookup, strict=strict)
+                _canonicalize_extracted_graph(
+                    extracted_graph, ontology_match_lookup, class_index, strict=strict
+                )
             )
 
     if strict and (run_drop_counts.dropped_nodes or run_drop_counts.dropped_edges):
@@ -264,9 +311,9 @@ def canonicalize_extracted_graphs(
 def _get_data_point_class_for_ontology_category(
     node_category: str,
 ) -> type[Entity] | type[EntityType] | None:
-    if node_category == _ONTOLOGY_CLASS_CATEGORY:
+    if node_category == ONTOLOGY_CLASS_CATEGORY:
         return EntityType
-    if node_category == _ONTOLOGY_INDIVIDUAL_CATEGORY:
+    if node_category == ONTOLOGY_INDIVIDUAL_CATEGORY:
         return Entity
     return None
 
@@ -288,6 +335,27 @@ def _mark_existing_ontology_data_point(
     return True
 
 
+def ontology_data_point(
+    data_point_class: type[Entity] | type[EntityType],
+    ontology_node: AttachedOntologyNode,
+    **fields,
+) -> Entity | EntityType:
+    """The graph node of an ontology class or individual, under its deterministic id.
+
+    Cognify and table alignment (``schema_alignment``) both build ontology nodes here, so
+    a class that a document and a table both name is one node.
+    """
+    normalized_name = generate_node_name(ontology_node.name)
+    return data_point_class(
+        id=data_point_class.id_for(ontology_node.name),
+        name=normalized_name,
+        description=normalized_name,
+        ontology_valid=True,
+        ontology_uri=str(ontology_node.uri) if ontology_node.uri is not None else None,
+        **fields,
+    )
+
+
 def _add_ontology_data_points(
     ontology_nodes: list[AttachedOntologyNode],
     source_chunk: DocumentChunk,
@@ -307,38 +375,27 @@ def _add_ontology_data_points(
         ):
             continue
 
-        data_point_id = data_point_class.id_for(ontology_node.name)
-        data_point_key = str(data_point_id)
-        normalized_name = generate_node_name(ontology_node.name)
-        if data_point_class is EntityType:
-            data_points_by_id[data_point_key] = EntityType(
-                id=data_point_id,
-                name=normalized_name,
-                description=normalized_name,
-                ontology_valid=True,
-                ontology_uri=ontology_uri,
-                importance_weight=source_chunk.importance_weight,
-            )
-        else:
-            data_points_by_id[data_point_key] = Entity(
-                id=data_point_id,
-                name=normalized_name,
-                description=normalized_name,
-                ontology_valid=True,
-                ontology_uri=ontology_uri,
-                belongs_to_set=source_chunk.belongs_to_set,
-                importance_weight=source_chunk.importance_weight,
-            )
+        fields = {"importance_weight": source_chunk.importance_weight}
+        if data_point_class is Entity:
+            fields["belongs_to_set"] = source_chunk.belongs_to_set
+        data_point = ontology_data_point(data_point_class, ontology_node, **fields)
+        data_points_by_id[str(data_point.id)] = data_point
 
 
-def _add_ontology_edges(
+def ontology_edge_triples(
     ontology_nodes: list[AttachedOntologyNode],
     ontology_edges: list[tuple[str, str, str]],
-    edges_by_identity: dict[EdgeIdentity, Edge],
-) -> None:
+) -> list[tuple[UUID, UUID, str]]:
+    """The graph edges of an ontology subgraph, as ``(source id, target id, relationship)``.
+
+    An edge is kept when both ends are among ``ontology_nodes`` and are classes or
+    individuals. Cognify and table alignment (``schema_alignment``) both translate edges
+    here, so they write the same edges between the nodes they share.
+    """
     ontology_nodes_by_normalized_name = {
         generate_edge_name(node.name): node for node in ontology_nodes
     }
+    triples = []
     for source_name, ontology_relationship_name, target_name in ontology_edges:
         source_node = ontology_nodes_by_normalized_name.get(generate_edge_name(source_name))
         target_node = ontology_nodes_by_normalized_name.get(generate_edge_name(target_name))
@@ -350,10 +407,27 @@ def _add_ontology_edges(
         if source_data_point_class is None or target_data_point_class is None:
             continue
 
-        relationship_name = generate_edge_name(ontology_relationship_name)
+        triples.append(
+            (
+                source_data_point_class.id_for(source_node.name),
+                target_data_point_class.id_for(target_node.name),
+                generate_edge_name(ontology_relationship_name),
+            )
+        )
+    return triples
+
+
+def _add_ontology_edges(
+    ontology_nodes: list[AttachedOntologyNode],
+    ontology_edges: list[tuple[str, str, str]],
+    edges_by_identity: dict[EdgeIdentity, Edge],
+) -> None:
+    for source_id, target_id, relationship_name in ontology_edge_triples(
+        ontology_nodes, ontology_edges
+    ):
         edge_identity = EdgeIdentity(
-            source_id=str(source_data_point_class.id_for(source_node.name)),
-            target_id=str(target_data_point_class.id_for(target_node.name)),
+            source_id=str(source_id),
+            target_id=str(target_id),
             relationship_name=relationship_name,
         )
         edges_by_identity.setdefault(

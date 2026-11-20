@@ -27,7 +27,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "cognee-connectors-core[dlt]>=0.1,<1",
+    "cognee-connectors-core[dlt]>=0.2,<1",
     # The provider's own libraries, with the ranges cognee's pyproject.toml uses:
     # aiohttp for the OAuth, search and parent-lookup client, httpx for the DLT
     # source's walk, pydantic-settings for the NOTION_* settings class.
