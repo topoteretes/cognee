@@ -76,6 +76,9 @@ from cognee.infrastructure.session.session_context_models import (
     CodingAgentContextExtraction,
     ContextProfile,
 )
+from cognee.infrastructure.session.session_context_models import (
+    clip_text as _clip,
+)
 from cognee.infrastructure.session.session_node_set import get_session_node_set
 from cognee.infrastructure.session.session_persist_watermark import StateRowWatermark
 from cognee.infrastructure.session.trace_phases import (
@@ -202,11 +205,6 @@ def relative_path(path: str, repo_root: str) -> str:
         return "."
     match = re.match(r"^(?:/Users|/home)/[^/]+/(.*)$", text)
     return match.group(1) if match else text
-
-
-def _clip(text: str, limit: int) -> str:
-    text = " ".join(str(text or "").split())
-    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def program_words(command: str) -> list[str]:
@@ -563,11 +561,20 @@ def build_failure_candidates(
             room,
         )
         content = f"{key}{problem}{failed_with}{error_line}{arrow}{worked}"
+        # The observed failures and their fix, so the lesson clears the agent-profile
+        # evidence gate (``supported_project_candidate``) like an LLM lesson must.
+        evidence = _clip(
+            f"{group.tool} failed {len(group.failures)} times with "
+            f'"{group.error_text}"; fixed by: {render_fixes(group.fixes, repo_root)}',
+            MAX_CONTEXT_CONTENT_CHARS,
+        )
         candidates.append(
             (
                 failure.trace_id,
                 CandidateFailureLessonUpdate(
-                    content=content, confidence=FAILURE_CANDIDATE_CONFIDENCE
+                    content=content,
+                    confidence=FAILURE_CANDIDATE_CONFIDENCE,
+                    evidence=evidence,
                 ),
             )
         )
