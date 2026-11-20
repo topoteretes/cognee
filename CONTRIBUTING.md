@@ -3,9 +3,7 @@
 
 # 🎉 Welcome to **cognee**!
 
-We're excited that you're interested in contributing to our project!
-We want to ensure that every user and contributor feels welcome, included and supported to participate in cognee community.
-This guide will help you get started and ensure your contributions can be efficiently integrated into the project.
+We're excited that you're interested in contributing to our project! We want to ensure that every user and contributor feels welcome, included and supported to participate in cognee community. This guide will help you get started and ensure your contributions can be efficiently integrated into the project.
 
 ## 🌟 Quick Links
 
@@ -172,8 +170,7 @@ Use an imperative subject of at most 72 characters in `type: Summary` form. Capi
 
 ### PR Titles
 
-Use `type: Summary` for your PR title. The [PR title check](.github/workflows/pr_lint.yml)
-accepts these types:
+Use `type: Summary` for your PR title. The [PR title check](.github/workflows/pr_lint.yml) accepts these types:
 
 | Type | Example |
 | --- | --- |
@@ -190,13 +187,9 @@ accepts these types:
 
 ### Changelog Entries
 
-This repository has no `CHANGELOG.md`. Release notes are compiled from merged PR titles when a
-release is cut (see `.github/docs/release.md`), so your PR title *is* the changelog entry: use the
-conventional `type: Summary` form described above and make it understandable on its own.
+This repository has no `CHANGELOG.md`. Release notes are compiled from merged PR titles when a release is cut (see `.github/docs/release.md`), so your PR title *is* the changelog entry: use the conventional `type: Summary` form described above and make it understandable on its own.
 
-> **Reviewers are auto-routed.** Cognee uses a [`CODEOWNERS`](.github/CODEOWNERS)
-> file to request reviews automatically based on the directories your PR touches.
-> No manual ping required — the right person will get notified when you open the PR.
+> **Reviewers are auto-routed.** Cognee uses a [`CODEOWNERS`](.github/CODEOWNERS) file to request reviews automatically based on the directories your PR touches. No manual ping required — the right person will get notified when you open the PR.
 
 ## 5. 📜 Developer Certificate of Origin (DCO)
 

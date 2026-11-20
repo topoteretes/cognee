@@ -3,9 +3,11 @@
 Cognee can send its embeddings to a separate
 [embedding worker](https://github.com/topoteretes/embedding-worker) over
 RabbitMQ, in the same way the remote GLiNER client sends extraction to a
-`gliner_worker` (see [remote GLiNER setup](architecture.md#llm-free-graph-extraction-gliner-demo)). Many cognee processes can
-then share one fleet of workers, sized and autoscaled by queue depth, and no
-embedding model or tokenizer runtime has to be loaded in the cognee process.
+`gliner_worker` (see
+[remote GLiNER setup](memory-internals.md#llm-free-graph-extraction-gliner-demo)).
+Many cognee processes can then share one fleet of workers, sized and autoscaled
+by queue depth, and no embedding model or tokenizer runtime has to be loaded
+in the cognee process.
 
 The engine is `cognee/infrastructure/databases/vector/embeddings/EmbeddingWorkerEmbeddingEngine.py`.
 Its settings, errors, wire contract and transport are in `embedding_worker/` next

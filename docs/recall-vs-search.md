@@ -329,5 +329,5 @@ golden table routes. Keep the size principle above in mind: a rule that sends
 ordinary questions to a slower or narrower retriever is a regression, not an
 improvement.
 
-Related: [the search-type list](retrieval-internals.md#search-retrieval), `examples/guides/recall_core.py`,
-`examples/guides/hybrid_retrieval_recall.py`.
+Related: [the search-type list](retrieval-internals.md#search-retrieval),
+`examples/guides/recall_core.py`, `examples/guides/hybrid_retrieval_recall.py`.

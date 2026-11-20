@@ -163,7 +163,8 @@ isolation; `REQUIRE_AUTHENTICATION=false` with access control on is ignored
   adapters), cognee raises `OSError` naming it
   (`multi_user_support_possible()` in `cognee/context_global_variables.py`),
   never a silent fall back to shared databases. Switch backends or set
-  `ENABLE_BACKEND_ACCESS_CONTROL=false`. See the [database support matrix](../../../docs/architecture.md#3-multi-tenant-access-control)
+  `ENABLE_BACKEND_ACCESS_CONTROL=false`. See the
+  [database support matrix](../../../docs/architecture.md#3-multi-tenant-access-control)
   ("Multi-Tenant Access Control").
 - **User management is a capability.** `manage_users` is a tenant-scoped
   capability in `principal_capabilities`, granted to a tenant (every member),

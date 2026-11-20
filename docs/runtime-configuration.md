@@ -15,7 +15,7 @@ LLM_MODEL="openai/gpt-6-luna"  # Default model
 
 **Important**: If you configure only LLM or only embeddings, the other defaults to OpenAI. Ensure you have a working OpenAI API key, or configure both to avoid unexpected defaults.
 
-**No key at all** is also a working setup: with no LLM and no embedding credentials configured, cognify extracts the graph with the local GLiNER demo model (`pip install "cognee[gliner]"` recommended; without it the CPU runtime installs itself on first use; see "LLM-free Graph Extraction (GLiNER demo)" below) and embeds with the local fastembed model (a core dependency); models download on first use (a warning names the model, its size and the cache location while that happens; both models are kept in the Hugging Face hub cache, default `~/.cache/huggingface/hub`, which `HF_HOME` moves for both, with `FASTEMBED_CACHE_PATH` overriding it for fastembed alone), and `recall()` without a `query_type` routes only to search types that run without an LLM, defaulting to `HYBRID_COMPLETION` with `only_context=True` (the assembled prompt instead of an answer). The switch is per half — `GRAPH_EXTRACTOR=auto` (default) resolves on the LLM key, embeddings resolve on "nothing configured and no LLM key" — so setting any credential or any embedding setting takes that half back to the configured provider. The env vars that disable the preflight (`COGNEE_SKIP_PREFLIGHT`, `COGNEE_SKIP_CONNECTION_TEST`, `MOCK_EMBEDDING`) also disable this rerouting (`keyless_local_defaults_apply()`): a mocked or deliberately partial config is honoured, not replaced. See [LLM-free graph extraction](architecture.md#llm-free-graph-extraction-gliner-demo).
+**No key at all** is also a working setup: with no LLM and no embedding credentials configured, cognify extracts the graph with the local GLiNER demo model (`pip install "cognee[gliner]"` recommended; without it the CPU runtime installs itself on first use; see [LLM-free graph extraction](memory-internals.md#llm-free-graph-extraction-gliner-demo)) and embeds with the local fastembed model (a core dependency); models download on first use (a warning names the model, its size and the cache location while that happens; both models are kept in the Hugging Face hub cache, default `~/.cache/huggingface/hub`, which `HF_HOME` moves for both, with `FASTEMBED_CACHE_PATH` overriding it for fastembed alone), and `recall()` without a `query_type` routes only to search types that run without an LLM, defaulting to `HYBRID_COMPLETION` with `only_context=True` (the assembled prompt instead of an answer). The switch is per half — `GRAPH_EXTRACTOR=auto` (default) resolves on the LLM key, embeddings resolve on "nothing configured and no LLM key" — so setting any credential or any embedding setting takes that half back to the configured provider. The env vars that disable the preflight (`COGNEE_SKIP_PREFLIGHT`, `COGNEE_SKIP_CONNECTION_TEST`, `MOCK_EMBEDDING`) also disable this rerouting (`keyless_local_defaults_apply()`): a mocked or deliberately partial config is honoured, not replaced.
 
 Default databases (no extra setup needed):
 - **Relational**: SQLite (metadata and state storage)
@@ -40,11 +40,7 @@ DB_NAME=cognee_db
 #### Vector Databases
 Supported in-tree: lancedb (default), pgvector, neptune_analytics, turso.
 
-**LanceDB payload schema migrations.** When a payload model changes (a field added or removed on `IndexSchema`, a type or nullability change), the stored `payload` struct is evolved in place by `cognee_db_workers/lancedb_schema_evolution.py` (its module docstring is the reference: Lance schema evolution on the payload column alone, vectors never read, `payload` present at every committed version, rows another process wrote during the run repaired by fragment, which is why compaction leaves a table mid-migration alone, interrupted runs finished by the next one, nothing partial). It runs proactively on every cognee version change (`run_migrations`, schema reads only, every table visited before one error names the failures) and reactively when a write hits LanceDB's schema-drift errors (`create_data_points`); in subprocess mode on the worker's handle (`OP_TABLE_EVOLVE_PAYLOAD`), with the model's required fields carried apart from the relaxed storage schema. Index collections are compared against `IndexSchema`, `TruthCentroid_vector` against its own model (`_resolve_collection_payload_schema`). A table whose vectors are not the configured width is refused with `StoredVectorWidthMismatchError` (a re-embedding, not a schema migration). Commits through pylance, so it needs the pylance line matching lancedb's Lance core, like compaction.
-Others (ChromaDB, Qdrant, Weaviate, Milvus, …) are community adapters — install from
-https://github.com/topoteretes/cognee-community and register via `use_vector_adapter`
-before setting `VECTOR_DB_PROVIDER`, otherwise cognee raises
-"Unsupported vector database provider".
+**LanceDB payload schema migrations.** When a payload model changes (a field added or removed on `IndexSchema`, a type or nullability change), the stored `payload` struct is evolved in place by `cognee_db_workers/lancedb_schema_evolution.py` (its module docstring is the reference: Lance schema evolution on the payload column alone, vectors never read, `payload` present at every committed version, rows another process wrote during the run repaired by fragment, which is why compaction leaves a table mid-migration alone, interrupted runs finished by the next one, nothing partial). It runs proactively on every cognee version change (`run_migrations`, schema reads only, every table visited before one error names the failures) and reactively when a write hits LanceDB's schema-drift errors (`create_data_points`); in subprocess mode on the worker's handle (`OP_TABLE_EVOLVE_PAYLOAD`), with the model's required fields carried apart from the relaxed storage schema. Index collections are compared against `IndexSchema`, `TruthCentroid_vector` against its own model (`_resolve_collection_payload_schema`). A table whose vectors are not the configured width is refused with `StoredVectorWidthMismatchError` (a re-embedding, not a schema migration). Commits through pylance, so it needs the pylance line matching lancedb's Lance core, like compaction. Others (ChromaDB, Qdrant, Weaviate, Milvus, …) are community adapters — install from https://github.com/topoteretes/cognee-community and register via `use_vector_adapter` before setting `VECTOR_DB_PROVIDER`, otherwise cognee raises "Unsupported vector database provider".
 ```bash
 # PGVector (requires postgres extra)
 VECTOR_DB_PROVIDER=pgvector
@@ -75,31 +71,12 @@ GRAPH_DATABASE_PROVIDER=postgres_demo
 GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
 
-> **⚠️ Warning:** Using Postgres as a graph store is currently a demo feature and is not
-> production-ready. Use it to demo keeping relational metadata, PGVector, and graph
-> state in a single Postgres service, but rely on a graph-native backend such as Kuzu or Neo4j
-> for production workloads.
+> **⚠️ Warning:** Using Postgres as a graph store is currently a demo feature and is not production-ready. Use it to demo keeping relational metadata, PGVector, and graph state in a single Postgres service, but rely on a graph-native backend such as Kuzu or Neo4j for production workloads.
 >
-> Interested in further development or production use of Postgres as a graph database? Write to
-> us at social@cognee.ai to explore the options.
+> Interested in further development or production use of Postgres as a graph database? Write to us at social@cognee.ai to explore the options.
 
 #### Turso (all three layers)
-`DB_PROVIDER=turso`, `GRAPH_DATABASE_PROVIDER=turso`, `VECTOR_DB_PROVIDER=turso` and
-`CACHE_BACKEND=turso` (the session cache's `cache.db`, same layout as the sqlite backend) — all four
-layers — run on the Turso rewrite engine (`pyturso`, `pip install cognee"[turso]"`) through one shared dialect,
-`sqlite+cognee_turso://` (`cognee/infrastructure/databases/turso/`). Local database files only:
-remote Turso settings (`DB_TURSO_URL`, `GRAPH_DATABASE_KEY`, a `libsql://` vector URL) are a hard
-error. Shared knobs (`TursoConfig`, env prefix `TURSO_`): `TURSO_JOURNAL_MODE=wal|mvcc` (default
-`wal`; `mvcc` turns graph and vector writes into `BEGIN CONCURRENT` transactions that commit in
-parallel and are retried on `Write-write conflict`, at the cost of files that stock SQLite can no
-longer read; the relational DB and session cache always stay on `wal`, because their transactions
-cannot be retried), `TURSO_BUSY_TIMEOUT_MS`, `TURSO_CONFLICT_RETRIES`. A Turso database file can be
-open in only one process at a time (pyturso 0.7.x), so the API server and a separate SDK/CLI process
-cannot share one Turso deployment. Engine limits that shaped the adapters (no
-recursive CTEs, no parenthesized joins in a FROM clause — the dialect's compiler flattens them —
-no scalar subquery in an upsert `SET`, primitive-only bind parameters, no approximate vector
-index) are listed with reproductions in `docs/turso-local.md`; setup and a runnable
-add → cognify → search example live there too.
+`DB_PROVIDER=turso`, `GRAPH_DATABASE_PROVIDER=turso`, `VECTOR_DB_PROVIDER=turso` and `CACHE_BACKEND=turso` (the session cache's `cache.db`, same layout as the sqlite backend) — all four layers — run on the Turso rewrite engine (`pyturso`, `pip install cognee"[turso]"`) through one shared dialect, `sqlite+cognee_turso://` (`cognee/infrastructure/databases/turso/`). Local database files only: remote Turso settings (`DB_TURSO_URL`, `GRAPH_DATABASE_KEY`, a `libsql://` vector URL) are a hard error. Shared knobs (`TursoConfig`, env prefix `TURSO_`): `TURSO_JOURNAL_MODE=wal|mvcc` (default `wal`; `mvcc` turns graph and vector writes into `BEGIN CONCURRENT` transactions that commit in parallel and are retried on `Write-write conflict`, at the cost of files that stock SQLite can no longer read; the relational DB and session cache always stay on `wal`, because their transactions cannot be retried), `TURSO_BUSY_TIMEOUT_MS`, `TURSO_CONFLICT_RETRIES`. A Turso database file can be open in only one process at a time (pyturso 0.7.x), so the API server and a separate SDK/CLI process cannot share one Turso deployment. Engine limits that shaped the adapters (no recursive CTEs, no parenthesized joins in a FROM clause — the dialect's compiler flattens them — no scalar subquery in an upsert `SET`, primitive-only bind parameters, no approximate vector index) are listed with reproductions in `docs/turso-local.md`; setup and a runnable add → cognify → search example live there too.
 
 #### Session Cache
 ```bash
@@ -179,10 +156,7 @@ LLM_MODEL="openrouter/deepseek/deepseek-r1"
 LLM_ENDPOINT="https://openrouter.ai/api/v1"
 LLM_API_KEY="your_api_key"
 ```
-OpenRouter model ids change over time (the `:free` tier especially) — check
-`https://openrouter.ai/api/v1/models` for a current slug. Embeddings are a
-separate catalogue at `https://openrouter.ai/api/v1/embeddings/models` and
-must be configured separately; see the OpenRouter block in `.env.template`.
+OpenRouter model ids change over time (the `:free` tier especially) — check `https://openrouter.ai/api/v1/models` for a current slug. Embeddings are a separate catalogue at `https://openrouter.ai/api/v1/embeddings/models` and must be configured separately; see the OpenRouter block in `.env.template`.
 
 #### AWS Bedrock (requires aws extra)
 ```bash
