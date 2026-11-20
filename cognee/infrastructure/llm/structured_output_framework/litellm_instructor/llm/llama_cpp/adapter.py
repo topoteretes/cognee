@@ -189,6 +189,8 @@ class LlamaCppAPIAdapter(LLMInterface):
                 ]
 
                 merged_kwargs = {**self.llm_args, **kwargs}
+                if not {"max_tokens", "max_completion_tokens"} & merged_kwargs.keys():
+                    merged_kwargs["max_tokens"] = self.max_completion_tokens
                 if self.mode_type == "server":
                     response = await cast(
                         instructor.AsyncInstructor, self.aclient

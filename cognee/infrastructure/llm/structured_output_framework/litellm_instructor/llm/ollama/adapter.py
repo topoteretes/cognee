@@ -143,6 +143,8 @@ class OllamaAPIAdapter(LLMInterface):
             - BaseModel: A structured output that conforms to the specified response model.
         """
         merged_kwargs = {**self.llm_args, **kwargs}
+        if not {"max_tokens", "max_completion_tokens"} & merged_kwargs.keys():
+            merged_kwargs["max_tokens"] = self.max_completion_tokens
 
         if self.ollama_num_ctx is not None:
             extra_body = merged_kwargs.get("extra_body", {}) or {}
