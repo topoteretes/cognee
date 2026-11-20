@@ -34,6 +34,25 @@ def sample_db(tmp_path):
     return db_path
 
 
+@pytest.fixture
+def literals_db(tmp_path):
+    db_path = tmp_path / "literals.db"
+    connection = sqlite3.connect(db_path)
+    connection.executescript(
+        """
+        CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL);
+        INSERT INTO notes (body) VALUES
+            ('match :name here'),
+            ('{"a":1}'),
+            ('12:30'),
+            ('plain');
+        """
+    )
+    connection.commit()
+    connection.close()
+    return db_path
+
+
 def _engine(db_path):
     return get_external_sql_engine(f"sqlite:///{db_path}", "sqlite", 5000)
 
@@ -61,6 +80,28 @@ async def test_empty_result_is_not_an_error(sample_db):
         _engine(sample_db), "SELECT * FROM orders WHERE region = 'jp'", max_rows=10
     )
     assert rows == []
+    assert truncated is False
+
+
+@pytest.mark.parametrize(
+    ("predicate", "expected"),
+    [
+        ("body LIKE '%:name%'", "match :name here"),
+        ("""body = '{"a":1}'""", '{"a":1}'),
+        # Controls: a colon that never looked like a bind parameter.
+        ("body = '12:30'", "12:30"),
+        ("body = 'plain'", "plain"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_colon_in_string_literal_is_not_a_bind_parameter(literals_db, predicate, expected):
+    """A ':token' inside a quoted literal is data, not a parameter to bind."""
+    rows, truncated = await execute_readonly(
+        _engine(literals_db),
+        f"SELECT body FROM notes WHERE {predicate} LIMIT 25",
+        max_rows=25,
+    )
+    assert rows == [{"body": expected}]
     assert truncated is False
 
 
