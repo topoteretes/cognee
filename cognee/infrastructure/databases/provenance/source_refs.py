@@ -21,6 +21,27 @@ def make_chunk_source_ref_key(dataset_id: UUID, data_id: UUID, chunk_id: UUID) -
     return f"{CHUNK_SOURCE_REF_PREFIX}:{dataset_id}:{data_id}:{chunk_id}"
 
 
+def make_chunk_source_ref_key_prefix(dataset_id: UUID, data_id: UUID) -> str:
+    """Build what every v2 chunk key of one dataset document starts with."""
+    return f"{CHUNK_SOURCE_REF_PREFIX}:{dataset_id}:{data_id}:"
+
+
+def select_data_source_ref_keys(
+    source_ref_keys: list[str], dataset_id: UUID, data_id: UUID
+) -> list[str]:
+    """Keep the keys one dataset document owns: its v1 key and its v2 chunk keys.
+
+    This is the rule a graph store applies when it selects a document's refs
+    itself (``find_node_source_refs_by_data``), so an adapter that narrows the rows
+    in its query and one that filters them here agree.
+    """
+    document_key = make_source_ref_key(dataset_id, data_id)
+    chunk_key_prefix = make_chunk_source_ref_key_prefix(dataset_id, data_id)
+    return [
+        key for key in source_ref_keys if key == document_key or key.startswith(chunk_key_prefix)
+    ]
+
+
 class ParsedSourceRef(NamedTuple):
     """A source ref key decomposed: v1 doc-scope (chunk_id None) or v2 chunk-scope."""
 

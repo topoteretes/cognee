@@ -15,6 +15,7 @@ from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
     NodeDeleteData,
+    select_data_source_ref_keys,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger
@@ -553,6 +554,114 @@ class GraphDBInterface(ABC):
             - dict[EdgeIdentity, list[str]]: Matching source refs keyed by edge identity.
         """
         raise UnsupportedProvenanceCapability()
+
+    async def find_node_source_refs_by_data(
+        self,
+        dataset_id: str,
+        data_id: str,
+    ) -> dict[str, list[str]]:
+        """
+        Find the node source refs one data item of a dataset owns: its v1
+        document key and every v2 chunk key of that data item.
+
+        This default reads every ref of the dataset and keeps the data item's,
+        so its cost follows the dataset. An adapter that can select the rows in
+        its store overrides it, and deleting or replacing one document then
+        costs what that document holds.
+
+        Parameters:
+        -----------
+
+            - dataset_id (str): Dataset id to match.
+            - data_id (str): Data item id to match.
+
+        Returns:
+        --------
+
+            - dict[str, list[str]]: The data item's source refs keyed by node id.
+        """
+        refs_by_node = await self.find_node_source_refs_by_dataset(dataset_id)
+        return {
+            node_id: data_refs
+            for node_id, refs in refs_by_node.items()
+            if (
+                data_refs := select_data_source_ref_keys(
+                    refs, UUID(str(dataset_id)), UUID(str(data_id))
+                )
+            )
+        }
+
+    async def find_edge_source_refs_by_data(
+        self,
+        dataset_id: str,
+        data_id: str,
+    ) -> dict[EdgeIdentity, list[str]]:
+        """
+        Find the edge source refs one data item of a dataset owns: its v1
+        document key and every v2 chunk key of that data item.
+
+        Same default and same reason to override as
+        ``find_node_source_refs_by_data``.
+
+        Parameters:
+        -----------
+
+            - dataset_id (str): Dataset id to match.
+            - data_id (str): Data item id to match.
+
+        Returns:
+        --------
+
+            - dict[EdgeIdentity, list[str]]: The data item's source refs keyed by
+              edge identity.
+        """
+        refs_by_edge = await self.find_edge_source_refs_by_dataset(dataset_id)
+        return {
+            edge: data_refs
+            for edge, refs in refs_by_edge.items()
+            if (
+                data_refs := select_data_source_ref_keys(
+                    refs, UUID(str(dataset_id)), UUID(str(data_id))
+                )
+            )
+        }
+
+    async def find_edge_texts_in_use(self, edge_texts: list[str]) -> set[str]:
+        """
+        Find which of the given retrieval texts a stored edge still has.
+
+        An edge's retrieval text is ``get_edge_retrieval_text`` of its
+        ``edge_text`` property and its relationship name. Graph-provenance
+        delete asks this after removing edges, to drop the EdgeType of a text no
+        edge uses any more.
+
+        This default reads every edge of the graph. An adapter that can ask its
+        store overrides it.
+
+        Parameters:
+        -----------
+
+            - edge_texts (list[str]): Retrieval texts to look for.
+
+        Returns:
+        --------
+
+            - set[str]: The given texts that at least one stored edge has.
+        """
+        from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+
+        wanted = set(edge_texts)
+        if not wanted:
+            return set()
+
+        _, edges = await self.get_graph_data()
+        in_use: set[str] = set()
+        for edge in edges:
+            properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
+            edge_text = get_edge_retrieval_text(properties.get("edge_text"), edge[2])
+            if edge_text in wanted:
+                in_use.add(edge_text)
+        return in_use
 
     async def find_node_source_refs_by_pipeline_run(
         self,

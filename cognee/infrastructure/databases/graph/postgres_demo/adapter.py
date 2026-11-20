@@ -10,7 +10,9 @@ us at social@cognee.ai to explore the options.
 """
 
 import asyncio
+import functools
 import json
+import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -42,6 +44,8 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
 )
 from cognee.infrastructure.databases.provenance.source_refs import (
     get_dataset_id_from_source_ref_key,
+    make_chunk_source_ref_key_prefix,
+    make_source_ref_key,
     make_source_run_ref,
 )
 from cognee.infrastructure.databases.relational import get_relational_config
@@ -189,6 +193,40 @@ def _source_ref_rows(source_ref_keys: list[str], pipeline_run_id: str | None) ->
         }
         for key in source_ref_keys
     ]
+
+
+def _like_prefix(prefix: str) -> str:
+    """A LIKE pattern for the strings that start with ``prefix``, taken literally.
+
+    ``_`` and ``%`` are wildcards in LIKE and every source ref key has a ``_``.
+    Escaped, the pattern matches the prefix only, and its fixed part is the whole
+    prefix, which is what an index on the key can use.
+    """
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"{escaped}%"
+
+
+def _data_source_ref_parameters(dataset_id: str, data_id: str) -> dict[str, str]:
+    """What selects the source-ref rows of one dataset document: its v1 key and the
+    pattern of its v2 chunk keys."""
+    dataset, data = UUID(str(dataset_id)), UUID(str(data_id))
+    return {
+        "dataset_id": str(dataset),
+        "document_key": make_source_ref_key(dataset, data),
+        "chunk_keys": _like_prefix(make_chunk_source_ref_key_prefix(dataset, data)),
+    }
+
+
+@functools.cache
+def _python_whitespace() -> str:
+    """Every character ``str.strip()`` removes, for ``btrim`` to remove the same.
+
+    ``get_edge_retrieval_text`` strips with ``str.strip()``; Postgres's own notion
+    of whitespace is narrower and depends on the database locale.
+    """
+    return "".join(
+        character for character in map(chr, range(sys.maxunicode + 1)) if character.isspace()
+    )
 
 
 def _provenance_fields(
@@ -1770,6 +1808,98 @@ class PostgresDemoAdapter(GraphDBInterface):
                 )
                 out.setdefault(edge, []).append(row["source_ref_key"])
             return out
+
+    async def find_node_source_refs_by_data(
+        self, dataset_id: str, data_id: str
+    ) -> dict[str, list[str]]:
+        """The source refs one dataset document owns on nodes, selected in the database.
+
+        Only the document's rows come back, so memory follows the document. Without
+        an index that serves the key pattern the database still reads the dataset's
+        ref rows to find them.
+        """
+        await self._require_current_layout()
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text("""
+                    SELECT node_id, source_ref_key
+                    FROM graph_node_source_ref
+                    WHERE dataset_id = :dataset_id
+                      AND (source_ref_key = :document_key OR source_ref_key LIKE :chunk_keys)
+                    ORDER BY position
+                """),
+                _data_source_ref_parameters(dataset_id, data_id),
+            )
+            out: dict[str, list[str]] = {}
+            for row in result.mappings().all():
+                out.setdefault(row["node_id"], []).append(row["source_ref_key"])
+            return out
+
+    async def find_edge_source_refs_by_data(
+        self, dataset_id: str, data_id: str
+    ) -> dict[EdgeIdentity, list[str]]:
+        """The source refs one dataset document owns on edges; see the node lookup."""
+        await self._require_current_layout()
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text("""
+                    SELECT source_id, target_id, relationship_name, source_ref_key
+                    FROM graph_edge_source_ref
+                    WHERE dataset_id = :dataset_id
+                      AND (source_ref_key = :document_key OR source_ref_key LIKE :chunk_keys)
+                    ORDER BY position
+                """),
+                _data_source_ref_parameters(dataset_id, data_id),
+            )
+            out: dict[EdgeIdentity, list[str]] = {}
+            for row in result.mappings().all():
+                edge = EdgeIdentity(
+                    source_id=row["source_id"],
+                    target_id=row["target_id"],
+                    relationship_name=row["relationship_name"],
+                )
+                out.setdefault(edge, []).append(row["source_ref_key"])
+            return out
+
+    async def find_edge_texts_in_use(self, edge_texts: list[str]) -> set[str]:
+        """Which of ``edge_texts`` a stored edge still has, found in one pass in the
+        database instead of by reading every edge.
+
+        The query narrows the edges; ``get_edge_retrieval_text`` still decides, on
+        the rows that come back. For an ``edge_text`` that is a string or absent the
+        query computes the same text Python does (``btrim`` with the characters
+        ``str.strip()`` removes). One of any other JSON type has no faithful SQL form,
+        so every such edge comes back too.
+        """
+        from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+
+        wanted = set(edge_texts)
+        if not wanted:
+            return set()
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text("""
+                    SELECT DISTINCT relationship_name,
+                           (properties->'edge_text')::text AS edge_text_json
+                    FROM graph_edge
+                    WHERE coalesce(
+                              nullif(btrim(properties->>'edge_text', :whitespace), ''),
+                              nullif(btrim(relationship_name, :whitespace), ''),
+                              ''
+                          ) = ANY(:edge_texts)
+                       OR jsonb_typeof(properties->'edge_text') NOT IN ('string', 'null')
+                """),
+                {"edge_texts": sorted(wanted), "whitespace": _python_whitespace()},
+            )
+            in_use: set[str] = set()
+            for row in result.mappings().all():
+                stored = row["edge_text_json"]
+                edge_text = get_edge_retrieval_text(
+                    None if stored is None else json.loads(stored), row["relationship_name"]
+                )
+                if edge_text in wanted:
+                    in_use.add(edge_text)
+            return in_use
 
     async def find_node_source_refs_by_pipeline_run(
         self, pipeline_run_id: str

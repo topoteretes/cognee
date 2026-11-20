@@ -14,9 +14,18 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 
-from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
-from cognee.infrastructure.databases.provenance import EdgeIdentity, make_source_ref_key
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.graph.postgres_demo.adapter import (
+    PostgresDemoAdapter,
+    _python_whitespace,
+)
+from cognee.infrastructure.databases.provenance import (
+    EdgeIdentity,
+    make_chunk_source_ref_key,
+    make_source_ref_key,
+)
 from cognee.tests.utils.assert_bounded_neighborhood_contract import (
     assert_bounded_neighborhood_contract,
 )
@@ -1079,3 +1088,99 @@ async def test_entity_type_names_reads_one_is_a_hop(adapter):
     }
     assert await adapter.get_entity_type_names(["person"]) == {}
     assert await adapter.get_entity_type_names([]) == {}
+
+
+@pytest.mark.asyncio
+async def test_source_refs_by_data_take_the_key_literally(adapter):
+    """Issue 6791: one document's refs are selected in the database. ``_`` is a LIKE
+    wildcard and every key has one, so a row that differs from the document's chunk
+    keys only where the pattern has ``_`` must not come back."""
+    dataset, data = uuid4(), uuid4()
+    document_key = make_source_ref_key(dataset, data)
+    chunk_key = make_chunk_source_ref_key(dataset, data, uuid4())
+    other_document_key = make_source_ref_key(dataset, uuid4())
+    for node_id in ("document", "chunk", "other", "lookalike"):
+        await adapter.add_node(_FakeDataPoint(id=node_id, name=node_id, type="Entity"))
+    await adapter.add_edge("document", "chunk", "has_chunk")
+    await adapter.add_edge("other", "chunk", "mentions")
+    await adapter.attach_node_source_refs(["document"], [other_document_key, document_key])
+    await adapter.attach_node_source_refs(["chunk"], [chunk_key])
+    await adapter.attach_node_source_refs(["other"], [other_document_key])
+    await adapter.attach_edge_source_refs(
+        [EdgeIdentity("document", "chunk", "has_chunk")], [chunk_key]
+    )
+    await adapter.attach_edge_source_refs(
+        [EdgeIdentity("other", "chunk", "mentions")], [other_document_key]
+    )
+    # Not a key cognee writes: "source_ref" with its "_" replaced, which only an
+    # unescaped LIKE pattern would match.
+    async with adapter.engine.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO graph_node_source_ref (node_id, source_ref_key, dataset_id) "
+                "VALUES ('lookalike', :key, :dataset)"
+            ),
+            {"key": chunk_key.replace("source_ref", "sourceXref"), "dataset": str(dataset)},
+        )
+
+    assert await adapter.find_node_source_refs_by_data(str(dataset), str(data)) == {
+        "document": [document_key],
+        "chunk": [chunk_key],
+    }
+    assert await adapter.find_edge_source_refs_by_data(str(dataset), str(data)) == {
+        EdgeIdentity("document", "chunk", "has_chunk"): [chunk_key]
+    }
+    assert await adapter.find_node_source_refs_by_data(str(dataset), str(uuid4())) == {}
+
+
+@pytest.mark.asyncio
+async def test_edge_texts_in_use_agree_with_reading_every_edge(adapter):
+    """Issue 6791: the database narrows the edges and must not lose one whose text
+    ``get_edge_retrieval_text`` computes: every whitespace ``str.strip()`` removes,
+    blank and absent ``edge_text``, and ``edge_text`` values that are not strings."""
+    every_whitespace = _python_whitespace()
+    assert len(every_whitespace) > 20 and "\u00a0" in every_whitespace
+    stored_edge_texts = [
+        "plain text",
+        f"{every_whitespace}padded with every whitespace{every_whitespace}",
+        "\u00a0non breaking spaces\u2003",
+        "\x1funit separators\x1c",
+        "inner  spaces\tstay",
+        "",
+        "   ",
+        every_whitespace,
+        None,
+        5,
+        1.5,
+        True,
+        False,
+        ["a", "list"],
+        {"a": "dict"},
+    ]
+    await adapter.add_node(_FakeDataPoint(id="hub", name="hub", type="Entity"))
+    for index, edge_text in enumerate(stored_edge_texts):
+        node_id = f"n{index}"
+        await adapter.add_node(_FakeDataPoint(id=node_id, name=node_id, type="Entity"))
+        # Two relationship names carry padding of their own, for the fallback.
+        relationship_name = f"\u2003rel_{index}\n" if index % 5 == 0 else f"rel_{index}"
+        await adapter.add_edge("hub", node_id, relationship_name, {"edge_text": edge_text})
+    await adapter.add_node(_FakeDataPoint(id="bare", name="bare", type="Entity"))
+    await adapter.add_edge("hub", "bare", "no_properties")
+
+    _, edges = await adapter.get_graph_data()
+    assert len(edges) == len(stored_edge_texts) + 1
+    from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+
+    texts = {get_edge_retrieval_text(edge[3].get("edge_text"), edge[2]) for edge in edges}
+    assert {"plain text", "padded with every whitespace", "non breaking spaces"} <= texts
+    assert {"5", "1.5", "True", "False", "no_properties", "rel_5", "rel_7", "rel_8"} <= texts
+
+    absent = ["rel_0", "rel_1", "plain", "true", "a", " plain text", "nobody has this"]
+    asked = sorted(texts) + absent
+    in_use = await adapter.find_edge_texts_in_use(asked)
+    assert in_use == texts
+    assert in_use == await GraphDBInterface.find_edge_texts_in_use(adapter, asked)
+    # Asking for one text at a time finds the same edges as asking for all.
+    for edge_text in asked:
+        assert await adapter.find_edge_texts_in_use([edge_text]) == {edge_text} & texts
+    assert await adapter.find_edge_texts_in_use([]) == set()

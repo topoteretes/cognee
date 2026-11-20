@@ -13,10 +13,12 @@ from .source_refs import (
     get_pipeline_run_id_from_source_run_ref,
     get_source_ref_key_from_source_run_ref,
     make_chunk_source_ref_key,
+    make_chunk_source_ref_key_prefix,
     make_source_ref_key,
     parse_source_ref_key,
     ParsedSourceRef,
     make_source_run_ref,
+    select_data_source_ref_keys,
 )
 from .write_context import (
     data_item_id,
@@ -42,8 +44,10 @@ __all__ = [
     "get_source_ref_key_from_source_run_ref",
     "graph_provenance_write_kwargs",
     "make_chunk_source_ref_key",
+    "make_chunk_source_ref_key_prefix",
     "make_source_ref_key",
     "make_source_run_ref",
     "parse_source_ref_key",
+    "select_data_source_ref_keys",
     "source_ref_from_context",
 ]

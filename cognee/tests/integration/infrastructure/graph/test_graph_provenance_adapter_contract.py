@@ -13,12 +13,14 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.databases.provenance import (
     GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
     GRAPH_DELETE_MODE_KEY,
     GRAPH_PROVENANCE_VERSION,
     GRAPH_PROVENANCE_VERSION_KEY,
     EdgeIdentity,
+    make_chunk_source_ref_key,
     make_source_ref_key,
     make_source_run_ref,
 )
@@ -268,6 +270,83 @@ async def test_edge_provenance_snapshot_and_lookups(graph_provenance_adapter):
 
     await adapter.remove_edge_source_refs([edge], [key])
     assert await adapter.find_edges_by_source_ref(key) == []
+
+
+async def test_source_ref_lookups_by_data_select_one_document(graph_provenance_adapter):
+    """A document's refs are its v1 key and its v2 chunk keys, in its dataset only."""
+    adapter = graph_provenance_adapter
+    d1, d2, data_a, data_b = uuid4(), uuid4(), uuid4(), uuid4()
+    a_document = make_source_ref_key(d1, data_a)
+    a_chunk_1 = make_chunk_source_ref_key(d1, data_a, uuid4())
+    a_chunk_2 = make_chunk_source_ref_key(d1, data_a, uuid4())
+    b_document = make_source_ref_key(d1, data_b)
+    b_chunk = make_chunk_source_ref_key(d1, data_b, uuid4())
+    a_elsewhere = make_chunk_source_ref_key(d2, data_a, uuid4())
+    germany_id, alice_id = await _seed_two_entities(adapter)
+    await adapter.add_edges([(germany_id, alice_id, "knows", {"edge_text": "t"})])
+    await adapter.add_edges([(alice_id, germany_id, "likes", {"edge_text": "t2"})])
+    knows = EdgeIdentity(germany_id, alice_id, "knows")
+    likes = EdgeIdentity(alice_id, germany_id, "likes")
+
+    await adapter.attach_node_source_refs([germany_id], [a_document, b_document, a_chunk_1])
+    await adapter.attach_node_source_refs([alice_id], [b_chunk, a_elsewhere])
+    await adapter.attach_edge_source_refs([knows], [a_chunk_2, b_chunk])
+    await adapter.attach_edge_source_refs([likes], [a_elsewhere, b_document])
+
+    nodes = await adapter.find_node_source_refs_by_data(str(d1), str(data_a))
+    edges = await adapter.find_edge_source_refs_by_data(str(d1), str(data_a))
+    assert nodes == {germany_id: [a_document, a_chunk_1]}
+    assert edges == {knows: [a_chunk_2]}
+
+    # The same data id in another dataset belongs to that dataset.
+    assert await adapter.find_node_source_refs_by_data(str(d2), str(data_a)) == {
+        alice_id: [a_elsewhere]
+    }
+    assert await adapter.find_edge_source_refs_by_data(str(d2), str(data_a)) == {
+        likes: [a_elsewhere]
+    }
+
+    unknown = str(uuid4())
+    assert await adapter.find_node_source_refs_by_data(str(d1), unknown) == {}
+    assert await adapter.find_edge_source_refs_by_data(str(d1), unknown) == {}
+
+    # An adapter that selects the rows in its store answers what narrowing the
+    # dataset's refs answers (the interface default).
+    for dataset, data in [(d1, data_a), (d1, data_b), (d2, data_a)]:
+        arguments = (adapter, str(dataset), str(data))
+        assert await adapter.find_node_source_refs_by_data(
+            str(dataset), str(data)
+        ) == await GraphDBInterface.find_node_source_refs_by_data(*arguments)
+        assert await adapter.find_edge_source_refs_by_data(
+            str(dataset), str(data)
+        ) == await GraphDBInterface.find_edge_source_refs_by_data(*arguments)
+
+
+async def test_edge_texts_in_use_follow_the_edge_retrieval_text(graph_provenance_adapter):
+    """An edge's text is its stripped ``edge_text``, else its relationship name."""
+    adapter = graph_provenance_adapter
+    germany_id, alice_id = await _seed_two_entities(adapter)
+    await adapter.add_edges(
+        [
+            (germany_id, alice_id, "knows", {"edge_text": "  Germany knows Alice\n"}),
+            (alice_id, germany_id, "likes", {}),
+            (alice_id, germany_id, "trusts", {"edge_text": "   "}),
+        ]
+    )
+    asked = ["Germany knows Alice", "likes", "trusts", "knows", "no edge has this"]
+
+    assert await adapter.find_edge_texts_in_use(asked) == {
+        "Germany knows Alice",
+        "likes",
+        "trusts",
+    }
+    assert await adapter.find_edge_texts_in_use([]) == set()
+    assert await adapter.find_edge_texts_in_use(
+        asked
+    ) == await GraphDBInterface.find_edge_texts_in_use(adapter, asked)
+
+    await adapter.delete_edge_triples([EdgeIdentity(alice_id, germany_id, "likes")])
+    assert await adapter.find_edge_texts_in_use(asked) == {"Germany knows Alice", "trusts"}
 
 
 async def test_delete_edge_triples_preserves_endpoints(graph_provenance_adapter):

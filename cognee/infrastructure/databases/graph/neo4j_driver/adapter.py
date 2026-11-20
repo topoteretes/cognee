@@ -24,6 +24,9 @@ from cognee.infrastructure.databases.provenance import (
     get_dataset_id_from_source_ref_key,
     get_pipeline_run_id_from_source_run_ref,
     get_source_ref_key_from_source_run_ref,
+    make_chunk_source_ref_key_prefix,
+    make_source_ref_key,
+    select_data_source_ref_keys,
 )
 from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_after_attach,
@@ -980,6 +983,66 @@ class Neo4jAdapter(GraphDBInterface):
                 for key in row["keys"]
                 if str(get_dataset_id_from_source_ref_key(key)) == dataset_id
             ]
+            if owned:
+                edge = EdgeIdentity(
+                    source_id=row["s"], target_id=row["t"], relationship_name=row["rel"]
+                )
+                result[edge] = owned
+        return result
+
+    @staticmethod
+    def _data_source_ref_parameters(dataset_id: str, data_id: str) -> dict[str, str]:
+        """What selects the keys of one dataset document: its v1 key and the start of
+        its v2 chunk keys."""
+        dataset, data = UUID(str(dataset_id)), UUID(str(data_id))
+        return {
+            "document_key": make_source_ref_key(dataset, data),
+            "chunk_key_prefix": make_chunk_source_ref_key_prefix(dataset, data),
+        }
+
+    async def find_node_source_refs_by_data(
+        self, dataset_id: str, data_id: str
+    ) -> dict[str, list[str]]:
+        """The source refs one dataset document owns on nodes. The database picks the
+        nodes that carry one, so only those reach Python."""
+        rows = await self.query(
+            f"""
+            MATCH (n:`{BASE_LABEL}`)
+            WHERE any(
+                key IN coalesce(n.source_ref_keys, [])
+                WHERE key = $document_key OR key STARTS WITH $chunk_key_prefix
+            )
+            RETURN n.id AS id, n.source_ref_keys AS keys
+            """,
+            self._data_source_ref_parameters(dataset_id, data_id),
+        )
+        dataset, data = UUID(str(dataset_id)), UUID(str(data_id))
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            owned = select_data_source_ref_keys(row["keys"], dataset, data)
+            if owned:
+                result[row["id"]] = owned
+        return result
+
+    async def find_edge_source_refs_by_data(
+        self, dataset_id: str, data_id: str
+    ) -> dict[EdgeIdentity, list[str]]:
+        """The source refs one dataset document owns on edges; see the node lookup."""
+        rows = await self.query(
+            f"""
+            MATCH (a:`{BASE_LABEL}`)-[r]->(b:`{BASE_LABEL}`)
+            WHERE any(
+                key IN coalesce(r.source_ref_keys, [])
+                WHERE key = $document_key OR key STARTS WITH $chunk_key_prefix
+            )
+            RETURN a.id AS s, b.id AS t, type(r) AS rel, r.source_ref_keys AS keys
+            """,
+            self._data_source_ref_parameters(dataset_id, data_id),
+        )
+        dataset, data = UUID(str(dataset_id)), UUID(str(data_id))
+        result: dict[EdgeIdentity, list[str]] = {}
+        for row in rows:
+            owned = select_data_source_ref_keys(row["keys"], dataset, data)
             if owned:
                 edge = EdgeIdentity(
                     source_id=row["s"], target_id=row["t"], relationship_name=row["rel"]
