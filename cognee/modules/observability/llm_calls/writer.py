@@ -42,10 +42,16 @@ class JsonlWriter:
         self._queue.put(line)
 
     def flush(self, timeout: float = 5.0) -> bool:
-        """Wait until every line put so far is on disk. Returns False on timeout."""
+        """Wait until every line put so far is on disk.
+
+        Returns False on timeout, and once a write has failed: records were lost,
+        so the file is not complete.
+        """
+        if self._failed:
+            return False
         done = threading.Event()
         self._queue.put(done)
-        return done.wait(timeout)
+        return done.wait(timeout) and not self._failed
 
     def close(self, timeout: float = 5.0) -> None:
         """Write what is queued and stop the thread (also run at interpreter exit)."""

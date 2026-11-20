@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify import config as cognify_config_module
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.tasks.graph.gliner_demo import (
@@ -209,7 +210,12 @@ async def test_label_bank_probe_runs_on_the_worker():
         patch.object(tasks_module, "get_extractor", side_effect=AssertionError("local model")),
     ):
         await tasks_module.prepare_gliner_schema(
-            [document], schema=GlinerSchema(), max_chunk_size=512, threshold=0.3, remote=remote
+            [document],
+            schema=GlinerSchema(),
+            max_chunk_size=512,
+            chunker=TextChunker,
+            threshold=0.3,
+            remote=remote,
         )
 
     [(text, schema, threshold)] = remote.probes
@@ -232,7 +238,11 @@ async def test_the_probe_sketch_fits_the_workers_text_limit(max_text_chars):
 
     with patch.object(TextDocument, "read", read):
         await tasks_module.prepare_gliner_schema(
-            [document], schema=GlinerSchema(), max_chunk_size=512, remote=remote
+            [document],
+            schema=GlinerSchema(),
+            max_chunk_size=512,
+            chunker=TextChunker,
+            remote=remote,
         )
 
     [(text, _schema, _threshold)] = remote.probes

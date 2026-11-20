@@ -1,3 +1,4 @@
+import builtins
 from os.path import basename
 from uuid import UUID
 
@@ -21,7 +22,7 @@ class DltSourceDocument(Document):
     type: str = "dlt_source"
     mime_type: str = "application/x-dlt-source"
 
-    async def read(self, chunker_cls: Chunker, max_chunk_size: int):
+    async def read(self, chunker_cls: builtins.type[Chunker], max_chunk_size: int):
         from cognee.modules.chunking.models.DltRow import DltRow
         from cognee.tasks.ingestion.dlt_utils import load_dlt_manifest
 

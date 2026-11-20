@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class LLMCallRecord(BaseModel):
@@ -21,6 +21,12 @@ class LLMCallRecord(BaseModel):
     hold user content. They are set only when the record was built with content
     included (``content_included``); the lengths and the system prompt hash are
     always set, so scrubbed records can still be grouped by prompt and size.
+
+    ``stage`` is the model stage that chose the call's model settings
+    (extraction, summarization or query), or None outside one. ``caller`` names
+    the enclosing piece of cognee work (``caller_scope``), and ``chunk_id`` the
+    chunk the call is about; both are left out of the JSON when not supplied.
+    Schema 2 split ``caller`` out of ``stage``.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -31,6 +37,7 @@ class LLMCallRecord(BaseModel):
     duration_ms: float
 
     stage: str | None
+    caller: str | None = None
     run_id: UUID | None
     chunk_id: UUID | None = None
 

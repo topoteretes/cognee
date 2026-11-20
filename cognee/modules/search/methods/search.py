@@ -11,7 +11,7 @@ from cognee.context_global_variables import (
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
-from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
+from cognee.infrastructure.llm.pipeline_stage import caller_scope
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
@@ -252,7 +252,7 @@ async def authorized_search(
 
     async def _search(datasets: list[Dataset], widening: bool = False) -> list[SearchResultPayload]:
         # Searches all provided datasets and handles setting up of appropriate database context based on permissions
-        with pipeline_stage("retrieval"):
+        with caller_scope("search_in_datasets_context"):
             return await search_in_datasets_context(
                 search_datasets=datasets,
                 widening=widening,

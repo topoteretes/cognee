@@ -35,6 +35,9 @@ from cognee.infrastructure.databases.exceptions.exceptions import (
 )
 from cognee.infrastructure.databases.postgres.deadlock import is_deadlock
 from cognee.infrastructure.databases.relational import get_relational_config
+from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+    DEFAULT_POOL_TIMEOUT,
+)
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 
@@ -152,6 +155,10 @@ class SqlCacheAdapter(CacheDBInterface):
             # same value must work here — SQLAlchemy itself needs the class.
             if pool_args.get("poolclass", "").lower() == "nullpool":
                 pool_args["poolclass"] = NullPool
+            elif not is_sqlite:
+                # The Postgres cache waits for a pooled connection as long as cognee's
+                # other Postgres pools do.
+                pool_args.setdefault("pool_timeout", DEFAULT_POOL_TIMEOUT)
             if is_sqlite:
                 # Concurrency tuning: wait out writer locks instead of failing
                 # with SQLITE_BUSY when several processes share one cache.db.
@@ -350,14 +357,17 @@ class SqlCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        time: str | None = None,
+        prompt_time: str | None = None,
     ) -> dict:
         """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
-            time=datetime.now(timezone.utc).isoformat(),
+            time=time or datetime.now(timezone.utc).isoformat(),
             question=question,
             context=context,
             answer=answer,
             qa_id=qa_id or str(uuid.uuid4()),
+            prompt_time=prompt_time or "",
             feedback_text=feedback_text,
             feedback_score=feedback_score,
             used_graph_element_ids=used_graph_element_ids,
@@ -377,6 +387,7 @@ class SqlCacheAdapter(CacheDBInterface):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        time: str | None = None,
     ) -> dict:
         """Serialize one agent-trace step into the normalized cache payload shape."""
         entry = SessionAgentTraceEntry(
@@ -389,6 +400,7 @@ class SqlCacheAdapter(CacheDBInterface):
             method_return_value=method_return_value,
             error_message=error_message,
             session_feedback=session_feedback,
+            time=time or datetime.now(timezone.utc).isoformat(),
         )
         return entry.model_dump()
 
@@ -525,6 +537,8 @@ class SqlCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        time: str | None = None,
+        prompt_time: str | None = None,
     ) -> None:
         """Append one QA entry to the session. Creates the session if it doesn't exist."""
         await self._ensure_initialized()
@@ -539,6 +553,8 @@ class SqlCacheAdapter(CacheDBInterface):
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
                 used_session_context_ids=used_session_context_ids,
+                time=time,
+                prompt_time=prompt_time,
             )
             async with self.sessionmaker() as session, session.begin():
                 await self._lock_session_writes(session, cache_qa_entries, user_id, session_id)
@@ -885,6 +901,7 @@ class SqlCacheAdapter(CacheDBInterface):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        time: str | None = None,
     ) -> None:
         """Append one trace step to the stored trace list for this session."""
         await self._ensure_initialized()
@@ -899,6 +916,7 @@ class SqlCacheAdapter(CacheDBInterface):
                 method_return_value=method_return_value,
                 error_message=error_message,
                 session_feedback=session_feedback,
+                time=time,
             )
             async with self.sessionmaker() as session, session.begin():
                 await self._lock_session_writes(session, cache_trace_entries, user_id, session_id)
