@@ -27,16 +27,16 @@ import cognee
 from cognee.tasks.ingestion.connectors import evernote_source
 
 source = evernote_source(
-    resource_name="evernote_notes",      # one per account, required
+    resource_name="evernote_notes",  # one per account, required
     token="S=s1:U=...:H=...",
-    notebook_names=["Work"],             # optional, by name
-    tag_names=["project-x"],             # optional, by name
+    notebook_names=["Work"],  # optional, by name
+    tag_names=["project-x"],  # optional, by name
 )
 await cognee.remember(
     source,
     dataset_name="evernote",
     primary_key="id",
-    write_disposition="merge",           # REQUIRED: the default "replace" wipes the corpus
+    write_disposition="merge",  # REQUIRED: the default "replace" wipes the corpus
     max_rows_per_table=0,
     self_improvement=False,
 )

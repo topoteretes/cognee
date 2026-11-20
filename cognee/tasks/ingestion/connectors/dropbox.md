@@ -22,9 +22,9 @@ from cognee.tasks.ingestion.connectors import dropbox_account_id, dropbox_source
 
 source = dropbox_source(
     folder_id="id:a4ayc_80_OEAAAAAAAAAXw",  # or "" for the whole Dropbox
-    account_id=dropbox_account_id(token),    # "dbid:..."
-    token=token,                             # or a callable returning a fresh one; or service=
-    resource_name="dropbox_notes",           # required, one per folder and account
+    account_id=dropbox_account_id(token),  # "dbid:..."
+    token=token,  # or a callable returning a fresh one; or service=
+    resource_name="dropbox_notes",  # required, one per folder and account
 )
 await cognee.remember(
     source,
