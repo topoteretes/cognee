@@ -127,6 +127,8 @@ def test_estimate_chunks_warns_when_model_has_no_pricing(offline_estimator, monk
         ("gpt-5", True),
         ("gpt-5-nano", True),
         ("gpt-5.4", True),
+        ("openai/gpt-6-luna", True),
+        ("gpt-6.1-terra", True),
         ("o1", True),
         ("o3-mini", True),
         ("openai/o4-mini", True),
