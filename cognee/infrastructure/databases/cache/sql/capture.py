@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import time
+from datetime import datetime
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from sqlalchemy import insert, select, update
@@ -143,6 +144,9 @@ async def store_capture(
             }
             if entry["type"] == "qa":
                 values["qa_id"] = entry_id
+                # The same instant as the payload's ``time``, as ``create_qa_entry``
+                # stores it, so a time filter on the column agrees with the payload.
+                values["created_at"] = datetime.fromisoformat(payload["time"])
             await session.execute(insert(table).values(**values))
             await adapter._refresh_session_ttl(session, table, user_id, session_id)
         else:

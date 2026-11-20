@@ -16,6 +16,7 @@ from cognee.infrastructure.databases.cache.sql.capture import CaptureConflictErr
 from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 from cognee.infrastructure.databases.cache.sql.tables import (
     cache_capture_receipts,
+    cache_qa_entries,
     cache_trace_entries,
 )
 from cognee.infrastructure.session import capture
@@ -429,3 +430,21 @@ async def test_capture_returns_its_receipt_while_the_llm_batch_runs(service, mon
     release.set()
     assert await wait_for_background_tasks(timeout=5)
     batch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_qa_capture_keeps_the_client_times(service):
+    # Coding distillation pairs traces with turns by these times, on the client's clock.
+    entry = QAEntry(
+        question="q",
+        answer="a",
+        time="2020-01-01T00:05:00+00:00",
+        prompt_time="2020-01-01T00:00:00+00:00",
+    )
+    await capture.remember_capture(**{**service.args, "entry": entry})
+
+    async with service.adapter.sessionmaker() as session:
+        row = (await session.execute(select(cache_qa_entries))).mappings().one()
+    assert row["payload"]["time"] == "2020-01-01T00:05:00+00:00"
+    assert row["payload"]["prompt_time"] == "2020-01-01T00:00:00+00:00"
+    assert row["created_at"].replace(tzinfo=None).isoformat() == "2020-01-01T00:05:00"

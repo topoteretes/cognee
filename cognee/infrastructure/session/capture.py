@@ -118,6 +118,10 @@ async def remember_capture(
                 entry.feedback_text,
                 entry.feedback_score,
                 used_graph_element_ids=entry.used_graph_element_ids,
+                # The client's clock, as on the plain entry path: coding distillation
+                # pairs traces with turns by these times.
+                time=entry.time,
+                prompt_time=entry.prompt_time,
             )
         return adapter._build_agent_trace_entry_dump(
             trace_id=entry_id,
