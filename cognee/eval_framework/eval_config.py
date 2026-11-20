@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,6 +46,16 @@ class EvalConfig(BaseSettings):
     # written to the current working directory (legacy behavior).
     results_dir: str | None = None
 
+    # Run integrity. All opt-in; the thresholds are the user's, there are no defaults.
+    # Reuse the ok answers (and the built corpus) of an interrupted run in the same directory.
+    resume: bool = False
+    # Fail the run when more than this fraction of questions could not be answered (0.0 = none).
+    max_answer_failure_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Fail the run when any metric left more than this fraction of its questions unscored.
+    max_unscored_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Fail the run when cross-file validation finds an error (see integrity.validate_run).
+    strict_integrity: bool = False
+
     # file paths
     questions_path: str = "questions_output.json"
     answers_path: str = "answers_output.json"
@@ -72,6 +83,10 @@ class EvalConfig(BaseSettings):
             "dashboard": self.dashboard,
             "seed": self.seed,
             "results_dir": self.results_dir,
+            "resume": self.resume,
+            "max_answer_failure_rate": self.max_answer_failure_rate,
+            "max_unscored_rate": self.max_unscored_rate,
+            "strict_integrity": self.strict_integrity,
             "questions_path": self.questions_path,
             "answers_path": self.answers_path,
             "metrics_path": self.metrics_path,

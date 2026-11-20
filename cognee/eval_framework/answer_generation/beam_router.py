@@ -5,8 +5,10 @@ The router classifies the question (using pre-labeled types from the dataset)
 and delegates to the matching retrieval strategy.
 """
 
+from collections.abc import Callable
 from typing import Any
 
+from cognee.eval_framework.integrity.answering import answer_question
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -119,19 +121,31 @@ class BEAMRouter:
         return self._retriever_cache[cls_name]
 
     @staticmethod
+    def all_prompts() -> dict[str, str]:
+        """Every system prompt the router can use (part of a run's answer fingerprint)."""
+        return {**_TYPE_PROMPTS, "default": _DEFAULT_PROMPT}
+
+    @staticmethod
     def get_system_prompt(question_type: str) -> str:
         """Get the system prompt for a question type."""
         return _TYPE_PROMPTS.get(question_type, _DEFAULT_PROMPT)
 
-    async def answer_questions(self, questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def answer_questions(
+        self,
+        questions: list[dict[str, Any]],
+        on_answer: Callable[[dict[str, Any]], None] | None = None,
+    ) -> list[dict[str, Any]]:
         """Answer a list of BEAM probing questions using type-based routing.
 
         Args:
             questions: List of dicts with "question", "answer" (golden),
                 "question_type", and optionally "rubric".
 
+            on_answer: Called with every finished record as soon as it exists (checkpointing).
+
         Returns:
-            List of answer dicts compatible with the eval framework.
+            List of answer dicts compatible with the eval framework. A question whose retrieval
+            or completion raised has a failed ``status`` and an ``error`` instead of an answer.
         """
         answers = []
 
@@ -143,35 +157,18 @@ class BEAMRouter:
             retriever = self._get_retriever(question_type)
             system_prompt = self.get_system_prompt(question_type)
 
-            try:
-                retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
-                retrieval_context = await retriever.get_context_from_objects(
-                    query=query_text, retrieved_objects=retrieved_objects
-                )
-                search_results = await retriever.get_completion_from_context(
-                    query=query_text,
-                    retrieved_objects=retrieved_objects,
-                    context=retrieval_context,
-                    system_prompt=system_prompt,
-                )
-
-                if isinstance(search_results, str):
-                    search_results = [search_results]
-
-                answer_text = search_results[0] if search_results else ""
-
-            except Exception as e:
-                logger.exception(f"Failed to answer '{query_text[:80]}...'")
-                answer_text = f"ERROR: {e}"
-                retrieval_context = ""
+            outcome = await answer_question(retriever, query_text, system_prompt=system_prompt)
 
             answer = {
                 "question": query_text,
-                "answer": answer_text,
+                "answer": outcome["answer"],
                 "golden_answer": golden_answer,
-                "retrieval_context": retrieval_context,
+                "retrieval_context": outcome["retrieval_context"],
                 "question_type": question_type,
+                "status": outcome["status"],
             }
+            if "error" in outcome:
+                answer["error"] = outcome["error"]
 
             if "rubric" in instance:
                 answer["rubric"] = instance["rubric"]
@@ -180,6 +177,8 @@ class BEAMRouter:
             if "difficulty" in instance:
                 answer["difficulty"] = instance["difficulty"]
 
+            if on_answer is not None:
+                on_answer(answer)
             answers.append(answer)
             logger.info(
                 f"[{question_type}] Answered: '{query_text[:60]}...' "
