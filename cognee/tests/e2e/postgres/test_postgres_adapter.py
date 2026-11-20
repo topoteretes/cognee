@@ -9,12 +9,13 @@ Override via environment variables if needed.
 
 import asyncio
 import os
+from contextlib import contextmanager
 from copy import deepcopy
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.databases.graph.postgres_demo.adapter import (
@@ -1133,6 +1134,26 @@ async def test_source_refs_by_data_take_the_key_literally(adapter):
     assert await adapter.find_node_source_refs_by_data(str(dataset), str(uuid4())) == {}
 
 
+@contextmanager
+def _executed_statements(adapter):
+    """The SQL the adapter's engine runs inside the block."""
+    statements: list[str] = []
+
+    def record(connection, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(adapter.engine.sync_engine, "before_cursor_execute", record)
+    try:
+        yield statements
+    finally:
+        event.remove(adapter.engine.sync_engine, "before_cursor_execute", record)
+
+
+def _narrowed_by_text(statements: list[str]) -> bool:
+    """Whether a statement selected edges by their text in the database."""
+    return any("btrim(" in statement for statement in statements)
+
+
 @pytest.mark.asyncio
 async def test_edge_texts_in_use_agree_with_reading_every_edge(adapter):
     """Issue 6791: the database narrows the edges and must not lose one whose text
@@ -1146,6 +1167,8 @@ async def test_edge_texts_in_use_agree_with_reading_every_edge(adapter):
         "\u00a0non breaking spaces\u2003",
         "\x1funit separators\x1c",
         "inner  spaces\tstay",
+        "café, voilà, très",
+        "日本語のテキスト",
         "",
         "   ",
         every_whitespace,
@@ -1161,26 +1184,104 @@ async def test_edge_texts_in_use_agree_with_reading_every_edge(adapter):
     for index, edge_text in enumerate(stored_edge_texts):
         node_id = f"n{index}"
         await adapter.add_node(_FakeDataPoint(id=node_id, name=node_id, type="Entity"))
-        # Two relationship names carry padding of their own, for the fallback.
+        # Some relationship names carry padding of their own, for the fallback.
         relationship_name = f"\u2003rel_{index}\n" if index % 5 == 0 else f"rel_{index}"
         await adapter.add_edge("hub", node_id, relationship_name, {"edge_text": edge_text})
     await adapter.add_node(_FakeDataPoint(id="bare", name="bare", type="Entity"))
-    await adapter.add_edge("hub", "bare", "no_properties")
+    await adapter.add_edge("hub", "bare", "créé")
+    # More edges than texts asked below, so the adapter narrows in the database.
+    for index in range(40):
+        node_id = f"filler{index}"
+        await adapter.add_node(_FakeDataPoint(id=node_id, name=node_id, type="Entity"))
+        await adapter.add_edge("hub", node_id, "filler", {"edge_text": f"filler text {index}"})
 
     _, edges = await adapter.get_graph_data()
-    assert len(edges) == len(stored_edge_texts) + 1
+    assert len(edges) == len(stored_edge_texts) + 41
     from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 
-    texts = {get_edge_retrieval_text(edge[3].get("edge_text"), edge[2]) for edge in edges}
+    texts = {
+        get_edge_retrieval_text(edge[3].get("edge_text"), edge[2])
+        for edge in edges
+        if edge[2] != "filler"
+    }
     assert {"plain text", "padded with every whitespace", "non breaking spaces"} <= texts
-    assert {"5", "1.5", "True", "False", "no_properties", "rel_5", "rel_7", "rel_8"} <= texts
+    assert {"café, voilà, très", "日本語のテキスト", "créé"} <= texts
+    assert {"5", "1.5", "True", "False", "rel_10", "rel_7", "rel_8", "rel_9"} <= texts
 
     absent = ["rel_0", "rel_1", "plain", "true", "a", " plain text", "nobody has this"]
     asked = sorted(texts) + absent
-    in_use = await adapter.find_edge_texts_in_use(asked)
+    assert len(asked) < len(edges)
+    with _executed_statements(adapter) as statements:
+        in_use = await adapter.find_edge_texts_in_use(asked)
+    assert _narrowed_by_text(statements)
     assert in_use == texts
     assert in_use == await GraphDBInterface.find_edge_texts_in_use(adapter, asked)
     # Asking for one text at a time finds the same edges as asking for all.
     for edge_text in asked:
         assert await adapter.find_edge_texts_in_use([edge_text]) == {edge_text} & texts
     assert await adapter.find_edge_texts_in_use([]) == set()
+
+
+@pytest.mark.asyncio
+async def test_edge_texts_in_use_reads_the_remaining_edges_when_more_texts_are_asked(adapter):
+    """After a whole dataset is deleted, millions of texts are asked about and few
+    edges are left: the adapter reads those edges and does not send every text."""
+    for node_id in ("a", "b", "c"):
+        await adapter.add_node(_FakeDataPoint(id=node_id, name=node_id, type="Entity"))
+    await adapter.add_edge("a", "b", "knows", {"edge_text": "  a knows b "})
+    await adapter.add_edge("b", "c", "likes")
+    asked = ["a knows b", "likes", "knows"] + [f"deleted text {index}" for index in range(500)]
+
+    with _executed_statements(adapter) as statements:
+        in_use = await adapter.find_edge_texts_in_use(asked)
+
+    assert in_use == {"a knows b", "likes"}
+    assert not _narrowed_by_text(statements)
+    assert not any("deleted text" in statement for statement in statements)
+
+    # With no edge left there is nothing in use, whatever is asked.
+    await adapter.delete_graph()
+    assert await adapter.find_edge_texts_in_use(asked) == set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("encoding", ["SQL_ASCII", "LATIN1"])
+async def test_edge_texts_in_use_on_a_database_that_is_not_utf8(adapter, encoding):
+    """In a single-byte encoding ``btrim`` works on bytes, and the whitespace
+    characters cannot be sent to every encoding, so the adapter does not narrow by
+    text there. A relationship name is a plain text column and may hold "é" in both
+    encodings; narrowed byte-wise, SQL_ASCII lost such an edge."""
+    database = f"cognee_graph_{encoding.lower()}_{uuid4().hex[:8]}"
+    url = adapter.engine.url.set(database=database).render_as_string(hide_password=False)
+    async with adapter.engine.connect() as connection:
+        autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+        await autocommit.execute(
+            text(
+                f"CREATE DATABASE {database} ENCODING '{encoding}' TEMPLATE template0 "
+                "LC_COLLATE 'C' LC_CTYPE 'C'"
+            )
+        )
+    other = PostgresDemoAdapter(connection_string=url)
+    try:
+        await other.initialize()
+        await other.add_node(_FakeDataPoint(id="hub", name="hub", type="Entity"))
+        for index in range(12):
+            node_id = f"n{index}"
+            await other.add_node(_FakeDataPoint(id=node_id, name=node_id, type="Entity"))
+            await other.add_edge("hub", node_id, f"rel_{index}", {"edge_text": f"text {index}"})
+        await other.add_node(_FakeDataPoint(id="accented", name="accented", type="Entity"))
+        await other.add_edge("hub", "accented", "créé")
+        await other.add_edge("accented", "hub", "voilà", {"edge_text": "  "})
+
+        asked = ["créé", "voilà", "text 3", "rel_3", "nobody has this"]
+        with _executed_statements(other) as statements:
+            in_use = await other.find_edge_texts_in_use(asked)
+
+        assert in_use == {"créé", "voilà", "text 3"}
+        assert in_use == await GraphDBInterface.find_edge_texts_in_use(other, asked)
+        assert not _narrowed_by_text(statements)
+    finally:
+        await other.close()
+        async with adapter.engine.connect() as connection:
+            autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit.execute(text(f"DROP DATABASE IF EXISTS {database} WITH (FORCE)"))

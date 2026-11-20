@@ -30,11 +30,11 @@ from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
     NodeDeleteData,
+    data_source_ref_key_selector,
     get_dataset_id_from_source_ref_key,
     make_chunk_source_ref_key,
     make_source_ref_key,
     make_source_run_ref,
-    select_data_source_ref_keys,
 )
 from cognee.infrastructure.databases.unified import UnifiedStoreEngine
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
@@ -309,6 +309,7 @@ class FakeProvenanceGraphEngine:
     find_node_source_refs_by_data = GraphDBInterface.find_node_source_refs_by_data
     find_edge_source_refs_by_data = GraphDBInterface.find_edge_source_refs_by_data
     find_edge_texts_in_use = GraphDBInterface.find_edge_texts_in_use
+    _warn_data_source_ref_fallback = GraphDBInterface._warn_data_source_ref_fallback
 
     async def remove_belongs_to_set_tags(self, tags):
         self._guard()
@@ -706,10 +707,12 @@ _ = (EdgeType, generate_node_id, get_edge_retrieval_text)
 
 
 class StoreSideLookupGraphEngine(FakeProvenanceGraphEngine):
-    """A graph that answers the by-document lookups itself, like the in-tree adapters.
+    """A graph that answers all three lookups itself, as the Postgres adapter does
+    (Ladybug and Neo4j answer the two source-ref lookups and inherit the default
+    ``find_edge_texts_in_use``).
 
-    Reading the whole dataset or the whole graph fails the test: a delete of one
-    document must not need either.
+    Reading the whole dataset or the whole graph fails the test: with such an
+    adapter a delete of one document must not need either.
     """
 
     async def find_node_source_refs_by_dataset(self, dataset_id):
@@ -723,20 +726,20 @@ class StoreSideLookupGraphEngine(FakeProvenanceGraphEngine):
 
     async def find_node_source_refs_by_data(self, dataset_id, data_id):
         self._guard()
-        dataset, data = _as_uuid(dataset_id), _as_uuid(data_id)
+        select = data_source_ref_key_selector(_as_uuid(dataset_id), _as_uuid(data_id))
         return {
             node_id: owned
             for node_id, node in self.nodes.items()
-            if (owned := select_data_source_ref_keys(node.source_ref_keys, dataset, data))
+            if (owned := select(node.source_ref_keys))
         }
 
     async def find_edge_source_refs_by_data(self, dataset_id, data_id):
         self._guard()
-        dataset, data = _as_uuid(dataset_id), _as_uuid(data_id)
+        select = data_source_ref_key_selector(_as_uuid(dataset_id), _as_uuid(data_id))
         return {
             edge: owned
             for edge, row in self.edges.items()
-            if (owned := select_data_source_ref_keys(row.source_ref_keys, dataset, data))
+            if (owned := select(row.source_ref_keys))
         }
 
     async def find_edge_texts_in_use(self, edge_texts):

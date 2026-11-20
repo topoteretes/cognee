@@ -36,12 +36,12 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_attach_inputs,
 )
 from cognee.infrastructure.databases.provenance.source_refs import (
+    data_source_ref_key_selector,
     get_dataset_id_from_source_ref_key,
     get_pipeline_run_id_from_source_run_ref,
     get_source_ref_key_from_source_run_ref,
     make_chunk_source_ref_key_prefix,
     make_source_ref_key,
-    select_data_source_ref_keys,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.files.storage import get_file_storage
@@ -1806,10 +1806,10 @@ class LadybugAdapter(GraphDBInterface):
             """,
             self._data_source_ref_tokens(dataset_id, data_id),
         )
-        dataset, data = UUID(str(dataset_id)), UUID(str(data_id))
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
         result: dict[str, list[str]] = {}
         for row in rows:
-            owned = select_data_source_ref_keys(_decode_refs(row[1]), dataset, data)
+            owned = select(_decode_refs(row[1]))
             if owned:
                 result[row[0]] = owned
         return result
@@ -1827,10 +1827,10 @@ class LadybugAdapter(GraphDBInterface):
             """,
             self._data_source_ref_tokens(dataset_id, data_id),
         )
-        dataset, data = UUID(str(dataset_id)), UUID(str(data_id))
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
         result: dict[EdgeIdentity, list[str]] = {}
         for row in rows:
-            owned = select_data_source_ref_keys(_decode_refs(row[3]), dataset, data)
+            owned = select(_decode_refs(row[3]))
             if owned:
                 edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
                 result[edge] = owned

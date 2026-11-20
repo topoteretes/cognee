@@ -21,12 +21,12 @@ from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
     NodeDeleteData,
+    data_source_ref_key_selector,
     get_dataset_id_from_source_ref_key,
     get_pipeline_run_id_from_source_run_ref,
     get_source_ref_key_from_source_run_ref,
     make_chunk_source_ref_key_prefix,
     make_source_ref_key,
-    select_data_source_ref_keys,
 )
 from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_after_attach,
@@ -1016,10 +1016,10 @@ class Neo4jAdapter(GraphDBInterface):
             """,
             self._data_source_ref_parameters(dataset_id, data_id),
         )
-        dataset, data = UUID(str(dataset_id)), UUID(str(data_id))
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
         result: dict[str, list[str]] = {}
         for row in rows:
-            owned = select_data_source_ref_keys(row["keys"], dataset, data)
+            owned = select(row["keys"])
             if owned:
                 result[row["id"]] = owned
         return result
@@ -1039,10 +1039,10 @@ class Neo4jAdapter(GraphDBInterface):
             """,
             self._data_source_ref_parameters(dataset_id, data_id),
         )
-        dataset, data = UUID(str(dataset_id)), UUID(str(data_id))
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
         result: dict[EdgeIdentity, list[str]] = {}
         for row in rows:
-            owned = select_data_source_ref_keys(row["keys"], dataset, data)
+            owned = select(row["keys"])
             if owned:
                 edge = EdgeIdentity(
                     source_id=row["s"], target_id=row["t"], relationship_name=row["rel"]

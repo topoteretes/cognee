@@ -15,7 +15,7 @@ from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
     NodeDeleteData,
-    select_data_source_ref_keys,
+    data_source_ref_key_selector,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger
@@ -33,6 +33,8 @@ Node = tuple[str, NodeData]  # (node_id, properties)
 _warned_degree_fallbacks: set[type] = set()
 _warned_neighborhood_fallbacks: set[type] = set()
 _warned_graph_counts_fallbacks: set[type] = set()
+_warned_data_source_ref_fallbacks: set[type] = set()
+_warned_edge_text_fallbacks: set[type] = set()
 
 
 def timestamp_overlaps(node: dict, start: int | None, end: int | None) -> bool:
@@ -580,15 +582,13 @@ class GraphDBInterface(ABC):
 
             - dict[str, list[str]]: The data item's source refs keyed by node id.
         """
+        self._warn_data_source_ref_fallback()
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
         refs_by_node = await self.find_node_source_refs_by_dataset(dataset_id)
         return {
             node_id: data_refs
             for node_id, refs in refs_by_node.items()
-            if (
-                data_refs := select_data_source_ref_keys(
-                    refs, UUID(str(dataset_id)), UUID(str(data_id))
-                )
-            )
+            if (data_refs := select(refs))
         }
 
     async def find_edge_source_refs_by_data(
@@ -615,16 +615,23 @@ class GraphDBInterface(ABC):
             - dict[EdgeIdentity, list[str]]: The data item's source refs keyed by
               edge identity.
         """
+        self._warn_data_source_ref_fallback()
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
         refs_by_edge = await self.find_edge_source_refs_by_dataset(dataset_id)
         return {
-            edge: data_refs
-            for edge, refs in refs_by_edge.items()
-            if (
-                data_refs := select_data_source_ref_keys(
-                    refs, UUID(str(dataset_id)), UUID(str(data_id))
-                )
-            )
+            edge: data_refs for edge, refs in refs_by_edge.items() if (data_refs := select(refs))
         }
+
+    def _warn_data_source_ref_fallback(self) -> None:
+        adapter_type = type(self)
+        if adapter_type not in _warned_data_source_ref_fallbacks:
+            _warned_data_source_ref_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native find_node_source_refs_by_data / "
+                "find_edge_source_refs_by_data; deleting one document reads every source "
+                "ref of its dataset. This is O(dataset) in memory.",
+                adapter_type.__name__,
+            )
 
     async def find_edge_texts_in_use(self, edge_texts: list[str]) -> set[str]:
         """
@@ -654,6 +661,14 @@ class GraphDBInterface(ABC):
         if not wanted:
             return set()
 
+        adapter_type = type(self)
+        if adapter_type not in _warned_edge_text_fallbacks:
+            _warned_edge_text_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native find_edge_texts_in_use; a delete that removes edges "
+                "reads the whole graph. This is O(graph) in memory.",
+                adapter_type.__name__,
+            )
         _, edges = await self.get_graph_data()
         in_use: set[str] = set()
         for edge in edges:
