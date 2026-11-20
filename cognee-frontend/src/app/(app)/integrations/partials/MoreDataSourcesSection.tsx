@@ -1,5 +1,7 @@
 "use client";
 
+import { uiPath } from "@/modules/config/uiBasePath";
+
 import { useState, type ReactElement } from "react";
 import { trackEvent } from "@/modules/analytics";
 
@@ -184,7 +186,7 @@ export default function MoreDataSourcesSection(): ReactElement {
             <button key={it.name} className="ds-card" onClick={() => openSource(it)} style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "13px 15px", textAlign: "left", cursor: "pointer", fontFamily: "inherit", width: "100%" }}>
               <div style={{ width: 36, height: 36, borderRadius: 10, background: it.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}>
                 {it.logo ? (
-                  <span aria-hidden style={{ width: 19, height: 19, background: "#fff", WebkitMaskImage: `url(/visuals/logos/datasources/${it.logo}.svg)`, maskImage: `url(/visuals/logos/datasources/${it.logo}.svg)`, WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat", WebkitMaskPosition: "center", maskPosition: "center", WebkitMaskSize: "contain", maskSize: "contain" }} />
+                  <span aria-hidden style={{ width: 19, height: 19, background: "#fff", WebkitMaskImage: `url(${uiPath(`/visuals/logos/datasources/${it.logo}.svg`)})`, maskImage: `url(${uiPath(`/visuals/logos/datasources/${it.logo}.svg`)})`, WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat", WebkitMaskPosition: "center", maskPosition: "center", WebkitMaskSize: "contain", maskSize: "contain" }} />
                 ) : (
                   <span style={{ color: "#fff", fontSize: 13, fontWeight: 700, letterSpacing: "-0.02em" }}>{it.initials}</span>
                 )}

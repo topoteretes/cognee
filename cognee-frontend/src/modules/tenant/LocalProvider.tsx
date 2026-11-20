@@ -1,5 +1,7 @@
 "use client";
 
+import { uiPath } from "@/modules/config/uiBasePath";
+
 import { useEffect, useState } from "react";
 import { Tenant } from "./types";
 import { TenantContext, localInstance } from "./TenantContext";
@@ -18,7 +20,7 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
 
     async function init() {
       // Guard: don't check auth if we're already on the login page (avoids redirect loop)
-      if (typeof window !== "undefined" && window.location.pathname === "/local-login") {
+      if (typeof window !== "undefined" && window.location.pathname === uiPath("/local-login")) {
         setIsInitializing(false);
         return;
       }
@@ -31,7 +33,7 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
 
         if (meResponse.status === 401 || meResponse.status === 403) {
           // Not authenticated — redirect to local login
-          window.location.href = "/local-login";
+          window.location.href = uiPath("/local-login");
           return;
         }
 

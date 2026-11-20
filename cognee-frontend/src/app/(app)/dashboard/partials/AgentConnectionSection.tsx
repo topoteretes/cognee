@@ -1,5 +1,7 @@
 "use client";
 
+import { uiPath } from "@/modules/config/uiBasePath";
+
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { trackEvent } from "@/modules/analytics";
@@ -90,7 +92,7 @@ export function AgentConnectionSection({
   // claude-code/codex never reach this popup (handleCardClick routes them to
   // AgentSetupModal instead), so the only logo this needs is openclaw's —
   // api-mcp renders its own inline svg in the header below.
-  const logoSrc = "/visuals/logos/openclaw.svg";
+  const logoSrc = uiPath("/visuals/logos/openclaw.svg");
 
   const popupContent =
     popupOpen && activeCfg && activeKey ? (

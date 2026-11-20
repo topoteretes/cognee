@@ -1,5 +1,7 @@
 "use client";
 
+import { uiPath } from "@/modules/config/uiBasePath";
+
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -94,7 +96,7 @@ export function AgentOnboarding({ agent, serviceUrl, apiKey, cogniInstance, onRe
         <div style={{ padding: "26px 30px 18px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <Image src={agent === "claude-code" ? "/visuals/logos/claude.svg" : "/visuals/logos/codex.svg"} alt={name} width={26} height={26} style={{ width: 26, height: 26, objectFit: "contain" }} />
+              <Image src={agent === "claude-code" ? uiPath("/visuals/logos/claude.svg") : uiPath("/visuals/logos/codex.svg")} alt={name} width={26} height={26} style={{ width: 26, height: 26, objectFit: "contain" }} />
               <h1 style={{ fontSize: 24, fontWeight: 300, color: "#EDECEA", margin: 0, fontFamily: '"TWKLausanne", sans-serif', letterSpacing: "-0.02em" }}>
                 Connect {name}
               </h1>

@@ -1,5 +1,7 @@
 "use client";
 
+import { uiPath } from "@/modules/config/uiBasePath";
+
 import { useEffect, useRef, useState } from "react";
 import { Avatar, Button, Divider, Flex, Stack, Text, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -129,7 +131,7 @@ export default function ProfileWidget() {
             width={54}
             height={54}
             alt=""
-            src="/images/icons/avatar.svg"
+            src={uiPath("/images/icons/avatar.svg")}
           />
         </Avatar>
         <Stack gap="0">

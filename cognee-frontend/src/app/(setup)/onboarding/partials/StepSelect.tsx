@@ -1,4 +1,5 @@
 "use client";
+import { uiPath } from "@/modules/config/uiBasePath";
 
 import { useState } from "react";
 import Image from "next/image";
@@ -24,8 +25,8 @@ function CompanyBrainIcon() {
 
 export function StepSelect({ onSelect }: { onSelect: (path: OnboardingPath) => void }) {
   const cards: { key: OnboardingPath; name: string; description: string; logo: React.ReactNode }[] = [
-    { key: "claude-code", name: "Claude Code", description: "Give Claude Code persistent memory across all your projects", logo: <Image src="/visuals/logos/claude.svg" alt="Claude Code" width={72} height={72} style={{ height: 72, width: "auto" }} /> },
-    { key: "codex", name: "Codex", description: "Connect OpenAI Codex to your knowledge graph via a skill", logo: <Image src="/visuals/logos/codex.svg" alt="Codex" width={72} height={72} style={{ height: 72, width: "auto" }} /> },
+    { key: "claude-code", name: "Claude Code", description: "Give Claude Code persistent memory across all your projects", logo: <Image src={uiPath("/visuals/logos/claude.svg")} alt="Claude Code" width={72} height={72} style={{ height: 72, width: "auto" }} /> },
+    { key: "codex", name: "Codex", description: "Connect OpenAI Codex to your knowledge graph via a skill", logo: <Image src={uiPath("/visuals/logos/codex.svg")} alt="Codex" width={72} height={72} style={{ height: 72, width: "auto" }} /> },
     { key: "company", name: "Company Dataset", description: "Upload PDFs, docs, and data to build your knowledge graph", logo: <CompanyBrainIcon /> },
   ];
   const [hovered, setHovered] = useState<OnboardingPath | null>(null);

@@ -1,4 +1,5 @@
 "use client";
+import { uiPath } from "@/modules/config/uiBasePath";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -200,7 +201,7 @@ export default function WelcomePage() {
               controls
               autoPlay
               playsInline
-              poster="/videos/full-demo-poster.jpg"
+              poster={uiPath("/videos/full-demo-poster.jpg")}
               style={{
                 width: "100%",
                 aspectRatio: "1280 / 708",
@@ -211,7 +212,7 @@ export default function WelcomePage() {
                 display: "block",
               }}
             >
-              <source src="/videos/full-demo.mp4" type="video/mp4" />
+              <source src={uiPath("/videos/full-demo.mp4")} type="video/mp4" />
             </video>
           </div>
         </div>

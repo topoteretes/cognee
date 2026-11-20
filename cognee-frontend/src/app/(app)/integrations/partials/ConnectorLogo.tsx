@@ -1,4 +1,5 @@
 "use client";
+import { uiPath } from "@/modules/config/uiBasePath";
 
 import type { ReactElement } from "react";
 import classNames from "classnames";
@@ -19,7 +20,7 @@ interface ConnectorLogoProps {
 // read as two different kinds of thing.
 export default function ConnectorLogo({ logo, initials, color, size }: ConnectorLogoProps): ReactElement {
   const glyphSize = Math.round(size * 0.48);
-  const maskUrl = `url(/visuals/logos/datasources/${logo}.svg)`;
+  const maskUrl = `url(${uiPath(`/visuals/logos/datasources/${logo}.svg`)})`;
 
   return (
     <div

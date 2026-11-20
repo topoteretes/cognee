@@ -1,3 +1,4 @@
+import { uiPath } from "@/modules/config/uiBasePath";
 import {
   OPENCLAW_PROMPT,
   MCP_STDIO_CONFIG, HERMES_MCP_CONFIG, genericSkillInstall, fillTemplate,
@@ -15,7 +16,7 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     name: "Claude Code",
     cta: "Connect via plugin",
     description: "Give Claude Code persistent memory across sessions.",
-    icon: imgIcon("/visuals/logos/claude.svg", "Claude Code"),
+    icon: imgIcon(uiPath("/visuals/logos/claude.svg"), "Claude Code"),
     osAware: true,
     buildSteps: (baseUrl, apiKey, loading, os) =>
       agentSetupSteps("claude-code", { os, baseUrl, apiKey, loading }),
@@ -25,7 +26,7 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     name: "Codex",
     cta: "Connect via plugin",
     description: "Give Codex persistent memory across sessions.",
-    icon: imgIcon("/visuals/logos/codex.svg", "Codex"),
+    icon: imgIcon(uiPath("/visuals/logos/codex.svg"), "Codex"),
     osAware: true,
     buildSteps: (baseUrl, apiKey, loading, os) =>
       agentSetupSteps("codex", { os, baseUrl, apiKey, loading }),
@@ -35,7 +36,7 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     name: "OpenClaw",
     cta: "Connect via prompts",
     description: "Recall your Cognee memory in every OpenClaw conversation.",
-    icon: imgIcon("/visuals/logos/openclaw.svg", "OpenClaw"),
+    icon: imgIcon(uiPath("/visuals/logos/openclaw.svg"), "OpenClaw"),
     osAware: true,
     buildSteps: (baseUrl, apiKey, loading, os) => [
       credStep(baseUrl, apiKey, loading, os),
@@ -49,7 +50,7 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     name: "Claude Desktop",
     cta: "Connect via MCP",
     description: "Recall your Cognee memory in every conversation.",
-    icon: imgIcon("/visuals/logos/claude.svg", "Claude Desktop"),
+    icon: imgIcon(uiPath("/visuals/logos/claude.svg"), "Claude Desktop"),
     buildSteps: (baseUrl, apiKey, loading) => [
       installUvStep(),
       {
@@ -95,7 +96,7 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     name: "Cursor",
     cta: "Connect via MCP",
     description: "Ground Cursor's agent in your Cognee memory.",
-    icon: imgIcon("/visuals/logos/cursor.svg", "Cursor"),
+    icon: imgIcon(uiPath("/visuals/logos/cursor.svg"), "Cursor"),
     buildSteps: (baseUrl, apiKey, loading) => [
       installUvStep(),
       {
@@ -142,7 +143,7 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     name: "Hermes Agent",
     cta: "Connect via MCP",
     description: "Ground Hermes Agent in your Cognee memory.",
-    icon: imgIcon("/visuals/logos/hermes.svg", "Hermes Agent"),
+    icon: imgIcon(uiPath("/visuals/logos/hermes.svg"), "Hermes Agent"),
     buildSteps: (baseUrl, apiKey, loading) => [
       { title: "Configure Hermes Agent", description: "Hermes reads YAML — add this block under mcp_servers in ~/.hermes/config.yaml and restart the agent. Cognee runs via uvx (requires uv) — no separate install.", code: "~/.hermes/config.yaml", codeToCopy: fillTemplate(HERMES_MCP_CONFIG, baseUrl, apiKey), loading },
       { title: "Test the connection", description: "Ask Hermes: \"What do you know from cognee?\" — it should use the Cognee memory tool and return a response from your dataset." },
@@ -153,7 +154,7 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     name: "VS Code",
     cta: "Connect via extension",
     description: "Give VS Code persistent, citable project memory.",
-    icon: imgIcon("/visuals/logos/vscode.svg", "VS Code"),
+    icon: imgIcon(uiPath("/visuals/logos/vscode.svg"), "VS Code"),
     buildSteps: (baseUrl, apiKey, loading) => [
       {
         title: "Install the Cognee extension",
@@ -195,7 +196,7 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     name: "Gemini CLI",
     cta: "Connect via MCP",
     description: "Ground Gemini CLI in your Cognee memory.",
-    icon: imgIcon("/visuals/logos/gemini.svg", "Gemini CLI"),
+    icon: imgIcon(uiPath("/visuals/logos/gemini.svg"), "Gemini CLI"),
     buildSteps: (baseUrl, apiKey, loading) => [
       installUvStep(),
       {
@@ -247,7 +248,7 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     name: "Cline",
     cta: "Connect via MCP",
     description: "Ground Cline in your Cognee memory.",
-    icon: imgIcon("/visuals/logos/cline.svg", "Cline"),
+    icon: imgIcon(uiPath("/visuals/logos/cline.svg"), "Cline"),
     buildSteps: (baseUrl, apiKey, loading) => [
       { title: "Configure Cline", description: "In VS Code, open the Cline sidebar → MCP Servers → Configure MCP Servers — paste this JSON block and save. Cognee runs via uvx (requires uv) — no separate install.", code: '{ "mcpServers": { "cognee": … } }', codeToCopy: fillTemplate(MCP_STDIO_CONFIG, baseUrl, apiKey), loading },
       { title: "Test the connection", description: "Ask Cline: \"What do you know from cognee?\" — it should use the Cognee memory tool and return a response from your dataset." },
