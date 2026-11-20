@@ -76,6 +76,9 @@ from cognee.infrastructure.session.session_context_models import (
     CodingAgentContextExtraction,
     ContextProfile,
 )
+from cognee.infrastructure.session.session_context_models import (
+    clip_text as _clip,
+)
 from cognee.infrastructure.session.session_node_set import get_session_node_set
 from cognee.infrastructure.session.session_persist_watermark import StateRowWatermark
 from cognee.infrastructure.session.trace_phases import (
@@ -202,11 +205,6 @@ def relative_path(path: str, repo_root: str) -> str:
         return "."
     match = re.match(r"^(?:/Users|/home)/[^/]+/(.*)$", text)
     return match.group(1) if match else text
-
-
-def _clip(text: str, limit: int) -> str:
-    text = " ".join(str(text or "").split())
-    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def program_words(command: str) -> list[str]:

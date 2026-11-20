@@ -24,6 +24,7 @@ from cognee.infrastructure.session.session_context_models import (
     ContextProfile,
     ContextSection,
     SessionContextEntry,
+    clip_text,
     normalize_content,
     valid_sections_for,
 )
@@ -523,8 +524,8 @@ async def _apply_single_candidate(
         content=content,
         normalized_content=normalized,
         confidence=float(candidate.confidence),
-        reason=getattr(candidate, "reason", ""),
-        evidence=getattr(candidate, "evidence", ""),
+        reason=clip_text(getattr(candidate, "reason", ""), MAX_CONTEXT_CONTENT_CHARS),
+        evidence=clip_text(getattr(candidate, "evidence", ""), MAX_CONTEXT_CONTENT_CHARS),
         created_at=datetime.now(timezone.utc).isoformat(),
         source_feedback_ids=linked_ids if source_field == "source_feedback_ids" else [],
         source_trace_ids=linked_ids if source_field == "source_trace_ids" else [],

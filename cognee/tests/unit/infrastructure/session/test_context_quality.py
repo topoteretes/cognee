@@ -6,7 +6,10 @@ import pytest
 from cognee.infrastructure.session.context_quality import supported_project_candidate, unused_entry
 from cognee.infrastructure.session.session_context_builder import apply_candidate_updates
 from cognee.infrastructure.session.session_context_models import (
+    MAX_CONTEXT_CONTENT_CHARS,
+    AgentContextExtraction,
     CandidateEnvironmentFactUpdate,
+    CodingAgentContextExtraction,
     SessionContextEntry,
 )
 
@@ -106,3 +109,34 @@ async def test_decay_counts_only_same_user_and_dataset_sessions(monkeypatch):
     manager.update_session_context_entry.assert_not_called()
     assert await filter_unused_entries(manager, str(uid), old, [entry], persist=True) == []
     assert manager.update_session_context_entry.await_args.kwargs["merge"]["expired_at"]
+
+
+def test_long_support_does_not_fail_the_batch():
+    # One over-long evidence used to fail validation for every lesson in the response.
+    lesson = {
+        "section": "environment_facts",
+        "content": "The outbox cursor commits with delivery to prevent event loss.",
+        "confidence": 0.9,
+    }
+    lessons = [{**lesson, "evidence": "x" * 300}, {**lesson, "reason": "Crash safety."}]
+    default = AgentContextExtraction.model_validate({"lessons": lessons})
+    coding = CodingAgentContextExtraction.model_validate(
+        {"lessons": [{"turn": 1, "lesson": item} for item in lessons]}
+    )
+    assert len(default.lessons) == len(coding.lessons) == 2
+
+
+@pytest.mark.asyncio
+async def test_stored_support_is_clipped():
+    manager = AsyncMock()
+    manager.get_session_context_entries.return_value = []
+    await apply_candidate_updates(
+        session_manager=manager,
+        user_id="u",
+        session_id="s",
+        source_id="trace",
+        candidates=[candidate(reason="r " * 200, evidence="e" * 300)],
+    )
+    stored = manager.create_session_context_entry.await_args.kwargs["entry_dump"]
+    assert len(stored["reason"]) == len(stored["evidence"]) == MAX_CONTEXT_CONTENT_CHARS
+    assert stored["evidence"].endswith("…")
