@@ -19,8 +19,8 @@ A trace write runs improve's agent-context stage early, every
 call (``SessionManager``): a skip is only logged and the window waits for the
 next interval. ``dataset_id`` there is the session manager's, ``None`` for a
 manager built without a dataset (``@agent_memory`` traces).
-The check runs under that session's extraction lock, so it must not write
-a trace step to the same session: that write would wait for the lock forever.
+It is asked before that session's extraction lock is taken, so a slow check
+holds up only its own trace write's background task.
 
 The check can never break ``remember()``: nothing registered, a check that
 raises, and an answer that is neither ``None`` nor a reason string all mean

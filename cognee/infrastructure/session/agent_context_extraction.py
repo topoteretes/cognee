@@ -95,10 +95,10 @@ _LONG_NUMBER_RE = re.compile(r"\b\d{8,}\b")
 
 @dataclass(frozen=True, slots=True)
 class TraceExtractionPlan:
-    """A bounded trace window to extract and the watermark to save afterward."""
+    """The traces to extract, from the processed watermark to the total."""
 
     total_trace_count: int
-    window_size: int
+    processed_count: int
 
 
 def _sanitize_error_text(error_message: str, max_chars: int = MAX_ERROR_TEXT_CHARS) -> str:
@@ -169,9 +169,17 @@ async def extract_live_agent_context(
         return []
 
 
-def _trace_window_size(pending_trace_count: int, overlap: int, max_window: int) -> int:
-    """Return the bounded trace window size for pending-trace extraction."""
-    return max(1, min(max_window, pending_trace_count + overlap))
+def _trace_windows(
+    processed: int, total: int, overlap: int, max_window: int
+) -> list[tuple[int, int, int]]:
+    """``(context_start, start, end)`` of each window over traces ``processed..total``,
+    oldest first. A window holds at most ``max_window`` traces: up to ``overlap``
+    already-seen ones for context, then the new ones it seals."""
+    step = max(1, max_window - overlap)
+    return [
+        (max(0, start - overlap), start, min(start + step, total))
+        for start in range(processed, total, step)
+    ]
 
 
 async def _effective_count(
@@ -215,12 +223,7 @@ async def _plan_pending_extraction(
     counted_from = max(processed_count, attempted_count) if automatic else processed_count
     if total_trace_count - counted_from < min_new_traces:
         return None
-    pending_count = max(0, total_trace_count - processed_count)
-
-    return TraceExtractionPlan(
-        total_trace_count=total_trace_count,
-        window_size=_trace_window_size(pending_count, overlap, max_window),
-    )
+    return TraceExtractionPlan(total_trace_count=total_trace_count, processed_count=processed_count)
 
 
 def _trace_line(entry) -> str:
@@ -367,7 +370,8 @@ async def extract_pending_agent_context(
     ``admission`` is asked once per due window, before the trace read and the LLM call;
     a skip reason ends the run and counts as the window's attempt.
 
-    The LLM receives only the latest ``pending + overlap`` trace steps, capped by ``max_window``.
+    Pending traces are sent in windows of at most ``max_window`` steps (``overlap`` of
+    them already seen), oldest first, the watermark sealed after each window.
     The start of a window is recorded before its LLM call; the watermark advances only
     after the extraction attempt completes without raising. One window per session runs
     at a time (in-process lock): a concurrent caller waits, then plans from the new
@@ -393,8 +397,8 @@ async def extract_pending_agent_context(
     # load with the session infrastructure.
     from cognee.infrastructure.locks import session_lock
 
-    async with session_lock(f"{user_id}:{session_id}", "agent_context_extraction"):
-        plan = await _plan_pending_extraction(
+    async def plan_window() -> TraceExtractionPlan | None:
+        return await _plan_pending_extraction(
             session_manager=session_manager,
             user_id=user_id,
             session_id=session_id,
@@ -403,35 +407,48 @@ async def extract_pending_agent_context(
             max_window=max_window,
             automatic=automatic,
         )
+
+    # The host check is the caller's code with no bound on how long it takes, and
+    # improve() waits on this lock while it holds the dataset lock: ask it before
+    # the lock, once a window is due, and plan again under the lock.
+    skip_reason = None
+    if admission is not None:
+        if await plan_window() is None:
+            return []
+        skip_reason = await admission()
+
+    async with session_lock(f"{user_id}:{session_id}", "agent_context_extraction"):
+        plan = await plan_window()
         if plan is None:
             return []
         await TRACE_EXTRACTION_ATTEMPT.write_count(
             session_manager, user_id, session_id, count=plan.total_trace_count
         )
-
-        if admission is not None:
-            skip_reason = await admission()
-            if skip_reason:
-                logger.info(
-                    "Agent-context extraction skipped by the host admission check (%s)",
-                    skip_reason,
-                )
-                return []
+        if skip_reason:
+            logger.info(
+                "Agent-context extraction skipped by the host admission check (%s)", skip_reason
+            )
+            return []
+        total = plan.total_trace_count
         traces = await session_manager.get_agent_trace_session(
             user_id=user_id,
             session_id=session_id,
-            last_n=plan.window_size,
+            last_n=total - plan.processed_count + overlap,
         )
-        touched = await _extract_batch_from_traces(
-            session_manager=session_manager,
-            user_id=user_id,
-            session_id=session_id,
-            traces=traces,
-        )
-        await TRACE_EXTRACTION_WATERMARK.write_count(
-            session_manager,
-            user_id,
-            session_id,
-            count=plan.total_trace_count,
-        )
+        first = total - len(traces)  # session position of traces[0]
+        touched: list[str] = []
+        # A backlog larger than one window (calls that failed for several intervals)
+        # is walked oldest first, sealing each window, so no trace is skipped.
+        for context_start, start, end in _trace_windows(
+            plan.processed_count, total, overlap, max_window
+        ):
+            touched += await _extract_batch_from_traces(
+                session_manager=session_manager,
+                user_id=user_id,
+                session_id=session_id,
+                traces=traces[max(0, context_start - first) : end - first],
+            )
+            await TRACE_EXTRACTION_WATERMARK.write_count(
+                session_manager, user_id, session_id, count=end
+            )
         return touched
