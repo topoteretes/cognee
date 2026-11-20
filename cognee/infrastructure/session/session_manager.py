@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 from datetime import datetime
+from functools import partial
 from typing import Any
 
 from cognee.context_global_variables import current_dataset_id, session_user
@@ -379,11 +380,21 @@ class SessionManager:
                 from cognee.infrastructure.session.agent_context_extraction import (
                     extract_pending_agent_context,
                 )
+                from cognee.modules.improve.admission import (
+                    auto_improve_skip_reason_for_user_id,
+                )
 
                 await extract_pending_agent_context(
                     session_manager=self,
                     user_id=user_id,
                     session_id=session_id,
+                    admission=partial(
+                        auto_improve_skip_reason_for_user_id,
+                        user_id=user_id,
+                        dataset_id=self.dataset_id,
+                        session_id=session_id,
+                        session_ids=[session_id],
+                    ),
                 )
             except Exception as error:
                 logger.warning("Agent-context extraction skipped: %s", error, exc_info=True)

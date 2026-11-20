@@ -350,6 +350,7 @@ class ExtractAgentContextStage(BaseStage):
                         user_id=user_id,
                         session_id=session_id,
                         min_new_traces=1,
+                        automatic=False,
                     )
                 touched += len(ids)
             except Exception as e:

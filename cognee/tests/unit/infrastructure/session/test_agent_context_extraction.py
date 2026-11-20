@@ -5,6 +5,7 @@ steps produce a live failure_lessons lesson, that the batch pass stores LLM-prop
 the fail-open contract for both.
 """
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,7 @@ from cognee.infrastructure.session.agent_context_extraction import (
     MAX_BATCH_LESSONS,
     TRACE_EXTRACTION_STATE_ID,
     TRACE_EXTRACTION_STATE_KIND,
+    TRACE_EXTRACTION_WATERMARK,
     build_live_agent_candidates,
     build_trace_batch,
     extract_batch_agent_context,
@@ -41,6 +43,8 @@ def _trace(
 
 class FakeSessionManager:
     """In-memory stand-in for the context CRUD + trace-read surface."""
+
+    dataset_id = None
 
     def __init__(self, traces=None):
         self.store = []
@@ -461,7 +465,322 @@ async def test_pending_extraction_does_not_advance_watermark_on_llm_error(monkey
             session_manager=sm, user_id="u", session_id="s", min_new_traces=3, overlap=1
         )
 
-    assert not any(row.get("kind") == TRACE_EXTRACTION_STATE_KIND for row in sm.store)
+    state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
+    assert "processed_trace_count" not in state
+    assert state["attempted_trace_count"] == 3
+
+
+USER_ID = "6f1c2c9e-4b8a-4a51-9a35-5d0a1f3e7b21"
+
+
+async def _write_traces(sm, count, admission=None):
+    """Store ``count`` traces one at a time, each followed by the trace-write path's
+    extraction. Its failures are returned instead of raised, as SessionManager logs
+    them instead of failing the write."""
+    failures = []
+    for _ in range(count):
+        sm.traces.append(_trace(f"step-{len(sm.traces)}"))
+        try:
+            await extract_pending_agent_context(
+                session_manager=sm, user_id=USER_ID, session_id="s", admission=admission
+            )
+        except RuntimeError as error:
+            failures.append(error)
+    return failures
+
+
+def _count_llm_calls(monkeypatch, error=None, lessons=()):
+    calls = []
+
+    async def llm(text_input, system_prompt, response_model):
+        calls.append(text_input)
+        if error is not None:
+            raise error
+        return AgentContextExtraction(lessons=list(lessons))
+
+    monkeypatch.setattr(agent_context_extraction, "llm_available", lambda: True)
+    monkeypatch.setattr(agent_context_extraction.LLMGateway, "acreate_structured_output", llm)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_a_call_that_always_fails_is_made_once_per_interval(monkeypatch):
+    # A spent budget, a bad key or a missing model fails every call. Counting from the
+    # last finished window alone made one call per trace write after the tenth.
+    calls = _count_llm_calls(monkeypatch, error=RuntimeError("Budget has been exceeded"))
+    sm = FakeSessionManager()
+
+    failures = await _write_traces(sm, 30)
+
+    assert len(calls) == 3  # at traces 10, 20 and 30
+    assert len(failures) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_call_waits_for_the_interval_too(monkeypatch):
+    # The start is recorded before the call, so a call that never returns (a cancelled
+    # task, a killed worker) is not retried on the next trace write either.
+    calls = _count_llm_calls(monkeypatch, error=asyncio.CancelledError())
+    sm = FakeSessionManager()
+
+    with pytest.raises(asyncio.CancelledError):
+        await _write_traces(sm, 10)
+    await _write_traces(sm, 9)
+
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_window_after_a_failed_one_covers_its_traces(monkeypatch):
+    calls = _count_llm_calls(monkeypatch, error=RuntimeError("llm down"))
+    sm = FakeSessionManager()
+    await _write_traces(sm, 10)
+    calls = _count_llm_calls(monkeypatch)
+
+    await _write_traces(sm, 10)
+
+    assert len(calls) == 1
+    assert sm.trace_session_last_n_calls[-1] == 23  # 20 not extracted + the overlap of 3
+    assert "step-0 " in calls[0]
+    assert await TRACE_EXTRACTION_WATERMARK.read_count(sm, USER_ID, "s") == 20
+
+
+@pytest.mark.asyncio
+async def test_improve_retries_an_unfinished_window_at_once(monkeypatch):
+    calls = _count_llm_calls(monkeypatch, error=RuntimeError("llm down"))
+    sm = FakeSessionManager()
+    await _write_traces(sm, 10)
+    calls = _count_llm_calls(monkeypatch)
+
+    await extract_pending_agent_context(
+        session_manager=sm, user_id=USER_ID, session_id="s", min_new_traces=1, automatic=False
+    )
+
+    assert len(calls) == 1
+    assert await TRACE_EXTRACTION_WATERMARK.read_count(sm, USER_ID, "s") == 10
+
+
+@pytest.mark.asyncio
+async def test_a_finished_window_keeps_the_attempt_and_the_watermark(monkeypatch):
+    _count_llm_calls(monkeypatch)
+    sm = FakeSessionManager()
+
+    await _write_traces(sm, 10)
+
+    state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
+    assert state["attempted_trace_count"] == 10
+    assert state["processed_trace_count"] == 10
+
+
+@pytest.mark.asyncio
+async def test_traces_gone_below_the_recorded_attempt_start_over(monkeypatch):
+    # The trace key can expire while the context row lives on (Redis TTL). An attempt
+    # count above the trace count is stale, like the processed count above it.
+    calls = _count_llm_calls(monkeypatch, error=RuntimeError("llm down"))
+    sm = FakeSessionManager()
+    await _write_traces(sm, 10)
+    sm.traces.clear()
+    calls = _count_llm_calls(monkeypatch)
+
+    await _write_traces(sm, 10)
+
+    assert len(calls) == 1
+
+
+class YieldingSessionManager(FakeSessionManager):
+    """Yields to the event loop on every store call, as a real cache backend does."""
+
+    async def get_session_context_entries(self, user_id, session_id):
+        await asyncio.sleep(0)
+        return await super().get_session_context_entries(user_id, session_id)
+
+    async def update_session_context_entry(self, user_id, session_id, entry_id, merge):
+        await asyncio.sleep(0)
+        return await super().update_session_context_entry(user_id, session_id, entry_id, merge)
+
+    async def get_agent_trace_count(self, user_id, session_id):
+        await asyncio.sleep(0)
+        return await super().get_agent_trace_count(user_id, session_id)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_trace_writes_start_one_window(monkeypatch):
+    calls = _count_llm_calls(monkeypatch, error=RuntimeError("llm down"))
+    sm = YieldingSessionManager(traces=[_trace(f"step-{i}") for i in range(10)])
+
+    results = await asyncio.gather(
+        *(
+            extract_pending_agent_context(session_manager=sm, user_id=USER_ID, session_id="s")
+            for _ in range(5)
+        ),
+        return_exceptions=True,
+    )
+
+    assert len(calls) == 1
+    assert sum(isinstance(result, RuntimeError) for result in results) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_slow_window_does_not_move_the_watermark_back_under_improve(monkeypatch):
+    # The trace path's window is still in its LLM call when improve() flushes the
+    # session. Improve waits for it, so its own write is the last one.
+    release = asyncio.Event()
+    calls = []
+
+    async def llm(text_input, system_prompt, response_model):
+        calls.append(text_input)
+        if len(calls) == 1:
+            await release.wait()
+        return AgentContextExtraction(lessons=[])
+
+    monkeypatch.setattr(agent_context_extraction, "llm_available", lambda: True)
+    monkeypatch.setattr(agent_context_extraction.LLMGateway, "acreate_structured_output", llm)
+    sm = YieldingSessionManager(traces=[_trace(f"step-{i}") for i in range(10)])
+
+    automatic = asyncio.create_task(
+        extract_pending_agent_context(session_manager=sm, user_id=USER_ID, session_id="s")
+    )
+    while not calls:
+        await asyncio.sleep(0)
+    sm.traces.extend(_trace(f"step-{i}") for i in range(10, 20))
+    flush = asyncio.create_task(
+        extract_pending_agent_context(
+            session_manager=sm, user_id=USER_ID, session_id="s", min_new_traces=1, automatic=False
+        )
+    )
+    for _ in range(50):
+        await asyncio.sleep(0)
+    release.set()
+    await asyncio.gather(automatic, flush)
+
+    assert await TRACE_EXTRACTION_WATERMARK.read_count(sm, USER_ID, "s") == 20
+
+
+@pytest.mark.asyncio
+async def test_a_failed_improve_run_delays_the_trace_path(monkeypatch):
+    calls = _count_llm_calls(monkeypatch, error=RuntimeError("llm down"))
+    sm = FakeSessionManager(traces=[_trace(f"step-{i}") for i in range(9)])
+    with pytest.raises(RuntimeError):
+        await extract_pending_agent_context(
+            session_manager=sm, user_id=USER_ID, session_id="s", min_new_traces=1, automatic=False
+        )
+
+    await _write_traces(sm, 9)
+
+    assert len(calls) == 1
+
+
+def _admission(answer=None):
+    asked = []
+
+    async def admission():
+        asked.append(True)
+        return answer
+
+    return admission, asked
+
+
+@pytest.mark.asyncio
+async def test_the_admission_skips_the_call_once_per_interval(monkeypatch):
+    admission, asked = _admission("insufficient_credits")
+    calls = _count_llm_calls(monkeypatch)
+    sm = FakeSessionManager()
+
+    await _write_traces(sm, 20, admission=admission)
+
+    assert calls == []
+    assert len(asked) == 2  # at traces 10 and 20, not on every write
+    assert await TRACE_EXTRACTION_WATERMARK.read_count(sm, USER_ID, "s") == 0
+
+
+@pytest.mark.asyncio
+async def test_a_hung_admission_does_not_hold_the_session_lock(monkeypatch):
+    # improve() holds the dataset lock while its stage 4 takes this session's lock,
+    # so a host check that never answers must not be asked under that lock.
+    calls = _count_llm_calls(monkeypatch)
+    asked = asyncio.Event()
+
+    async def hung_admission():
+        asked.set()
+        await asyncio.Event().wait()
+
+    sm = FakeSessionManager(traces=[_trace(f"step-{i}") for i in range(10)])
+    trace_path = asyncio.create_task(
+        extract_pending_agent_context(
+            session_manager=sm, user_id=USER_ID, session_id="s", admission=hung_admission
+        )
+    )
+    try:
+        await asyncio.wait_for(asked.wait(), timeout=1)
+        await asyncio.wait_for(
+            extract_pending_agent_context(
+                session_manager=sm,
+                user_id=USER_ID,
+                session_id="s",
+                min_new_traces=1,
+                automatic=False,
+            ),
+            timeout=1,
+        )
+    finally:
+        # The session lock lives in a process-wide registry: a task left holding it
+        # would hang every later test on this session.
+        trace_path.cancel()
+        await asyncio.gather(trace_path, return_exceptions=True)
+
+    assert len(calls) == 1
+    assert await TRACE_EXTRACTION_WATERMARK.read_count(sm, USER_ID, "s") == 10
+
+
+@pytest.mark.asyncio
+async def test_a_backlog_above_the_window_is_extracted_oldest_first(monkeypatch):
+    # Four failed windows leave 50 traces pending, more than one window holds.
+    _count_llm_calls(monkeypatch, error=RuntimeError("llm down"))
+    sm = FakeSessionManager()
+    await _write_traces(sm, 49)
+    calls = _count_llm_calls(monkeypatch)
+
+    await _write_traces(sm, 1)
+
+    sent = "".join(calls)
+    assert all(f"step-{i} " in sent for i in range(50))
+    assert "step-0 " in calls[0]
+    assert await TRACE_EXTRACTION_WATERMARK.read_count(sm, USER_ID, "s") == 50
+
+
+@pytest.mark.asyncio
+async def test_an_admission_that_writes_a_trace_to_the_session_finishes(monkeypatch):
+    # A host check that records its own decision as a trace in the same session
+    # runs that trace's extraction; it must not wait on a lock its caller holds.
+    calls = _count_llm_calls(monkeypatch)
+    sm = FakeSessionManager(traces=[_trace(f"step-{i}") for i in range(10)])
+
+    async def admission():
+        sm.traces.append(_trace("admission-decision"))
+        await extract_pending_agent_context(
+            session_manager=sm, user_id=USER_ID, session_id="s", min_new_traces=1, automatic=False
+        )
+
+    await asyncio.wait_for(
+        extract_pending_agent_context(
+            session_manager=sm, user_id=USER_ID, session_id="s", admission=admission
+        ),
+        timeout=1,
+    )
+
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_allowing_admission_lets_the_call_run(monkeypatch):
+    admission, asked = _admission(None)
+    calls = _count_llm_calls(monkeypatch)
+    sm = FakeSessionManager()
+
+    await _write_traces(sm, 10, admission=admission)
+
+    assert len(asked) == 1
+    assert len(calls) == 1
 
 
 # ------------------------------------------------------- shared watermark implementation
