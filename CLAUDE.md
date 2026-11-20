@@ -693,7 +693,9 @@ failure behaviour: `docs/embedding-worker.md`.
 LLM_RATE_LIMIT_ENABLED=true
 LLM_RATE_LIMIT_REQUESTS=60  # Requests per interval
 LLM_RATE_LIMIT_INTERVAL=60  # Interval in seconds
+LLM_MAX_CONCURRENT_REQUESTS=0  # Max requests in flight at once per model; 0 = unlimited (default)
 ```
+The RPM limiter bounds how many requests *start* per interval; `LLM_MAX_CONCURRENT_REQUESTS` bounds how many are *running* at once, which is what a serial backend (Ollama, llama.cpp, a small vLLM server) needs. It is off for every provider until set, applies per model (stages routed to the same model share its slots) and per process.
 
 #### Instructor Mode (Structured Output)
 ```bash

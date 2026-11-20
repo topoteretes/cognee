@@ -172,6 +172,12 @@ class LLMConfig(BaseSettings):
     llm_rate_limit_requests: int = 60
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     llm_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
+    # Max LLM requests in flight at once per backend model (0 = unlimited,
+    # the default for every provider). Unlike the RPM limiter this bounds
+    # CONCURRENCY, not entry rate: slow backends (local servers, bounded
+    # KV-cache self-hosters) are protected by how many requests they hold,
+    # not how many start per minute. Opt-in: set it for such backends.
+    llm_max_concurrent_requests: int = 0
     # When the provider reports a rate limit, warn and switch on the RPM limiter
     # (with the llm_rate_limit_requests/interval budget) for the rest of the process.
     auto_rate_limit: bool = True
