@@ -44,6 +44,12 @@ LOCAL_LLM_MODEL_PREFIXES = ("lm_studio/",)
 # is not explicitly configured; cloud providers keep the regular default of 60.
 LOCAL_DEFAULT_RATE_LIMIT_REQUESTS = 10
 
+# Default in-flight cap for local inference servers when
+# LLM_MAX_CONCURRENT_REQUESTS is not explicitly configured. Ollama/llama.cpp
+# serialize inference, so a handful of queued slots absorbs retry churn
+# without building a deep backlog; cloud endpoints keep the default of no cap.
+LOCAL_DEFAULT_MAX_CONCURRENT_REQUESTS = 5
+
 
 def is_local_llm(provider: str | None, model: str | None) -> bool:
     """True when the provider/model points at a serial local inference server
@@ -62,11 +68,11 @@ def _apply_local_rate_limit_default(config: "LLMConfig") -> "LLMConfig":
     validator and ``stage_config`` can use it: a ``@model_validator`` is a
     descriptor proxy on the class, not a plain callable.
     """
-    if "llm_rate_limit_requests" in config.model_fields_set:
-        return config
-
     if is_local_llm(config.llm_provider, config.llm_model):
-        config.llm_rate_limit_requests = LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
+        if "llm_rate_limit_requests" not in config.model_fields_set:
+            config.llm_rate_limit_requests = LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
+        if "llm_max_concurrent_requests" not in config.model_fields_set:
+            config.llm_max_concurrent_requests = LOCAL_DEFAULT_MAX_CONCURRENT_REQUESTS
 
     return config
 
@@ -172,6 +178,14 @@ class LLMConfig(BaseSettings):
     llm_rate_limit_requests: int = 60
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     llm_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
+    # Max LLM requests in flight at once per backend model (0 = unlimited,
+    # i.e. disabled). Unlike the RPM limiter this bounds CONCURRENCY, not
+    # entry rate: slow backends (local servers, bounded KV-cache
+    # self-hosters) are protected by how many requests they hold, not how
+    # many start per minute. Pipeline stages routed to a different model
+    # share that model's slots; stages routed to a local server get this
+    # file's local default via stage_config().
+    llm_max_concurrent_requests: int = 0
     # When the provider reports a rate limit, warn and switch on the RPM limiter
     # (with the llm_rate_limit_requests/interval budget) for the rest of the process.
     auto_rate_limit: bool = True
