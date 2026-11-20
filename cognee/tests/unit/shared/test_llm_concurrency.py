@@ -42,6 +42,12 @@ def _clean_seam_state():
     rl._embedding_rate_limiter = None
     rl._concurrency_state.clear()
     llm_overload_policy._paced_until = 0.0
+    # _set_env builds the cached config from a stripped env (no LLM key);
+    # monkeypatch restores the env, so drop the cached config too, or later
+    # tests in this process see "no LLM key configured".
+    from cognee.infrastructure.llm.config import get_llm_config
+
+    get_llm_config.cache_clear()
 
 
 # --- Helpers ------------------------------------------------------------------
