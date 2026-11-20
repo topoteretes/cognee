@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.context_global_variables import current_pipeline_stage
+from cognee.infrastructure.llm.pipeline_stage import caller_scope, pipeline_stage
 from cognee.modules.observability import llm_calls
 from cognee.modules.observability.llm_calls import (
     capture_llm_call,
@@ -146,12 +147,14 @@ def test_chunk_id_comes_from_the_enclosing_chunk_scope(capture_env):
     asyncio.run(run())
     _capture(text_input="outside")
 
-    chunk_by_input = {r["text_input"]: r["chunk_id"] for r in _records(directory)}
+    records = _records(directory)
+    chunk_by_input = {r["text_input"]: r.get("chunk_id") for r in records}
     assert chunk_by_input == {
         str(first_chunk): str(first_chunk),
         str(second_chunk): str(second_chunk),
         "outside": None,
     }
+    assert "chunk_id" not in next(r for r in records if r["text_input"] == "outside")
 
 
 def test_failed_call_is_recorded_with_its_error_class(capture_env):
@@ -198,7 +201,7 @@ def test_a_write_error_stops_the_writer_without_raising(capture_env):
     capture_env(ENABLED="true", DIRECTORY=str(blocker / "calls"))
 
     _capture()
-    assert flush_llm_call_capture()
+    assert flush_llm_call_capture() is False
     _capture()
 
     assert llm_calls._writer._failed is True
@@ -245,3 +248,74 @@ def test_capture_returns_while_the_writer_is_stuck_on_disk(capture_env, monkeypa
     caller.join()
     assert not stuck, "capture_llm_call waited on the disk write"
     assert len(_records(directory)) == 101
+
+
+def test_a_record_without_a_chunk_has_no_chunk_id_key(capture_env):
+    directory = capture_env(ENABLED="true", DIRECTORY=str(capture_env()))
+    chunk_id = uuid4()
+
+    _capture()
+    with chunk_scope(chunk_id):
+        _capture()
+
+    without_chunk, with_chunk = _records(directory)
+    assert "chunk_id" not in without_chunk
+    assert with_chunk["chunk_id"] == str(chunk_id)
+
+
+def test_a_record_carries_its_caller_and_stage_and_omits_a_missing_caller(capture_env):
+    directory = capture_env(ENABLED="true", DIRECTORY=str(capture_env()))
+
+    with caller_scope("improve.distill_sessions"), pipeline_stage("extraction"):
+        _capture()
+    _capture()
+
+    inside, outside = _records(directory)
+    assert inside["schema_version"] == 2
+    assert (inside["caller"], inside["stage"]) == ("improve.distill_sessions", "extraction")
+    assert "caller" not in outside
+    assert outside["stage"] is None
+
+
+def test_flush_reports_a_disk_error_to_a_waiting_and_a_later_caller(capture_env, monkeypatch):
+    capture_env(ENABLED="true", DIRECTORY=str(capture_env()))
+    write_started, fail_disk = threading.Event(), threading.Event()
+
+    class FailingFile:
+        """A file whose first write waits for the test, then fails like a full disk."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def write(self, text):
+            write_started.set()
+            fail_disk.wait()
+            raise OSError("No space left on device")
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(writer_module, "open", lambda *a, **k: FailingFile(), raising=False)
+
+    _capture()
+    assert write_started.wait(5)
+    waiting = {}
+    waiter = threading.Thread(target=lambda: waiting.update(result=flush_llm_call_capture()))
+    waiter.start()
+    fail_disk.set()
+    waiter.join(timeout=5)
+
+    assert waiting["result"] is False
+    assert flush_llm_call_capture() is False
+
+
+def test_flush_is_true_once_every_record_is_on_disk(capture_env):
+    directory = capture_env(ENABLED="true", DIRECTORY=str(capture_env()))
+
+    _capture()
+
+    assert flush_llm_call_capture() is True
+    assert len(_records(directory)) == 1

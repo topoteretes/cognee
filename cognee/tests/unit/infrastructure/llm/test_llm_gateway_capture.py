@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 from types import SimpleNamespace
@@ -149,3 +150,65 @@ async def test_a_misconfigured_capture_never_breaks_the_call(gateway):
 
     assert result == Person(name="Ada Lovelace")
     assert llm_calls._writer is None
+
+
+class HangingClient:
+    """A client whose call never returns, like a provider that stopped answering."""
+
+    def __init__(self):
+        self.started = asyncio.Event()
+
+    async def acreate_structured_output(self, text_input, system_prompt, response_model, **kwargs):
+        self.started.set()
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_call_is_recorded_and_still_cancelled(gateway):
+    client = HangingClient()
+    directory = gateway(client, ENABLED="true")
+
+    call = asyncio.create_task(LLMGateway.acreate_structured_output("text", "prompt", Person))
+    await client.started.wait()
+    call.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await call
+
+    [record] = _records(directory)
+    assert record["status"] == "error"
+    assert record["error_class"] == "CancelledError"
+    assert record["output_chars"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_connection_check_timeout_still_reaches_its_caller_and_is_recorded(
+    gateway, monkeypatch
+):
+    llm_utils = sys.modules["cognee.infrastructure.llm.utils"]
+    monkeypatch.setattr(llm_utils, "CONNECTION_TEST_TIMEOUT_SECONDS", 0.05)
+    directory = gateway(HangingClient(), ENABLED="true")
+
+    with pytest.raises(TimeoutError, match="timed out"):
+        await llm_utils.test_llm_connection()
+
+    [record] = _records(directory)
+    assert record["error_class"] == "CancelledError"
+    assert record["caller"] == "test_llm_connection"
+
+
+@pytest.mark.asyncio
+async def test_a_capture_failure_never_replaces_the_cancellation(gateway, monkeypatch):
+    def broken_capture(**kwargs):
+        raise RuntimeError("capture broke")
+
+    monkeypatch.setattr(llm_gateway_module, "capture_llm_call", broken_capture)
+    client = HangingClient()
+    gateway(client, ENABLED="true")
+
+    call = asyncio.create_task(LLMGateway.acreate_structured_output("text", "prompt", Person))
+    await client.started.wait()
+    call.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await call

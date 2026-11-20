@@ -127,7 +127,8 @@ async def consolidate_entity_descriptions_pipeline(
             max_completion_tokens=type_description_max_completion_tokens,
             tokens_per_is_a_line=type_tokens_per_is_a_line,
         ),
-        Task(add_data_points),
+        # The descriptions are rewritten on purpose, so stored entities are replaced.
+        Task(add_data_points, replace_nodes=True),
     ]
 
     result = await run_memify_tasks(

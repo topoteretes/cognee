@@ -46,6 +46,21 @@ DOCUMENTS = 25
 SHARD_SIZE = 10
 WORKERS_AT_A_TIME = 2
 TOPICS = ["harbours", "rivers", "bridges", "markets", "mills", "orchards", "quarries"]
+# A node or an edge names the documents it is from in one row per source in its
+# source-ref table. These count the ones with no such row.
+WITHOUT_SOURCES = {
+    "graph_node": (
+        "select count(*) from graph_node as node where not exists ("
+        "select 1 from graph_node_source_ref as ref where ref.node_id = node.id)"
+    ),
+    "graph_edge": (
+        "select count(*) from graph_edge as edge where not exists ("
+        "select 1 from graph_edge_source_ref as ref"
+        " where ref.source_id = edge.source_id"
+        " and ref.target_id = edge.target_id"
+        " and ref.relationship_name = edge.relationship_name)"
+    ),
+}
 
 
 def texts() -> list[str]:
@@ -81,10 +96,8 @@ async def stored(dataset) -> dict:
                 rows[table] = await connection.fetchval(f'select count(*) from "{table}"')
                 # A graph that keeps its sources in the graph: every node and
                 # edge names the documents it is from.
-                if table in ("graph_node", "graph_edge"):
-                    without_sources[table] = await connection.fetchval(
-                        f"select count(*) from {table} where cardinality(source_ref_keys) = 0"
-                    )
+                if table in WITHOUT_SOURCES:
+                    without_sources[table] = await connection.fetchval(WITHOUT_SOURCES[table])
         finally:
             await connection.close()
     return {"rows": rows, "without_sources": without_sources}

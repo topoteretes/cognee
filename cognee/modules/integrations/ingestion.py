@@ -39,6 +39,9 @@ class _Provider:
     source_module: str
     source_name: str
     service_builder: Callable[[str], Any] | None = None
+    # Maps a failure the source raised to the stats key it counted it under, so the host does
+    # not count the same failure a second time (see ``sync_scopes``).
+    classify_error: Callable[[BaseException], str | None] | None = None
 
 
 def _google_service_builder(api: str, version: str) -> Callable[[str], Any]:
@@ -78,6 +81,12 @@ def _dropbox_service(access_token: str) -> Any:
     return build_dropbox_service(access_token)
 
 
+def _evernote_service(token: str) -> Any:
+    from cognee.tasks.ingestion.connectors.evernote import build_evernote_service
+
+    return build_evernote_service(token)
+
+
 def _slack_service(access_token: str) -> Any:
     from cognee.tasks.ingestion.connectors.slack import build_slack_service
 
@@ -88,6 +97,18 @@ def _vercel_service(access_token: str) -> Any:
     from cognee.tasks.ingestion.connectors.vercel import build_vercel_service
 
     return build_vercel_service(access_token)
+
+
+def _telegram_service(bot_token: str) -> Any:
+    from cognee.tasks.ingestion.connectors.telegram import build_telegram_service
+
+    return build_telegram_service(bot_token)
+
+
+def _telegram_error(error: BaseException) -> str | None:
+    from cognee.tasks.ingestion.connectors.telegram import classify_sync_error
+
+    return classify_sync_error(error)
 
 
 _PROVIDERS: dict[str, _Provider] = {
@@ -147,6 +168,14 @@ _PROVIDERS: dict[str, _Provider] = {
         source_name="dropbox_source",
         service_builder=_dropbox_service,
     ),
+    # SDK-only: Evernote authorizes with OAuth 1.0a, and the builder takes the resulting token
+    # (or a developer token), which every Thrift call carries as its first argument.
+    "evernote": _Provider(
+        prefix="evernote",
+        source_module="cognee.tasks.ingestion.connectors.evernote",
+        source_name="evernote_source",
+        service_builder=_evernote_service,
+    ),
     # One resource per channel: the scope is the channel id.
     "slack": _Provider(
         prefix="slack_channel",
@@ -159,6 +188,15 @@ _PROVIDERS: dict[str, _Provider] = {
         source_module="cognee.tasks.ingestion.connectors.vercel",
         source_name="vercel_source",
         service_builder=_vercel_service,
+    ),
+    # A bot token from @BotFather, not an OAuth access token: Telegram has no OAuth for bots,
+    # so a host passes the token the user pasted (Cloud: its API-key connect flow).
+    "telegram": _Provider(
+        prefix="telegram",
+        source_module="cognee.tasks.ingestion.connectors.telegram",
+        source_name="telegram_source",
+        service_builder=_telegram_service,
+        classify_error=_telegram_error,
     ),
 }
 
@@ -206,6 +244,11 @@ def dataset_name_for_credential(prefix: str, credential: Any) -> str:
 def source_factory(provider: str) -> Callable[..., Any]:
     entry = _provider(provider)
     return getattr(import_module(entry.source_module), entry.source_name)
+
+
+def error_classifier(provider: str) -> Callable[[BaseException], str | None] | None:
+    """The provider's ``classify_error`` for :func:`sync_scopes`, ``None`` when it has none."""
+    return _provider(provider).classify_error
 
 
 def build_service(provider: str, access_token: str) -> Any:
