@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import pytest
 
+import cognee.modules.pipelines.operations.pipeline as pipeline_module
 import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
 from cognee.modules.data.models import Data
 from cognee.modules.operations.usage_accumulator import operation_usage_scope
@@ -887,3 +888,52 @@ async def test_a_run_given_registered_tasks_goes_to_the_executor(monkeypatch, ru
         "test_registered_run",
         {"chunk_size": 1},
     )
+
+
+class _ConnectionChecked(Exception):
+    """Ends ``run_pipeline`` where it checks its environment."""
+
+
+async def _needs_llm_at_the_connection_check(monkeypatch, tasks, **kwargs):
+    """What ``run_pipeline`` tells the connection check about the LLM."""
+    asked = {}
+
+    async def check(vector_db_config, graph_db_config, *, skip_connection_test, needs_llm):
+        asked["needs_llm"] = needs_llm
+        raise _ConnectionChecked
+
+    monkeypatch.setattr(pipeline_module, "setup_and_check_environment", check)
+    with pytest.raises(_ConnectionChecked):
+        async for _ in pipeline_module.run_pipeline(tasks=tasks, **kwargs):
+            pass
+    return asked["needs_llm"]
+
+
+@pytest.mark.asyncio
+async def test_a_run_an_executor_may_take_does_not_test_the_llm_connection(monkeypatch):
+    """Its items may run in other processes, so the process that owns the run
+    does not test the LLM connection for them: with an executor registered, and
+    with one given to the call."""
+    assert (
+        await _needs_llm_at_the_connection_check(
+            monkeypatch, _PortableResolver(), data_item_executor=_RecordingExecutor()
+        )
+        is False
+    )
+
+    set_data_item_executor(_RecordingExecutor())
+    assert await _needs_llm_at_the_connection_check(monkeypatch, _PortableResolver()) is False
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_stays_in_its_process_tests_the_llm_connection_as_before(monkeypatch):
+    """With no executor, or with tasks no other process could rebuild, the run
+    is told about the LLM as its caller said."""
+    assert await _needs_llm_at_the_connection_check(monkeypatch, _PortableResolver()) is True
+    assert (
+        await _needs_llm_at_the_connection_check(monkeypatch, _PortableResolver(), needs_llm=False)
+        is False
+    )
+
+    set_data_item_executor(_RecordingExecutor())
+    assert await _needs_llm_at_the_connection_check(monkeypatch, lambda _item: []) is True
