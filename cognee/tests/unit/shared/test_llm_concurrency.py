@@ -1,5 +1,8 @@
 """Unit tests for the LLM in-flight concurrency cap (per backend model).
 
+Config defaults for the cap live in
+cognee/tests/unit/infrastructure/llm/test_llm_config_rate_limit_defaults.py.
+
 Pure-asyncio tests (no backend): helper tasks hold a "request" open on a
 time-based gate (opens on demand, auto-closes after a short window) and
 release only when the test says so. Assertions are on OBSERVED concurrency —
@@ -17,10 +20,7 @@ from contextlib import asynccontextmanager
 import pytest
 
 import cognee.shared.rate_limiting as rl
-from cognee.infrastructure.llm.config import (
-    LOCAL_DEFAULT_MAX_CONCURRENT_REQUESTS,
-    LLMConfig,
-)
+from cognee.infrastructure.llm.config import LLMConfig
 
 pytestmark = pytest.mark.asyncio
 
@@ -200,78 +200,6 @@ def _build(**kwargs):
 # --- Tests --------------------------------------------------------------------
 
 
-async def test_default_is_unlimited(monkeypatch):
-    """With no env set, the config cap is 0 (disabled) — backward compatible."""
-    _set_env(
-        monkeypatch,
-        LLM_MAX_CONCURRENT_REQUESTS=None,
-        LLM_RATE_LIMIT_ENABLED="false",
-    )
-    config = _build()
-    assert config.llm_max_concurrent_requests == 0
-
-
-async def test_cloud_default_rpm_is_60(monkeypatch):
-    """Cloud providers keep the 60 RPM default when nothing is set."""
-    _set_env(
-        monkeypatch,
-        LLM_MAX_CONCURRENT_REQUESTS=None,
-        LLM_RATE_LIMIT_REQUESTS=None,
-        LLM_RATE_LIMIT_ENABLED="false",
-    )
-    config = _build()
-    assert config.llm_rate_limit_requests == 60
-
-
-async def test_local_provider_gets_concurrency_default(monkeypatch):
-    """Ollama/llama.cpp/LM Studio get the local in-flight cap by default."""
-    _set_env(
-        monkeypatch,
-        LLM_MAX_CONCURRENT_REQUESTS=None,
-        LLM_RATE_LIMIT_ENABLED="false",
-    )
-    for provider, model in (
-        ("ollama", "phi4:latest"),
-        ("llama_cpp", "some-model"),
-        ("custom", "lm_studio/qwen2.5-7b"),
-    ):
-        config = _build(llm_provider=provider, llm_model=model)
-        assert config.llm_max_concurrent_requests == LOCAL_DEFAULT_MAX_CONCURRENT_REQUESTS
-
-
-async def test_local_default_value_is_5(monkeypatch):
-    """The local default cap is 5 (maintainer-requested value)."""
-    assert LOCAL_DEFAULT_MAX_CONCURRENT_REQUESTS == 5
-
-
-async def test_explicit_cap_overrides_local_default(monkeypatch):
-    """An explicit LLM_MAX_CONCURRENT_REQUESTS wins over the local default."""
-    _set_env(
-        monkeypatch,
-        LLM_MAX_CONCURRENT_REQUESTS=8,
-        LLM_RATE_LIMIT_ENABLED="false",
-    )
-    config = _build(llm_provider="ollama", llm_model="llama3.3")
-    assert config.llm_max_concurrent_requests == 8
-
-
-async def test_stage_routed_local_gets_local_cap(monkeypatch):
-    """A stage routed to a local server carries the local cap on its own
-    config even when the base model is cloud — stage_config() re-applies
-    _apply_local_rate_limit_default, so no dedicated stage fields are needed.
-    """
-    _set_env(
-        monkeypatch,
-        LLM_MAX_CONCURRENT_REQUESTS=None,
-        LLM_RATE_LIMIT_ENABLED="false",
-        LLM_EXTRACTION_MODEL="llama3.3",
-        LLM_EXTRACTION_PROVIDER="ollama",
-    )
-    config = _build(llm_provider="openai", llm_model="gpt-4o-mini")
-    stage = config.stage_config("extraction")
-    assert stage.llm_max_concurrent_requests == LOCAL_DEFAULT_MAX_CONCURRENT_REQUESTS
-
-
 async def test_unset_cap_lets_unbounded_requests_run(monkeypatch):
     """Cap disabled: 10 simultaneous requests all proceed (fast path)."""
     _set_env(
@@ -391,3 +319,101 @@ async def test_slots_released_on_error(monkeypatch):
     finally:
         gate.open_for(2.0)
         await asyncio.wait_for(held.release(), timeout=10)
+
+
+async def test_waiting_on_the_rpm_bucket_holds_no_slot(monkeypatch):
+    """Pacing runs before the slot is taken: a request queued on the token bucket
+    must leave the slot free for whoever already has a token."""
+    _set_env(
+        monkeypatch,
+        LLM_MAX_CONCURRENT_REQUESTS=1,
+        LLM_RATE_LIMIT_ENABLED="true",
+        LLM_RATE_LIMIT_REQUESTS=1,
+        LLM_RATE_LIMIT_INTERVAL=60,
+    )
+    counter = _Counter()
+    gate = _Gate()
+    first = _hold_open(_seam, gate, counter)
+    gate.open_for(2.0)
+    await asyncio.wait_for(first.entered(), timeout=10)
+    await asyncio.wait_for(first.release(), timeout=10)
+
+    # The bucket is now empty for ~60s, so this request parks on the limiter.
+    second = _hold_open(_seam, gate, _Counter())
+    for _ in range(50):
+        await asyncio.sleep(0)
+    assert not second._task.done()
+
+    (semaphore,) = (entry[1] for entry in rl._concurrency_state.values())
+    assert not semaphore.locked(), "a request waiting on the RPM bucket holds a slot"
+
+    second._task.cancel()
+    await asyncio.gather(second._task, return_exceptions=True)
+
+
+async def test_retry_backoff_does_not_hold_a_slot(monkeypatch):
+    """Through a real adapter's tenacity retry: a failed attempt frees its slot
+    before backing off, so another call runs during the backoff, and the retry
+    takes a slot again when it resumes."""
+    import litellm
+
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    _set_env(
+        monkeypatch,
+        LLM_MAX_CONCURRENT_REQUESTS=1,
+        LLM_RATE_LIMIT_ENABLED="false",
+        AUTO_RATE_LIMIT="false",
+    )
+
+    # Tenacity sleeps through asyncio.sleep; park the adapter's backoff (>= 1s)
+    # on an event instead of waiting it out. Short sleeps run as usual.
+    real_sleep = asyncio.sleep
+    in_backoff = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def _sleep(seconds, *args, **kwargs):
+        if seconds >= 1:
+            in_backoff.set()
+            await resume.wait()
+            return
+        await real_sleep(seconds, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "sleep", _sleep)
+
+    in_flight = _Counter()
+    calls = {"n": 0}
+
+    async def _acompletion(**kwargs):
+        calls["n"] += 1
+        in_flight.increment()
+        try:
+            await real_sleep(0)
+            if calls["n"] == 1:
+                raise ConnectionError("backend unavailable")
+            return litellm.ModelResponse(
+                choices=[{"message": {"role": "assistant", "content": "ok"}}]
+            )
+        finally:
+            in_flight.decrement()
+
+    monkeypatch.setattr(litellm, "acompletion", _acompletion)
+
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key", model="ollama/phi4", max_completion_tokens=256
+    )
+    retried = asyncio.ensure_future(adapter.acreate_structured_output("q", "s", str))
+    await asyncio.wait_for(in_backoff.wait(), timeout=10)
+
+    # The retrying call is backing off; with a cap of 1 this call only gets
+    # in if the failed attempt released its slot.
+    assert (
+        await asyncio.wait_for(adapter.acreate_structured_output("q", "s", str), timeout=5) == "ok"
+    )
+
+    resume.set()
+    assert await asyncio.wait_for(retried, timeout=5) == "ok"
+    assert calls["n"] == 3
+    assert in_flight.max_seen == 1
