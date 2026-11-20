@@ -12,9 +12,12 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from cognee.modules.users.models.Principal import Principal
 from cognee.modules.users.models.PrincipalConfiguration import PrincipalConfiguration
+from cognee.modules.users.models.User import User
 
 # The ``methods`` package re-exports each function under its module's own name,
 # so hold the modules themselves for patching.
@@ -46,12 +49,13 @@ def children(monkeypatch):
     return tree
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def relational_engine(monkeypatch, children):
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(
-            PrincipalConfiguration.metadata.create_all, tables=[PrincipalConfiguration.__table__]
+            PrincipalConfiguration.metadata.create_all,
+            tables=[Principal.__table__, PrincipalConfiguration.__table__, User.__table__],
         )
 
     fake_engine = _SqliteEngine(engine)
