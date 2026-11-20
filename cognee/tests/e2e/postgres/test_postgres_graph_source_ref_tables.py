@@ -1145,6 +1145,12 @@ _REFUSED = {
     "find_edge_source_refs_by_dataset": lambda adapter: adapter.find_edge_source_refs_by_dataset(
         str(DATASETS[0])
     ),
+    "find_node_source_refs_by_data": lambda adapter: adapter.find_node_source_refs_by_data(
+        str(DATASETS[0]), str(uuid4())
+    ),
+    "find_edge_source_refs_by_data": lambda adapter: adapter.find_edge_source_refs_by_data(
+        str(DATASETS[0]), str(uuid4())
+    ),
     "find_node_source_refs_by_pipeline_run": lambda adapter: (
         adapter.find_node_source_refs_by_pipeline_run(str(RUNS[0]))
     ),
