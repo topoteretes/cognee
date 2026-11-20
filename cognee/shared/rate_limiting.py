@@ -25,8 +25,7 @@ _embedding_rate_limiter: "AsyncLimiter | None" = None
 # hit (base model, or the model the active pipeline stage is routed to),
 # because the cap protects a serving backend: two stages routed to the same
 # model share that model's slots. The governing cap comes from the *context*
-# config, so a stage routed to a local server gets LOCAL_DEFAULT_MAX_
-# CONCURRENT_REQUESTS on its own (stage_config applies it per stage). Caps are
+# config, the one pipeline-stage routing selects. Caps are
 # per-process, the same scope as DATASET_QUEUE_MAX_CONCURRENT. ``loop`` entries
 # die with their loop; the dict holds one small tuple per (loop, model), which
 # is bounded in practice.
@@ -50,10 +49,8 @@ def _llm_concurrency_limit():
     """Return ``(cap, model)`` governing the current call, or ``(0, "")`` when
     the cap is off.
 
-    Reads the *context* config, so pipeline-stage routing decides both which
-    backend is hit and which cap governs it: a stage routed to a local server
-    carries LOCAL_DEFAULT_MAX_CONCURRENT_REQUESTS on its own config (via
-    stage_config), while cloud stages keep the global setting.
+    Reads the *context* config, so pipeline-stage routing decides which
+    backend is hit and therefore which model's slots the call takes.
     """
     # NOTE: Imports inside function to avoid circular imports at module load.
     from cognee.infrastructure.llm.config import get_llm_context_config

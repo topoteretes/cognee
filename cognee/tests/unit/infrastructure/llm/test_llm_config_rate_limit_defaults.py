@@ -1,12 +1,8 @@
-"""Tests for the provider-aware local defaults (RPM budget and in-flight cap)."""
+"""Tests for the provider-aware RPM default and the opt-in in-flight cap."""
 
 import pytest
 
-from cognee.infrastructure.llm.config import (
-    LOCAL_DEFAULT_MAX_CONCURRENT_REQUESTS,
-    LOCAL_DEFAULT_RATE_LIMIT_REQUESTS,
-    LLMConfig,
-)
+from cognee.infrastructure.llm.config import LOCAL_DEFAULT_RATE_LIMIT_REQUESTS, LLMConfig
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +49,8 @@ def _build(**kwargs):
 def test_local_providers_default_to_small_budget(provider, model):
     config = _build(llm_provider=provider, llm_model=model)
     assert config.llm_rate_limit_requests == LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
-    assert config.llm_max_concurrent_requests == LOCAL_DEFAULT_MAX_CONCURRENT_REQUESTS
+    # The in-flight cap is opt-in: local servers are not capped by default.
+    assert config.llm_max_concurrent_requests == 0
 
 
 @pytest.mark.parametrize(
@@ -73,33 +70,6 @@ def test_regular_providers_keep_regular_default(provider, model):
 def test_explicit_setting_wins_over_local_default():
     config = _build(llm_provider="ollama", llm_model="phi4:latest", llm_rate_limit_requests=90)
     assert config.llm_rate_limit_requests == 90
-
-
-def test_explicit_cap_wins_over_local_default():
-    config = _build(llm_provider="ollama", llm_model="phi4:latest", llm_max_concurrent_requests=8)
-    assert config.llm_max_concurrent_requests == 8
-
-
-def test_each_local_default_applies_unless_its_own_field_is_set():
-    """Setting one field explicitly must not switch off the other's local default."""
-    rpm_set = _build(llm_provider="ollama", llm_model="phi4:latest", llm_rate_limit_requests=30)
-    assert rpm_set.llm_max_concurrent_requests == LOCAL_DEFAULT_MAX_CONCURRENT_REQUESTS
-
-    cap_set = _build(llm_provider="ollama", llm_model="phi4:latest", llm_max_concurrent_requests=2)
-    assert cap_set.llm_rate_limit_requests == LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
-
-
-def test_stage_routed_to_local_server_gets_local_cap():
-    """stage_config() re-applies the local defaults for the stage's own provider."""
-    config = _build(
-        llm_provider="openai",
-        llm_model="openai/gpt-5.6-luna",
-        llm_extraction_provider="ollama",
-        llm_extraction_model="llama3.3",
-    )
-    assert config.llm_max_concurrent_requests == 0
-    stage = config.stage_config("extraction")
-    assert stage.llm_max_concurrent_requests == LOCAL_DEFAULT_MAX_CONCURRENT_REQUESTS
 
 
 @pytest.mark.parametrize(
