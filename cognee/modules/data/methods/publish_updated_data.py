@@ -44,7 +44,9 @@ class StagedContent(BaseModel):
 
     Content-addressed storage writes are safe to make before anything is
     decided: until ``publish_updated_data`` flips the row, readers keep
-    resolving the old file, and an abandoned staged file is inert garbage.
+    resolving the old file. Once the update is over, the files no row points
+    at are removed: the old version's after a publish, the staged ones when
+    the update did not publish.
     """
 
     name: str

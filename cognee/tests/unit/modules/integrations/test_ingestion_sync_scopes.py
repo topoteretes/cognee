@@ -98,6 +98,51 @@ async def test_a_connection_that_goes_inactive_stops_the_loop_even_on_the_last_s
 
 
 @pytest.mark.asyncio
+async def test_a_sync_requested_while_one_runs_runs_once_more_after_it(monkeypatch):
+    """A selection saved mid-sync is applied by one more run, not dropped."""
+    monkeypatch.setattr(
+        ingestion, "require_active_credential", AsyncMock(side_effect=lambda credential: credential)
+    )
+    monkeypatch.setattr("cognee.modules.integrations.credentials.record_sync_result", AsyncMock())
+    runs = []
+
+    async def sync_source(credential, counts):
+        runs.append(credential)
+        if len(runs) == 1:
+            assert ingestion.request_rerun_if_running("linear", CREDENTIAL.provider_account_id)
+            assert ingestion.request_rerun_if_running("linear", CREDENTIAL.provider_account_id)
+        return "ok", counts
+
+    await ingestion.run_sync("linear", CREDENTIAL, sync_source)
+
+    # Requested twice during the first run: one more run applies both.
+    assert len(runs) == 2
+    assert not ingestion.request_rerun_if_running("linear", CREDENTIAL.provider_account_id)
+
+
+@pytest.mark.asyncio
+async def test_a_sync_requested_while_one_fails_still_runs_after_it(monkeypatch):
+    """A selection saved during a sync that fails is applied, not dropped with the failure."""
+    monkeypatch.setattr(
+        ingestion, "require_active_credential", AsyncMock(side_effect=lambda credential: credential)
+    )
+    monkeypatch.setattr("cognee.modules.integrations.credentials.record_sync_result", AsyncMock())
+    runs = []
+
+    async def sync_source(credential, counts):
+        runs.append(credential)
+        if len(runs) == 1:
+            assert ingestion.request_rerun_if_running("linear", CREDENTIAL.provider_account_id)
+            raise RuntimeError("the provider is unreachable")
+        return "ok", counts
+
+    with contextlib.suppress(RuntimeError):
+        await ingestion.run_sync("linear", CREDENTIAL, sync_source)
+
+    assert len(runs) == 2
+
+
+@pytest.mark.asyncio
 async def test_a_rate_limit_error_is_recorded_as_one_whatever_its_text(monkeypatch):
     """Typed, not sniffed from the message: Linear's wording is not Google's."""
     recorded = AsyncMock()
@@ -113,6 +158,72 @@ async def test_a_rate_limit_error_is_recorded_as_one_whatever_its_text(monkeypat
         await ingestion.run_sync("linear", CREDENTIAL, sync_source)
 
     assert recorded.await_args.kwargs["counts"]["failed_rate_limit"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failure_the_source_already_counted_is_counted_once(remember):
+    """Dropbox counts an account mismatch in its own stats before raising; the loop must not
+    add the classified key on top, or one refusal reads as two."""
+    from cognee.modules.integrations.dropbox.sync import _classify_error
+    from cognee.tasks.ingestion.connectors.dropbox import (
+        DropboxAccountMismatchError,
+        _iter_rows,
+        _Session,
+        dropbox_source,
+    )
+    from cognee.tests.unit.tasks.connectors.fake_dropbox import FakeDropbox
+
+    fake = FakeDropbox()
+    fake.account = "dbid:another-account"
+
+    def make_source(scope, name, check_active):
+        return dropbox_source(
+            folder_id="",
+            account_id="dbid:AAAfakeaccount",
+            resource_name=name,
+            service=fake.client(),
+        )
+
+    async def run_the_source(source, **_kwargs):
+        # What remember() does with the resource, reduced to its walk; dlt wraps what it raises.
+        try:
+            list(
+                _iter_rows(
+                    _Session(fake.client(), None),
+                    folder_id="",
+                    account_id="dbid:AAAfakeaccount",
+                    state={},
+                    stats=source.cognee_sync_stats,
+                    max_bytes=None,
+                )
+            )
+        except DropboxAccountMismatchError as error:
+            raise RuntimeError("pipeline step failed") from error
+
+    remember.side_effect = run_the_source
+    counts = {"scanned": 0, "skipped": 0, "failed": 0}
+
+    await ingestion.sync_scopes(
+        "dropbox",
+        CREDENTIAL,
+        counts,
+        scopes=[""],
+        dataset_name="dropbox_acme",
+        make_source=make_source,
+        classify_error=_classify_error,
+    )
+
+    assert counts["failed"] == 1 and counts["failed_account"] == 1
+    assert counts.get("failed_auth", 0) == 0 and "failed_ingestion" not in counts
+
+
+@pytest.mark.asyncio
+async def test_a_failure_the_source_did_not_count_is_still_counted(remember):
+    remember.side_effect = RuntimeError("boom")
+
+    _, counts, _ = await _run(["t1"])
+
+    assert counts["failed"] == 1 and counts["failed_ingestion"] == 1
 
 
 @pytest.mark.asyncio
@@ -159,6 +270,87 @@ def test_only_a_scope_gone_at_the_provider_does_not_block_retirement(counts, gon
     assert ingestion.retirement_blocked(counts, gone_keys=gone_keys) is blocked
 
 
+@pytest.mark.asyncio
+async def test_a_failure_followed_by_a_rerun_keeps_its_traceback_in_the_log(monkeypatch, caplog):
+    monkeypatch.setattr(
+        ingestion, "require_active_credential", AsyncMock(side_effect=lambda credential: credential)
+    )
+    monkeypatch.setattr("cognee.modules.integrations.credentials.record_sync_result", AsyncMock())
+    runs = []
+
+    async def sync_source(credential, counts):
+        runs.append(credential)
+        if len(runs) == 1:
+            ingestion.request_rerun_if_running("linear", CREDENTIAL.provider_account_id)
+            raise RuntimeError("the provider is unreachable")
+        return "ok", counts
+
+    with caplog.at_level("WARNING"):
+        await ingestion.run_sync("linear", CREDENTIAL, sync_source)
+
+    rerun = [record for record in caplog.records if "running it again" in record.getMessage()]
+    assert rerun and "the provider is unreachable" in rerun[0].getMessage()
+
+
 def test_a_rate_limit_carries_the_wait_the_provider_named():
     assert ingestion.RateLimitedError("slow down", retry_after=30).retry_after == 30
     assert ingestion.RateLimitedError("slow down").retry_after is None
+
+
+@pytest.mark.parametrize("failure", ["api", "folder_not_found"])
+@pytest.mark.asyncio
+async def test_a_listing_failure_is_counted_once_with_a_reason(remember, failure):
+    from cognee.modules.integrations.dropbox.sync import _classify_error
+    from cognee.tasks.ingestion.connectors.dropbox import (
+        DropboxError,
+        _iter_rows,
+        _Session,
+        dropbox_source,
+    )
+    from cognee.tests.unit.tasks.connectors.fake_dropbox import ACCOUNT, FakeDropbox
+
+    fake = FakeDropbox()
+    folder = "id:never-listed"
+    if failure == "api":
+        folder = fake.mkdir("/Notes")
+        fake.queued["files/list_folder"] = [(403, {})]
+
+    def make_source(scope, name, check_active):
+        return dropbox_source(
+            folder_id=folder, account_id=ACCOUNT, resource_name=name, service=fake.client()
+        )
+
+    async def run_the_source(source, **_kwargs):
+        try:
+            list(
+                _iter_rows(
+                    _Session(fake.client(), None),
+                    folder_id=folder,
+                    account_id=ACCOUNT,
+                    state={},
+                    stats=source.cognee_sync_stats,
+                    max_bytes=None,
+                )
+            )
+        except DropboxError as error:
+            raise RuntimeError("pipeline step failed") from error
+
+    remember.side_effect = run_the_source
+    counts = {"scanned": 0, "skipped": 0, "failed": 0}
+
+    await ingestion.sync_scopes(
+        "dropbox",
+        CREDENTIAL,
+        counts,
+        scopes=[folder],
+        dataset_name="dropbox_acme",
+        make_source=make_source,
+        classify_error=_classify_error,
+    )
+
+    assert counts["failed"] == 1
+    reasons = {k: v for k, v in counts.items() if k.startswith("failed_") and v}
+    # A folder never listed that Dropbox does not find holds no data: it has its own key,
+    # which never blocks retiring deselected folders.
+    expected = "failed_listing" if failure == "api" else "failed_folder_not_found"
+    assert reasons == {expected: 1}

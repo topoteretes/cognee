@@ -56,8 +56,9 @@ def _enrich_llm_span(model: str, name: str) -> None:
     try:
         from opentelemetry import trace as otel_trace  # ty:ignore[unresolved-import]
 
-        from cognee.context_global_variables import current_pipeline_stage
+        from cognee.context_global_variables import current_caller, current_pipeline_stage
         from cognee.modules.observability.tracing import (
+            COGNEE_LLM_CALLER,
             COGNEE_LLM_MODEL,
             COGNEE_LLM_PROVIDER,
             COGNEE_PIPELINE_STAGE,
@@ -70,6 +71,9 @@ def _enrich_llm_span(model: str, name: str) -> None:
             stage = current_pipeline_stage.get()
             if stage:
                 current_span.set_attribute(COGNEE_PIPELINE_STAGE, stage)
+            caller = current_caller.get()
+            if caller:
+                current_span.set_attribute(COGNEE_LLM_CALLER, caller)
     except Exception:
         logger.debug("Ignoring exception in _enrich_llm_span", exc_info=True)
 

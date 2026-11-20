@@ -112,8 +112,11 @@ def _render_fact_line(fact: COGXFact) -> str:
 
 
 def _data_item_for(record: COGXRecord, content: str, label: str | None = None) -> DataItem:
+    # Imported content is text the provider stored, never a path or URL for
+    # this server to resolve (see DataItem.literal_text).
     return DataItem(
         data=content,
+        literal_text=True,
         label=label,
         external_metadata=_record_external_metadata(record),
         data_id=record_data_id(record),

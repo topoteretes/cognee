@@ -50,6 +50,13 @@ is equivalent.
 Fork rows are rare (same user, identical content, several datasets, before
 the upgrade), so this is cheap: one indexed relational query in the common
 case, per-document work only where forks exist.
+
+Note: this migration works through the graph adapter's own methods, so it runs
+with the adapter of the cognee release doing the upgrade. A Postgres graph that
+still keeps source refs in the ``source_ref_keys`` columns is refused by the
+current adapter (see ``postgres_graph_source_ref_tables``). A database that has
+not passed this migration yet must be upgraded to cognee 1.6.8 first, and to the
+current release after that.
 """
 
 from uuid import UUID

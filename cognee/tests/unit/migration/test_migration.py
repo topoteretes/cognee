@@ -32,6 +32,8 @@ from cognee.modules.migration.sources import (
     LettaSource,
     Mem0Source,
 )
+from cognee.modules.operations import remote_caller_scope
+from cognee.tasks.ingestion.screen_server_paths import screen_server_paths
 
 
 def collect(source):
@@ -699,6 +701,27 @@ class TestFormatEmitters:
         assert "MERGE (a)-[r:`lives_in`]->(b)" in script
         # Non-scalar property serialized as JSON string, not raw repr.
         assert '"[\\"city\\", \\"capital\\"]"' in script
+
+
+class TestImportedContentIsLiteralText:
+    """Provider content is text: never resolved as a server path or URL."""
+
+    RECORDS = [
+        COGXDocument(external_system="t", external_id="d1", title="t", content="w/o"),
+        COGXMemory(external_system="t", external_id="m1", content="github.com/org/repo"),
+        COGXMemoryBlock(external_system="t", external_id="b1", label="l", value="/etc/passwd"),
+    ]
+
+    def test_every_content_record_is_literal_text(self):
+        for record in self.RECORDS:
+            assert loader.data_item_from_record(record).literal_text is True
+
+    def test_a_remote_import_passes_the_entry_screen(self):
+        # Without the flag "github.com/org/repo" is path-only and would be refused.
+        item = loader.data_item_from_record(self.RECORDS[1])
+
+        with remote_caller_scope():
+            assert screen_server_paths([item]) == [item]
 
 
 class TestImportModeValidation:

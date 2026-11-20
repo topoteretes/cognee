@@ -35,7 +35,6 @@ from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from cognee.infrastructure.llm.utils import get_llm_tokenizer
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -333,13 +332,6 @@ def _require_text_like(name: str) -> None:
         raise ValueError(f"dry_run supports text-like file inputs only, got {name!r}.")
 
 
-def _accept_local_file_path() -> bool:
-    """The same ACCEPT_LOCAL_FILE_PATH gate real ingestion applies."""
-    from cognee.tasks.ingestion.save_data_item_to_storage import local_file_paths_accepted
-
-    return local_file_paths_accepted()
-
-
 def _path_candidate(value: str) -> Path | None:
     """The local path this string refers to, or None when it is raw text.
 
@@ -348,9 +340,9 @@ def _path_candidate(value: str) -> Path | None:
     when it points at one that exists. An absolute-looking string that is not an
     existing file (e.g. a "/"-prefixed text note) is raw text, exactly as a real
     run now ingests it. Scheme is checked before the newline guard so a
-    trailing-newline URL cannot slip through as text. When
-    ``ACCEPT_LOCAL_FILE_PATH`` is disabled, an existing *absolute* file path is
-    rejected while relative paths and non-existent strings stay raw text.
+    trailing-newline URL cannot slip through as text. With the server-path gate
+    closed nothing is looked up: ``screen_server_paths`` has refused explicit
+    paths at the estimate's entry, and anything else is text.
     """
     scheme = urlparse(value).scheme.lower()
     if scheme in _UNSUPPORTED_SCHEMES:
@@ -358,9 +350,11 @@ def _path_candidate(value: str) -> Path | None:
             f"dry_run supports local text inputs only, got {value!r}. "
             "A real run would fetch and ingest this URL."
         )
+    from cognee.tasks.ingestion.save_data_item_to_storage import local_file_paths_accepted
+
+    if not local_file_paths_accepted():
+        return None  # gate closed: the disk is never asked, so it is text
     if scheme == "file":
-        if not _accept_local_file_path():
-            raise ValueError(f"Local files are not accepted, got {value!r}.")
         return Path(url2pathname(urlparse(value).path))
 
     if "\n" in value or "\r" in value or len(value) > 4096:
@@ -373,10 +367,6 @@ def _path_candidate(value: str) -> Path | None:
         return None
 
     if exists:
-        # Mirror the ACCEPT_LOCAL_FILE_PATH gate: save_data_item_to_storage
-        # refuses any existing path, absolute or relative, when it is closed.
-        if not _accept_local_file_path():
-            raise ValueError(f"Local files are not accepted, got {value!r}.")
         return path
 
     # A non-existent path — absolute or relative — is raw text. A real run no
@@ -424,6 +414,8 @@ async def _input_to_texts(data: Any) -> list[str]:
     if data is None:
         return []
     if isinstance(data, DataItem):
+        if data.literal_text and isinstance(data.data, str):
+            return [data.data]  # stored verbatim, never read as a path or URL
         # save_data_item_to_storage recurses into the wrapped payload.
         return await _input_to_texts(data.data)
     if isinstance(data, list):
@@ -523,13 +515,18 @@ async def _chunks_from_data_items(
 async def estimate_remember_dry_run(
     data: Any,
     *,
-    chunker: type[Any] = TextChunker,
+    chunker: type[Any],
     chunk_size: int,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
     summary_method: str | None = None,
 ) -> DryRunEstimate:
     """Estimate ``remember(data)`` for permanent add+cognify inputs."""
+    from cognee.tasks.ingestion.screen_server_paths import screen_server_paths
+
+    # The same entry decision add() makes, so a closed gate refuses what a real
+    # run refuses and never looks a caller string up.
+    data = screen_server_paths(data)
     chunks = await _chunks_from_texts(
         await _input_to_texts(data), chunker=chunker, chunk_size=chunk_size
     )
@@ -546,7 +543,7 @@ async def estimate_cognify_dry_run(
     datasets,
     *,
     user=None,
-    chunker: type[Any] = TextChunker,
+    chunker: type[Any],
     chunk_size: int,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,

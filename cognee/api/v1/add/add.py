@@ -34,6 +34,7 @@ from cognee.tasks.ingestion.refuse_changed_existing_documents import (
     refuse_changed_existing_documents,
 )
 from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
+from cognee.tasks.ingestion.screen_server_paths import screen_server_paths
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
 
 logger = get_logger()
@@ -61,16 +62,48 @@ async def add(
     **kwargs,
 ):
     """
-    Add data to Cognee for knowledge graph processing.
+    Ingest data into a dataset, ready for cognify() to turn into memory.
 
-    This is the first step in the Cognee workflow - it ingests raw data and prepares it
-    for processing. The function accepts text, file paths, URLs and file uploads, then
-    stores them in a specified dataset for further processing.
+    add() is the staging step of the memory API: one call takes text, files, folders,
+    uploads, web pages, code repositories or database tables, and leaves each one as a
+    stored document in the dataset, with its original, its text, its metadata and a
+    stable ``data_id``. It builds no graph and computes no embeddings; ``cognify()``
+    does that over what add() stored, and ``remember()`` runs add() + cognify() (and
+    improve()) in one call. Reach for add() directly to stage data before a separate
+    cognify(), or for the options remember() does not forward (``skip_connection_test``,
+    the dlt option ``column_value_columns``).
 
-    Prerequisites:
-        - **LLM_API_KEY**: Must be set in environment variables for content processing
-        - **Database Setup**: Relational and vector databases must be configured
-        - **User Authentication**: Uses default user if none provided (created automatically)
+    What add() handles for you:
+        - **Dataset and permissions**: the dataset is looked up among the user's own
+          datasets by name (or by ``dataset_id``, which also reaches a dataset shared
+          with the user) and must grant the user write permission. A name that does not
+          exist yet creates the dataset and gives its creator read, write, delete and
+          share permission on it.
+        - **Loading**: folders are expanded (subfolders included) and every item is
+          handed to the loader registered for its type, so the dataset holds the item's
+          text next to its original; ``preferred_loaders`` steers that choice.
+        - **Storage and identity**: originals and text are stored under cognee's data
+          root (local or S3). Items are matched by content hash within the dataset, so
+          adding the same content again returns the stored document's ``data_id``
+          instead of duplicating it.
+        - **Run tracking**: ingestion is a pipeline run on the dataset (``add_pipeline``),
+          recorded and reported like cognify's runs, and it takes the same per-dataset
+          lock, so within one process add, cognify and forget on one dataset run one
+          after another.
+
+    What you must provide:
+        - An LLM key only for images, audio and video: their loaders need an LLM to
+          describe or transcribe them, and they raise when none is configured. Otherwise
+          add() makes no LLM call and validates only the embedding side of the provider
+          config, so text, documents, code, web pages and databases ingest on a keyless
+          install.
+        - A ``user`` when acting for someone; without one the default user is used
+          (created on first use).
+        - Then ``cognify()`` (or ``remember()``) to make the data searchable.
+
+    While connected to a running instance through ``cognee.serve()``, add() forwards
+    only ``data`` and ``dataset_name`` to that server, and the other options are not
+    sent (``branch`` raises instead of being dropped).
 
     add() creates documents; it never updates one. A file that already exists in
     the dataset (the same path, or the same filename for an upload) with different
@@ -79,16 +112,23 @@ async def add(
     and its graph is replaced in place. Re-adding identical content is a no-op.
 
     Supported Input Types:
-        - **Text strings**: Direct text content (str) - any string not starting with "/" or "file://"
-        - **File paths**: Local file paths as strings in these formats:
+        - **Text strings**: any string that is not a path, URL or connection string is
+          stored as a text document
+        - **File paths and folders**: local paths as strings in these formats:
             * Absolute paths: "/path/to/document.pdf"
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
+          Paths are read with the server's own access, so API requests refuse them
+          unless ``ACCEPT_LOCAL_FILE_PATH=true``; the SDK and CLI accept them by default.
         - **File uploads**: FastAPI ``UploadFile`` objects, which is what ``POST /api/v1/add``
           hands in for its multipart ``data`` field; each is stored under its upload
           filename. Plain open file objects (``open(path, "rb")``, ``BytesIO``) are not
           accepted: pass the file's path instead.
-        - **Web URLs**: "https://example.com/page" is fetched and ingested as a page
+        - **Web URLs**: "https://example.com/page" is fetched and ingested as a page,
+          through Tavily when ``TAVILY_API_KEY`` is set, else Keenable when
+          ``KEENABLE_API_KEY`` is set, else the built-in crawler. API calls need
+          ``ALLOW_HTTP_REQUESTS=true`` on the server; the refusal comes before any work
+          starts, also with ``run_in_background=True``.
         - **Code repository URLs**: "https://github.com/<owner>/<repo>" (or a gitlab.com
           project, or any URL ending in .git) is shallow-cloned and ingested as ONE
           code-repo item that cognify runs through the enola code graph pipeline
@@ -108,19 +148,26 @@ async def add(
         - **Lists**: Multiple files or text strings in a single call
 
     Supported File Formats:
-        - Text files (.txt, .md, .csv)
+        - Text files (.txt, .md); CSV files are read through dlt as table rows
         - PDFs (.pdf)
-        - Images (.png, .jpg, .jpeg) - extracted via OCR/vision models
-        - Audio files (.mp3, .wav) - transcribed to text
-        - Code files (.py, .js, .ts, etc.) - parsed for structure and content
-        - Office documents (.docx, .pptx)
+        - Images (.png, .jpg, .jpeg) - described by the configured LLM's vision model
+        - Audio files (.mp3, .wav) - transcribed by the configured LLM provider
+        - Code files (.py, .js, .ts, etc.) - stored as code, so cognify builds a code
+          graph from them without an LLM; ``preferred_loaders=["text_loader"]`` treats
+          one as a plain document instead
+        - Office documents (.docx, .pptx) - with the ``docs`` or ``docling`` extra
 
-            Workflow:
-        1. **Data Resolution**: Resolves file paths and validates accessibility
-        2. **Content Extraction**: Extracts text content from various file formats
-        3. **Dataset Storage**: Stores processed content in the specified dataset
-        4. **Metadata Tracking**: Records file metadata, timestamps, and user permissions
-        5. **Permission Assignment**: Grants user read/write/delete/share permissions on dataset
+    Workflow:
+        1. **Checks before any write**: remote-fetch permission, server-path screening,
+           provider config, and the dataset's write permission (creating it if new).
+        2. **Source expansion**: database connection strings and dlt resources become
+           individual items.
+        3. **Changed-file check**: a file the dataset holds with other content refuses
+           the whole call (see above), before any item is written; folders are checked
+           file by file.
+        4. **Ingestion**: the pipeline expands folders, repository URLs and CSV files,
+           then each item is loaded, stored and recorded as a ``Data`` row of the
+           dataset, tagged with ``node_set`` and ``importance_weight``.
 
     Args:
         data: The data to ingest. Can be:
@@ -133,17 +180,25 @@ async def add(
             - url: A web link url (https or http); a GitHub/GitLab repository URL is
               cloned and indexed as a code graph instead of fetched as a page
         dataset_name: Name of the dataset to store data in. Defaults to "main_dataset".
-                    Create separate datasets to organize different knowledge domains.
+                    A dataset is the unit of permissions, of cognify() runs and, with
+                    backend access control on, of isolated graph and vector stores, so
+                    separate datasets keep different knowledge domains apart.
         user: User object for authentication and permissions. Uses default user if None.
               Default user: "default_user@example.com" (created automatically on first use).
-              Users can only access datasets they have permissions for.
-        node_set: Optional list of node identifiers used to organize and filter data points
-                 in the knowledge graph. Not an access-control mechanism.
+        node_set: Optional NodeSet names to tag these documents with. cognify() links
+                 their documents and chunks to those NodeSet nodes, so
+                 ``recall(node_name=...)`` / ``search(node_name=...)`` can scope retrieval
+                 to them. Not an access-control mechanism. Re-adding an existing document
+                 without ``node_set`` keeps its stored tags; ``[]`` clears them.
         vector_db_config: Optional configuration for vector database (for custom setups).
         graph_db_config: Optional configuration for graph database (for custom setups).
-        dataset_id: Optional specific dataset UUID to use instead of dataset_name.
+        dataset_id: Optional specific dataset UUID to use instead of dataset_name; the
+                    way to write to a dataset another user shared with you. An id that
+                    matches no dataset raises ``DatasetNotFoundError``.
         preferred_loaders: Loader names to try first, each optionally with that loader's
                            options: ``["csv_loader"]`` or ``[{"dlt_csv_loader": {...}}]``.
+                           Web-page extraction rules go here too, with the ``scraping``
+                           extra: ``[{"beautiful_soup_loader": {"extraction_rules": ...}}]``.
         dlt_config: Options that apply only to dlt sources (connection strings, dlt
                     resources, CSV files): ``primary_key``, ``write_disposition``,
                     ``query``, ``max_rows_per_table``, ``column_value_columns``,
@@ -154,9 +209,13 @@ async def add(
                            DLT orphan cleanup is skipped; propagating upstream deletions
                            requires a successful foreground sync.
                            If False (default), waits for completion before returning.
-        extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
-        tavily_config: Optional configuration for Tavily API, including API key and extraction settings
-        soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
+        importance_weight: The documents' importance, 0 to 1 (default 0.5). It is stored
+                           on each document and carried to its chunks, and the hybrid
+                           retriever (the default search type) scales a chunk's ranking
+                           score by a factor from 0.75 (weight 0) to 1.25 (weight 1).
+        extraction_rules / tavily_config / soup_crawler_config: accepted and ignored.
+                           Pass extraction rules through ``preferred_loaders`` (above);
+                           Tavily is configured by ``TAVILY_API_KEY``.
         branch: Branch to clone for the GitHub/GitLab repository URL(s) in ``data``, instead of
                 the remote's default. Each branch is cloned into its own directory, so adds on
                 different branches never touch each other's clone. A dataset holds one branch of
@@ -219,13 +278,15 @@ async def add(
         # Add a single file
         await cognee.add("/home/user/documents/analysis.pdf")
 
-        # Add a single url and bs4 extract ingestion method
+        # Add a single url with BeautifulSoup extraction rules (needs the scraping extra)
         extraction_rules = {
-            "title": "h1",
-            "description": "p",
-            "more_info": "a[href*='more-info']"
+            "title": {"selector": "title"},
+            "paragraphs": {"selector": "p", "all": True},
         }
-        await cognee.add("https://example.com",extraction_rules=extraction_rules)
+        await cognee.add(
+            "https://example.com",
+            preferred_loaders=[{"beautiful_soup_loader": {"extraction_rules": extraction_rules}}],
+        )
 
         # Add a single url and tavily extract ingestion method
         Make sure to set TAVILY_API_KEY = YOUR_TAVILY_API_KEY as a environment variable
@@ -241,8 +302,9 @@ async def add(
         ```
 
     Environment Variables:
-        - LLM_API_KEY: API key for your LLM provider (OpenAI, Anthropic, etc.). When
-          unset, ingestion runs on local models (GLiNER extraction, fastembed embeddings).
+        - LLM_API_KEY: API key for your LLM provider (OpenAI, Anthropic, etc.). add()
+          needs it only for images, audio and video; when unset, the cognify() that
+          follows runs on local models (GLiNER extraction, fastembed embeddings).
 
         Optional:
         - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama", "mistral", "bedrock"
@@ -284,6 +346,12 @@ async def add(
     # Before any work starts: with run_in_background the fetch runs after this call
     # has returned, where its refusal would never reach the caller.
     require_http_requests_allowed_for(data)
+
+    # With the server-path gate closed, decide here, once, what each caller
+    # string is: before anything is written (a refused call leaves no dataset
+    # behind) and before anything below (CSV detection, the changed-document
+    # check, the pipeline) could look it up on disk.
+    data = screen_server_paths(data)
 
     if preferred_loaders is not None:
         transformed = {}

@@ -3,8 +3,8 @@
 Pinned here:
 
 * ``local_file_paths_accepted`` is the one gate: an explicit variable is honoured
-  everywhere; unset, a call that originates from an API request is refused while
-  the SDK, CLI and MCP server keep the code default.
+  everywhere; unset, a remote caller (an API request, MCP over sse / http) is
+  refused while a local one keeps the code default. The origin plays no part.
 * With the gate closed, every path form is refused before anything is read or
   listed: a file, a ``file://`` URI, a path into cognee's own data root, a
   directory, an ``s3://`` object or prefix.
@@ -13,6 +13,7 @@ Pinned here:
 """
 
 import importlib
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -23,11 +24,14 @@ from cognee.modules.ingestion import StoredFile
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.operations.origin import (
     ORIGIN_API,
+    ORIGIN_BACKGROUND,
     ORIGIN_CLI,
     ORIGIN_MCP,
     ORIGIN_SDK,
+    get_operation_origin,
     operation_origin_scope,
 )
+from cognee.modules.operations.remote_caller import remote_caller_scope
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
 from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
@@ -86,8 +90,12 @@ class _FakeLoaderEngine:
 # --- the gate itself -------------------------------------------------------
 
 
-@pytest.mark.parametrize("origin", [ORIGIN_SDK, ORIGIN_CLI, ORIGIN_MCP])
-def test_unset_variable_keeps_the_code_default_off_the_api(fresh_settings, origin):
+ALL_ORIGINS = [ORIGIN_SDK, ORIGIN_CLI, ORIGIN_MCP, ORIGIN_API, ORIGIN_BACKGROUND]
+
+
+@pytest.mark.parametrize("origin", ALL_ORIGINS)
+def test_unset_variable_keeps_the_code_default_for_a_local_caller(fresh_settings, origin):
+    """The origin only records the surface: without the remote signal the gate is open."""
     fresh_settings()
     assert local_file_paths_configured() is False
 
@@ -95,11 +103,15 @@ def test_unset_variable_keeps_the_code_default_off_the_api(fresh_settings, origi
         assert local_file_paths_accepted() is True
 
 
-def test_unset_variable_refuses_api_requests(fresh_settings):
+@pytest.mark.parametrize("origin", ALL_ORIGINS)
+def test_unset_variable_refuses_a_remote_caller(fresh_settings, origin):
+    """Whatever the origin: an API request, MCP over the network, a task they start."""
     instance = fresh_settings()
 
-    with operation_origin_scope(ORIGIN_API):
+    with operation_origin_scope(origin), remote_caller_scope():
         assert local_file_paths_accepted() is False
+        assert get_operation_origin() == origin, "the remote signal leaves the origin alone"
+    assert local_file_paths_accepted() is True, "the scope ends with its block"
     assert instance.accept_local_file_path is None, "the setting itself is never rewritten"
 
 
@@ -120,33 +132,33 @@ def test_assigning_the_setting_in_process_is_explicit(fresh_settings):
 
 @pytest.mark.parametrize("name", [VARIABLE, VARIABLE.lower()])
 @pytest.mark.parametrize("configured", [True, False])
-@pytest.mark.parametrize("origin", [ORIGIN_API, ORIGIN_SDK])
+@pytest.mark.parametrize("caller", [remote_caller_scope, nullcontext], ids=["remote", "local"])
 def test_an_explicit_variable_is_honoured_everywhere(
-    monkeypatch, fresh_settings, name, configured, origin
+    monkeypatch, fresh_settings, name, configured, caller
 ):
     monkeypatch.setenv(name, "true" if configured else "false")
     fresh_settings()
     assert local_file_paths_configured() is True
 
-    with operation_origin_scope(origin):
+    with caller():
         assert local_file_paths_accepted() is configured
 
 
 @pytest.mark.parametrize(
-    "configured,origin,reason",
+    "configured,caller,reason",
     [
-        (None, ORIGIN_API, "ACCEPT_LOCAL_FILE_PATH is unset"),
-        ("false", ORIGIN_SDK, "ACCEPT_LOCAL_FILE_PATH=false"),
+        (None, remote_caller_scope, "ACCEPT_LOCAL_FILE_PATH is unset"),
+        ("false", nullcontext, "ACCEPT_LOCAL_FILE_PATH=false"),
     ],
 )
 def test_the_refusal_says_how_to_allow_paths(
-    monkeypatch, fresh_settings, configured, origin, reason
+    monkeypatch, fresh_settings, configured, caller, reason
 ):
     if configured is not None:
         monkeypatch.setenv(VARIABLE, configured)
     fresh_settings()
 
-    with operation_origin_scope(origin), pytest.raises(IngestionError) as error:
+    with caller(), pytest.raises(IngestionError) as error:
         storage_module.require_server_path_access()
 
     assert error.value.status_code == 403
@@ -155,16 +167,17 @@ def test_the_refusal_says_how_to_allow_paths(
     assert "upload the file instead" in error.value.message
 
 
-# --- every path form is refused over the API, before anything is read ------
+# --- no path is read over the API: refused, or never looked up ---------------
 
 
 @pytest.mark.asyncio
 async def test_api_refuses_a_file_outside_the_data_root(fresh_settings, tmp_path):
+    """Below the entry screen too, a path is refused by its shape, never looked up."""
     fresh_settings()
     outside = tmp_path / "flag.txt"
     outside.write_text("not for callers")
 
-    with operation_origin_scope(ORIGIN_API):
+    with remote_caller_scope():
         for path in (str(outside), outside.as_uri()):
             with pytest.raises(IngestionError, match="not accepted"):
                 await save_data_item_to_storage_detailed(path)
@@ -174,11 +187,11 @@ async def test_api_refuses_a_file_outside_the_data_root(fresh_settings, tmp_path
 async def test_api_refuses_a_path_into_cognees_own_data_root(fresh_settings, data_root):
     """Another user's upload lives here; a caller naming it is refused like any path."""
     fresh_settings()
-    stored = data_root / "text_abc.txt"
-    stored.write_text("someone else's upload")
+    upload = data_root / "text_abc.txt"
+    upload.write_text("someone else's upload")
 
-    with operation_origin_scope(ORIGIN_API):
-        for path in (str(stored), stored.as_uri()):
+    with remote_caller_scope():
+        for path in (str(upload), upload.as_uri()):
             with pytest.raises(IngestionError, match="not accepted"):
                 await save_data_item_to_storage_detailed(path)
 
@@ -188,7 +201,7 @@ async def test_api_refuses_an_s3_object(fresh_settings):
     fresh_settings()
 
     with (
-        operation_origin_scope(ORIGIN_API),
+        remote_caller_scope(),
         pytest.raises(IngestionError, match="not accepted"),
     ):
         await save_data_item_to_storage_detailed("s3://cognee-bucket/data/other-tenant.pdf")
@@ -206,13 +219,14 @@ async def test_sdk_passes_an_s3_object_through(fresh_settings):
 
 @pytest.mark.asyncio
 async def test_api_refuses_a_directory_before_listing_it(fresh_settings, tmp_path):
+    """Gate closed, the folder path is refused by its shape: never looked up or listed."""
     fresh_settings()
     folder = tmp_path / "project"
     folder.mkdir()
     (folder / "a.txt").write_text("a")
 
     with (
-        operation_origin_scope(ORIGIN_API),
+        remote_caller_scope(),
         pytest.raises(IngestionError, match="not accepted"),
     ):
         await resolve_data_directories([str(folder)])
@@ -226,7 +240,7 @@ async def test_api_refuses_an_s3_prefix_before_listing_it(fresh_settings):
     fresh_settings()
 
     with (
-        operation_origin_scope(ORIGIN_API),
+        remote_caller_scope(),
         pytest.raises(IngestionError, match="not accepted"),
     ):
         await resolve_data_directories(["s3://cognee-bucket/data/"])
@@ -238,7 +252,7 @@ async def test_api_still_ingests_text(fresh_settings):
     fresh_settings()
     note = "/remember to call Bob"
 
-    with operation_origin_scope(ORIGIN_API):
+    with remote_caller_scope():
         assert await resolve_data_directories([note]) == [note]
         with patch.object(
             storage_module, "save_data_to_file_detailed", return_value="stored-text"
@@ -264,7 +278,7 @@ async def test_api_ingests_the_documents_of_a_repository_it_cloned(fresh_setting
         return manifest, [readme], 0
 
     with (
-        operation_origin_scope(ORIGIN_API),
+        remote_caller_scope(),
         patch("cognee.tasks.code_graph.code_repo.resolve_code_repository_url", fake_clone),
     ):
         resolved = await resolve_data_directories(["https://github.com/org/repo"])
@@ -280,7 +294,7 @@ async def test_api_stores_an_upload_with_the_gate_closed(fresh_settings):
     upload = SimpleNamespace(file=object(), filename="report.pdf")
 
     with (
-        operation_origin_scope(ORIGIN_API),
+        remote_caller_scope(),
         patch.object(storage_module, "save_data_to_file_detailed", return_value="stored") as save,
     ):
         assert await save_data_item_to_storage_detailed(upload) == "stored"
@@ -299,7 +313,7 @@ async def test_loader_applies_no_policy_to_a_stored_copy(
     path = stored.as_uri() if as_uri else str(stored)
 
     with (
-        operation_origin_scope(ORIGIN_API),
+        remote_caller_scope(),
         patch.object(ditf, "get_loader_engine", return_value=_FakeLoaderEngine()),
     ):
         storage_path, loader = await data_item_to_text_file(path)

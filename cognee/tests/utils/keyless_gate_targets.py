@@ -2,6 +2,7 @@
 
 KEYLESS_GATE_PATCH_TARGETS = (
     "cognee.infrastructure.session.agent_context_extraction.llm_available",
+    "cognee.infrastructure.session.coding_unit_extraction.llm_available",
     "cognee.infrastructure.session.feedback_detection.llm_available",
     "cognee.infrastructure.session.session_agent_trace.llm_available",
     "cognee.modules.improve.stages.llm_available",

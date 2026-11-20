@@ -15,6 +15,9 @@ migration it is immutable history, so it does not import the (mutable) adapter
 schema. Statements are idempotent (``IF NOT EXISTS``) and cheap on a fresh or
 empty store; the constant ``'{}'`` default keeps ``ADD COLUMN`` metadata-only
 (no table rewrite).
+
+A graph that already has ``graph_node_source_ref`` is skipped: its refs live in
+ref tables (``postgres_graph_source_ref_tables``), not in these columns.
 """
 
 from __future__ import annotations
@@ -87,8 +90,22 @@ async def _run(graph_engine, statements_for: Callable[[str, str], list[str]]) ->
                 await conn.execute(text(statement))
 
 
+async def _has_source_ref_tables(graph_engine) -> bool:
+    """Whether the graph keeps its source refs in ref tables already.
+
+    ``postgres_graph_source_ref_tables`` moves the refs out of these columns. When
+    the chain runs again on such a graph, adding the columns back would leave them
+    empty beside the ref rows, and the adapter would refuse the graph.
+    """
+    async with graph_engine.engine.connect() as conn:
+        statement = text("SELECT to_regclass('graph_node_source_ref')")
+        return (await conn.execute(statement)).scalar() is not None
+
+
 async def migrate(context: MigrationContext) -> None:
     if not _is_postgres_graph(context.graph_engine):
+        return
+    if await _has_source_ref_tables(context.graph_engine):
         return
     await _run(context.graph_engine, _upgrade_statements)
 

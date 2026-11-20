@@ -10,4 +10,5 @@ from .exceptions import (
     AmbiguousDataIdError,
     DatasetNotFoundError,
     DatasetTypeError,
+    StoredFileNotRemovedError,
 )

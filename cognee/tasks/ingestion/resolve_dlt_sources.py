@@ -1163,6 +1163,7 @@ async def _delete_dlt_orphans(
     from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
         delete_data_nodes_and_edges,
     )
+    from cognee.modules.provenance.tombstones import tombstone_data_items
     from cognee.modules.users.exceptions import PermissionDeniedError
 
     # Find the dataset — if it doesn't exist yet this is a first ingestion,
@@ -1261,10 +1262,12 @@ async def _delete_dlt_orphans(
         # One pass covers every purged row, since it reads what the graph holds
         # now; a failure keeps the rows for the next ingest's retry.
         retired: set[str] = set()
+        removed: list = []  # ids of the orphans whose Data rows are gone
         if purged:
             try:
                 retired = await retire_forgotten_decisions(dataset, user)
                 await delete_data([orphan for orphan, _ in purged], dataset.id, user)
+                removed = [orphan.id for orphan, _ in purged]
             except Exception:
                 failed.extend(orphan.id for orphan, _ in purged)
                 logger.warning(
@@ -1296,6 +1299,23 @@ async def _delete_dlt_orphans(
                     "Session invalidation after orphan cleanup failed (non-fatal).",
                     exc_info=True,
                 )
+
+        # The Data rows of ``removed`` are gone, so the audit ledger retracts
+        # them (a no-op unless PROVENANCE_TRACKING recorded them). Last, and
+        # under the dataset lock, so no re-ingest of an id comes in between.
+        # Not swallowed: a removed document without a tombstone is a gap
+        # nothing reports. forget(data_id=...) on a logged id writes it.
+        try:
+            await tombstone_data_items(dataset.id, removed, user=user)
+        except Exception:
+            logger.error(
+                "Removed %d orphaned dlt row(s) from dataset '%s' but could not write "
+                "their audit-ledger tombstones. data_ids=%s",
+                len(removed),
+                dataset_name,
+                ", ".join(str(i) for i in removed),
+            )
+            raise
 
     if failed:
         # Surface partial-cleanup failures loudly: the stale rows remain across
