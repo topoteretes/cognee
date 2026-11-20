@@ -1,3 +1,4 @@
+import builtins
 from typing import Any
 
 from pydantic import PrivateAttr
@@ -15,5 +16,5 @@ class Document(DataPoint):
     importance_weight: float | None = 0.5
     _gliner_schema: Any = PrivateAttr(default=None)
 
-    async def read(self, chunker_cls: Chunker, max_chunk_size: int) -> str:
+    async def read(self, chunker_cls: builtins.type[Chunker], max_chunk_size: int) -> str:
         pass

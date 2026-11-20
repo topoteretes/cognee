@@ -16,9 +16,10 @@ from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import NullPool, text
+from sqlalchemy import NullPool, TextClause, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from cognee.infrastructure.databases.exceptions import PostgresGraphLayoutError
 from cognee.infrastructure.databases.graph.bounded_neighborhood import (
     DEFAULT_NEIGHBORHOOD_CHUNK_SIZE,
     unique_node_ids,
@@ -35,26 +36,92 @@ from cognee.infrastructure.databases.provenance import (
 )
 from cognee.infrastructure.databases.provenance.source_ref_state import (
     ProvenanceColumns,
-    provenance_after_attach,
-    provenance_after_remove,
+    coerce_run_uuid,
+    derive_dataset_ids,
+    derive_run_ids,
 )
 from cognee.infrastructure.databases.provenance.source_refs import (
     get_dataset_id_from_source_ref_key,
-    get_pipeline_run_id_from_source_run_ref,
-    get_source_ref_key_from_source_run_ref,
+    make_source_run_ref,
 )
 from cognee.infrastructure.databases.relational import get_relational_config
+from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+    DEFAULT_POOL_TIMEOUT,
+)
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.modules.storage.utils import JSONEncoder
 
 from .tables import _meta
 
+# Properties ``add_nodes`` leaves out when it decides whether a stored node differs
+# from the incoming one. The timestamps and the source stamps (the ``source_*``
+# fields of ``DataPoint``) say when and by which run a node was written, not what
+# it is, so they differ on every write of the same node.
+_WRITE_TIMESTAMPS = ("created_at", "updated_at")
+_SOURCE_STAMPS = (
+    "source_pipeline",
+    "source_task",
+    "source_node_set",
+    "source_user",
+    "source_content_hash",
+)
+# An ``Entity`` is described again by every document that mentions it, each in its
+# own words and with its own relations, so these two are left out for that type
+# only. On any other type they are content and are compared.
+_ENTITY_TYPE = "Entity"
+_ENTITY_OWN_PROPERTIES = ("description", "relations")
+
+# What a node write leaves on the source-ref row it attaches: the write's own
+# source stamps and, for an ``Entity``, its description (see ``tables.py``).
+_NODE_REF_STAMP_COLUMNS = (*_SOURCE_STAMPS, "description")
+
+
+def _sql_text_array(values: tuple[str, ...]) -> str:
+    """A Postgres ``text[]`` literal of fixed property names."""
+    return "ARRAY[" + ", ".join(f"'{value}'" for value in values) + "]"
+
+
+# The properties left out of the comparison for the incoming row of an upsert.
+_UNCOMPARED_NODE_PROPERTIES = f"""
+    CASE WHEN EXCLUDED.type = '{_ENTITY_TYPE}'
+         THEN {_sql_text_array((*_WRITE_TIMESTAMPS, *_SOURCE_STAMPS, *_ENTITY_OWN_PROPERTIES))}
+         ELSE {_sql_text_array((*_WRITE_TIMESTAMPS, *_SOURCE_STAMPS))}
+    END
+"""
+
+
+# The condition on ``add_nodes``' upsert that keeps a stored node which differs from
+# the incoming one only in what ``_UNCOMPARED_NODE_PROPERTIES`` leaves out, unless
+# the stored node is an Entity with an empty description and the incoming one has
+# a real one.
+_ONLY_CHANGED_NODES = f"""
+    WHERE (graph_node.name, graph_node.type) IS DISTINCT FROM (EXCLUDED.name, EXCLUDED.type)
+       OR (graph_node.properties - {_UNCOMPARED_NODE_PROPERTIES})
+          IS DISTINCT FROM (EXCLUDED.properties - {_UNCOMPARED_NODE_PROPERTIES})
+       OR (
+            EXCLUDED.type = '{_ENTITY_TYPE}'
+            AND COALESCE(graph_node.properties -> 'description', 'null') IN ('null', '""')
+            AND COALESCE(EXCLUDED.properties -> 'description', 'null') NOT IN ('null', '""')
+          )
+"""
+
+
+def _node_ref_stamps(node_type: str, properties: dict[str, Any]) -> dict[str, str | None]:
+    """The ``_NODE_REF_STAMP_COLUMNS`` values of one node write, None where it has none."""
+    stamps = {column: properties.get(column) for column in _SOURCE_STAMPS}
+    stamps["description"] = properties.get("description") if node_type == _ENTITY_TYPE else None
+    return {column: None if value is None else str(value) for column, value in stamps.items()}
+
 
 def _prepare_node_rows(
     nodes: list[tuple[str, dict]] | list[DataPoint],
 ) -> list[dict[str, Any]]:
-    """Copy, sanitize, deduplicate, and sort nodes for one database write."""
+    """Copy, sanitize, deduplicate, and sort nodes for one database write.
+
+    Besides the stored columns, a row carries ``_NODE_REF_STAMP_COLUMNS``: what
+    this write leaves on a source-ref row attached together with it.
+    """
     rows_by_id: dict[str, dict[str, Any]] = {}
     for node in nodes:
         if isinstance(node, tuple):
@@ -65,14 +132,16 @@ def _prepare_node_rows(
             properties = dict(vars(node))
 
         node_id = sanitize_relational_payload(str(properties.get("id", "")))
-        extra = {
-            key: value for key, value in properties.items() if key not in {"id", "name", "type"}
-        }
+        node_type = sanitize_relational_payload(str(properties.get("type", "")))
+        extra = sanitize_relational_payload(
+            {key: value for key, value in properties.items() if key not in {"id", "name", "type"}}
+        )
         rows_by_id[node_id] = {
             "id": node_id,
             "name": sanitize_relational_payload(str(properties.get("name", ""))),
-            "type": sanitize_relational_payload(str(properties.get("type", ""))),
-            "properties": json.dumps(sanitize_relational_payload(extra), cls=JSONEncoder),
+            "type": node_type,
+            "properties": json.dumps(extra, cls=JSONEncoder),
+            **_node_ref_stamps(node_type, extra),
         }
 
     return [rows_by_id[node_id] for node_id in sorted(rows_by_id)]
@@ -107,6 +176,92 @@ def _edge_identities(edges: list[EdgeIdentity]) -> list[tuple[str, str, str]]:
     return sorted(
         {(str(edge.source_id), str(edge.target_id), str(edge.relationship_name)) for edge in edges}
     )
+
+
+def _source_ref_rows(source_ref_keys: list[str], pipeline_run_id: str | None) -> list[dict]:
+    """What a source-ref row stores for each key to attach: its dataset and the run."""
+    run = None if pipeline_run_id is None else str(coerce_run_uuid(pipeline_run_id))
+    return [
+        {
+            "source_ref_key": key,
+            "dataset_id": str(get_dataset_id_from_source_ref_key(key)),
+            "pipeline_run_id": run,
+        }
+        for key in source_ref_keys
+    ]
+
+
+def _provenance_fields(
+    source_ref_keys: list[str] | None, pipeline_run_ids: list[str | None] | None
+) -> ProvenanceColumns:
+    """The four provenance fields of a node or edge, built from its source-ref rows.
+
+    Both lists come from the rows in ``position`` order (None when there are no
+    rows). Only a row with a run id has a source run ref.
+    """
+    keys = list(source_ref_keys or [])
+    run_refs = [
+        make_source_run_ref(coerce_run_uuid(run), key)
+        for key, run in zip(keys, pipeline_run_ids or [])
+        if run is not None
+    ]
+    return ProvenanceColumns(keys, derive_dataset_ids(keys), derive_run_ids(run_refs), run_refs)
+
+
+# Attaching a source ref inserts its row. A ref the node or edge already has is
+# left as it is, so it keeps the run that first attached it and, on a node, the
+# stamps and description of that write. A ref for a node or edge that does not
+# exist is skipped.
+_ATTACH_NODE_REF = text(f"""
+    INSERT INTO graph_node_source_ref (
+        node_id, source_ref_key, dataset_id, pipeline_run_id,
+        {", ".join(_NODE_REF_STAMP_COLUMNS)}
+    )
+    SELECT :node_id, :source_ref_key, :dataset_id, :pipeline_run_id,
+           {", ".join(f":{column}" for column in _NODE_REF_STAMP_COLUMNS)}
+    WHERE EXISTS (SELECT 1 FROM graph_node WHERE id = :node_id)
+    ON CONFLICT (node_id, source_ref_key) DO NOTHING
+""")
+_ATTACH_EDGE_REF = text("""
+    INSERT INTO graph_edge_source_ref (
+        source_id, target_id, relationship_name, source_ref_key, dataset_id, pipeline_run_id
+    )
+    SELECT :source_id, :target_id, :relationship_name,
+           :source_ref_key, :dataset_id, :pipeline_run_id
+    WHERE EXISTS (
+        SELECT 1 FROM graph_edge
+        WHERE source_id = :source_id
+          AND target_id = :target_id
+          AND relationship_name = :relationship_name
+    )
+    ON CONFLICT (source_id, target_id, relationship_name, source_ref_key) DO NOTHING
+""")
+_REMOVE_NODE_REFS = text("""
+    DELETE FROM graph_node_source_ref
+    WHERE node_id = :node_id AND source_ref_key = ANY(:source_ref_keys)
+""")
+_REMOVE_EDGE_REFS = text("""
+    DELETE FROM graph_edge_source_ref
+    WHERE source_id = :source_id
+      AND target_id = :target_id
+      AND relationship_name = :relationship_name
+      AND source_ref_key = ANY(:source_ref_keys)
+""")
+# A ref attached without a node payload has no stamps and no description.
+_NO_NODE_REF_STAMPS = dict.fromkeys(_NODE_REF_STAMP_COLUMNS)
+
+
+async def _execute_for_each(
+    session: AsyncSession, statement: TextClause, parameters: list[dict | list[dict]]
+) -> None:
+    """Run ``statement`` for every parameter set, as one batched call.
+
+    No row is locked first: every write holds the graph write lock, and a ref row
+    only inserts or deletes itself, so nothing is read and written back.
+    """
+    rows = [row for item in parameters for row in (item if isinstance(item, list) else [item])]
+    if rows:
+        await session.execute(statement, rows)
 
 
 # Every write in this adapter takes this one advisory lock first, so two write
@@ -182,17 +337,17 @@ def _select_nodeset_neighbor_ids(
 
 _DEFAULT_POOL_ARGS = {
     "pool_size": 2,
-    "max_overflow": 20,  # 22-connection ceiling, PER DATASET
+    "max_overflow": 10,  # 12-connection ceiling, PER DATASET
     "pool_pre_ping": True,
     "pool_recycle": 280,
-    "pool_timeout": 280,
+    "pool_timeout": DEFAULT_POOL_TIMEOUT,
 }
 
 
 def _resolve_engine_args(configured_pool_args) -> dict:
     """Turn the configured POOL_ARGS into create_async_engine kwargs.
 
-    Defaults mirror PGVectorAdapter._ACCESS_CONTROL_DEFAULT_POOL_ARGS (2/20),
+    Defaults mirror PGVectorAdapter._ACCESS_CONTROL_DEFAULT_POOL_ARGS (2/10),
     NOT SqlAlchemyAdapter's 5/35. Like PGVector's, this engine is created per
     dataset — the engine-cache key includes graph_database_schema — so its
     ceiling is multiplied by dataset count, not paid once. dict() handles the
@@ -263,6 +418,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         self._initialized = False
         self._init_lock = None
         self._init_lock_loop = None
+        self._layout_is_current = False
 
     def _get_write_gate(self) -> asyncio.Lock:
         """Per-running-loop write gate.
@@ -329,6 +485,38 @@ class PostgresDemoAdapter(GraphDBInterface):
                 await conn.run_sync(_meta.create_all, checkfirst=True)
             self._initialized = True
 
+    async def _require_current_layout(self) -> None:
+        """Refuse a graph that still keeps its source refs in array columns.
+
+        A release before the source-ref tables stored them in ``source_ref_keys``
+        and three more columns of graph_node and graph_edge; cognee's migrations
+        move them. Nothing here reads those columns, so on such a graph every
+        ownership answer would be empty and every write would leave it half in one
+        layout and half in the other.
+
+        ``initialize()`` cannot be the place to refuse it: the migration runner
+        initializes the adapter before the migration runs. So the methods that
+        read or write source refs, and the node and edge writers, ask here. Only
+        the answer "current" is kept, which lets a graph be converted while this
+        adapter is alive and costs a current graph one catalog lookup.
+        """
+        if self._layout_is_current:
+            return
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_attribute
+                        WHERE attrelid = to_regclass('graph_node')
+                          AND attname = 'source_ref_keys'
+                          AND NOT attisdropped
+                    )
+                """)
+            )
+            if result.scalar():
+                raise PostgresGraphLayoutError()
+        self._layout_is_current = True
+
     async def query(self, query_str: str, params: dict | None = None) -> list[Any]:
         """Reject raw Cypher; callers must use the typed graph methods."""
         raise NotImplementedError(
@@ -358,15 +546,29 @@ class PostgresDemoAdapter(GraphDBInterface):
         nodes: list[tuple[str, dict]] | list[DataPoint],
         source_ref_key: str | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
-        """Add or replace nodes, optionally attaching one provenance reference."""
+        """Add nodes, optionally attaching one provenance reference.
+
+        A stored node is rewritten only when the incoming one differs from it in
+        something other than the write timestamps, the source stamps and, for an
+        ``Entity``, ``description`` and ``relations``. A node many documents share
+        therefore keeps the stamps and the description it was first written with,
+        and each write's own are kept on the source-ref row it attaches. An empty
+        stored description (missing, null or ``""``) is still replaced by a real
+        one. A rewrite stores the incoming properties whole. ``replace=True`` skips
+        the comparison, for callers that change such a property on purpose (an
+        edited or merged description): every existing node is rewritten.
+        """
         if not nodes:
             return
+        await self._require_current_layout()
 
         rows = _prepare_node_rows(nodes)
-        # Provenance columns are absent here on purpose: a rewrite without a
+        # The source-ref rows are not touched here on purpose: a rewrite without a
         # source ref must not erase existing ownership.
-        upsert = text("""
+        upsert = text(f"""
             INSERT INTO graph_node (id, name, type, properties, created_at, updated_at)
             VALUES (:id, :name, :type, CAST(:properties AS jsonb), now(), now())
             ON CONFLICT (id) DO UPDATE SET
@@ -374,16 +576,23 @@ class PostgresDemoAdapter(GraphDBInterface):
                 type = EXCLUDED.type,
                 properties = EXCLUDED.properties,
                 updated_at = now()
+            {"" if replace else _ONLY_CHANGED_NODES}
         """)
+        refs = [] if source_ref_key is None else _source_ref_rows([source_ref_key], pipeline_run_id)
+        stamps = {
+            row["id"]: {column: row[column] for column in _NODE_REF_STAMP_COLUMNS} for row in rows
+        }
         async with self._write_session() as session:
+            # Each row also carries its ref stamps, which this statement does not bind.
             await session.execute(upsert, rows)
-            if source_ref_key is not None:
+            if refs:
                 await self._update_node_provenance(
                     session,
                     [row["id"] for row in rows],
-                    lambda keys, run_refs: provenance_after_attach(
-                        keys, run_refs, [source_ref_key], pipeline_run_id
-                    ),
+                    _ATTACH_NODE_REF,
+                    lambda node_id: [
+                        {"node_id": node_id, **ref, **stamps[node_id]} for ref in refs
+                    ],
                 )
             await session.commit()
 
@@ -391,8 +600,8 @@ class PostgresDemoAdapter(GraphDBInterface):
         """Set ONLY ``chunk_index`` on the given chunk nodes.
 
         Node properties live in one JSONB column, so the move is a ``jsonb_set``
-        of that single key; name, type, every other property and the provenance
-        columns are untouched. Missing ids are skipped, like ``get_nodes``.
+        of that single key; name, type, every other property and the source refs
+        are untouched. Missing ids are skipped, like ``get_nodes``.
         """
         if not chunk_indexes:
             return
@@ -577,9 +786,10 @@ class PostgresDemoAdapter(GraphDBInterface):
         """Add or replace edges, optionally attaching one provenance reference."""
         if not edges:
             return
+        await self._require_current_layout()
 
         rows = _prepare_edge_rows(edges)
-        # Provenance columns are absent here on purpose: a rewrite without a
+        # The source-ref rows are not touched here on purpose: a rewrite without a
         # source ref must not erase existing ownership.
         upsert = text("""
             INSERT INTO graph_edge (
@@ -593,9 +803,10 @@ class PostgresDemoAdapter(GraphDBInterface):
                 properties = EXCLUDED.properties,
                 updated_at = now()
         """)
+        refs = [] if source_ref_key is None else _source_ref_rows([source_ref_key], pipeline_run_id)
         async with self._write_session() as session:
             await session.execute(upsert, rows)
-            if source_ref_key is not None:
+            if refs:
                 await self._update_edge_provenance(
                     session,
                     [
@@ -606,9 +817,8 @@ class PostgresDemoAdapter(GraphDBInterface):
                         )
                         for row in rows
                     ],
-                    lambda keys, run_refs: provenance_after_attach(
-                        keys, run_refs, [source_ref_key], pipeline_run_id
-                    ),
+                    _ATTACH_EDGE_REF,
+                    lambda identity: [{**identity, **ref} for ref in refs],
                 )
             await session.commit()
 
@@ -1255,94 +1465,35 @@ class PostgresDemoAdapter(GraphDBInterface):
             await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
             await session.commit()
 
-    # Provenance is stored in four text-array columns on both graph tables.
+    # Provenance is one row per source ref in graph_node_source_ref and
+    # graph_edge_source_ref (see tables.py).
 
     async def _update_node_provenance(
         self,
         session: AsyncSession,
         node_ids: list[str],
-        transition: Callable[[list[str], list[str]], ProvenanceColumns],
+        statement: TextClause,
+        parameters: Callable[[str], Any],
     ) -> None:
-        """Lock each node and apply a provenance state transition."""
-        lock = text("""
-            SELECT source_ref_keys, source_run_refs
-            FROM graph_node
-            WHERE id = :id
-            FOR UPDATE
-        """)
-        update = text("""
-            UPDATE graph_node SET
-                source_ref_keys = CAST(:source_ref_keys AS text[]),
-                source_dataset_ids = CAST(:source_dataset_ids AS text[]),
-                source_run_ids = CAST(:source_run_ids AS text[]),
-                source_run_refs = CAST(:source_run_refs AS text[]),
-                updated_at = now()
-            WHERE id = :id
-        """)
-        for node_id in sorted({str(node_id) for node_id in node_ids}):
-            result = await session.execute(lock, {"id": node_id})
-            current = result.first()
-            if current is None:
-                continue
-            updated = transition(list(current[0] or []), list(current[1] or []))
-            await session.execute(
-                update,
-                {
-                    "id": node_id,
-                    "source_ref_keys": updated.source_ref_keys,
-                    "source_dataset_ids": updated.source_dataset_ids,
-                    "source_run_ids": updated.source_run_ids,
-                    "source_run_refs": updated.source_run_refs,
-                },
-            )
+        """Run ``statement`` once for every node, with that node's parameters."""
+        node_ids = sorted({str(node_id) for node_id in node_ids})
+        await _execute_for_each(session, statement, [parameters(node_id) for node_id in node_ids])
 
     async def _update_edge_provenance(
         self,
         session: AsyncSession,
         edges: list[EdgeIdentity],
-        transition: Callable[[list[str], list[str]], ProvenanceColumns],
+        statement: TextClause,
+        parameters: Callable[[dict[str, str]], Any],
     ) -> None:
-        """Lock each edge and apply a provenance state transition."""
-        lock = text("""
-            SELECT source_ref_keys, source_run_refs
-            FROM graph_edge
-            WHERE source_id = :source_id
-              AND target_id = :target_id
-              AND relationship_name = :relationship_name
-            FOR UPDATE
-        """)
-        update = text("""
-            UPDATE graph_edge SET
-                source_ref_keys = CAST(:source_ref_keys AS text[]),
-                source_dataset_ids = CAST(:source_dataset_ids AS text[]),
-                source_run_ids = CAST(:source_run_ids AS text[]),
-                source_run_refs = CAST(:source_run_refs AS text[]),
-                updated_at = now()
-            WHERE source_id = :source_id
-              AND target_id = :target_id
-              AND relationship_name = :relationship_name
-        """)
-        for source_id, target_id, relationship_name in _edge_identities(edges):
-            identity = {
-                "source_id": source_id,
-                "target_id": target_id,
-                "relationship_name": relationship_name,
-            }
-            result = await session.execute(lock, identity)
-            current = result.first()
-            if current is None:
-                continue
-            updated = transition(list(current[0] or []), list(current[1] or []))
-            await session.execute(
-                update,
-                {
-                    **identity,
-                    "source_ref_keys": updated.source_ref_keys,
-                    "source_dataset_ids": updated.source_dataset_ids,
-                    "source_run_ids": updated.source_run_ids,
-                    "source_run_refs": updated.source_run_refs,
-                },
-            )
+        """Run ``statement`` once for every edge, with that edge's parameters."""
+        identities = [
+            {"source_id": source_id, "target_id": target_id, "relationship_name": relationship}
+            for source_id, target_id, relationship in _edge_identities(edges)
+        ]
+        await _execute_for_each(
+            session, statement, [parameters(identity) for identity in identities]
+        )
 
     async def attach_node_source_refs(
         self,
@@ -1352,14 +1503,16 @@ class PostgresDemoAdapter(GraphDBInterface):
     ) -> None:
         if not source_ref_keys:
             return
-        keys_to_add = list(source_ref_keys)
+        await self._require_current_layout()
+        refs = _source_ref_rows(source_ref_keys, pipeline_run_id)
         async with self._write_session() as session:
             await self._update_node_provenance(
                 session,
                 node_ids,
-                lambda keys, run_refs: provenance_after_attach(
-                    keys, run_refs, keys_to_add, pipeline_run_id
-                ),
+                _ATTACH_NODE_REF,
+                lambda node_id: [
+                    {"node_id": node_id, **ref, **_NO_NODE_REF_STAMPS} for ref in refs
+                ],
             )
             await session.commit()
 
@@ -1371,14 +1524,14 @@ class PostgresDemoAdapter(GraphDBInterface):
     ) -> None:
         if not source_ref_keys:
             return
-        keys_to_add = list(source_ref_keys)
+        await self._require_current_layout()
+        refs = _source_ref_rows(source_ref_keys, pipeline_run_id)
         async with self._write_session() as session:
             await self._update_edge_provenance(
                 session,
                 edges,
-                lambda keys, run_refs: provenance_after_attach(
-                    keys, run_refs, keys_to_add, pipeline_run_id
-                ),
+                _ATTACH_EDGE_REF,
+                lambda identity: [{**identity, **ref} for ref in refs],
             )
             await session.commit()
 
@@ -1389,12 +1542,14 @@ class PostgresDemoAdapter(GraphDBInterface):
     ) -> None:
         if not source_ref_keys:
             return
+        await self._require_current_layout()
         keys_to_remove = list(source_ref_keys)
         async with self._write_session() as session:
             await self._update_node_provenance(
                 session,
                 node_ids,
-                lambda keys, run_refs: provenance_after_remove(keys, run_refs, keys_to_remove),
+                _REMOVE_NODE_REFS,
+                lambda node_id: {"node_id": node_id, "source_ref_keys": keys_to_remove},
             )
             await session.commit()
 
@@ -1405,12 +1560,14 @@ class PostgresDemoAdapter(GraphDBInterface):
     ) -> None:
         if not source_ref_keys:
             return
+        await self._require_current_layout()
         keys_to_remove = list(source_ref_keys)
         async with self._write_session() as session:
             await self._update_edge_provenance(
                 session,
                 edges,
-                lambda keys, run_refs: provenance_after_remove(keys, run_refs, keys_to_remove),
+                _REMOVE_EDGE_REFS,
+                lambda identity: {**identity, "source_ref_keys": keys_to_remove},
             )
             await session.commit()
 
@@ -1439,12 +1596,22 @@ class PostgresDemoAdapter(GraphDBInterface):
     async def get_node_delete_data(self, node_ids: list[str]) -> dict[str, NodeDeleteData]:
         if not node_ids:
             return {}
+        await self._require_current_layout()
         async with self.sessionmaker() as session:
             result = await session.execute(
                 text("""
-                    SELECT id, name, type, properties,
-                           source_ref_keys, source_dataset_ids, source_run_ids, source_run_refs
-                    FROM graph_node WHERE id = ANY(:ids)
+                    SELECT node.id, node.name, node.type, node.properties,
+                           refs.source_ref_keys, refs.pipeline_run_ids
+                    FROM graph_node AS node
+                    LEFT JOIN LATERAL (
+                        SELECT array_agg(ref.source_ref_key ORDER BY ref.position)
+                                   AS source_ref_keys,
+                               array_agg(ref.pipeline_run_id ORDER BY ref.position)
+                                   AS pipeline_run_ids
+                        FROM graph_node_source_ref AS ref
+                        WHERE ref.node_id = node.id
+                    ) AS refs ON true
+                    WHERE node.id = ANY(:ids)
                 """),
                 {"ids": [str(node_id) for node_id in node_ids]},
             )
@@ -1456,15 +1623,16 @@ class PostgresDemoAdapter(GraphDBInterface):
                 indexed_fields = (
                     list(metadata.get("index_fields") or []) if isinstance(metadata, dict) else []
                 )
+                provenance = _provenance_fields(row["source_ref_keys"], row["pipeline_run_ids"])
                 out[row["id"]] = NodeDeleteData(
                     node_id=row["id"],
                     node_type=row["type"] or "",
                     indexed_fields=indexed_fields,
                     node_properties=properties,
-                    source_ref_keys=list(row["source_ref_keys"] or []),
-                    source_dataset_ids=list(row["source_dataset_ids"] or []),
-                    source_run_ids=list(row["source_run_ids"] or []),
-                    source_run_refs=list(row["source_run_refs"] or []),
+                    source_ref_keys=provenance.source_ref_keys,
+                    source_dataset_ids=provenance.source_dataset_ids,
+                    source_run_ids=provenance.source_run_ids,
+                    source_run_refs=provenance.source_run_refs,
                 )
             return out
 
@@ -1473,13 +1641,22 @@ class PostgresDemoAdapter(GraphDBInterface):
     ) -> dict[EdgeIdentity, EdgeDeleteData]:
         if not edges:
             return {}
+        await self._require_current_layout()
         statement = text("""
-            SELECT source_id, target_id, relationship_name, properties,
-                   source_ref_keys, source_dataset_ids, source_run_ids, source_run_refs
-            FROM graph_edge
-            WHERE source_id = :source_id
-              AND target_id = :target_id
-              AND relationship_name = :relationship_name
+            SELECT edge.source_id, edge.target_id, edge.relationship_name, edge.properties,
+                   refs.source_ref_keys, refs.pipeline_run_ids
+            FROM graph_edge AS edge
+            LEFT JOIN LATERAL (
+                SELECT array_agg(ref.source_ref_key ORDER BY ref.position) AS source_ref_keys,
+                       array_agg(ref.pipeline_run_id ORDER BY ref.position) AS pipeline_run_ids
+                FROM graph_edge_source_ref AS ref
+                WHERE ref.source_id = edge.source_id
+                  AND ref.target_id = edge.target_id
+                  AND ref.relationship_name = edge.relationship_name
+            ) AS refs ON true
+            WHERE edge.source_id = :source_id
+              AND edge.target_id = :target_id
+              AND edge.relationship_name = :relationship_name
         """)
         # Lazy import: prepare_edges_for_storage lives in the modules layer, whose
         # package __init__ imports get_graph_engine -> this adapter. Importing it at
@@ -1507,34 +1684,40 @@ class PostgresDemoAdapter(GraphDBInterface):
                     relationship_name=row["relationship_name"],
                 )
                 properties = _decode_properties(row["properties"])
+                provenance = _provenance_fields(row["source_ref_keys"], row["pipeline_run_ids"])
                 out[edge] = EdgeDeleteData(
                     edge=edge,
                     edge_text=get_edge_retrieval_text(
                         properties.get("edge_text"), edge.relationship_name
                     ),
                     edge_properties=properties,
-                    source_ref_keys=list(row["source_ref_keys"] or []),
-                    source_dataset_ids=list(row["source_dataset_ids"] or []),
-                    source_run_ids=list(row["source_run_ids"] or []),
-                    source_run_refs=list(row["source_run_refs"] or []),
+                    source_ref_keys=provenance.source_ref_keys,
+                    source_dataset_ids=provenance.source_dataset_ids,
+                    source_run_ids=provenance.source_run_ids,
+                    source_run_refs=provenance.source_run_refs,
                 )
         return out
 
     async def find_nodes_by_source_ref(self, source_ref_key: str) -> list[str]:
+        await self._require_current_layout()
         async with self.sessionmaker() as session:
             result = await session.execute(
-                text("SELECT id FROM graph_node WHERE :source_ref = ANY(source_ref_keys)"),
+                text("""
+                    SELECT node_id FROM graph_node_source_ref
+                    WHERE source_ref_key = :source_ref
+                """),
                 {"source_ref": source_ref_key},
             )
-            return [row["id"] for row in result.mappings().all()]
+            return [row["node_id"] for row in result.mappings().all()]
 
     async def find_edges_by_source_ref(self, source_ref_key: str) -> list[EdgeIdentity]:
+        await self._require_current_layout()
         async with self.sessionmaker() as session:
             result = await session.execute(
                 text("""
                     SELECT source_id, target_id, relationship_name
-                    FROM graph_edge
-                    WHERE :source_ref = ANY(source_ref_keys)
+                    FROM graph_edge_source_ref
+                    WHERE source_ref_key = :source_ref
                 """),
                 {"source_ref": source_ref_key},
             )
@@ -1548,107 +1731,87 @@ class PostgresDemoAdapter(GraphDBInterface):
             ]
 
     async def find_node_source_refs_by_dataset(self, dataset_id: str) -> dict[str, list[str]]:
-        dataset_id = str(dataset_id)
+        await self._require_current_layout()
         async with self.sessionmaker() as session:
             result = await session.execute(
                 text("""
-                    SELECT id, source_ref_keys
-                    FROM graph_node
-                    WHERE :dataset_id = ANY(source_dataset_ids)
+                    SELECT node_id, source_ref_key
+                    FROM graph_node_source_ref
+                    WHERE dataset_id = :dataset_id
+                    ORDER BY position
                 """),
-                {"dataset_id": dataset_id},
+                {"dataset_id": str(dataset_id)},
             )
             out: dict[str, list[str]] = {}
             for row in result.mappings().all():
-                owned = [
-                    key
-                    for key in (row["source_ref_keys"] or [])
-                    if str(get_dataset_id_from_source_ref_key(key)) == dataset_id
-                ]
-                if owned:
-                    out[row["id"]] = owned
+                out.setdefault(row["node_id"], []).append(row["source_ref_key"])
             return out
 
     async def find_edge_source_refs_by_dataset(
         self, dataset_id: str
     ) -> dict[EdgeIdentity, list[str]]:
-        dataset_id = str(dataset_id)
+        await self._require_current_layout()
         async with self.sessionmaker() as session:
             result = await session.execute(
                 text("""
-                    SELECT source_id, target_id, relationship_name, source_ref_keys
-                    FROM graph_edge
-                    WHERE :dataset_id = ANY(source_dataset_ids)
+                    SELECT source_id, target_id, relationship_name, source_ref_key
+                    FROM graph_edge_source_ref
+                    WHERE dataset_id = :dataset_id
+                    ORDER BY position
                 """),
-                {"dataset_id": dataset_id},
+                {"dataset_id": str(dataset_id)},
             )
             out: dict[EdgeIdentity, list[str]] = {}
             for row in result.mappings().all():
-                owned = [
-                    key
-                    for key in (row["source_ref_keys"] or [])
-                    if str(get_dataset_id_from_source_ref_key(key)) == dataset_id
-                ]
-                if owned:
-                    edge = EdgeIdentity(
-                        source_id=row["source_id"],
-                        target_id=row["target_id"],
-                        relationship_name=row["relationship_name"],
-                    )
-                    out[edge] = owned
+                edge = EdgeIdentity(
+                    source_id=row["source_id"],
+                    target_id=row["target_id"],
+                    relationship_name=row["relationship_name"],
+                )
+                out.setdefault(edge, []).append(row["source_ref_key"])
             return out
 
     async def find_node_source_refs_by_pipeline_run(
         self, pipeline_run_id: str
     ) -> dict[str, list[str]]:
-        pipeline_run_id = str(pipeline_run_id)
+        await self._require_current_layout()
         async with self.sessionmaker() as session:
             result = await session.execute(
                 text("""
-                    SELECT id, source_run_refs
-                    FROM graph_node
-                    WHERE :pipeline_run_id = ANY(source_run_ids)
+                    SELECT node_id, source_ref_key
+                    FROM graph_node_source_ref
+                    WHERE pipeline_run_id = :pipeline_run_id
+                    ORDER BY position
                 """),
-                {"pipeline_run_id": pipeline_run_id},
+                {"pipeline_run_id": str(pipeline_run_id)},
             )
             out: dict[str, list[str]] = {}
             for row in result.mappings().all():
-                contributed = [
-                    get_source_ref_key_from_source_run_ref(ref)
-                    for ref in (row["source_run_refs"] or [])
-                    if str(get_pipeline_run_id_from_source_run_ref(ref)) == pipeline_run_id
-                ]
-                if contributed:
-                    out[row["id"]] = contributed
+                out.setdefault(row["node_id"], []).append(row["source_ref_key"])
             return out
 
     async def find_edge_source_refs_by_pipeline_run(
         self, pipeline_run_id: str
     ) -> dict[EdgeIdentity, list[str]]:
-        pipeline_run_id = str(pipeline_run_id)
+        await self._require_current_layout()
         async with self.sessionmaker() as session:
             result = await session.execute(
                 text("""
-                    SELECT source_id, target_id, relationship_name, source_run_refs
-                    FROM graph_edge
-                    WHERE :pipeline_run_id = ANY(source_run_ids)
+                    SELECT source_id, target_id, relationship_name, source_ref_key
+                    FROM graph_edge_source_ref
+                    WHERE pipeline_run_id = :pipeline_run_id
+                    ORDER BY position
                 """),
-                {"pipeline_run_id": pipeline_run_id},
+                {"pipeline_run_id": str(pipeline_run_id)},
             )
             out: dict[EdgeIdentity, list[str]] = {}
             for row in result.mappings().all():
-                contributed = [
-                    get_source_ref_key_from_source_run_ref(ref)
-                    for ref in (row["source_run_refs"] or [])
-                    if str(get_pipeline_run_id_from_source_run_ref(ref)) == pipeline_run_id
-                ]
-                if contributed:
-                    edge = EdgeIdentity(
-                        source_id=row["source_id"],
-                        target_id=row["target_id"],
-                        relationship_name=row["relationship_name"],
-                    )
-                    out[edge] = contributed
+                edge = EdgeIdentity(
+                    source_id=row["source_id"],
+                    target_id=row["target_id"],
+                    relationship_name=row["relationship_name"],
+                )
+                out.setdefault(edge, []).append(row["source_ref_key"])
             return out
 
     async def set_graph_metadata(self, metadata: dict[str, str]) -> None:

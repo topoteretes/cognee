@@ -522,7 +522,8 @@ async def merge_entity_duplicates(
     #    Each rebuilt canonical carries the union of its cluster's descriptions
     #    AND belongs_to_set tags (see _build_canonical_entity). belongs_to_set is
     #    a node property, so it must be unioned here — edge re-pointing in step 1
-    #    cannot preserve it.
+    #    cannot preserve it. replace=True: the merged description must be stored even
+    #    on a backend that otherwise keeps an entity's first description.
     updated_canonicals = [
         entity
         for canonical, duplicates in plans
@@ -531,7 +532,7 @@ async def merge_entity_duplicates(
         if entity is not None
     ]
     if updated_canonicals:
-        await graph_engine.add_nodes(updated_canonicals)
+        await graph_engine.add_nodes(updated_canonicals, replace=True)
 
     # 3. Delete the duplicates (detach-delete cascades their old edges) and
     #    purge their name embeddings, or stale vectors resurface in later runs.

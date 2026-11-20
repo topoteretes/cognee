@@ -1208,6 +1208,8 @@ class LadybugAdapter(GraphDBInterface):
         nodes: list[DataPoint],
         source_ref_key: str | dict[str, str] | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """
         Add multiple nodes to the graph in a batch operation.
@@ -1229,6 +1231,7 @@ class LadybugAdapter(GraphDBInterface):
               non-graph-provenance writes.
             - pipeline_run_id (Optional[str]): Run id recorded alongside the provenance
               stamp, so the write is rollbackable by run. Ignored when source_ref_key is None.
+            - replace (bool): Ignored: every write stores the incoming properties.
         """
         if not nodes:
             return

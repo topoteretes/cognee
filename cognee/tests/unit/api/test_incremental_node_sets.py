@@ -9,6 +9,7 @@ import pytest
 
 from cognee.modules.chunking.chunk_policy import ChunkPlan
 from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
 from cognee.tasks.documents.classify_documents import update_node_set
 
@@ -80,6 +81,7 @@ async def test_fresh_chunks_reach_extraction_with_document_membership(monkeypatc
         object,
         None,
         uuid4(),
+        TextChunker,
     )
     assert observed == fresh
     assert result["added_chunks"] == 2

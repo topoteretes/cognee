@@ -357,6 +357,7 @@ async def test_an_outdated_pgvector_fails_creating_a_collection_before_any_table
     adapter.has_collection = AsyncMock(return_value=False)
     adapter.VECTOR_DB_LOCK = LoopAgnosticLock()
     adapter.embedding_engine = SimpleNamespace(get_vector_size=lambda: 8)
+    adapter.collection_partitions = 1
     collection = "OutdatedPgvector_text"
     try:
         with pytest.raises(PgvectorVersionError) as raised:
