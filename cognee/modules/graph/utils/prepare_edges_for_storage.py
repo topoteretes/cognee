@@ -25,7 +25,11 @@ def _get_nonblank_text(value: Any) -> str | None:
 
 
 def get_edge_retrieval_text(edge_text: Any, relationship_name: Any) -> str:
-    """Return the edge text used for retrieval, falling back to relationship_name."""
+    """Return the edge text used for retrieval, falling back to relationship_name.
+
+    The Postgres graph adapter narrows edges by this text in SQL
+    (``find_edge_texts_in_use``): a change to the rule here has to be made there too.
+    """
     return _get_nonblank_text(edge_text) or _get_nonblank_text(relationship_name) or ""
 
 

@@ -16,6 +16,7 @@ from uuid import UUID
 from sqlalchemy import or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.files.stored_file_claims import holding_stored_files
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules import ingestion
 from cognee.modules.data.models import Data, Dataset
@@ -208,6 +209,11 @@ async def run_tasks_data_item_incremental(
     if data_point:
         status_for_pipeline = (data_point.pipeline_status or {}).get(pipeline_name) or {}
         if is_data_item_completed(status_for_pipeline.get(str(dataset.id))):
+            # The copy saved above is left where it is, also when it landed
+            # under another name than the row's own file and no row will take
+            # it. Its key is shared by every add of the same bytes under the
+            # same name, and one of those may be between saving it and
+            # committing its row: removing it here broke that add.
             yield {
                 "run_info": PipelineRunAlreadyCompleted(
                     pipeline_run_id=pipeline_run_id,
@@ -517,7 +523,10 @@ async def run_tasks_data_item(
         )
 
     try:
-        result = await _drain_item_events(events, ctx, tasks, pipeline_run_id, progress_state)
+        # The item's files are stored before its row commits; claimed until the
+        # item is done, so no removal in another dataset takes them in between.
+        async with holding_stored_files():
+            result = await _drain_item_events(events, ctx, tasks, pipeline_run_id, progress_state)
     except Exception:
         # Preserve the original pipeline exception if flushing already-written
         # edge evidence also fails; rollback still has graph-native run refs.

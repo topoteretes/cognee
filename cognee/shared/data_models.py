@@ -1,4 +1,24 @@
-"""Data models for the cognitive architecture."""
+"""Structured-output shapes for cognify's extraction, summary and classification steps.
+
+``KnowledgeGraph`` (with ``Node`` and ``Edge``) is the default ``graph_model``: with no
+``graph_model`` argument, ``cognify()`` and ``remember()`` have it filled for every chunk:
+by the LLM, or, when no LLM key is configured, by the GLiNER demo extractor. Cognee then turns
+it into stored graph nodes, so callers get entities, entity types, timestamps and
+relationships without defining a schema. A custom ``graph_model`` is the alternative when a
+domain needs its own node types (see ``KnowledgeGraph``).
+
+The models here are plain Pydantic ``BaseModel`` classes, not ``DataPoint`` subclasses: they
+describe the answer a structured-output call must return and are never stored as they are.
+Graph construction (``expand_with_nodes_and_edges``) turns a filled ``KnowledgeGraph`` into
+``Entity``, ``EntityType`` and ``Timestamp`` data points, which ``add_data_points`` writes
+to the graph and vector stores. A ``graph_model`` that subclasses ``DataPoint`` skips that
+conversion: the LLM fills the stored node classes directly.
+
+``SummarizedContent`` and ``DefaultContentPrediction`` are the default summarization and
+classification response models in the cognify config. ``SummarizedCode`` is the response
+model for LLM code summaries. The chunking enums configure the engines in
+``cognee.infrastructure.data.chunking``.
+"""
 
 from enum import Enum, auto
 from typing import Any
@@ -18,7 +38,10 @@ if get_llm_config().llm_provider.lower() == "gemini":
     """
 
     class Node(BaseModel):
-        """Node in a knowledge graph."""
+        """One extracted entity. The Gemini variant, which also requires ``label``.
+
+        Stored the same way as the default ``Node``; see that class.
+        """
 
         id: str
         name: str
@@ -27,7 +50,7 @@ if get_llm_config().llm_provider.lower() == "gemini":
         label: str
 
     class Edge(BaseModel):
-        """Edge in a knowledge graph."""
+        """One extracted relationship. Same shape and storage as the default ``Edge``."""
 
         source_node_id: str
         target_node_id: str
@@ -38,7 +61,13 @@ if get_llm_config().llm_provider.lower() == "gemini":
         )
 
     class KnowledgeGraph(BaseModel):
-        """Knowledge graph."""
+        """Default extraction shape when ``LLM_PROVIDER`` is ``gemini``.
+
+        Chosen once, at import, from the LLM config, to work around a Gemini
+        structured-output restriction. It requires ``summary``, ``description``
+        and ``Node.label`` on top of the default shape. Graph construction reads
+        only ``nodes`` and ``edges``, as it does for the default ``KnowledgeGraph``.
+        """
 
         summary: str
         description: str
@@ -47,7 +76,22 @@ if get_llm_config().llm_provider.lower() == "gemini":
 else:
 
     class Node(BaseModel):
-        """Node in a knowledge graph."""
+        """One extracted entity, stored as an ``Entity`` linked to its chunk.
+
+        ``id`` is local to one chunk's graph: edges use it to name their endpoints,
+        and it is not the stored id. The stored ``Entity`` id comes from ``name``,
+        so the same name mentioned in different chunks or documents becomes one
+        node. Two nodes with the same name in one chunk graph stay separate.
+        A missing or empty ``name`` falls back to ``id``. If two nodes in one
+        chunk graph share an ``id``, only the first is kept.
+
+        ``type`` becomes an ``EntityType`` node the entity points to with ``is_a``.
+        A blank type creates no ``EntityType``. The type ``Timestamp`` with a
+        normalized time as ``name`` (``YYYY``, ``YYYY-MM``, ``YYYY-MM-DD``, ...)
+        becomes a ``Timestamp`` node instead, which ``SearchType.TEMPORAL`` uses to
+        find facts by date. ``description`` is stored on the entity and in the text of
+        the chunk's ``contains`` edge to it.
+        """
 
         id: str
         name: str = ""
@@ -60,7 +104,15 @@ else:
             super().__init__(**data)
 
     class Edge(BaseModel):
-        """Edge in a knowledge graph."""
+        """One extracted relationship between two ``Node`` entries of the same chunk graph.
+
+        ``source_node_id`` and ``target_node_id`` name nodes by their chunk-local
+        ``Node.id``. An edge whose endpoint is not among the chunk's nodes is
+        skipped. ``relationship_name`` is normalized into the stored edge name.
+        ``description`` becomes the stored edge's text and, with the default
+        ``SUMMARY_METHOD=from_extraction``, a line of the chunk's summary. An edge
+        drawn from a timestamp is reversed so the timestamp is the target.
+        """
 
         source_node_id: str
         target_node_id: str
@@ -71,7 +123,18 @@ else:
         )
 
     class KnowledgeGraph(BaseModel):
-        """Knowledge graph."""
+        """Default ``graph_model``: the entities and relationships extracted from one chunk.
+
+        A cognify run without a ``graph_model`` fills one per chunk with the LLM,
+        or, by default when no LLM key is configured, with the GLiNER demo
+        extractor. Cognee then turns it into graph data points: ``Entity`` and
+        ``EntityType`` nodes, ``Timestamp`` nodes, ``contains`` edges from the chunk,
+        and the extracted relationships. Relationships already in the graph are not
+        written again. With an ontology resolver, construction also grounds the
+        entities in the ontology. A ``graph_model`` that subclasses ``KnowledgeGraph``
+        takes this path too, but construction reads only the fields defined here.
+        Any other model's objects are stored as returned, attached to the chunk.
+        """
 
         nodes: list[Node] = Field(..., default_factory=list)
         edges: list[Edge] = Field(..., default_factory=list)
@@ -90,6 +153,14 @@ class Answer(BaseModel):
 
 
 class ChunkStrategy(Enum):
+    """How the engines in ``cognee.infrastructure.data.chunking`` split text.
+
+    ``PARAGRAPH`` (the chunk config default), ``SENTENCE`` and ``EXACT`` are handled
+    by ``DefaultChunkEngine``. ``CODE`` and ``LANGCHAIN_CHARACTER`` are handled by
+    ``LangchainChunkEngine``. Cognify's own chunking does not use these engines; it
+    uses the ``chunker`` passed to ``extract_chunks_from_documents``.
+    """
+
     EXACT = "exact"
     PARAGRAPH = "paragraph"
     SENTENCE = "sentence"
@@ -98,6 +169,8 @@ class ChunkStrategy(Enum):
 
 
 class ChunkEngine(Enum):
+    """Which engine ``create_chunking_engine`` builds; ``DEFAULT_ENGINE`` is the default."""
+
     LANGCHAIN_ENGINE = "langchain"
     DEFAULT_ENGINE = "default"
     HAYSTACK_ENGINE = "haystack"
@@ -254,7 +327,12 @@ class ProceduralContent(ContentType):
 
 
 class DefaultContentPrediction(BaseModel):
-    """Class for a single class label prediction."""
+    """Content classification the LLM fills for a sample of a file.
+
+    The default ``classification_model`` in the cognify config, and the model
+    ``classify_files`` uses with ``use_llm=True``. ``label`` picks one
+    content family; its ``subclass`` list narrows it down.
+    """
 
     label: (
         TextContent
@@ -325,6 +403,8 @@ class SummarizedClass(BaseModel):
 
 
 class SummarizedCode(BaseModel):
+    """Structured summary of one source file, filled by ``extract_code_summary``."""
+
     high_level_summary: str
     key_features: list[str]
     imports: list[str] = []

@@ -15,7 +15,8 @@ class DatasetRoutingConfig(BaseSettings):
     # A search that names no dataset scores every readable dataset against the
     # query on the routing collection and searches only the best ones. Always
     # on under backend access control (one store per dataset); a dataset with
-    # no index rows is always searched.
+    # no index rows is searched only when the routed ones retrieve nothing, or
+    # when no dataset is routed at all.
     top_k: int = 1
     # Scores are cosine distances: 0 is identical text, unrelated text sits
     # near 1. A dataset whose best row is farther than the cutoff is not a

@@ -30,6 +30,7 @@ async def log_pipeline_run_error(
     origin: str | None = None,
     parent_operation_id: UUID | None = None,
     session_ids: tuple[str, ...] | None = None,
+    created_at: datetime | None = None,
 ):
     """Append the ERRORED row for a run.
 
@@ -39,6 +40,10 @@ async def log_pipeline_run_error(
     that died, not the process closing it.
     ``user_id`` and ``tenant_id`` preserve that stored identity without requiring
     a live ``User`` model. When ``user`` is supplied, its identity takes precedence.
+
+    ``created_at`` dates the row, which is what orders it among its dataset's rows;
+    by default it is now. Startup recovery passes an earlier time for a run that a
+    later run has followed (``recovery._closing_time``). ``ended_at`` is always now.
     """
     if session_ids is None:
         session_ids = get_current_session_ids()
@@ -73,6 +78,8 @@ async def log_pipeline_run_error(
             if parent_operation_id is not None
             else get_parent_run_id(excluding=pipeline_run_id)
         ),
+        # Left out when not given, so the column's own default (now) applies.
+        **({"created_at": created_at} if created_at is not None else {}),
     )
 
     db_engine = get_relational_engine()

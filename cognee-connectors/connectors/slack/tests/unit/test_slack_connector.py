@@ -336,10 +336,12 @@ async def test_handle_webhook_routes_an_events_api_envelope_by_team_and_event_id
 
 
 @pytest.mark.asyncio
-async def test_handle_webhook_drops_a_form_encoded_slash_command():
-    # Slash commands and interactive payloads are form-encoded and go through
-    # the host's own /commands and /interactive routes.
-    dispatch = await CONNECTOR.handle_webhook(b"command=%2Fcognee-ask&team_id=T123", {})
+async def test_handle_webhook_drops_a_form_encoded_interactive_payload():
+    # Interactive payloads are form-encoded and go through the host's own
+    # /interactive route.
+    dispatch = await CONNECTOR.handle_webhook(
+        b"payload=%7B%22type%22%3A%22message_action%22%7D&team_id=T123", {}
+    )
 
     assert dispatch.provider_account_id is None
 

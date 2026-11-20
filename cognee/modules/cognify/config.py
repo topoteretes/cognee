@@ -21,6 +21,10 @@ class CognifyConfig(BaseSettings):
     # texts, one per line, no LLM call. "llm": one LLM call per chunk.
     summary_method: Literal["llm", "from_extraction"] = "from_extraction"
     chunks_per_batch: int | None = None
+    # The chunker every call that names none uses: cognify(), remember(), update(),
+    # the CLI, the API and cognee's own pipelines (env: DEFAULT_CHUNKER). TextChunker,
+    # or a name added with register_chunker() in every process that reads it.
+    default_chunker: str = "TextChunker"
     # Write chunks (and their documents) to the graph and vector stores right
     # after chunking, before the LLM extraction (env: EARLY_CHUNK_INDEXING).
     # On (default): chunk-based searches answer while entities are still being
@@ -30,6 +34,16 @@ class CognifyConfig(BaseSettings):
     # Opt-in audit-grade provenance ledger (env: PROVENANCE_TRACKING). Default
     # OFF so the standard cognify pipeline is unchanged.
     provenance_tracking: bool = False
+    # External anchoring of the ledger's hash chain (env: PROVENANCE_ANCHOR_KEY,
+    # PROVENANCE_ANCHOR_PATH). With a key set, ``cognee-cli provenance anchor``
+    # / ``POST /api/v1/provenance/anchor`` sign the chain head with HMAC-SHA256
+    # and append the anchor to the anchor file (default
+    # ``{system_root}/provenance_anchors.jsonl``). A verify that includes the
+    # anchors then proves the ledger has not been rewritten *and re-chained*
+    # since the anchor — the one attack a self-contained hash chain cannot
+    # detect. Never serialized by ``to_dict``.
+    provenance_anchor_key: str | None = None
+    provenance_anchor_path: str | None = None
     # Which implementation fills the extract-and-summarize step of the default
     # cognify pipeline (env: GRAPH_EXTRACTOR). "auto" (default) runs the LLM
     # path when a usable LLM key is configured and the GLiNER demo otherwise;
@@ -62,6 +76,7 @@ class CognifyConfig(BaseSettings):
             "gliner_torch_index_url": self.gliner_torch_index_url,
             "gliner_inference_threads": self.gliner_inference_threads,
             "summary_method": self.summary_method,
+            "default_chunker": self.default_chunker,
         }
 
 
