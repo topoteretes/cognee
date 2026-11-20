@@ -12,8 +12,11 @@ class Node(BaseModel):
     Attributes:
         id (str): A unique identifier for the node.
         attributes (Dict[str, Any]): A dictionary of attributes associated with the node.
-        neighbors (List[Node]): Represents the original nodes
-        skeleton_edges (List[Edge]): Represents the original edges
+        skeleton_neighbours (List[Node]): The neighbouring nodes, in the order they were
+            added. Read-only: every read returns a new list, so changing it does not change
+            the node; use add_skeleton_neighbor and remove_skeleton_neighbor.
+        skeleton_edges (List[Edge]): The edges that connect this node to its neighbours.
+        status (np.ndarray): Whether the node is alive (1) or not (0) in each dimension.
     """
 
     id: str
@@ -128,6 +131,10 @@ class Node(BaseModel):
         return self.skeleton_edges
 
     def get_skeleton_neighbours(self):
+        """Return the neighbours in the order they were added, as a new list.
+
+        Changing the returned list does not change the node.
+        """
         return self.skeleton_neighbours
 
     def to_json(self) -> dict[str, Any]:
