@@ -7,9 +7,9 @@ Flow:
 2. BATCH  (LLM) — proposes reasoning-heavy sections (tool_rules, success_patterns,
    workflow_state, environment_facts, and richer failure_lessons) over bounded pending trace
    windows. It runs in two places: periodically from the trace-write path (every
-   TRACE_EXTRACTION_INTERVAL traces, awaited inline in SessionManager.add_agent_trace_step), and
-   again at improve/session end to flush any pending tail. Because the periodic pass is awaited
-   inline, a trace write that crosses the interval pays the latency of one LLM call.
+   TRACE_EXTRACTION_INTERVAL traces, as a background task, at most one per session, started
+   by SessionManager after a trace is stored), and again at improve/session end to flush any
+   pending tail. The trace write, and a capture's receipt, never wait for the LLM call.
 
 Both feed the shared deterministic applier (apply_candidate_updates), so lessons are
 confidence-gated and de-duplicated the same way QA lessons are. Fail-open: extraction never
@@ -120,7 +120,13 @@ def build_live_agent_candidates(
     if status != "error" or not error_message.strip():
         return []
     content = _failure_lesson_content(origin_function, error_message)
-    return [CandidateFailureLessonUpdate(content=content, confidence=LIVE_FAILURE_CONFIDENCE)]
+    return [
+        CandidateFailureLessonUpdate(
+            content=content,
+            confidence=LIVE_FAILURE_CONFIDENCE,
+            evidence=content,
+        )
+    ]
 
 
 async def extract_live_agent_context(
@@ -333,32 +339,42 @@ async def extract_pending_agent_context(
         return []
     if min_new_traces <= 0:
         return []
-    plan = await _plan_pending_extraction(
-        session_manager=session_manager,
-        user_id=user_id,
-        session_id=session_id,
-        min_new_traces=min_new_traces,
-        overlap=overlap,
-        max_window=max_window,
-    )
-    if plan is None:
-        return []
 
-    traces = await session_manager.get_agent_trace_session(
-        user_id=user_id,
-        session_id=session_id,
-        last_n=plan.window_size,
-    )
-    touched = await _extract_batch_from_traces(
-        session_manager=session_manager,
-        user_id=user_id,
-        session_id=session_id,
-        traces=traces,
-    )
-    await TRACE_EXTRACTION_WATERMARK.write_count(
-        session_manager,
-        user_id,
-        session_id,
-        count=plan.total_trace_count,
-    )
-    return touched
+    # The trace write's background batch and improve's extract_agent_context stage
+    # both run this: plan, call the LLM and advance the watermark under one lock per
+    # session, so the second caller reads the advanced watermark instead of sending
+    # the same window again. In-process only, like the coding extraction's lock.
+    # Imported here, like the coding extraction does: the locks package must not
+    # load with the session infrastructure.
+    from cognee.infrastructure.locks import session_lock
+
+    async with session_lock(f"{user_id}:{session_id}", "agent_context_extraction"):
+        plan = await _plan_pending_extraction(
+            session_manager=session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            min_new_traces=min_new_traces,
+            overlap=overlap,
+            max_window=max_window,
+        )
+        if plan is None:
+            return []
+
+        traces = await session_manager.get_agent_trace_session(
+            user_id=user_id,
+            session_id=session_id,
+            last_n=plan.window_size,
+        )
+        touched = await _extract_batch_from_traces(
+            session_manager=session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            traces=traces,
+        )
+        await TRACE_EXTRACTION_WATERMARK.write_count(
+            session_manager,
+            user_id,
+            session_id,
+            count=plan.total_trace_count,
+        )
+        return touched
