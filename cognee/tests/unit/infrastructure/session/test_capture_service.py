@@ -12,6 +12,7 @@ import pytest_asyncio
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from cognee.infrastructure.background_tasks import wait_for_background_tasks
 from cognee.infrastructure.databases.cache.sql.capture import CaptureConflictError
 from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 from cognee.infrastructure.databases.cache.sql.tables import (
@@ -81,6 +82,9 @@ async def service(tmp_path, monkeypatch):
         index=index,
         args=args,
     )
+    # A captured trace starts the pending-trace extraction as a background task that
+    # reads this cache; let it finish before the cache closes and the loop ends.
+    assert await wait_for_background_tasks(timeout=5)
     await adapter.close()
     await engine.dispose()
 

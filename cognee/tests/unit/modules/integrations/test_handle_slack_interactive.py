@@ -271,11 +271,14 @@ async def test_the_detached_save_is_drained_when_the_server_shuts_down():
         patch(f"{MENTION}.remember_message", new=AsyncMock()) as remember,
         patch(f"{MODULE}.post_to_response_url", new=AsyncMock()),
     ):
+        # Counted relative to before the call: the registry is process-wide, so it may
+        # still hold tasks that are none of this test's business.
+        pending_before = pending_background_tasks()
         await handle_slack_interactive(_body(_shortcut_payload()))
         try:
             # The API waits for these on shutdown (wait_for_background_tasks), so a save
             # in flight is not lost to a restart.
-            assert pending_background_tasks() == 1
+            assert pending_background_tasks() == pending_before + 1
         finally:
             release.set()
             await wait_for_background_tasks()
