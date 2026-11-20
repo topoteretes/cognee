@@ -462,3 +462,64 @@ async def test_chunking_errors_still_fail_read(chunker_class, make_text_generato
         pytest.raises(ValueError, match="word longer than the chunk size"),
     ):
         await collect_chunks(chunker)
+
+
+def _plain_document():
+    return Document(
+        id=uuid4(),
+        name="test_document",
+        raw_data_location="/test/path",
+        external_metadata=None,
+        mime_type="text/plain",
+    )
+
+
+@pytest.mark.asyncio
+async def test_overlap_chunker_keeps_records_a_custom_generator_reuses(make_text_generator):
+    """A custom get_chunk_data generator may update one dict between yields.
+
+    The records are collected on the worker before any chunk is emitted, so each one
+    must be copied as it is yielded, or every chunk ends up with the last yield's text.
+    """
+
+    def reusing_records(_text):
+        row = {"chunk_size": 11, "cut_type": "word"}
+        for text in ("first", "second", "third"):
+            row.update(text=text, chunk_id=uuid4())
+            yield row
+
+    chunker = TextChunkerWithOverlap(
+        _plain_document(),
+        make_text_generator("ignored"),
+        max_chunk_size=10,
+        get_chunk_data=reusing_records,
+    )
+
+    chunks = await collect_chunks(chunker)
+
+    assert [chunk.text for chunk in chunks] == ["first", "second", "third"]
+
+
+@pytest.mark.asyncio
+async def test_overlap_chunker_calls_an_eager_get_chunk_data_off_the_event_loop(
+    make_text_generator,
+):
+    """A get_chunk_data that returns a list does its work when called, so the call
+    itself must happen on the worker, not only the iteration of its result."""
+    calling_threads = []
+
+    def eager_records(text):
+        calling_threads.append(threading.current_thread())
+        return [{"text": text, "chunk_size": 1, "cut_type": "word", "chunk_id": uuid4()}]
+
+    chunker = TextChunkerWithOverlap(
+        _plain_document(),
+        make_text_generator("hello"),
+        max_chunk_size=10,
+        get_chunk_data=eager_records,
+    )
+
+    chunks = await collect_chunks(chunker)
+
+    assert [chunk.text for chunk in chunks] == ["hello"]
+    assert calling_threads and calling_threads[0] is not threading.current_thread()

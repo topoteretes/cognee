@@ -12,6 +12,15 @@ from .models.DocumentChunk import DocumentChunk
 logger = get_logger()
 
 
+def _collect_chunk_data(get_chunk_data: Callable, text: str) -> list[dict]:
+    """Call get_chunk_data and copy each record, on the CPU worker.
+
+    The call happens here so an eager callback's work also leaves the event loop, and
+    each record is copied because a custom generator may reuse one dict between yields.
+    """
+    return [dict(record) for record in get_chunk_data(text)]
+
+
 class TextChunkerWithOverlap(Chunker):
     chunker_id = "text_chunker_overlap_v1"
 
@@ -122,9 +131,11 @@ class TextChunkerWithOverlap(Chunker):
 
     async def read(self):
         async for content_text in self.get_text():
-            # Same as TextChunker: the default get_chunk_data counts tokens word by word, and
-            # its generator is consumed on the shared CPU worker, so the event loop stays free.
-            chunk_data_list = await run_cpu_bound(list, self.get_chunk_data(content_text))
+            # Same as TextChunker: the default get_chunk_data counts tokens word by word, so
+            # it is called and consumed on the shared CPU worker and the event loop stays free.
+            chunk_data_list = await run_cpu_bound(
+                _collect_chunk_data, self.get_chunk_data, content_text
+            )
             for chunk_data in chunk_data_list:
                 if not self._accumulation_overflows(chunk_data):
                     self._accumulate_chunk_data(chunk_data)
