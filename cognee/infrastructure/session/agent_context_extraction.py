@@ -13,16 +13,19 @@ Flow:
 
 Both feed the shared deterministic applier (apply_candidate_updates), so lessons are
 confidence-gated and de-duplicated the same way QA lessons are. Fail-open: extraction never
-raises into the trace write path — a failure just means no lesson this time.
+raises into the trace write path — a failure just means no lesson this time, and no new
+attempt before the next interval.
 """
 
 import json
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.pipeline_stage import caller_scope
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.locks.session_lock import session_lock
 from cognee.infrastructure.session.session_context_builder import (
     apply_candidate_updates,
     coerce_active_context_entries,
@@ -66,6 +69,15 @@ TRACE_EXTRACTION_WATERMARK = StateRowWatermark(
     state_id=TRACE_EXTRACTION_STATE_ID,
     state_kind=TRACE_EXTRACTION_STATE_KIND,
     field="processed_trace_count",
+)
+# The trace count at which the last window was started, written before its LLM call.
+# Automatic runs count new traces from here, so a window that never finished (the
+# call failed or was cancelled) is retried after the next interval, not on every
+# trace write. The watermark above says what was extracted; this says when to try.
+TRACE_EXTRACTION_ATTEMPT = StateRowWatermark(
+    state_id=TRACE_EXTRACTION_STATE_ID,
+    state_kind=TRACE_EXTRACTION_STATE_KIND,
+    field="attempted_trace_count",
 )
 
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
@@ -157,6 +169,18 @@ def _trace_window_size(pending_trace_count: int, overlap: int, max_window: int) 
     return max(1, min(max_window, pending_trace_count + overlap))
 
 
+async def _effective_count(
+    watermark: StateRowWatermark, rows, session_manager, user_id: str, session_id: str, total: int
+) -> int:
+    """A count above the trace total is stale (the traces expired); reset it in the store,
+    or it would count again once the new traces reach it."""
+    stored = watermark.count_from_rows(rows)
+    effective = StateRowWatermark.resolve_effective(stored, total, session_id=session_id)
+    if effective != stored:
+        await watermark.write_count(session_manager, user_id, session_id, count=effective)
+    return effective
+
+
 async def _plan_pending_extraction(
     *,
     session_manager,
@@ -165,17 +189,28 @@ async def _plan_pending_extraction(
     min_new_traces: int,
     overlap: int,
     max_window: int,
+    automatic: bool,
 ) -> TraceExtractionPlan | None:
-    """Load trace-count state and decide whether a new extraction window is due."""
+    """Load trace-count state and decide whether a new extraction window is due.
+
+    New traces are counted from the last finished window, or for an automatic run
+    from the last started one. The window always covers every trace not yet
+    extracted, so the traces of a window that never finished are not lost.
+    """
     total_trace_count = await session_manager.get_agent_trace_count(
         user_id=user_id, session_id=session_id
     )
-    processed_count = await TRACE_EXTRACTION_WATERMARK.read_count(
-        session_manager, user_id, session_id
-    )
-    pending_count = max(0, total_trace_count - processed_count)
-    if pending_count < min_new_traces:
+    rows = await session_manager.get_session_context_entries(user_id=user_id, session_id=session_id)
+    processed_count, attempted_count = [
+        await _effective_count(
+            watermark, rows, session_manager, user_id, session_id, total_trace_count
+        )
+        for watermark in (TRACE_EXTRACTION_WATERMARK, TRACE_EXTRACTION_ATTEMPT)
+    ]
+    counted_from = max(processed_count, attempted_count) if automatic else processed_count
+    if total_trace_count - counted_from < min_new_traces:
         return None
+    pending_count = max(0, total_trace_count - processed_count)
 
     return TraceExtractionPlan(
         total_trace_count=total_trace_count,
@@ -313,6 +348,8 @@ async def extract_pending_agent_context(
     min_new_traces: int = TRACE_EXTRACTION_INTERVAL,
     overlap: int = TRACE_EXTRACTION_OVERLAP,
     max_window: int = BATCH_TRACE_LIMIT,
+    automatic: bool = True,
+    admission: Callable[[], Awaitable[str | None]] | None = None,
 ) -> list[str]:
     """Extract agent lessons from unprocessed traces using one shared watermark policy.
 
@@ -320,8 +357,16 @@ async def extract_pending_agent_context(
     - trace-write path uses the interval default, so extraction happens periodically;
     - improve/session-end callers can pass ``1`` to flush any pending traces before distillation.
 
+    ``automatic`` counts new traces from the last started window, so a failing call is
+    retried once per interval; ``False`` (improve) counts from the last finished one.
+    ``admission`` is asked once per due window, before the trace read and the LLM call;
+    a skip reason ends the run and counts as the window's attempt.
+
     The LLM receives only the latest ``pending + overlap`` trace steps, capped by ``max_window``.
-    The watermark advances only after the extraction attempt completes without raising.
+    The start of a window is recorded before its LLM call; the watermark advances only
+    after the extraction attempt completes without raising. One window per session runs
+    at a time (in-process lock): a concurrent caller waits, then plans from the new
+    watermark.
 
     Failures PROPAGATE — the callers own the fail-open policy: the trace-write
     path wraps this in its own try (a failed extraction must never lose the
@@ -333,32 +378,48 @@ async def extract_pending_agent_context(
         return []
     if min_new_traces <= 0:
         return []
-    plan = await _plan_pending_extraction(
-        session_manager=session_manager,
-        user_id=user_id,
-        session_id=session_id,
-        min_new_traces=min_new_traces,
-        overlap=overlap,
-        max_window=max_window,
-    )
-    if plan is None:
-        return []
+    # The whole window runs under one lock per session, like improve's own claim:
+    # concurrent trace writes would each call the LLM for the same window, and a
+    # slow window would write its older count over the count improve() sealed.
+    async with session_lock(f"{user_id}:{session_id}", "agent_context_extraction"):
+        plan = await _plan_pending_extraction(
+            session_manager=session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            min_new_traces=min_new_traces,
+            overlap=overlap,
+            max_window=max_window,
+            automatic=automatic,
+        )
+        if plan is None:
+            return []
+        await TRACE_EXTRACTION_ATTEMPT.write_count(
+            session_manager, user_id, session_id, count=plan.total_trace_count
+        )
 
-    traces = await session_manager.get_agent_trace_session(
-        user_id=user_id,
-        session_id=session_id,
-        last_n=plan.window_size,
-    )
-    touched = await _extract_batch_from_traces(
-        session_manager=session_manager,
-        user_id=user_id,
-        session_id=session_id,
-        traces=traces,
-    )
-    await TRACE_EXTRACTION_WATERMARK.write_count(
-        session_manager,
-        user_id,
-        session_id,
-        count=plan.total_trace_count,
-    )
-    return touched
+        if admission is not None:
+            skip_reason = await admission()
+            if skip_reason:
+                logger.info(
+                    "Agent-context extraction skipped by the host admission check (%s)",
+                    skip_reason,
+                )
+                return []
+        traces = await session_manager.get_agent_trace_session(
+            user_id=user_id,
+            session_id=session_id,
+            last_n=plan.window_size,
+        )
+        touched = await _extract_batch_from_traces(
+            session_manager=session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            traces=traces,
+        )
+        await TRACE_EXTRACTION_WATERMARK.write_count(
+            session_manager,
+            user_id,
+            session_id,
+            count=plan.total_trace_count,
+        )
+        return touched

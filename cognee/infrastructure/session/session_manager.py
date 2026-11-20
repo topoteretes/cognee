@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from functools import partial
 from typing import Any
 
 from cognee.context_global_variables import current_dataset_id, session_user
@@ -310,6 +311,7 @@ class SessionManager:
             # work from improve(), with tool inputs and the final answer: the per-trace
             # and per-window passes would only produce the vague lessons it replaces.
             # Read inside the try: an invalid improve setting must not fail the write.
+            from cognee.modules.improve.admission import auto_improve_skip_reason_for_user_id
             from cognee.modules.improve.config import coding_distillation_enabled
 
             if coding_distillation_enabled():
@@ -332,6 +334,13 @@ class SessionManager:
                 session_manager=self,
                 user_id=user_id,
                 session_id=session_id,
+                admission=partial(
+                    auto_improve_skip_reason_for_user_id,
+                    user_id=user_id,
+                    dataset_id=self.dataset_id,
+                    session_id=session_id,
+                    session_ids=[session_id],
+                ),
             )
         except Exception as error:
             logger.warning("Agent-context extraction skipped: %s", error, exc_info=True)

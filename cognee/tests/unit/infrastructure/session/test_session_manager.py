@@ -1,4 +1,6 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+import uuid
+from types import SimpleNamespace
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -248,7 +250,58 @@ class TestSessionManager:
             session_manager=sm,
             user_id="u1",
             session_id="s1",
+            admission=ANY,
         )
+
+    @pytest.mark.asyncio
+    async def test_trace_extraction_asks_the_host_about_the_session_and_dataset(
+        self, mock_cache, monkeypatch
+    ):
+        """The admission handed to the extractor asks the host check with the manager's dataset."""
+        import cognee.infrastructure.session.agent_context_extraction as ace
+        from cognee.modules.improve import (
+            clear_auto_improve_admission,
+            register_auto_improve_admission,
+        )
+        from cognee.modules.users import methods as user_methods
+
+        dataset_id = uuid.uuid4()
+        user_id = uuid.uuid4()
+        sm = SessionManager(cache_engine=mock_cache, dataset_id=dataset_id)
+        pending_spy = AsyncMock(return_value=[])
+        monkeypatch.setattr(ace, "extract_live_agent_context", AsyncMock(return_value=[]))
+        monkeypatch.setattr(ace, "extract_pending_agent_context", pending_spy)
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
+
+        async def get_user(looked_up):
+            return SimpleNamespace(id=looked_up)
+
+        asked = []
+
+        async def check(**context):
+            asked.append(context)
+            return "insufficient_credits"
+
+        monkeypatch.setattr(user_methods, "get_user", get_user)
+        register_auto_improve_admission(check)
+        try:
+            await sm.add_agent_trace_step(
+                user_id=str(user_id),
+                origin_function="run_tests",
+                status="success",
+                session_id="s1",
+                generate_feedback_with_llm=False,
+            )
+            reason = await pending_spy.await_args.kwargs["admission"]()
+        finally:
+            clear_auto_improve_admission()
+
+        assert reason == "insufficient_credits"
+        assert len(asked) == 1
+        assert asked[0]["user"].id == user_id
+        assert asked[0]["dataset_id"] == dataset_id
+        assert asked[0]["session_id"] == "s1"
+        assert asked[0]["session_ids"] == ["s1"]
 
     @pytest.mark.asyncio
     async def test_add_agent_trace_step_skips_extraction_in_coding_mode(
