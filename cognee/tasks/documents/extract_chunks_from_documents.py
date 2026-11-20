@@ -1,4 +1,6 @@
+import asyncio
 from collections.abc import AsyncGenerator
+from concurrent.futures import ThreadPoolExecutor
 from uuid import UUID
 
 from sqlalchemy import select
@@ -12,6 +14,14 @@ from cognee.modules.engine.utils.temporal_hints import hint_lines
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.documents.exceptions import InvalidChunkerError, InvalidChunkSizeError
+
+# The date-hint pass (dateparser) is pure CPU and takes ~0.2 s on a chunk dense
+# with numbers and dates. Run on the event loop, a large document's chunks are
+# cut and hinted with no await in between, which starves every other coroutine
+# (DB handshakes, health checks) for minutes. One worker thread keeps the loop
+# responsive; one is enough because the GIL serializes the work anyway, and it
+# keeps concurrent documents from calling dateparser from several threads.
+_HINT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="temporal-hints")
 
 
 async def update_document_token_count(document_id: UUID, token_count: int) -> None:
@@ -69,9 +79,15 @@ async def extract_chunks_from_documents(
             document_token_count += document_chunk.chunk_size
             document_chunk.belongs_to_set = document.belongs_to_set
             if temporal_hints:
-                document_chunk._temporal_hints, temporal_base = hint_lines(
-                    document_chunk.text, temporal_base
+                (
+                    document_chunk._temporal_hints,
+                    temporal_base,
+                ) = await asyncio.get_running_loop().run_in_executor(
+                    _HINT_EXECUTOR, hint_lines, document_chunk.text, temporal_base
                 )
+            else:
+                # The chunker itself never awaits; give the loop a turn per chunk.
+                await asyncio.sleep(0)
             yield document_chunk
 
         await update_document_token_count(document.id, document_token_count)

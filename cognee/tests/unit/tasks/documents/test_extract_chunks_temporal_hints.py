@@ -1,6 +1,9 @@
 """The chunk task's temporal hint pass is opt-out: the indexing pipeline skips it."""
 
+import asyncio
 import importlib
+import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -81,3 +84,61 @@ async def test_indexing_task_list_turns_the_hints_off():
     chunk_task = tasks[1]
     assert chunk_task.executable is task_module.extract_chunks_from_documents
     assert chunk_task.default_params["kwargs"]["temporal_hints"] is False
+
+
+class _LongDocument(_Document):
+    async def read(self, chunker_cls, max_chunk_size):
+        for index in range(5):
+            yield _Chunk(f"chunk {index}")
+
+
+async def _drain_while_ticking(**kwargs) -> int:
+    """Drain the task while another coroutine ticks; return how often it ticked."""
+    ticks = 0
+    done = False
+
+    async def ticker():
+        nonlocal ticks
+        while not done:
+            ticks += 1
+            await asyncio.sleep(0)
+
+    ticker_task = asyncio.create_task(ticker())
+    await asyncio.sleep(0)
+    ticks = 0
+    async for _ in task_module.extract_chunks_from_documents(
+        [_LongDocument()], max_chunk_size=10, chunker=_Chunker, **kwargs
+    ):
+        pass
+    done = True
+    await ticker_task
+    return ticks
+
+
+@pytest.mark.asyncio
+async def test_hint_pass_runs_off_the_event_loop(monkeypatch):
+    """A slow hint pass must not block other coroutines (DB handshakes, probes)."""
+    monkeypatch.setattr(task_module, "update_document_token_count", AsyncMock())
+    loop_thread = threading.get_ident()
+    hint_threads = []
+
+    def slow_hints(text, base):
+        hint_threads.append(threading.get_ident())
+        time.sleep(0.05)
+        return [], base
+
+    monkeypatch.setattr(task_module, "hint_lines", slow_hints)
+
+    ticks = await _drain_while_ticking()
+
+    assert loop_thread not in hint_threads
+    assert ticks >= 5
+
+
+@pytest.mark.asyncio
+async def test_chunks_without_hints_still_yield_to_the_loop(monkeypatch):
+    monkeypatch.setattr(task_module, "update_document_token_count", AsyncMock())
+
+    ticks = await _drain_while_ticking(temporal_hints=False)
+
+    assert ticks >= 5
