@@ -5,7 +5,11 @@ import os
 from numbers import Number
 
 from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
-from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
+from cognee.infrastructure.databases.utils.closing_lru_cache import (
+    closing_lru_cache,
+    resolve_pin,
+    weak_pin,
+)
 from cognee.infrastructure.databases.utils.engine_cache_ops import EngineCacheOps
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
@@ -81,12 +85,12 @@ class _GraphEngineHandle:
     tracks which engine proxy was last initialized and re-runs the idempotent
     schema setup when the underlying engine changes.
 
-    Known limitation (subprocess + exclusive file lock, e.g. Ladybug): the cache
-    leases a single shared proxy per entry, so two concurrently-held handles for
-    the same DB path pin the *same* proxy. If that entry is evicted while an
-    idle second handle keeps holding the proxy, the old worker's close stays
-    deferred (it does not release the file lock) until that holder lets go or
-    is garbage-collected. Creators for the same path deliberately do NOT wait
+    Subprocess + exclusive file lock (e.g. Ladybug): the cache leases a single
+    shared proxy per entry, and the handle pins it weakly (``weak_pin``), so an
+    evicted entry closes as soon as no call is in flight on it. An idle handle,
+    or one only reachable from a garbage reference cycle, does not keep the old
+    worker and its file lock alive. A close can still be deferred behind an
+    in-flight call. Creators for the same path deliberately do NOT wait
     for such a deferred close — an idle holder can pin it indefinitely, and
     waiting on it from a handle's own re-resolution self-deadlocks (this hung
     CI) — so a fresh engine relies on the worker's open-retry
@@ -101,11 +105,12 @@ class _GraphEngineHandle:
     def __init__(self, config: dict):
         object.__setattr__(self, "_config", config)
         object.__setattr__(self, "_last_initialized_id", None)
-        # Pinned leased engine proxy. Holding it avoids re-entering the cache on
-        # every attribute access (and the create-vs-close race that re-entry
-        # caused). It is dropped + re-resolved once the pin is no longer the
-        # live cache entry (see ``_pin_is_live``) so prune/delete eviction still
-        # recovers a fresh engine instead of keeping an evicted DB worker alive.
+        # Pinned leased engine proxy, held weakly (see ``weak_pin``). It avoids
+        # re-entering the cache on every attribute access (and the
+        # create-vs-close race that re-entry caused). It is dropped +
+        # re-resolved once the pin is no longer the live cache entry (see
+        # ``_pin_is_live``) so prune/delete eviction still recovers a fresh
+        # engine instead of keeping an evicted DB worker alive.
         object.__setattr__(self, "_pinned", None)
 
     @staticmethod
@@ -148,28 +153,28 @@ class _GraphEngineHandle:
         the pin when live; otherwise drops it and re-resolves through the (sync)
         cache. A mid-flow re-resolution can't await an in-flight close — the
         off-loop close + worker open-retry backstop cover that residual race."""
-        pinned = self._pinned
+        pinned = resolve_pin(self._pinned)
         if pinned is not None and self._pin_is_live(pinned):
             return pinned
         if pinned is not None:
             self._release_stale_pin(pinned)
             pinned = None
         engine = create_graph_engine(**self._config)
-        object.__setattr__(self, "_pinned", engine)
+        object.__setattr__(self, "_pinned", weak_pin(engine))
         return engine
 
     async def _aengine(self):
         """Async resolution used at initialization. Goes through the cache's
         async acquisition path so it waits for any in-flight close of the same
         key before constructing a new engine + pinning it."""
-        pinned = self._pinned
+        pinned = resolve_pin(self._pinned)
         if pinned is not None and self._pin_is_live(pinned):
             return pinned
         if pinned is not None:
             self._release_stale_pin(pinned)
             pinned = None
         engine = await acreate_graph_engine(**self._config)
-        object.__setattr__(self, "_pinned", engine)
+        object.__setattr__(self, "_pinned", weak_pin(engine))
         return engine
 
     async def _ensure_initialized(self):
