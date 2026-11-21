@@ -86,6 +86,35 @@ async def test_detect_pii_deterministic(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_detect_pii_scans_utf16_bom_files(tmp_path):
+    """A UTF-16 file with a BOM must be sampled in its own encoding."""
+    path = tmp_path / "contact_utf16.txt"
+    path.write_bytes("Contact: jane.doe@example.com\n".encode("utf-16"))
+    record = FileRecord(path=str(path), name=path.name, extension="txt", is_text=True)
+
+    findings = await detect_pii([record])
+
+    assert any(finding.category == "email_address" for finding in findings)
+
+
+@pytest.mark.asyncio
+async def test_detect_pii_utf16_end_to_end_via_scan(messy_folder):
+    """scan_folder keeps the UTF-16 file as text and detect_pii reads it."""
+    from cognee.tasks.presort.scan_folder import scan_folder
+
+    files, _ = await scan_folder(messy_folder)
+    utf16_record = next(record for record in files if record.name == "contact_utf16.txt")
+    assert utf16_record.is_text
+
+    findings = await detect_pii(files)
+
+    assert any(
+        finding.category == "email_address" and finding.path == utf16_record.path
+        for finding in findings
+    )
+
+
+@pytest.mark.asyncio
 async def test_detect_pii_llm_layer(tmp_path):
     record = _text_record(tmp_path, "medical_notes.txt", "patient history follows")
 

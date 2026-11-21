@@ -8,6 +8,8 @@ def messy_folder(tmp_path):
     (tmp_path / "report (1).pdf").write_bytes(b"%PDF-1.4 fake report body")  # exact dupe
     (tmp_path / "report_v2.pdf").write_bytes(b"%PDF-1.4 fake report body, revised")  # version
     (tmp_path / "notes.txt").write_text("Meet Ada at ada@example.com or +1 555 123 4567.")
+    # UTF-16 with BOM (Notepad's "Unicode" save) — text despite its null bytes.
+    (tmp_path / "contact_utf16.txt").write_bytes("Contact: jane.doe@example.com\n".encode("utf-16"))
     (tmp_path / "holiday.jpg").write_bytes(b"\xff\xd8\xff\xe0 fake jpeg bytes")
     (tmp_path / ".DS_Store").write_bytes(b"junk")
     (tmp_path / "partial.crdownload").write_bytes(b"partial download")

@@ -34,6 +34,7 @@ async def test_scan_metadata(messy_folder):
     assert by_name["notes.txt"].is_text
     assert by_name["notes.txt"].extension == "txt"
     assert by_name["notes.txt"].loader_claimed
+    assert by_name["contact_utf16.txt"].is_text  # UTF-16 BOM marks text, not binary
     assert by_name["main.py"].is_code
     assert not by_name["holiday.jpg"].is_text
 
