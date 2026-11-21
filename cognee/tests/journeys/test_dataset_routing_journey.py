@@ -2,13 +2,19 @@
 
 Two datasets, each remembered from its own slice of the golden corpus. The
 automatic improve after each remember builds the global context index and
-mirrors it into the routing collection of the default vector store, and an
-unscoped recall is then searched in the dataset whose documents match the
-query, not in both.
+mirrors it into the routing collection of the model that built the dataset,
+in the default vector store, and an unscoped recall is then searched in the
+dataset whose documents match the query, not in both.
 
 Mock mode embeds a hashed bag of words, so a query that quotes a document is
 closest to that document's bucket; that is enough to prove the mechanics
 (rows written, scored by derived id, the search narrowed to the winner).
+
+The second half switches the embedding model and remembers two more datasets
+with it: the unscoped recall is then routed among the new model's datasets
+and never enters the old ones, and switching the configuration back searches
+the first two again, off rows that waited in their collection -- no rebuild,
+no prune.
 """
 
 from __future__ import annotations
@@ -18,22 +24,44 @@ import pytest
 import cognee
 from cognee.modules.data.methods import get_data_ids_by_dataset, get_dataset_data
 from cognee.modules.search.dataset_routing import (
-    DATASET_ROUTE_COLLECTION,
+    dataset_route_collection,
     dataset_route_ids,
+    datasets_on_configured_model,
     get_dataset_route_engine,
     get_dataset_routing_config,
     route_datasets,
 )
-from cognee.tests.journeys import _support
+from cognee.tests.journeys import _support, mock_ai
 
 DATASET_A = "journey_routing_a"
 DATASET_B = "journey_routing_b"
+DATASET_C = "journey_routing_c"
+DATASET_D = "journey_routing_d"
+
+MODEL_ONE = ("openai/text-embedding-3-small", 256)
+MODEL_TWO = ("openai/text-embedding-3-large", 384)
+
+
+def _use_model(monkeypatch, model_and_dimensions):
+    """Point the deployment's embedding config at one of the two mock models.
+
+    The config caches see the environment at construction, so the caches are
+    dropped with the pin: the next engine embeds at the new width, and the
+    routing collection resolves to the new model's.
+    """
+    from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
+
+    model, dimensions = model_and_dimensions
+    monkeypatch.setenv("EMBEDDING_MODEL", model)
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", str(dimensions))
+    get_embedding_config.cache_clear()
+    mock_ai._clear_engine_caches()
 
 
 @pytest.mark.journey
 @pytest.mark.asyncio
 async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
-    clean_env, default_user, corpus
+    monkeypatch, clean_env, default_user, corpus
 ):
     first, second = corpus[:3], corpus[3:6]
 
@@ -47,16 +75,16 @@ async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
     )
 
     # The improve after each remember mirrored every dataset's index into the
-    # routing collection: its root plus one bucket per document, by derived id.
+    # routing collection of the model that built it: its root plus one bucket
+    # per document, by derived id.
+    config = get_dataset_routing_config()
     engine = await get_dataset_route_engine()
+    collection = dataset_route_collection()
     documents = await get_data_ids_by_dataset([dataset_a, dataset_b])
     for dataset_id, slice_ in ((dataset_a, first), (dataset_b, second)):
         assert len(documents[dataset_id]) == len(slice_)
         row_ids = dataset_route_ids(dataset_id, documents[dataset_id])
-        rows = {
-            str(row.id): row.payload
-            for row in await engine.retrieve(DATASET_ROUTE_COLLECTION, row_ids)
-        }
+        rows = {str(row.id): row.payload for row in await engine.retrieve(collection, row_ids)}
         assert set(rows) == set(row_ids), f"routing rows missing for {dataset_id}: {rows.keys()}"
         # Each row is the dataset's own index row, copied as stored: the root
         # names no single document, a bucket carries the document it summarizes.
@@ -67,7 +95,6 @@ async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
 
     # A query quoting one of B's documents routes to B alone.
     target = second[0]
-    config = get_dataset_routing_config()
     decision = await route_datasets(
         target.text,
         [dataset_a, dataset_b],
@@ -84,9 +111,58 @@ async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
     assert results, "recall returned nothing"
     assert {entry.dataset_id for entry in results} == {str(dataset_b)}
 
-    async def stored(dataset_id, document_ids):
-        rows = await engine.retrieve(
-            DATASET_ROUTE_COLLECTION, dataset_route_ids(dataset_id, document_ids)
+    # --- a second model joins the deployment -----------------------------------
+
+    _use_model(monkeypatch, MODEL_TWO)
+    third, fourth = corpus[6:9], corpus[9:12]
+
+    result_c = await cognee.remember([d.text for d in third], dataset_name=DATASET_C)
+    result_d = await cognee.remember([d.text for d in fourth], dataset_name=DATASET_D)
+    assert result_c.status == "completed" and result_d.status == "completed"
+    await cognee.wait_for_background_tasks()
+    dataset_c, dataset_d = (
+        _support.as_uuid(result_c.dataset_id),
+        _support.as_uuid(result_d.dataset_id),
+    )
+
+    # The model switch wrote into a different collection, on rows the first
+    # two datasets never shared: their collections are untouched.
+    other_collection = dataset_route_collection()
+    assert other_collection != collection
+    assert await (await get_dataset_route_engine()).has_collection(collection)
+    candidates = await datasets_on_configured_model([dataset_a, dataset_b, dataset_c, dataset_d])
+    assert candidates == {dataset_c, dataset_d}
+
+    target_c = third[0]
+    decision = await route_datasets(
+        target_c.text,
+        [dataset_a, dataset_b, dataset_c, dataset_d],
+        config.top_k,
+        config.distance_cutoff,
+        config.tie_margin,
+    )
+    assert decision.routed == (dataset_c,), decision
+
+    # An unscoped recall is routed among the new model's datasets and never
+    # enters the old ones: entering one of them would fail on the model guard.
+    results = await cognee.recall(target_c.text)
+    assert results, "recall returned nothing"
+    assert {entry.dataset_id for entry in results} == {str(dataset_c)}
+
+    # --- switching back needs no rebuild ---------------------------------------
+
+    _use_model(monkeypatch, MODEL_ONE)
+    assert await datasets_on_configured_model([dataset_a, dataset_b, dataset_c, dataset_d]) == {
+        dataset_a,
+        dataset_b,
+    }
+    results = await cognee.recall(target.text)
+    assert results, "recall returned nothing"
+    assert {entry.dataset_id for entry in results} == {str(dataset_b)}
+
+    async def stored(collection_name, dataset_id, document_ids):
+        rows = await (await get_dataset_route_engine()).retrieve(
+            collection_name, dataset_route_ids(dataset_id, document_ids)
         )
         return {str(row.id) for row in rows}
 
@@ -99,8 +175,8 @@ async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
     gone, *kept = documents[dataset_b]
     await cognee.forget(data_id=gone, dataset_id=dataset_b)
     root_id, *kept_buckets = dataset_route_ids(dataset_b, kept)
-    assert await stored(dataset_b, documents[dataset_b]) == {root_id, *kept_buckets}
-    [root_row] = await engine.retrieve(DATASET_ROUTE_COLLECTION, [root_id])
+    assert await stored(collection, dataset_b, documents[dataset_b]) == {root_id, *kept_buckets}
+    [root_row] = await (await get_dataset_route_engine()).retrieve(collection, [root_id])
     assert root_row.payload["document_id"] is None
     assert names[gone] not in root_row.payload["text"]
     assert all(names[document_id] in root_row.payload["text"] for document_id in kept)
@@ -119,13 +195,13 @@ async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
 
     # Dropping A's memory alone (its files stay) removes every row of A.
     await cognee.forget(dataset_id=dataset_a, memory_only=True)
-    assert await stored(dataset_a, documents[dataset_a]) == set()
+    assert await stored(collection, dataset_a, documents[dataset_a]) == set()
 
     # Deleting B removes the rest.
     await cognee.forget(dataset_id=dataset_b)
-    assert await stored(dataset_b, documents[dataset_b]) == set()
+    assert await stored(collection, dataset_b, documents[dataset_b]) == set()
 
-    # And a prune drops the collection itself, so a later embedding model
-    # change starts from a table of the new width.
+    # And a prune drops the collections themselves.
     await cognee.prune.prune_system(metadata=False)
-    assert await engine.has_collection(DATASET_ROUTE_COLLECTION) is False
+    assert await (await get_dataset_route_engine()).has_collection(collection) is False
+    assert await (await get_dataset_route_engine()).has_collection(other_collection) is False

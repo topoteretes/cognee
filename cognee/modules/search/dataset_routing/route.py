@@ -25,7 +25,7 @@ from cognee.modules.data.methods.get_data_ids_by_dataset import get_data_ids_by_
 from cognee.shared.logging_utils import get_logger
 
 from .index import dataset_route_ids
-from .store import DATASET_ROUTE_COLLECTION, get_dataset_route_engine, routing_width_matches
+from .store import dataset_route_collection, get_dataset_route_engine
 
 logger = get_logger("dataset_routing")
 
@@ -80,9 +80,9 @@ async def route_datasets(
     A dataset without a row has never been through the global context index
     (or lost it), so routing knows nothing about it: it is left to the search's
     widening pass when another dataset is routed, and searched with every other
-    candidate when none is. An
-    adapter that cannot score rows by id, or a routing collection built with
-    another embedding width, leaves every dataset unindexed. So does a
+    candidate when none is. An adapter that cannot score rows by id, or a
+    deployment whose configured model has no routing collection yet (nothing
+    was ever built with it), leaves every dataset unindexed. So does a
     deployment with no routing collection at all, before the query is
     embedded: a search type that needs no embedding (CODE, lexical, Cypher)
     must not start needing one for a routing step that cannot narrow anything.
@@ -114,9 +114,8 @@ async def _score_candidates(
     tie_margin: float,
 ) -> DatasetRoutingDecision:
     engine = await get_dataset_route_engine()
-    if not await engine.has_collection(DATASET_ROUTE_COLLECTION):
-        return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
-    if not await routing_width_matches(engine):
+    collection = dataset_route_collection()
+    if not await engine.has_collection(collection):
         return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
 
     documents = await get_data_ids_by_dataset(list(candidates))
@@ -127,9 +126,7 @@ async def _score_candidates(
 
     query_vector = (await engine.embedding_engine.embed_text([query_text]))[0]
     try:
-        scored = await engine.score_by_ids(
-            DATASET_ROUTE_COLLECTION, list(dataset_by_row), query_vector
-        )
+        scored = await engine.score_by_ids(collection, list(dataset_by_row), query_vector)
     except CollectionNotFoundError:
         scored = []
     except NotImplementedError:

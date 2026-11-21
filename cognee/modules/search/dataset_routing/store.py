@@ -1,4 +1,4 @@
-"""The routing collection: one vector store for the whole deployment.
+"""The routing collections: one vector store for the whole deployment, one collection per model.
 
 Dataset routing scores a query against every readable dataset before any
 dataset is searched, so its rows cannot live inside a dataset's own vector
@@ -9,16 +9,20 @@ dataset's store. The engine is built from the global config, never from the
 per-dataset ContextVar, so an upsert from inside a dataset's pipeline run and
 a read from search reach the same collection.
 
-One embedding model for the whole deployment: the collection has one vector
-width, and distances from two models cannot be ranked against each other. The
-rows are not embedded here at all: the mirror copies the vectors the index
-build stored in the dataset's own store (``sync_dataset_routes``), so each
-summary is embedded once. The query is embedded by this engine with the
-``.env`` embedding settings, never with a per-call ``embedding_config``, and
-when the collection's width no longer matches those settings
-(``EMBEDDING_MODEL`` changed without a prune) routing steps aside with a
-warning and the search covers every readable dataset, as it did before
-routing. Datasets built with different models are SDK-1316.
+One collection per embedding model and width (``dataset_route_collection_name``):
+vectors from two models are not comparable and a collection's width is fixed
+when it is created, so the rows of the model that built a dataset live apart
+from the rest. The index build mirrors a dataset's rows into the collection of
+the model that built it (``sync_dataset_routes``), the read path scores only
+the configured model's collection (``route_datasets``), and switching
+``EMBEDDING_MODEL`` moves to that model's collection -- the old one keeps its
+rows for when the configuration comes back. A dataset whose recorded model is
+not the configured one is never scored against it (``candidates.py``); within
+one collection every row and every query carry the same model, which is the
+one assumption ranking rests on. The rows are not embedded here at all: the
+mirror copies the vectors the index build stored in the dataset's own store,
+so each summary is embedded once. The query is embedded by this engine with
+the ``.env`` embedding settings, never with a per-call ``embedding_config``.
 
 The engine is the default store's own cache entry, the one prune uses too.
 It belongs to no dataset, so no dataset-queue slot would pin it against the
@@ -29,14 +33,22 @@ store itself under access control (``DatasetQueuePinPredicate``).
 
 from __future__ import annotations
 
+import hashlib
+import re
 from contextvars import copy_context
 
 from cognee.infrastructure.databases.vector import get_vectordb_config
-from cognee.infrastructure.databases.vector.embeddings.vector_size import engine_vector_size
 from cognee.infrastructure.databases.vector.get_vector_engine import _VectorEngineHandle
 from cognee.shared.logging_utils import get_logger
 
 DATASET_ROUTE_COLLECTION = "DatasetRoute_text"
+"""The pre-per-model collection name. Nothing writes or scores it anymore; the
+cleanup paths drop it, so an upgraded deployment does not keep its old rows."""
+
+_DATASET_ROUTE_COLLECTION_PREFIX = "DatasetRoute_text__"
+# Postgres caps identifiers at 63 bytes: prefix (19) + separators (2) + a width
+# of up to five digits (5) + digest (8) leaves this much of the model name.
+_MODEL_NAME_LIMIT = 29
 
 logger = get_logger("dataset_routing")
 
@@ -132,30 +144,51 @@ async def ensure_default_store() -> None:
     _default_store_ensured = True
 
 
-async def routing_width_matches(engine) -> bool:
-    """Whether the routing collection takes the configured model's vectors.
+def route_model_record() -> dict:
+    """The deployment's embedding model and width, per-call overrides cleared.
 
-    The collection's vector width is fixed when it is created. After an
-    ``EMBEDDING_MODEL`` change without a prune every write and query on it
-    would fail inside the store, so the width is compared first and a mismatch
-    turns routing off with a warning. An adapter that cannot report its stored
-    width (Turso, community adapters) is not checked; an empty store matches,
-    the first write creates the collection at the configured width.
+    Resolved exactly as ``embedding_model_record`` resolves them, but in a copy
+    of the current context with the per-call LLM and embedding overrides
+    removed -- the same resolution the routing engine itself uses. Naming the
+    collection after the caller's override would point the read at a
+    collection the writes never filled: the rows are mirrored under the
+    deployment's model, so the query must be scored under it too.
     """
-    read_stored_size = getattr(engine, "get_stored_vector_size", None)
-    if read_stored_size is None:
-        return True
-    stored = await read_stored_size()
-    # Awaited: a sync get_vector_size() may block this loop to ask a remote
-    # embedding worker for its size (embedding_worker without EMBEDDING_DIMENSIONS).
-    configured = await engine_vector_size(engine.embedding_engine)
-    if stored is None or stored == configured:
-        return True
-    logger.warning(
-        "Dataset routing is off: the routing collection holds %d-dimensional vectors and "
-        "the configured embedding model produces %d. Searches cover every readable "
-        "dataset until the vector stores are pruned and rebuilt with one model.",
-        stored,
-        configured,
+    from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import (
+        embedding_model_record,
     )
-    return False
+
+    def _resolve_with_deployment_settings():
+        from cognee.context_global_variables import embedding_config, llm_config
+
+        embedding_config.set(None)
+        llm_config.set(None)
+        return embedding_model_record()
+
+    return copy_context().run(_resolve_with_deployment_settings)
+
+
+def dataset_route_collection_name(model: str | None, dimensions: int | None) -> str:
+    """The routing collection of one embedding model and width.
+
+    Deterministic and storage-safe: the model name is reduced to characters
+    every adapter accepts (Postgres caps identifiers at 63 bytes, so the
+    readable part is truncated) and a digest of the full pair keeps distinct
+    models apart even when truncation or sanitization would collide. A model
+    whose name the config does not record (a row from before models were
+    recorded) shares the collection of no one: it reads ``unknown``.
+    """
+    readable = re.sub(r"[^A-Za-z0-9_-]", "_", model or "unknown")[:_MODEL_NAME_LIMIT]
+    digest = hashlib.sha256(f"{model}|{dimensions}".encode()).hexdigest()[:8]
+    return f"{_DATASET_ROUTE_COLLECTION_PREFIX}{readable}_{dimensions}_{digest}"
+
+
+def dataset_route_collection() -> str:
+    """The routing collection of the deployment's configured embedding model."""
+    from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import (
+        DIMENSIONS_KEY,
+        MODEL_KEY,
+    )
+
+    record = route_model_record()
+    return dataset_route_collection_name(record[MODEL_KEY], record[DIMENSIONS_KEY])

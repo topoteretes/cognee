@@ -82,13 +82,15 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
                     "will be deleted by metadata pruning."
                 )
         elif vector and backend_access_control_enabled():
-            await prune_vector_databases()
-            # The dataset routing collection lives in the default store, which
+            # The dataset routing collections live in the default store, which
             # the per-dataset handlers never touch; dropped, not emptied, so a
-            # model change after the prune starts from a clean table.
+            # model change after the prune starts from a clean table. They are
+            # named after the recorded embedding models, which the per-dataset
+            # prune clears from the registry rows, so they go first.
             from cognee.modules.search.dataset_routing import prune_dataset_routes
 
             await prune_dataset_routes()
+            await prune_vector_databases()
 
         # Graph runs after vector: a refused vector prune (shared PGVector database)
         # must raise before anything irreversible has been deleted.

@@ -43,6 +43,8 @@ def lane(monkeypatch):
         responses=[[]],  # one per fan-out call, in order; the last one repeats
         access_control=True,
         config=DatasetRoutingConfig(_env_file=None),
+        other_model=(),  # ids the candidate filter reports as another model's
+        candidates_read=0,  # how often the candidate filter ran
     )
 
     async def fake_readable(datasets, permission_type, user):
@@ -65,11 +67,16 @@ def lane(monkeypatch):
         )
         return state.decision
 
+    async def fake_candidates(dataset_ids):
+        state.candidates_read += 1
+        return {dataset_id for dataset_id in dataset_ids if dataset_id not in state.other_model}
+
     monkeypatch.setattr(search_mod, "get_authorized_existing_datasets", fake_readable)
     monkeypatch.setattr(search_mod, "search_in_datasets_context", fake_fan_out)
     monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: state.access_control)
     monkeypatch.setattr(routing_pkg, "route_datasets", fake_route)
     monkeypatch.setattr(routing_pkg, "get_dataset_routing_config", lambda: state.config)
+    monkeypatch.setattr(routing_pkg, "datasets_on_configured_model", fake_candidates)
     state.search_mod = search_mod
     return state
 
@@ -380,6 +387,58 @@ def test_routing_defaults():
         DatasetRoutingConfig(_env_file=None, distance_cutoff=2.5)
     with pytest.raises(ValueError):
         DatasetRoutingConfig(_env_file=None, tie_margin=-0.1)
+
+
+@pytest.mark.asyncio
+async def test_a_dataset_of_another_model_is_never_scored_searched_or_widened_into(lane):
+    """The readable set shrinks to the configured model's candidates before routing:
+    the other model's dataset is not given to the router, not fanned out over, and
+    not part of the widening pass."""
+    lane.readable = [_dataset("a"), _dataset("b"), _dataset("foreign")]
+    a, b, foreign = (dataset.id for dataset in lane.readable)
+    lane.other_model = {foreign}
+    lane.decision = DatasetRoutingDecision(
+        candidates=(a, b), routed=(b,), unindexed=(), scores={b: 0.1}
+    )
+    lane.responses = [[_payload(lane.readable[1])], [_payload(lane.readable[0], ["hit"])]]
+
+    out = await _search(lane)
+
+    assert lane.route_calls == [("q", [a, b], 1, 0.8, 0.001)]
+    assert lane.fan_out_calls == [[b], [a]]
+    assert lane.widening_flags == [False, True]
+    assert [payload.dataset_id for payload in out] == [a, b]
+
+
+@pytest.mark.asyncio
+async def test_a_fan_out_over_no_candidates_covers_none(lane):
+    """Every readable dataset recorded with another model: the unscoped search
+    covers none of them, instead of failing on the model guard mid-fan-out."""
+    lane.other_model = {dataset.id for dataset in lane.readable}
+    lane.decision = None
+
+    out = await _search(lane)
+
+    assert lane.fan_out_calls == [[]]
+    assert out == []
+
+
+@pytest.mark.asyncio
+async def test_the_candidate_filter_is_skipped_for_an_explicit_scope_and_single_dataset(lane):
+    a = lane.readable[0]
+    lane.readable = lane.readable[:1]
+
+    await _search(lane)
+    await _search(lane, dataset_ids=[a.id])
+    lane.access_control = False
+    lane.readable = [_dataset("a"), _dataset("b")]
+    await _search(lane)
+
+    assert state_reads(lane) == 0
+
+
+def state_reads(lane):
+    return lane.candidates_read
 
 
 def test_payload_entries_follow_the_normalization_rule():
