@@ -141,9 +141,10 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
                                 pipeline_name=current.pipeline_name,
                             )
                         # Shards the run handed to workers and never heard back
-                        # from. Before the run is closed: a closed run is not looked
-                        # at again, so if they cannot be recorded it stays open and
-                        # the next pass comes back to all of it.
+                        # from are noted as interrupted. The note is for the record
+                        # only and never fails recovery: when it cannot be written
+                        # the run is closed all the same, and those shards keep the
+                        # status they had (pending or running).
                         await record_interrupted(current.pipeline_run_id)
                         await _close_as_abandoned(
                             current, dataset, sessions_by_row.get(current.id, [])
