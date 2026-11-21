@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -13,6 +14,15 @@ from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.operations import scrub_error_message
 from cognee.modules.operations.usage_accumulator import operation_usage_scope, parent_run_scope
 from cognee.modules.pipelines.exceptions import AfterRunHookError, PipelineRunFailedError
+from cognee.modules.pipelines.execution import (
+    DataItemExecutor,
+    ItemRun,
+    RunSettings,
+    get_data_item_executor,
+    portable_item_check,
+    portable_spec,
+    run_items_with,
+)
 from cognee.modules.pipelines.layers.validate_pipeline_tasks import validate_pipeline_tasks
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.PipelineRunInfo import (
@@ -35,7 +45,7 @@ from cognee.shared.utils import send_telemetry, telemetry_exception_properties, 
 from cognee.tasks.ingestion import resolve_data_directories
 
 from ..tasks.task import Task
-from .run_tasks_data_item import run_tasks_data_item
+from .run_tasks_data_item import _source_fields, run_tasks_data_item
 from .run_tasks_with_telemetry import (
     PIPELINE_RUN_COMPLETED,
     PIPELINE_RUN_ERRORED,
@@ -75,6 +85,90 @@ def writes_durable_before_push(*engines: Any) -> bool:
     return not any(engine.needs_push_to_s3() for engine in engines if hasattr(engine, "push_to_s3"))
 
 
+def validated_once(resolve_tasks: Callable[[Any], list[Task]]) -> Callable[[Any], list[Task]]:
+    """``resolve_tasks``, with each distinct task list it returns validated the first time."""
+    validated_list_ids: set[int] = set()
+
+    def resolve_validated(data_item: Any) -> list[Task]:
+        item_tasks = resolve_tasks(data_item)
+        if id(item_tasks) not in validated_list_ids:
+            validate_pipeline_tasks(item_tasks)
+            validated_list_ids.add(id(item_tasks))
+        return item_tasks
+
+    return resolve_validated
+
+
+async def run_all_or_cancel(item_futures: list[asyncio.Task]) -> list[Any]:
+    """The results of ``item_futures``. When one raises, or this is cancelled, the
+    rest are cancelled and waited for: no item may still be writing once this raises."""
+    try:
+        return await asyncio.gather(*item_futures)
+    except BaseException:
+        for future in item_futures:
+            future.cancel()
+        await asyncio.gather(*item_futures, return_exceptions=True)
+        raise
+
+
+@dataclass
+class DataItemRunner:
+    """Runs data items of one pipeline run in this process.
+
+    ``run_tasks`` runs its run's items through it, and ``run_pipeline_shard``
+    the items of a run another process owns, so an item is run the same way
+    wherever it runs.
+    """
+
+    settings: RunSettings
+    dataset: Any
+    user: User
+    # Shared by the run's items: each records the stage it is at here.
+    progress_state: dict[str, Any] | None = None
+    # Awaited when an item ends, however it ended.
+    on_item_done: Callable[[], Awaitable[None]] | None = None
+
+    def __post_init__(self):
+        self._semaphore = asyncio.Semaphore(self.settings.data_per_batch)
+
+    async def run_item(self, data_item: Any, item_tasks: list[Task]) -> dict[str, Any] | None:
+        run = self.settings
+        try:
+            async with self._semaphore:
+                return await run_tasks_data_item(
+                    data_item,
+                    self.dataset,
+                    item_tasks,
+                    run.pipeline_name,
+                    run.pipeline_id,
+                    run.pipeline_run_id,
+                    PipelineContext(
+                        user=self.user,
+                        data_item=data_item,
+                        dataset=self.dataset,
+                        pipeline_run_id=run.pipeline_run_id,
+                        pipeline_name=run.pipeline_name,
+                        # Copy per item: a shared dict would let one item's
+                        # ctx.extras mutations leak into every other item.
+                        extras=dict(run.extras),
+                    ),
+                    self.user,
+                    run.incremental_loading,
+                    run.data_cache,
+                    self.progress_state,
+                )
+        finally:
+            if self.on_item_done is not None:
+                await self.on_item_done()
+
+    def start(self, work_items: list[tuple[Any, list[Task]]]) -> list[asyncio.Task]:
+        """Schedule ``(data_item, item_tasks)`` pairs, to await with ``run_all_or_cancel``."""
+        return [
+            asyncio.create_task(self.run_item(data_item, item_tasks))
+            for data_item, item_tasks in work_items
+        ]
+
+
 async def run_tasks(
     tasks: list[Task] | Callable[[Any], list[Task]],
     dataset_id: UUID,
@@ -90,6 +184,7 @@ async def run_tasks(
     data_cache: bool = False,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
     after_items_ran: Callable[[], Awaitable[Any]] | None = None,
+    data_item_executor: DataItemExecutor | None = None,
 ):
     """Run a pipeline over a dataset as ONE logical run.
 
@@ -113,6 +208,11 @@ async def run_tasks(
     propagates as ``AfterRunHookError`` too. On a failed run the run's own error wins:
     a raised one goes on with the hook's error as its cause, a reported one is returned
     and the hook's is logged.
+
+    ``data_item_executor`` may run the run's data items in other processes when the
+    run can leave this one (``execution.portable_spec`` says when); it comes before
+    an executor registered for the process. The run stays this function's: its
+    record, its database context, its rollback and its terminal status.
     """
     task_resolver = tasks if callable(tasks) else None
     if not user:
@@ -193,22 +293,14 @@ async def run_tasks(
                 # item's task list; a plain list applies uniformly. Validate each
                 # DISTINCT resolved list once (the eager check in run_pipeline
                 # covers only the plain-list case).
-                work_items = []
-                validated_list_ids = set()
-                for item in data:
-                    item_tasks = task_resolver(item) if task_resolver else tasks
-                    if task_resolver is not None and id(item_tasks) not in validated_list_ids:
-                        validate_pipeline_tasks(item_tasks)
-                        validated_list_ids.add(id(item_tasks))
-                    work_items.append((item, item_tasks))
-
-                # Semaphore-based concurrency: all items are scheduled at once,
-                # but at most data_per_batch run concurrently at any time.
-                semaphore = asyncio.Semaphore(data_per_batch)
+                resolve_tasks = (
+                    validated_once(task_resolver) if task_resolver else lambda _item: tasks
+                )
+                work_items = [(item, resolve_tasks(item)) for item in data]
 
                 # Item-level progress ("N of M files done"): a single counter shared
                 # across all concurrently-gathered items, guarded by a lock since
-                # multiple _run_item calls finish interleaved under the semaphore.
+                # several items finish interleaved under the semaphore.
                 total_items = len(work_items)
                 completed_items = 0
                 completed_items_lock = asyncio.Lock()
@@ -232,21 +324,27 @@ async def run_tasks(
                 # write per stage per item.
                 progress_state = {"current_stage": None}
 
-                async def _record_item_progress():
+                async def _record_item_progress(count: int = 1):
                     # An item that hard-raised (e.g. incremental loading with
                     # RAISE_INCREMENTAL_LOADING_ERRORS=true, the default) never
-                    # reaches _run_item's `return` — this is called from `finally`
+                    # reaches run_item's `return` — this is called from `finally`
                     # instead, so completed_items reaches total_items regardless of
                     # how the item ended. The error/success split itself still
                     # happens after gather() below; this only tracks "done", not
                     # outcome.
                     nonlocal completed_items
                     async with completed_items_lock:
-                        completed_items += 1
+                        previous_count = completed_items
+                        completed_items += count
                         progress_count = completed_items
 
-                    is_first_or_last = progress_count == 1 or progress_count == total_items
-                    if not (is_first_or_last or progress_count % progress_log_every == 0):
+                    # A data item executor reports several items at once, so the
+                    # throttle asks whether this step crossed a logging tick.
+                    is_first_or_last = previous_count == 0 or progress_count == total_items
+                    crossed_tick = (
+                        previous_count // progress_log_every != progress_count // progress_log_every
+                    )
+                    if not (is_first_or_last or crossed_tick):
                         return
 
                     try:
@@ -265,53 +363,73 @@ async def run_tasks(
                             "Failed to log pipeline run progress",
                         )
 
-                async def _run_item(data_item, item_tasks):
-                    try:
-                        async with semaphore:
-                            return await run_tasks_data_item(
-                                data_item,
-                                dataset,
-                                item_tasks,
-                                pipeline_name,
-                                pipeline_id,
-                                pipeline_run_id,
-                                PipelineContext(
-                                    user=user,
-                                    data_item=data_item,
-                                    dataset=dataset,
-                                    pipeline_run_id=pipeline_run_id,
-                                    pipeline_name=pipeline_name,
-                                    # Copy per item: a shared dict would let one item's
-                                    # ctx.extras mutations leak into every other item.
-                                    extras=dict(extras) if isinstance(extras, dict) else {},
-                                ),
-                                user,
-                                incremental_loading,
-                                data_cache,
-                                progress_state,
-                            )
-                    finally:
-                        await _record_item_progress()
+                # Every item of the run goes through this runner, whoever starts it.
+                runner = DataItemRunner(
+                    RunSettings(
+                        pipeline_name=pipeline_name,
+                        pipeline_id=pipeline_id,
+                        pipeline_run_id=pipeline_run_id,
+                        incremental_loading=incremental_loading,
+                        data_cache=data_cache,
+                        data_per_batch=data_per_batch,
+                        extras=extras if isinstance(extras, dict) else {},
+                    ),
+                    dataset,
+                    user,
+                    progress_state=progress_state,
+                    on_item_done=_record_item_progress,
+                )
 
-                item_futures = [
-                    asyncio.create_task(_run_item(item, item_tasks))
-                    for item, item_tasks in work_items
-                ]
+                # A data item executor may run the items in other processes,
+                # when the run can leave this one (see portable_spec): the one
+                # this run was given, else the one registered for the process.
+                executor = data_item_executor or get_data_item_executor()
+                spec = None
+                if executor is not None:
+                    spec = portable_spec(
+                        runner.settings,
+                        task_resolver,
+                        dataset.id,
+                        user.id,
+                        llm_config,
+                        embedding_config,
+                    )
+
+                item_futures = []
                 try:
-                    gathered = await asyncio.gather(*item_futures)
+                    if executor is None or spec is None:
+                        item_futures = runner.start(work_items)
+                        gathered = await run_all_or_cancel(item_futures)
+                    else:
+                        gathered = await run_items_with(
+                            executor,
+                            spec,
+                            [item for item, _ in work_items],
+                            ItemRun(
+                                run_in_process=lambda items: run_all_or_cancel(
+                                    runner.start([(item, resolve_tasks(item)) for item in items])
+                                ),
+                                record_progress=_record_item_progress,
+                                portable_item=portable_item_check(task_resolver),
+                                source_fields=lambda item: _source_fields(item, item),
+                            ),
+                        )
                 except BaseException as gather_error:
-                    # No item may still mutate the graph when rollback begins or
-                    # the run releases its ownership lock.
-                    for future in item_futures:
-                        future.cancel()
-                    await asyncio.gather(*item_futures, return_exceptions=True)
-                    # The items that finished before the failure still report
-                    # their result, so the rollback keeps what they completed.
-                    results = [
-                        future.result()
-                        for future in item_futures
-                        if not future.cancelled() and future.exception() is None and future.result()
-                    ]
+                    # The items this process ran before the failure still report
+                    # their result, so the rollback keeps what they completed. An
+                    # executor's run reports none, the items it handed back
+                    # included: the rollback takes a list as every result of the
+                    # run, and that one would lack what other processes completed,
+                    # so it would undo their work. With no list it goes by the
+                    # completion stamps, which is right for that run.
+                    if spec is None:
+                        results = [
+                            future.result()
+                            for future in item_futures
+                            if not future.cancelled()
+                            and future.exception() is None
+                            and future.result()
+                        ]
                     # By default (RAISE_INCREMENTAL_LOADING_ERRORS) a failing item raises
                     # its own error here; a cancellation is not an item failure.
                     items_failed = isinstance(gather_error, Exception)
