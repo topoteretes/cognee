@@ -91,12 +91,13 @@ def classify_family(record: FileRecord) -> str:
 
 
 async def _llm_classify(record: FileRecord) -> None:
+    from cognee.infrastructure.files.utils.is_text_content import decode_text_content
     from cognee.infrastructure.llm.extraction.extract_categories import extract_categories
     from cognee.shared.data_models import DefaultContentPrediction
 
     try:
         with open(record.path, "rb") as file:
-            sample = file.read(_LLM_SAMPLE_CHARS * 4).decode("utf-8", errors="replace")
+            sample = decode_text_content(file.read(_LLM_SAMPLE_CHARS * 4))
     except OSError as error:
         record.warnings.append(f"could not read sample for classification: {error}")
         return
