@@ -53,6 +53,15 @@ binary made it into the wheel, so a hollow wheel cannot ship silently. Guard
 tests in `test_bundled_json_extension.py` pin the probe parser and the filter
 semantics (cross-checked against `packaging`'s PEP 440).
 
+Besides loading by absolute path, the warm-up also **materializes** the
+bundled binary into the engine's per-user store
+(`~/.lbdb/extension/<version>/<platform>/json/`, engine-announced layout).
+That store is what the engine auto-loads catalog-registered extensions from
+at `Database(...)` open time — databases created under an older image carry
+`json` in their catalog, and their open fails before any LOAD-by-path
+fallback can run (see `materialize_bundled_json_extension` and the upgrade
+recovery tests in `test_ladybug_json_extension_upgrade.py`).
+
 ## Populating
 
 Binaries are not committed to git. Fetch the official ones with:
