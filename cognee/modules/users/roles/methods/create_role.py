@@ -29,6 +29,8 @@ async def create_role(
         PermissionDeniedError: If the request owner cannot manage users in
             their current tenant.
         TenantNotFoundError: If their current tenant does not exist.
+        EntityAlreadyExistsError: If their current tenant already has a role
+            with this name.
     """
     db_engine = get_relational_engine()
 
@@ -45,6 +47,9 @@ async def create_role(
             # Add association directly to the association table
             role = Role(name=role_name, tenant_id=tenant_id)
             session.add(role)
+            # add() does not hit the database; the unique (tenant_id, name)
+            # constraint only fires when the row is written.
+            await session.flush()
         except IntegrityError as e:
             raise EntityAlreadyExistsError(message="Role already exists for tenant.") from e
 
