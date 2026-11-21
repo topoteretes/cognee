@@ -7,6 +7,7 @@ as JSON (:class:`PipelineRunSpec`), in a form derived from its field
 declarations, so a field is declared once.
 """
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cache
@@ -66,7 +67,8 @@ class PipelineRunSpec(RunSettings):
 
     dataset_id: UUID
     user_id: UUID
-    # Name of the registered portable task resolver factory and its arguments.
+    # The name the run's task lists are registered under, and the arguments they
+    # were built with (see ``task_resolvers``).
     task_resolver: str
     task_resolver_args: dict[str, Any]
 
@@ -91,9 +93,31 @@ class PipelineRunSpec(RunSettings):
             return False
 
 
+def survives_json(value: Any) -> bool:
+    """Whether ``value`` reads back equal after a trip through JSON text.
+
+    What JSON cannot carry (an object, NaN) or carries differently (a set, a
+    tuple, a non-string key) does not.
+    """
+    try:
+        return json.loads(json.dumps(value, allow_nan=False)) == value
+    except (TypeError, ValueError, RecursionError):
+        return False
+
+
+@dataclass(frozen=True, kw_only=True)
+class ShardItem:
+    """One item of a shard: a ``Data`` row of the run's dataset, named by its id
+    and read by the worker, or a value that is no row, carried as it is (it
+    survives JSON)."""
+
+    data_id: UUID | None = None
+    value: Any = None
+
+
 @dataclass(frozen=True, kw_only=True)
 class Shard:
-    """What one worker is asked to do: which run, and which of its data items.
+    """What one worker is asked to do: which run, and which of its items.
 
     Only this package reads what is in a shard. Whatever starts a worker (a
     ``WorkerBackend``) is handed the shard's id and nothing else, and the worker
@@ -102,7 +126,8 @@ class Shard:
     """
 
     spec: PipelineRunSpec
-    data_ids: list[UUID]
+    # By their position in the shard, which is what an item's outcome names.
+    items: dict[int, ShardItem]
 
     @property
     def pipeline_run_id(self) -> UUID:
@@ -115,20 +140,26 @@ class Shard:
 
 @dataclass
 class ItemOutcome:
-    """How one data item ended: what a shard's item row holds of a ``run_tasks``
+    """How one item of a shard ended: what its item row holds of a ``run_tasks``
     result entry. Its status, and for a failed item the class name and the
-    scrubbed message of the failure. Nothing the item produced."""
+    scrubbed message of the failure. Nothing the item produced.
+
+    ``index`` is the item's position in its shard. ``data_id`` is the ``Data``
+    row the entry names: the item itself when it is one, else the row its tasks
+    stored it as, if any."""
 
     status: ItemStatus
-    data_id: UUID
+    index: int
+    data_id: UUID | None = None
     error_class: str | None = None
     error_message: str | None = None
 
     @classmethod
-    def from_entry(cls, entry: dict[str, Any]) -> Self:
+    def from_entry(cls, entry: dict[str, Any], index: int) -> Self:
         run_info = entry["run_info"]
         return cls(
             status=run_info.status,
+            index=index,
             data_id=entry["data_id"],
             error_class=getattr(run_info, "error_class", None),
             error_message=getattr(run_info, "error_message", None),
@@ -178,19 +209,3 @@ def count_usage(shard_result: ShardResult) -> None:
     if usage is not None:
         usage.add(shard_result.tokens_in, shard_result.tokens_out)
         usage.add_embedding(shard_result.embedding_tokens)
-
-
-def result_entries(
-    outcomes: list[ItemOutcome],
-    spec: PipelineRunSpec,
-    dataset_name: str,
-    source_of: Mapping[UUID, Mapping[str, Any]],
-) -> list[dict[str, Any]]:
-    """Outcomes as ``run_tasks`` result entries; ``source_of`` names where each
-    item came from, by its id (see ``ItemOutcome.to_entry``)."""
-    run = {
-        "pipeline_run_id": spec.pipeline_run_id,
-        "dataset_id": spec.dataset_id,
-        "dataset_name": dataset_name,
-    }
-    return [outcome.to_entry(run, source_of.get(outcome.data_id, {})) for outcome in outcomes]

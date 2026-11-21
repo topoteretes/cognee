@@ -1,4 +1,4 @@
-"""Run some data items of a pipeline run this process does not own.
+"""Run some items of a pipeline run this process does not own.
 
 The counterpart of a :class:`DataItemExecutor`: a worker an executor has
 started calls :func:`run_pipeline_shard` with the id of the shard it is for.
@@ -13,6 +13,7 @@ rows (``shard_store``).
 """
 
 import asyncio
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -44,7 +45,7 @@ async def run_pipeline_shard(shard_id: UUID) -> None:
     Raises when the shard cannot be taken (it has had a worker), when it cannot
     run at all (then why is stored on its row first), and when the result cannot
     be stored. A cancellation stores nothing: the run's owner works out from the
-    items' completion stamps what the worker had finished.
+    completion stamps of the shard's data rows what the worker had finished.
     """
     shard = await take_shard(shard_id)
     try:
@@ -68,16 +69,19 @@ async def run_pipeline_shard(shard_id: UUID) -> None:
 
 
 async def run_shard_items(shard: Shard) -> ShardResult:
-    """Run the data items ``shard`` names, of the run it describes.
+    """Run the items ``shard`` holds, of the run it describes.
 
-    Every item runs to its own end: one that fails is reported as errored and
-    the others carry on. An id that is not a data item of the run's dataset (any
-    more: it can be deleted between the run's planning and this shard's start) is
-    reported as errored too, and is never processed: a shard touches its own
-    dataset's rows only. Raises only when the shard cannot run at all (a missing
-    dataset, an unknown task resolver).
+    An item is a ``Data`` row of the run's dataset, read here by its id, or a
+    value that is no row, run as it is. Every item runs to its own end: one that
+    fails is reported as errored and the others carry on. An id that is not a
+    data item of the run's dataset (any more: it can be deleted between the
+    run's planning and this shard's start) is reported as errored too, and is
+    never processed: a shard touches its own dataset's rows only. Raises only
+    when the shard cannot run at all (a missing dataset, task lists that are not
+    registered in this process).
     """
-    spec, data_ids = shard.spec, shard.data_ids
+    spec = shard.spec
+    data_ids = [item.data_id for item in shard.items.values() if item.data_id is not None]
     user = await get_user(spec.user_id)
 
     async with get_relational_engine().get_async_session() as session:
@@ -86,24 +90,37 @@ async def run_shard_items(shard: Shard) -> ShardResult:
             raise LookupError(f"Dataset {spec.dataset_id} does not exist")
         rows = (
             (
-                await session.execute(
-                    select(Data).where(Data.dataset_id == spec.dataset_id, Data.id.in_(data_ids))
+                (
+                    await session.execute(
+                        select(Data).where(
+                            Data.dataset_id == spec.dataset_id, Data.id.in_(data_ids)
+                        )
+                    )
                 )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
+            if data_ids
+            else []
         )
 
-    items_by_id = {row.id: row for row in rows}
+    rows_by_id = {row.id: row for row in rows}
+    # What runs, by its position in the shard: the row or the value.
+    to_run = {
+        index: item.value if item.data_id is None else rows_by_id[item.data_id]
+        for index, item in shard.items.items()
+        if item.data_id is None or item.data_id in rows_by_id
+    }
     not_in_dataset = [
         ItemOutcome(
             status=ERRORED,
-            data_id=data_id,
+            index=index,
+            data_id=item.data_id,
             error_class="DataItemNotInDataset",
-            error_message=f"Data item {data_id} is not in dataset {spec.dataset_id}",
+            error_message=f"Data item {item.data_id} is not in dataset {spec.dataset_id}",
         )
-        for data_id in data_ids
-        if data_id not in items_by_id
+        for index, item in shard.items.items()
+        if index not in to_run
     ]
 
     resolve_tasks = validated_once(
@@ -111,22 +128,23 @@ async def run_shard_items(shard: Shard) -> ShardResult:
     )
     runner = DataItemRunner(spec, dataset, user)
 
-    async def outcome_of(data_item: Data) -> ItemOutcome | None:
+    async def outcome_of(index: int, data_item: Any) -> ItemOutcome | None:
         try:
             # Inside the try: an item whose task list cannot be resolved or is
             # invalid is that item's failure, not the shard's.
             entry = await runner.run_item(data_item, resolve_tasks(data_item))
         except Exception as error:
-            logger.error("Data item %s failed: %s", data_item.id, error, exc_info=error)
+            logger.error("Item %d of the shard failed: %s", index, error, exc_info=error)
             return ItemOutcome(
                 status=ERRORED,
-                data_id=data_item.id,
+                index=index,
+                data_id=shard.items[index].data_id,
                 error_class=type(error).__name__,
                 error_message=scrub_error_message(error),
             )
         # An item that reported nothing is not answered for here: the run's
         # owner then goes by its completion stamp.
-        return ItemOutcome.from_entry(entry) if entry else None
+        return ItemOutcome.from_entry(entry, index) if entry else None
 
     with operation_usage_scope() as usage, parent_run_scope(spec.pipeline_run_id):
         async with set_database_global_context_variables(dataset.id, dataset.owner_id):
@@ -134,9 +152,8 @@ async def run_shard_items(shard: Shard) -> ShardResult:
             # writing after this returns and the database context closes.
             outcomes = await run_all_or_cancel(
                 [
-                    asyncio.create_task(outcome_of(items_by_id[data_id]))
-                    for data_id in data_ids
-                    if data_id in items_by_id
+                    asyncio.create_task(outcome_of(index, data_item))
+                    for index, data_item in to_run.items()
                 ]
             )
 

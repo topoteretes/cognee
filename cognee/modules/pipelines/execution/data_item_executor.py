@@ -28,8 +28,11 @@ from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted_recor
 from cognee.modules.data.models import Data
 from cognee.modules.pipelines.models.DataItemStatus import is_item_stamped
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored
+from cognee.shared.logging_utils import get_logger
 
-from .messages import PipelineRunSpec, RunSettings
+from .messages import PipelineRunSpec, RunSettings, survives_json
+
+logger = get_logger("data_item_executor")
 
 
 @dataclass
@@ -56,7 +59,7 @@ class DataItemExecutor(Protocol):
     """Runs the data items of a run ``run_tasks`` owns.
 
     Only a run that may leave its process reaches an executor (see
-    ``portable_spec``): an incremental one, among other things.
+    ``portable_spec``). Which of its items may is the executor's to say.
 
     Returns one entry per item, in any order. For an item it handed back, the
     entry ``item_run.run_in_process`` returned. For an item that ran elsewhere,
@@ -114,38 +117,64 @@ def portable_spec(
       too. With backend access control every process binds a dataset's own
       stores; without it, a store configuration a call set for this context is
       known to this process alone;
-    - the run is incremental. Only then does a completion stamp mean "this item
-      is done", which is all the rollback has to go by when the executor fails
-      without results. A run that is not incremental reprocesses stamped items
-      and stamps none;
     - what it would send survives JSON.
+
+    Which items of such a run may leave is the executor's to say, by what the
+    item is and whether the run is incremental (``ShardedExecutor``).
+
+    ``run_tasks`` asks only when an executor would take the run, so a run that
+    must stay is logged with the reason. A resolver that is not portable may
+    say why itself (``stays_because``).
     """
     portable = getattr(task_resolver, "portable", None)
-    if (
-        portable is None
-        or llm_config is not None
+    if portable is None:
+        stays_because = getattr(task_resolver, "stays_because", None) or (
+            "its tasks are not registered task lists another process could rebuild "
+            "(see registered_tasks)"
+        )
+    elif (
+        llm_config is not None
         or embedding_config is not None
         or context_llm_config.get() is not None
         or context_embedding_config.get() is not None
-        or not (run.incremental_loading or run.data_cache)
-        or (
-            not backend_access_control_enabled()
-            and (
-                context_vector_db_config.get() is not None
-                or context_graph_db_config.get() is not None
-            )
-        )
     ):
-        return None
-    resolver_name, resolver_args = portable
-    spec = PipelineRunSpec(
-        **vars(run),
-        dataset_id=dataset_id,
-        user_id=user_id,
-        task_resolver=resolver_name,
-        task_resolver_args=resolver_args,
+        stays_because = "it has a per-call LLM or embedding configuration"
+    elif not backend_access_control_enabled() and (
+        context_vector_db_config.get() is not None or context_graph_db_config.get() is not None
+    ):
+        stays_because = (
+            "it has a per-call vector or graph store configuration, "
+            "and backend access control is off"
+        )
+    else:
+        resolver_name, resolver_args = portable
+        spec = PipelineRunSpec(
+            **vars(run),
+            dataset_id=dataset_id,
+            user_id=user_id,
+            task_resolver=resolver_name,
+            task_resolver_args=resolver_args,
+        )
+        if spec.survives_json():
+            return spec
+        changed = [f"extras[{key!r}]" for key in _keys_json_changes(run.extras)] + [
+            f"task argument {key!r}" for key in _keys_json_changes(resolver_args)
+        ]
+        stays_because = "what describes it to another process does not survive JSON" + (
+            f" ({', '.join(changed)})" if changed else ""
+        )
+    logger.info(
+        "Run %s (%s) keeps its items in this process: %s.",
+        run.pipeline_run_id,
+        run.pipeline_name,
+        stays_because,
     )
-    return spec if spec.survives_json() else None
+    return None
+
+
+def _keys_json_changes(values: dict[Any, Any]) -> list[Any]:
+    """The keys of ``values`` whose entry does not read back equal from JSON."""
+    return [key for key, value in values.items() if not survives_json({key: value})]
 
 
 async def run_items_with(

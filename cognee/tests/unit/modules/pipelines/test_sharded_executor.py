@@ -1,4 +1,4 @@
-"""``ShardedExecutor`` cuts a run's pending data items into shards for workers.
+"""``ShardedExecutor`` cuts a run's pending items into shards for workers.
 
 Which items go to workers, what a backend is handed and how the workers'
 answers become the run's result entries are the same whatever backend runs the
@@ -6,7 +6,6 @@ workers, so they are tested here against a stand-in backend and stand-in shard
 rows (the real rows are tested in ``test_shard_store``).
 """
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -15,6 +14,7 @@ import pytest
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.relational import get_relational_config
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
+from cognee.modules.data.models import Data
 from cognee.modules.operations.usage_accumulator import operation_usage_scope
 from cognee.modules.pipelines.execution import (
     COMPLETED,
@@ -24,11 +24,13 @@ from cognee.modules.pipelines.execution import (
     ItemRun,
     Shard,
     ShardedExecutor,
+    ShardItem,
     ShardResult,
     plan_shards,
     sharded_executor,
 )
 from cognee.modules.pipelines.execution.shard_store import ShardAnswer
+from cognee.modules.pipelines.execution.sharded_executor import item_size, worker_can_be_given
 from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored
 from cognee.modules.pipelines.models.PipelineRunShard import ShardStatus
@@ -38,8 +40,23 @@ PIPELINE = "cognify_pipeline"
 _real_run_stores = sharded_executor.run_stores
 
 
+def _row(kind="document", **fields):
+    """A data row of the run's dataset; ``kind`` says what a worker can run."""
+    row = Data(**({"id": uuid4(), "pipeline_status": {}} | fields))
+    row.kind = kind
+    return row
+
+
 def _items(count, kind="document"):
-    return [SimpleNamespace(id=uuid4(), kind=kind, pipeline_status={}) for _ in range(count)]
+    return [_row(kind) for _ in range(count)]
+
+
+def _shard(spec, data_ids):
+    """The shard of ``data_ids``, data rows by their position in it."""
+    return Shard(
+        spec=spec,
+        items={index: ShardItem(data_id=data_id) for index, data_id in enumerate(data_ids)},
+    )
 
 
 def _is_document(item) -> bool:
@@ -47,9 +64,7 @@ def _is_document(item) -> bool:
 
 
 def _stamped(dataset_id):
-    return SimpleNamespace(
-        id=uuid4(),
-        kind="document",
+    return _row(
         pipeline_status={
             PIPELINE: {str(dataset_id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED}
         },
@@ -93,9 +108,10 @@ def rows(monkeypatch):
 class _Backend:
     """Its workers answer for every item of their shard as completed, with 100,
     40 and 7 tokens used, except the workers of the shards in ``lost``, which
-    answer nothing. ``answer_for`` cuts what a worker answers for."""
+    answer nothing. ``answer_for`` cuts what a worker answers for, by the
+    positions of the shard's items."""
 
-    def __init__(self, rows, lost=(), answer_for=lambda index, data_ids: data_ids):
+    def __init__(self, rows, lost=(), answer_for=lambda index, positions: positions):
         self.rows, self.lost, self.answer_for = rows, set(lost), answer_for
         self.calls = []
 
@@ -103,11 +119,15 @@ class _Backend:
         self.calls.append((pipeline_run_id, shard_ids))
         for index, shard_id in enumerate(shard_ids):
             if index not in self.lost:
-                answered = self.answer_for(index, self.rows.shards[index].data_ids)
+                shard = self.rows.shards[index]
+                answered = self.answer_for(index, list(shard.items))
                 self.rows.answers[shard_id] = ShardAnswer(
                     status=ShardStatus.FINISHED,
                     result=ShardResult(
-                        outcomes=[ItemOutcome(status=COMPLETED, data_id=i) for i in answered],
+                        outcomes=[
+                            ItemOutcome(status=COMPLETED, index=at, data_id=shard.items[at].data_id)
+                            for at in answered
+                        ],
                         tokens_in=100,
                         tokens_out=40,
                         embedding_tokens=7,
@@ -116,7 +136,7 @@ class _Backend:
             await on_shard_ended(shard_id)
 
 
-def _item_run(portable_item=_is_document):
+def _item_run(portable_item=_is_document, **more):
     async def run_in_process(items):
         return [{"data_id": item.id, "run_info": "ran in process"} for item in items]
 
@@ -125,6 +145,7 @@ def _item_run(portable_item=_is_document):
         record_progress=AsyncMock(),
         portable_item=portable_item,
         source_fields=lambda item: {"data_name": f"name of {item.id}"},
+        **more,
     )
 
 
@@ -138,9 +159,15 @@ def _dataset(monkeypatch):
     monkeypatch.setattr(sharded_executor, "run_stores", lambda: dict(POSTGRES))
 
 
-def _by_stamp(completed, lost):
-    return [ItemOutcome(status=COMPLETED, data_id=data_id) for data_id in completed] + [
-        ItemOutcome(status=ERRORED, data_id=data_id, error_class=WORKER_LOST) for data_id in lost
+def _by_stamp(shard, completed, lost):
+    """What ``outcomes_of_unanswered`` says of the items of ``shard`` at these positions."""
+    return [
+        ItemOutcome(status=COMPLETED, index=at, data_id=shard.items[at].data_id) for at in completed
+    ] + [
+        ItemOutcome(
+            status=ERRORED, index=at, data_id=shard.items[at].data_id, error_class=WORKER_LOST
+        )
+        for at in lost
     ]
 
 
@@ -187,9 +214,7 @@ def test_a_shard_holds_at_least_one_item(rows):
 
 
 def _sized(*sizes, kind="document"):
-    return [
-        SimpleNamespace(id=uuid4(), kind=kind, pipeline_status={}, data_size=size) for size in sizes
-    ]
+    return [_row(kind, data_size=size) for size in sizes]
 
 
 def _sizes(shards):
@@ -210,17 +235,15 @@ def test_shards_cut_by_size_hold_what_fits_under_the_maximum():
 
 def test_an_item_larger_than_the_maximum_or_of_unknown_size_is_a_shard_by_itself():
     """Nothing is split or left out: an item over the maximum still goes to a worker,
-    alone, and so does one whose size is not known (it cannot be shown to fit)."""
-    large, unknown = _sized(250)[0], _items(1)[0]
-    stored_without_a_size = _sized(None)[0]
+    alone, and so does one whose size is not known (it cannot be shown to fit): a
+    row stored without a size."""
+    large, unknown = _sized(250)[0], _sized(None)[0]
     rest = _sized(70, 30)
 
-    stays, shards = plan_shards(
-        [*rest, unknown, large, stored_without_a_size], None, _is_document, max_shard_bytes=100
-    )
+    stays, shards = plan_shards([*rest, unknown, large], None, _is_document, max_shard_bytes=100)
 
     assert stays == []
-    assert shards == [[large], [unknown], [stored_without_a_size], rest]
+    assert shards == [[large], [unknown], rest]
 
 
 def test_a_run_that_fits_one_shard_by_size_stays_in_this_process():
@@ -269,9 +292,9 @@ async def test_a_run_cut_by_size_hands_out_its_shards_and_counts_their_items(run
 
     by_size = {item.data_size: item.id for item in items}
     assert rows.shards == [
-        Shard(spec=spec, data_ids=[by_size[60], by_size[40]]),
-        Shard(spec=spec, data_ids=[by_size[50], by_size[30], by_size[20]]),
-        Shard(spec=spec, data_ids=[by_size[10]]),
+        _shard(spec, [by_size[60], by_size[40]]),
+        _shard(spec, [by_size[50], by_size[30], by_size[20]]),
+        _shard(spec, [by_size[10]]),
     ]
     assert sorted(str(entry["data_id"]) for entry in entries) == sorted(str(i.id) for i in items)
     # Each shard counts the items it holds as progress, not a fixed number.
@@ -282,14 +305,54 @@ async def test_a_run_cut_by_size_hands_out_its_shards_and_counts_their_items(run
 
 
 @pytest.mark.asyncio
-async def test_a_small_run_never_reaches_the_backend(run_spec, rows):
+async def test_a_small_run_never_reaches_the_backend_and_says_why(run_spec, rows, info_lines):
     backend, item_run, items = _Backend(rows), _item_run(), _items(10)
+    lines = info_lines(sharded_executor)
+    spec = run_spec()
 
-    entries = await ShardedExecutor(backend, 10).run_items(run_spec(), items, item_run)
+    entries = await ShardedExecutor(backend, 10).run_items(spec, items, item_run)
 
     assert backend.calls == [] and rows.notes == []
     item_run.run_in_process.assert_awaited_once_with(items)
     assert [entry["data_id"] for entry in entries] == [item.id for item in items]
+    [line] = lines
+    assert line == (
+        f"Run {spec.pipeline_run_id} ({PIPELINE}) keeps its items in this process: 10 of the 10 "
+        "to process can go to a worker, which is no more than one shard (10 items)."
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_run_whose_items_no_worker_can_take_says_what_keeps_them(
+    run_spec, rows, info_lines
+):
+    """Counted by what keeps them: items the rebuilt tasks do not cover, and
+    items a worker cannot be given in this kind of run."""
+    lines = info_lines(sharded_executor)
+    items = [*_items(3, kind="code"), *_items(2)]
+
+    await ShardedExecutor(_Backend(rows), max_shard_bytes=1000).run_items(
+        run_spec(incremental_loading=False), items, _item_run()
+    )
+
+    [line] = lines
+    assert line.endswith(
+        "keeps its items in this process: 0 of the 5 to process can go to a worker, which is no "
+        "more than one shard (1000 bytes). 3 cannot: the tasks another process rebuilds do not "
+        "cover the item. 2 cannot: a data row goes to a worker in an incremental run only."
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_nothing_left_to_process_says_nothing(run_spec, rows, info_lines):
+    lines = info_lines(sharded_executor)
+    spec = run_spec()
+
+    await ShardedExecutor(_Backend(rows), 10).run_items(
+        spec, [_stamped(spec.dataset_id)], _item_run()
+    )
+
+    assert lines == []
 
 
 @pytest.mark.asyncio
@@ -368,9 +431,9 @@ async def test_pending_items_go_to_workers_and_the_rest_runs_here_first(run_spec
     assert ran_here_before_workers == done + repositories
     # The pending documents were handed out as shards of the run, in order.
     assert rows.shards == [
-        Shard(spec=spec, data_ids=[item.id for item in documents[0:10]]),
-        Shard(spec=spec, data_ids=[item.id for item in documents[10:20]]),
-        Shard(spec=spec, data_ids=[item.id for item in documents[20:25]]),
+        _shard(spec, [item.id for item in documents[0:10]]),
+        _shard(spec, [item.id for item in documents[10:20]]),
+        _shard(spec, [item.id for item in documents[20:25]]),
     ]
     # The backend got the run and the ids of its shards, and nothing else.
     assert backend.calls == [(spec.pipeline_run_id, rows.ids)]
@@ -406,22 +469,24 @@ async def test_what_no_worker_answered_for_is_read_from_the_completion_stamps(
     spec, items = run_spec(), _items(30)
     second, third = [item.id for item in items[10:20]], [item.id for item in items[20:]]
     read_stamps = AsyncMock(
-        side_effect=lambda spec, data_ids: _by_stamp(data_ids[:1], data_ids[1:])
+        side_effect=lambda shard, positions: _by_stamp(shard, positions[:1], positions[1:])
     )
-    monkeypatch.setattr(sharded_executor, "outcomes_by_stamp", read_stamps)
+    monkeypatch.setattr(sharded_executor, "outcomes_of_unanswered", read_stamps)
     backend = _Backend(
         rows,
         lost={1},
         # The third worker answers for all but its last two items.
-        answer_for=lambda index, data_ids: data_ids[:-2] if index == 2 else data_ids,
+        answer_for=lambda index, positions: positions[:-2] if index == 2 else positions,
     )
 
     entries = await ShardedExecutor(backend, 10).run_items(spec, items, _item_run())
 
     assert [call.args for call in read_stamps.await_args_list] == [
-        (spec, second),
-        (spec, third[-2:]),
+        (rows.shards[1], list(range(10))),
+        (rows.shards[2], [8, 9]),
     ]
+    assert [rows.shards[1].items[at].data_id for at in range(10)] == second
+    assert [rows.shards[2].items[at].data_id for at in (8, 9)] == third[-2:]
     failed = [entry for entry in entries if isinstance(entry["run_info"], PipelineRunErrored)]
     assert [entry["data_id"] for entry in failed] == second[1:] + third[-1:]
     assert {entry["run_info"].error_class for entry in failed} == {WORKER_LOST}
@@ -456,6 +521,95 @@ async def test_what_the_workers_used_counts_for_the_run_once(run_spec, rows):
     assert (usage.tokens_in, usage.tokens_out, usage.embedding_tokens) == (300, 120, 21)
 
 
+# ---- items that are values, not data rows ----
+
+
+def test_what_a_worker_can_be_given_depends_on_the_item_and_the_run():
+    """A data row goes by its id, in an incremental run only: only there does its
+    completion stamp say whether a lost worker had finished it. Any other item
+    goes as its JSON value, in a run that is not incremental, where it has no
+    stamp to be skipped by."""
+    row = _row()
+    assert worker_can_be_given(row, incremental=True)
+    assert not worker_can_be_given(row, incremental=False)
+
+    for value in ({"rows": [[0, 10]]}, [1, 2], "text", 3):
+        assert worker_can_be_given(value, incremental=False)
+        assert not worker_can_be_given(value, incremental=True)
+
+    # What does not read back equal from JSON text cannot be described to a worker.
+    for value in (object(), {1, 2}, (1, 2), {1: "x"}, float("nan")):
+        assert not worker_can_be_given(value, incremental=False)
+
+
+def test_an_item_is_sized_by_its_stored_bytes_or_its_json_text():
+    assert item_size(_row(data_size=1234)) == 1234
+    assert item_size(_row()) is None
+    assert item_size({"text": "é"}) == len('{"text": "\\u00e9"}')
+
+
+def _values_run(**more):
+    """An ``ItemRun`` for value items, which name where they came from by themselves."""
+    return ItemRun(
+        run_in_process=AsyncMock(return_value=[]),
+        record_progress=AsyncMock(),
+        portable_item=lambda item: True,
+        source_fields=lambda item: {"data_name": f"part {item['part']}"},
+        **more,
+    )
+
+
+@pytest.mark.asyncio
+async def test_values_of_a_run_that_is_not_incremental_go_to_workers_as_they_are(run_spec, rows):
+    """A lost worker's value has no completion stamp to go by: it is reported
+    failed, and so is every other value of that shard."""
+    spec = run_spec(incremental_loading=False)
+    values = [{"part": index} for index in range(11)]
+    item_run = _values_run()
+
+    entries = await ShardedExecutor(_Backend(rows, lost={1}), 10).run_items(spec, values, item_run)
+
+    assert rows.shards == [
+        Shard(
+            spec=spec, items={at: ShardItem(value=value) for at, value in enumerate(values[:10])}
+        ),
+        Shard(spec=spec, items={0: ShardItem(value=values[10])}),
+    ]
+    # Nothing stays in this process.
+    item_run.run_in_process.assert_awaited_once_with([])
+    assert len(entries) == 11
+    assert [entry["data_name"] for entry in entries] == [f"part {index}" for index in range(11)]
+    assert all(entry["data_id"] is None for entry in entries)
+    [lost] = [entry for entry in entries if isinstance(entry["run_info"], PipelineRunErrored)]
+    assert (lost["data_name"], lost["run_info"].error_class) == ("part 10", WORKER_LOST)
+    assert rows.notes[1:] == [("unanswered", 1, [ERRORED])]
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_is_not_incremental_keeps_its_data_rows_here(run_spec, rows):
+    """A data row of such a run has no stamp a lost worker could be judged by, so
+    every row runs here, a row stamped complete too: such a run reprocesses it."""
+    spec = run_spec(incremental_loading=False)
+    items = [_stamped(spec.dataset_id), *_items(20)]
+    backend, item_run = _Backend(rows), _item_run()
+
+    await ShardedExecutor(backend, 10).run_items(spec, items, item_run)
+
+    assert backend.calls == [] and rows.notes == []
+    item_run.run_in_process.assert_awaited_once_with(items)
+
+
+@pytest.mark.asyncio
+async def test_values_of_an_incremental_run_stay_here(run_spec, rows):
+    backend, item_run = _Backend(rows), _values_run()
+    values = [{"part": index} for index in range(20)]
+
+    await ShardedExecutor(backend, 10).run_items(run_spec(), values, item_run)
+
+    assert backend.calls == [] and rows.notes == []
+    item_run.run_in_process.assert_awaited_once_with(values)
+
+
 # ---- a run that ends before its shards are answered for ----
 
 
@@ -488,7 +642,7 @@ async def test_a_run_that_fails_after_reading_the_answers_counts_usage_once(
     spec = run_spec()
     monkeypatch.setattr(
         sharded_executor,
-        "outcomes_by_stamp",
+        "outcomes_of_unanswered",
         AsyncMock(side_effect=OSError("the connection was lost")),
     )
 
