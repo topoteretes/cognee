@@ -1,5 +1,6 @@
 import asyncio
 import re
+from contextlib import nullcontext
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -15,6 +16,7 @@ from cognee.infrastructure.llm.config import LLMConfig
 from cognee.memory.entries import normalize_scope
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.observability import (
     COGNEE_RECALL_ROUTE_RULE,
     COGNEE_RECALL_SCOPE,
@@ -46,9 +48,11 @@ from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
+from cognee.modules.search.methods.node_name_scope import node_name_scope
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.search.types.SearchType import resolve_deprecated_search_type
+from cognee.modules.session_lifecycle.usage_tracking import track_session_usage
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -384,11 +388,14 @@ async def _fetch_session_context(
     session_id: str,
     context_profile: str,
     user: str | None = None,
+    record_context_usage: bool = False,
 ) -> list[ResponseSessionContextEntry]:
     """Render active session-context lessons for one profile as a one-item list.
 
-    Read-only: uses the deterministic builder with ``stamp_served=False`` so it never updates
-    served metadata. Returns an empty list when no lessons match the profile.
+    Read-only by default. ``record_context_usage`` opts into stamping returned guidance,
+    and only in the caller's own session: a read grant on someone else's session never
+    writes to it. Published structured summaries are included without raw transcript
+    fallback.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
     from cognee.infrastructure.session.session_context_builder import build_active_context_block
@@ -410,14 +417,20 @@ async def _fetch_session_context(
         session_id=session_id,
         query=query_text,
         context_profile=context_profile,
-        stamp_served=False,
+        stamp_served=record_context_usage and cache_user_id == caller_user_id,
     )
-    if not block:
+    from cognee.modules.session_distillation.summary import latest_session_summary
+
+    summary = await latest_session_summary(sm, cache_user_id, session_id)
+    if not block and not summary:
         return []
 
     return [
         ResponseSessionContextEntry(
-            content=block, context_profile=context_profile, source="session_context"
+            content=block,
+            context_profile=context_profile,
+            source="session_context",
+            session_summary=summary,
         )
     ]
 
@@ -426,6 +439,23 @@ def _scope_should_forward_resolved(scope: str | list[str] | None) -> bool:
     if isinstance(scope, str):
         return scope in {"all", "graph_context"}
     return bool(scope and {"all", "graph_context"}.intersection(scope))
+
+
+async def _session_usage_scope(session_id: str | None, user):
+    """Bind an explicit session as the usage target for the whole recall.
+
+    Covers retrieval-stage LLM and embedding calls, not just the answer the
+    session turn already records. Without a session_id, or before cognee has a
+    default user, usage stays where it was attributed before.
+    """
+    if not session_id:
+        return nullcontext()
+    if user is None:
+        try:
+            user = await get_default_user()
+        except (DatabaseNotCreatedError, UserNotFoundError):
+            return nullcontext()
+    return track_session_usage(session_id, user.id)
 
 
 @telemetry_on_error("cognee.recall ERRORED")
@@ -440,6 +470,7 @@ async def recall(
     scope: str | list[str] | None = None,
     system_prompt: str | None = None,
     system_prompt_path: str = "answer_simple_question.txt",
+    node_type: type | None = NodeSet,
     node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
     # only_context / verbose inspect retriever-specific shapes. Pin query_type:
@@ -448,6 +479,7 @@ async def recall(
     only_context: bool = False,
     session_id: str | None = None,
     context_profile: str = "qa",
+    record_context_usage: bool = False,
     wide_search_top_k: int | None = None,
     triplet_distance_penalty: float | None = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
@@ -488,6 +520,15 @@ async def recall(
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
             automatically. If False, fall back to HYBRID_COMPLETION.
+        node_type: What the names in ``node_name`` are, as in ``search()``:
+            ``NodeSet`` (the default) means node-set tags; any other graph node
+            type (``SchemaColumn``, ``TextDocument``, ``Entity``, ...) means the
+            named nodes of that type and their one-hop neighbours. The router
+            then picks only a type that applies a graph scope (``TEMPORAL`` and
+            ``CODING_RULES`` apply node sets only); a pinned type that cannot
+            raises ``QueryValidationError``. ``None`` with names raises too.
+        node_name: Names to scope the graph search to, read according to
+            ``node_type``. Session sources are not scoped by it.
         response_model: Pydantic model class for structured completion output.
             Forwarded to the retriever, which validates the LLM answer against
             it; each result then carries the validated payload as a dict in its
@@ -594,6 +635,11 @@ async def recall(
             ),
             name="InvalidCodeQueryError",
         )
+    # Names without a type are refused here, before any lane runs, so a call is
+    # accepted or refused the same way locally and over serve(), whatever its
+    # scope: the graph lane would raise the same error later, a session-only call
+    # would silently drop the names, and the wire cannot tell None from omitted.
+    node_name_scope(node_type, node_name)
     # "on_empty" means: go back to the source database only when cognee lacks
     # context — so tools must observe every other source's results first.
     if tools_trigger == "on_empty" and "tools" in sources:
@@ -645,10 +691,12 @@ async def recall(
                 top_k=top_k,
                 scope=forward_scope,
                 system_prompt=system_prompt,
+                node_type=node_type,
                 node_name=node_name,
                 only_context=only_context,
                 session_id=session_id,
                 context_profile=context_profile,
+                record_context_usage=record_context_usage,
                 verbose=verbose,
                 include_references=include_references,
                 response_schema=(
@@ -664,7 +712,8 @@ async def recall(
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
             return results
 
-        async with record_operation("recall", user=user, session_id=session_id):
+        usage_scope = await _session_usage_scope(session_id, user)
+        async with usage_scope, record_operation("recall", user=user, session_ids=[session_id]):
             merged: list[RecallResponse] = []
 
             async def _run_session() -> list[RecallResponse]:
@@ -700,6 +749,7 @@ async def recall(
                         session_id=session_id,
                         context_profile=context_profile,
                         user=user,
+                        record_context_usage=record_context_usage,
                     )
                 )
 
@@ -744,7 +794,11 @@ async def recall(
                 # Cypher off means no Cypher types. Keyed on LLM availability, not on
                 # the extractor that built the graph. An explicit query_type is not
                 # rerouted; with no LLM a completion type runs with only_context=True.
-                constraints = RoutingConstraints.from_config(llm_config)
+                # A node_name filter also limits routing to the types that apply it,
+                # as node_type reads it: node-set tags, or a typed graph scope.
+                constraints = RoutingConstraints.from_config(
+                    llm_config, node_type=node_type, node_name=node_name
+                )
                 fallback_decision = default_route(constraints)
 
                 # routed_rule is set only when the router chose the type, so the
@@ -899,6 +953,7 @@ async def recall(
                         system_prompt_path=system_prompt_path,
                         system_prompt=system_prompt,
                         top_k=top_k,
+                        node_type=node_type,
                         node_name=node_name,
                         node_name_filter_operator=node_name_filter_operator,
                         only_context=search_only_context,

@@ -1,24 +1,38 @@
 import asyncio
+import contextvars
 import hashlib
 import json
 import os
 import re
+import threading
 from collections import Counter
+from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import AsyncExitStack, asynccontextmanager
+from typing import Any
 
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from cognee.infrastructure.databases.postgres.admin import create_pg_database_if_not_exists
+from cognee.infrastructure.databases.postgres.admin import (
+    create_pg_database_if_not_exists,
+    drop_pg_database_if_exists,
+)
 from cognee.infrastructure.databases.relational.config import get_relational_config
 from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.data.models import Data
+from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.dlt_row_data import DltRowData, DltRows
 from cognee.tasks.ingestion.dlt_utils import (
     DOCUMENT_COLUMN_HINTS,
+    FORGET_TABLE_ATTR,
     NODE_SET_COLUMN,
     STRUCTURE_COLUMN,
+    UNSCOPED_PIPELINE_NAME,
+    apply_dlt_runtime_defaults,
     document_source_tag,
+    pipeline_name_for_scope,
     pipeline_name_for_source,
 )
 from cognee.tasks.ingestion.exceptions.exceptions import (
@@ -35,20 +49,136 @@ except ImportError:
 
 logger = get_logger("ingest_dlt_source")
 
-# Serializes dlt staging runs: one shared pipeline name means one shared dlt
-# working directory, which concurrent runs corrupt (see the lock's use below).
-# Loop-agnostic: module-level, so it outlives any single event loop.
-_staging_lock = LoopAgnosticLock()
+# dlt staging locks, one per pipeline and one per staging dataset. Loop-agnostic and
+# module-level, so they outlive any single event loop. One entry per pipeline or dataset
+# name this process staged, never evicted: a lock dropped while another run holds or waits
+# for it would let a third run in.
+_staging_locks: dict[str, LoopAgnosticLock] = {}
+_staging_locks_mutex = threading.Lock()
+
+
+def _staging_lock(key: str) -> LoopAgnosticLock:
+    with _staging_locks_mutex:
+        return _staging_locks.setdefault(key, LoopAgnosticLock())
+
+
+@asynccontextmanager
+async def _staging(pipeline_name: str, dataset_name: str) -> AsyncIterator[None]:
+    """Exclusive use of one staging dataset and one dlt pipeline's working directory.
+
+    A staging dataset is one database every pipeline of that dataset loads into, and that
+    a drop removes. A pipeline's working directory is not safe for concurrent runs:
+    normalize's package cleanup deletes folders under the other run's feet. Runs on other
+    datasets and pipelines go on meanwhile, so a connector that waits on its provider
+    (Slack's rate limits) holds up only its own dataset. Taken dataset first, then pipeline,
+    by every caller: waiting for a busy dataset holds no pipeline, so a drop queued behind a
+    run never keeps the pipeline every CSV and database source shares.
+    """
+    async with (
+        _staging_lock(f"dataset:{dataset_name}"),
+        _staging_lock(f"pipeline:{pipeline_name}"),
+    ):
+        yield
+
+
+# The threads dlt walks run on. A walk holds a thread for its whole length and bridges back
+# to the event loop on every row (``extraction_checkpoint``), where the coroutine may need
+# the loop's default executor (``getaddrinfo`` for a new Postgres connection). On the
+# default executor, walks on enough datasets took every thread that coroutine needs and the
+# process wedged; on threads of their own they never can. A walk works on one dataset, so
+# the pool is as large as the number of datasets this process works on at once
+# (``DATASET_QUEUE_MAX_CONCURRENT``). A walk waiting for a thread holds only its own
+# dataset's and pipeline's staging locks, which nothing else but work on them needs.
+_walk_pool: ThreadPoolExecutor | None = None
+_walk_pool_mutex = threading.Lock()
+
+
+def _walk_executor() -> ThreadPoolExecutor:
+    global _walk_pool
+    with _walk_pool_mutex:
+        if _walk_pool is None:
+            from cognee.infrastructure.databases.dataset_queue.queue import (
+                get_dataset_queue_settings,
+            )
+
+            size = max(1, int(get_dataset_queue_settings().max_concurrent))
+            _walk_pool = ThreadPoolExecutor(max_workers=size, thread_name_prefix="cognee-dlt-walk")
+            logger.info("dlt walks run on a pool of %s threads", size)
+        return _walk_pool
+
+
+def reset_walk_pool() -> None:
+    """Drop the walk pool, so the next walk builds one from the current settings. Walks in
+    flight finish on the old pool."""
+    global _walk_pool
+    with _walk_pool_mutex:
+        pool, _walk_pool = _walk_pool, None
+    if pool is not None:
+        pool.shutdown(wait=False)
+
+
+async def _run_walk(pipeline, dlt_source, run_kwargs: dict) -> Any:
+    """``pipeline.run`` on a walk thread, with the caller's context, as ``to_thread`` gives.
+
+    A thread cannot be stopped, so a cancelled caller waits for a walk that already started
+    before it lets the cancellation through: the staging locks around this call then live as
+    long as the walk does, and no second run starts on its pipeline meanwhile. A walk still
+    waiting for a thread is dropped at once.
+    """
+    context = contextvars.copy_context()
+    walk = _walk_executor().submit(context.run, pipeline.run, dlt_source, **run_kwargs)
+    try:
+        return await asyncio.shield(asyncio.wrap_future(walk))
+    except asyncio.CancelledError:
+        if not walk.cancel():
+            finished = asyncio.wrap_future(walk)
+            while not walk.done():
+                try:
+                    await asyncio.wait({finished})
+                except asyncio.CancelledError:
+                    pass  # cancelled again: the walk still has to end first
+        raise
+
+
+# Marks a resource whose rows already pass through the NUL step, so staging it again does not
+# add the step a second time.
+_NUL_STRIPPED_ATTR = "cognee_nul_stripped"
 
 # Strict identifier pattern — only allow alphanumerics, underscores, dots, and hyphens
 _SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
+
+
+def strip_nul_from_rows(dlt_source) -> None:
+    """Remove NUL characters from every row a document source yields, before dlt stages it.
+
+    PostgreSQL rejects NUL in text, so one document with it fails the load of its whole dlt
+    package, and every retry of that pending package. Every document connector emits the same
+    row contract and is staged here, so the rule lives here once, and it is the one the graph
+    and vector adapters use: the character is removed, not replaced.
+    """
+    resources = getattr(dlt_source, "resources", None)
+    for resource in resources.values() if resources is not None else [dlt_source]:
+        if not getattr(resource, _NUL_STRIPPED_ATTR, False):
+            resource.add_map(sanitize_relational_payload)
+            setattr(resource, _NUL_STRIPPED_ATTR, True)
+
+
+VALID_WRITE_DISPOSITIONS = ("merge", "append", "replace")
+
+
+def require_valid_write_disposition(write_disposition) -> None:
+    if write_disposition not in VALID_WRITE_DISPOSITIONS:
+        raise InvalidDLTArgumentError(
+            message=f"Invalid write_disposition '{write_disposition}'. "
+            f"Must be one of: {VALID_WRITE_DISPOSITIONS}"
+        )
 
 
 async def ingest_dlt_source(
     dlt_source,
     dataset_name: str,
     primary_key: str | None = None,
-    write_disposition: str = "replace",
+    write_disposition: str | None = "replace",
     max_rows_per_table: int | None = None,
 ) -> DltRows:
     """
@@ -64,19 +194,21 @@ async def ingest_dlt_source(
         primary_key: Optional primary key column name. If not provided, auto-detected
                      from schema or defaults to 'id' or first column.
         write_disposition: DLT write disposition. One of:
-            - "merge" (default): Upsert rows by primary key. Existing rows with the same
+            - "replace" (default): Drop and recreate the table on each run.
+            - "merge": Upsert rows by primary key. Existing rows with the same
               PK are updated; new rows are inserted.
             - "append": Always insert new rows without deduplication.
-            - "replace": Drop and recreate the table on each run.
+            - None: each resource runs under the disposition it declares. For
+              sources whose resources declare "merge" (see
+              ``document_write_disposition``).
     Returns:
         List[DltRowData]: Per-row data objects for downstream processing.
     """
 
-    valid_dispositions = ("merge", "append", "replace")
-    if write_disposition not in valid_dispositions:
-        raise InvalidDLTArgumentError(
-            message=f"Invalid write_disposition '{write_disposition}'. Must be one of: {valid_dispositions}"
-        )
+    apply_dlt_runtime_defaults()
+
+    if write_disposition is not None:
+        require_valid_write_disposition(write_disposition)
 
     original_dataset_name = dataset_name
     dataset_name = _to_safe_ident(dataset_name)
@@ -100,13 +232,15 @@ async def ingest_dlt_source(
             "Only 'sqlite' and 'postgres' are supported."
         )
 
-    # Build run kwargs based on disposition
-    run_kwargs = {
-        "write_disposition": write_disposition,
-    }
+    # Build run kwargs based on disposition. A disposition passed to run()
+    # overrides the one every resource declares, so None passes nothing.
+    run_kwargs = {}
+    if write_disposition is not None:
+        run_kwargs["write_disposition"] = write_disposition
     # Only pass primary_key for merge disposition (required for upsert).
     # When the user didn't provide an explicit primary_key, omit it so dlt
-    # can auto-detect PKs from the source schema per table.
+    # can auto-detect PKs from the source schema per table. Resources running
+    # under their own disposition (None) keep their own key too.
     if write_disposition == "merge" and primary_key:
         run_kwargs["primary_key"] = primary_key
     if document_source_tag(dlt_source):
@@ -114,26 +248,46 @@ async def ingest_dlt_source(
         # stored as json on the row; without the hint dlt normalizes it into a
         # child table or flattened columns.
         run_kwargs["columns"] = DOCUMENT_COLUMN_HINTS
+        strip_nul_from_rows(dlt_source)
 
-    # Every staging run shares one dlt pipeline name, and dlt's working
-    # directory for a pipeline is NOT safe for concurrent runs: normalize's
-    # package cleanup deletes folders under the other run's feet. The add
-    # pipeline processes items concurrently (two CSVs in one add() reach the
-    # dlt_csv_loader in parallel), so staging must serialize here.
-    async with _staging_lock:
+    # The add pipeline processes items concurrently (two CSVs in one add() reach the
+    # dlt_csv_loader in parallel), so staging is exclusive per pipeline and dataset.
+    pipeline_name = pipeline_name_for_source(dlt_source, original_dataset_name)
+    async with _staging(pipeline_name, dataset_name):
         pipeline = dlt.pipeline(
-            pipeline_name=pipeline_name_for_source(dlt_source, original_dataset_name),
+            pipeline_name=pipeline_name,
             destination=destination,
             dataset_name=dataset_name,
         )
         try:
             # dlt's pipeline.run() is synchronous and potentially long-running;
-            # run it in a thread to avoid blocking the async event loop.
-            load_info = await asyncio.to_thread(pipeline.run, dlt_source, **run_kwargs)
+            # run it on a walk thread to avoid blocking the async event loop.
+            load_info = await _run_walk(pipeline, dlt_source, run_kwargs)
         except Exception as e:
             raise DLTIngestionError(
                 message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
             ) from e
+        forgotten = getattr(dlt_source, FORGET_TABLE_ATTR, None)
+        if forgotten:
+            scope = forgotten.removeprefix(f"{original_dataset_name}.")
+            owner_name = pipeline_name_for_scope(scope, original_dataset_name)
+            try:
+                async with AsyncExitStack() as stack:
+                    if owner_name != pipeline_name:
+                        # <dataset>.<table> loads a pipeline of its own; the bare table's
+                        # pipeline may be loading it right now. The dataset lock is already
+                        # held, so only the pipeline's is taken, in the documented order.
+                        await stack.enter_async_context(_staging_lock(f"pipeline:{owner_name}"))
+                    await asyncio.to_thread(
+                        _purge_forgotten_table, pipeline, owner_name, destination, scope
+                    )
+            except Exception as e:
+                raise DLTIngestionError(
+                    message=f"Table '{forgotten}' was emptied but its staging copy or state "
+                    f"could not be deleted for dataset '{original_dataset_name}'; "
+                    f"forget it again: {e}"
+                ) from e
+        key_hints = _dlt_key_hints(_source_tables(pipeline, dlt_source))
 
         # An incremental source can emit no rows (or only update its cursor),
         # so its load package need not contain a table job. Its previously
@@ -185,6 +339,7 @@ async def ingest_dlt_source(
         raise DLTIngestionError(
             message=f"Failed to extract schema from DLT database '{dlt_db_name}': {e}"
         ) from e
+    _apply_key_hints(filtered_schema, key_hints)
 
     # Read rows from each table and produce DltRowData objects
     from cognee.tasks.ingestion.config import get_ingestion_config
@@ -206,6 +361,90 @@ async def ingest_dlt_source(
         ) from e
 
     return DltRows(row_data_list, loaded_tables=filtered_schema)
+
+
+def _purge_forgotten_table(pipeline, owner_name: str, destination, scope: str) -> None:
+    """Empty a forgotten table everywhere dlt keeps its text, and reset its state.
+
+    That is its rows and nested tables in the dataset and in ``<dataset>_staging`` (a merge
+    load never truncates it), and the ``_dlt_pipeline_state`` rows of its pipeline. Cloud
+    spells the table ``<dataset>.<table>``, which loads a pipeline of its own: the bare
+    table's pipeline (``owner_name``, named by the raw ``scope``) then supplies the nested
+    tables, restored from the destination when this process has no copy of it, and loses its
+    cursor and state.
+    """
+    import dlt
+    from dlt.common.schema.utils import get_nested_tables
+
+    owner = pipeline
+    if owner_name != pipeline.pipeline_name:
+        owner = dlt.pipeline(
+            pipeline_name=owner_name,
+            destination=destination,
+            dataset_name=pipeline.dataset_name,
+        )
+
+        # The owner never loaded the empty table, so give it the cleared state row itself:
+        # a worker with its own copy of the owner's directory restores only a newer row.
+        # ``run`` restores the owner from the destination first, which is also what supplies
+        # its schema on a pod without a local copy.
+        @dlt.resource(name=scope, write_disposition="replace")
+        def cleared():
+            dlt.current.resource_state().clear()
+            yield []
+
+        owner.run(cleared())
+    table = pipeline.default_schema.naming.normalize_table_identifier(scope)
+    nested = get_nested_tables(owner.default_schema.tables, table) if owner.schema_names else []
+    tables = [t["name"] for t in nested] or [table]
+
+    with pipeline.sql_client() as client:
+        _empty_tables(client, tables)
+        with client.with_staging_dataset():
+            _empty_tables(client, tables)
+        _delete_state_rows(client, {pipeline.pipeline_name, owner_name})
+
+
+def _empty_tables(client, tables: list[str]) -> None:
+    present = [table for table in tables if _table_exists(client, table)]
+    if present:
+        client.truncate_tables(*present)
+
+
+def _delete_state_rows(client, pipeline_names: set[str]) -> None:
+    """Delete the state rows that may hold text; dlt has no API for it.
+
+    dlt keeps a state row per state-changing load and restores from the destination the row of
+    the highest load id (``get_stored_state``), and only one at least as new as a worker's local
+    copy. Each pipeline therefore keeps that row, the cleared state its last load wrote: a worker
+    with its own pipeline directory must find it, or it keeps its old cursor and the re-selected
+    table stays empty.
+    """
+    if not _table_exists(client, "_dlt_pipeline_state"):
+        return
+    state = client.make_qualified_table_name("_dlt_pipeline_state")
+    for name in sorted(pipeline_names):
+        rows = client.execute_sql(
+            f"SELECT _dlt_load_id FROM {state} WHERE pipeline_name = %s "
+            "ORDER BY _dlt_load_id DESC LIMIT 1",
+            name,
+        )
+        if rows:
+            client.execute_sql(
+                f"DELETE FROM {state} WHERE pipeline_name = %s AND _dlt_load_id <> %s",
+                name,
+                rows[0][0],
+            )
+
+
+def _table_exists(client, table: str) -> bool:
+    from dlt.destinations.exceptions import DatabaseUndefinedRelation
+
+    try:
+        client.execute_sql(f"SELECT 1 FROM {client.make_qualified_table_name(table)} LIMIT 1")
+    except DatabaseUndefinedRelation:
+        return False
+    return True
 
 
 async def _extract_dlt_schema(
@@ -263,6 +502,130 @@ async def _extract_dlt_schema(
         )
 
     return schema, filtered_schema
+
+
+def _loaded_schema(pipeline, dlt_source):
+    """The dlt schema holding the tables this run loaded.
+
+    Unscoped sources share one pipeline, and dlt keeps the first schema that
+    pipeline ever saw as its default. A source carries its own schema (a SQL
+    database's is ``sql_database``), so its tables live there, not in the
+    default; a bare resource (a CSV) joins the default schema.
+    """
+    from dlt.extract.source import DltSource
+
+    if isinstance(dlt_source, DltSource):
+        return pipeline.schemas[dlt_source.schema.name]
+    return pipeline.default_schema
+
+
+def _source_tables(pipeline, dlt_source) -> list:
+    """The table hints of the resources this run loaded, named as dlt staged them.
+
+    Read from the resources, never from the pipeline's schema: unscoped sources
+    share one pipeline, and dlt merges each run's tables into its schema without
+    ever removing a reference, so that schema still holds the keys of every source
+    an earlier run staged under the same table name.
+
+    Resource hints carry the source's own spelling; the loaded schema's naming
+    convention gives the names the staging tables and columns were created with.
+    A resource whose table name depends on its items has no static hints, so its
+    tables get no keys; that is said once per resource.
+    """
+    from dlt.common.schema.utils import normalize_table_identifiers
+    from dlt.extract.source import DltSource
+
+    if isinstance(dlt_source, DltSource):
+        resources = list(dlt_source.resources.selected.values())
+    else:
+        resources = [dlt_source]
+    naming = _loaded_schema(pipeline, dlt_source).naming
+
+    tables = []
+    for resource in resources:
+        if resource.has_dynamic_table_name:
+            logger.warning(
+                "Resource %r names its tables per item, so dlt has no key hints for them: "
+                "its rows get no foreign key edges.",
+                resource.name,
+            )
+            continue
+        tables.append(normalize_table_identifiers(resource.compute_table_schema(), naming))
+    return tables
+
+
+def _dlt_key_hints(tables) -> dict[str, dict]:
+    """Each table's primary and foreign keys, as dlt's table hints record them.
+
+    dlt creates its staging tables without key constraints, so reflecting them finds
+    none; the source's keys survive only as hints. ``references`` holds one entry
+    per referenced table, merging every foreign key to it into two aligned column
+    lists, which are paired back into one entry per column, in order. A composite
+    key's columns stay next to each other; ``_resolve_fk_references`` groups them.
+    """
+    return {
+        table["name"]: {
+            "primary_key": [
+                name
+                for name, column in table.get("columns", {}).items()
+                if column.get("primary_key")
+            ],
+            "foreign_keys": [
+                {"column": column, "ref_table": ref["referenced_table"], "ref_column": ref_column}
+                for ref in table.get("references") or []
+                if _aligned_reference(table["name"], ref)
+                for column, ref_column in zip(ref["columns"], ref["referenced_columns"])
+            ],
+        }
+        for table in tables
+    }
+
+
+def _aligned_reference(table_name: str, ref: dict) -> bool:
+    """Whether a reference pairs each of its columns with one referenced column."""
+    if len(ref["columns"]) == len(ref["referenced_columns"]):
+        return True
+    logger.warning(
+        "Foreign key hint %s(%s) -> %s(%s) is skipped: its column lists differ in length.",
+        table_name,
+        ", ".join(ref["columns"]),
+        ref["referenced_table"],
+        ", ".join(ref["referenced_columns"]),
+    )
+    return False
+
+
+def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
+    """Set each reflected table's keys from dlt's hints.
+
+    Postgres names tables "<dataset>.<table>", so a foreign key's target gets the
+    same prefix to match the row lookup.
+
+    Every foreign key is kept, so the table describes all its keys, including one
+    to a table this run did not load (a single-table ``query``, or an empty table
+    dlt wrote no job for). Which of them can find a row is decided per row by
+    ``_resolve_fk_references``; a key whose target has no loaded rows creates no
+    edge and is reported there.
+
+    A table without a hint keeps its reflected keys: a missing hint must never fail
+    the add.
+    """
+    for qualified_name, table_info in schema.items():
+        table_name = qualified_name.split(".")[-1]
+        prefix = qualified_name[: -len(table_name)]
+        hints = key_hints.get(table_name)
+        if hints is None:
+            continue
+        if hints["primary_key"]:
+            table_info["primary_key"] = hints["primary_key"]
+        table_info["foreign_keys"] = [
+            {**fk, "ref_table": prefix + fk["ref_table"]} for fk in hints["foreign_keys"]
+        ]
+
+
+def _is_dlt_column(name: str) -> bool:
+    """dlt's bookkeeping columns, ``_dlt_id`` and ``_dlt_load_id``."""
+    return "_dlt_" in name
 
 
 def _is_dlt_internal_table(qualified_name: str) -> bool:
@@ -403,18 +766,21 @@ async def _read_single_table(
     At most ``max_rows`` rows are read.  Pass 0 or a negative value to
     read all rows (no limit).
     """
-    raw_columns = table_info.get("columns", [])
     foreign_keys = table_info.get("foreign_keys", [])
 
     # extract_schema() returns columns as a list of dicts for SQLite
-    # (e.g. [{"name": "col", "type": "TEXT"}, ...]) or a dict for Postgres
+    # (e.g. [{"name": "col", "type": "TEXT"}, ...]) or a dict for Postgres.
+    # dlt's bookkeeping columns are left out, as they are from the row data.
+    raw_columns = table_info.get("columns", [])
     if isinstance(raw_columns, list):
+        raw_columns = [c for c in raw_columns if not _is_dlt_column(c["name"])]
         column_names = [c["name"] for c in raw_columns]
     else:
+        raw_columns = {k: v for k, v in raw_columns.items() if not _is_dlt_column(k)}
         column_names = list(raw_columns.keys())
 
     # Auto-detect primary key with validation
-    pk_col = _resolve_primary_key(primary_key, table_info, column_names, table_name)
+    pk_columns = _resolve_primary_key(primary_key, table_info, column_names, table_name)
 
     # Compute schema hash for evolution detection
     schema_hash = _compute_schema_hash(raw_columns)
@@ -438,37 +804,32 @@ async def _read_single_table(
 
     # Validate PK uniqueness
     if rows:
-        pk_values = [str(row.get(pk_col, "")) for row in rows]
+        pk_values = [_key_value(row, pk_columns) for row in rows]
         pk_counts = Counter(pk_values)
         duplicates = {v: c for v, c in pk_counts.items() if c > 1}
         if duplicates:
             dup_sample = dict(list(duplicates.items())[:5])
             logger.warning(
-                "Table '%s': primary key column '%s' has %d duplicate values "
+                "Table '%s': primary key '%s' has %d duplicate values "
                 "(sample: %s). Rows with duplicate PKs will overwrite each other "
                 "during upsert. Consider specifying a unique primary_key.",
                 table_name,
-                pk_col,
+                ", ".join(pk_columns),
                 len(duplicates),
                 dup_sample,
             )
 
     row_data_list = []
     for row in rows:
-        row_dict = {k: v for k, v in row.items()}
-        pk_value = str(row_dict.get(pk_col, ""))
-
-        row_keys = list(row_dict.keys())
-        for k in row_keys:
-            if "_dlt_" in k:
-                row_dict.pop(k)
+        row_dict = {k: v for k, v in row.items() if not _is_dlt_column(k)}
+        pk_value = _key_value(row_dict, pk_columns)
 
         content_hash = _row_content_hash(row_dict)
 
         row_data_list.append(
             DltRowData(
                 table_name=table_name,
-                primary_key_column=pk_col,
+                primary_key_columns=pk_columns,
                 primary_key_value=pk_value,
                 row_data=row_dict,
                 content_hash=content_hash,
@@ -488,10 +849,13 @@ def _resolve_primary_key(
     table_info: dict,
     column_names: list,
     table_name: str = "",
-) -> str:
-    """Resolve the primary key column for a table with validation and logging."""
+) -> list[str]:
+    """Resolve a table's primary key columns with validation and logging.
+
+    A composite key is every one of its columns; the fallbacks are one column.
+    """
     if provided_pk and provided_pk in column_names:
-        return provided_pk
+        return [provided_pk]
 
     if provided_pk and provided_pk not in column_names:
         logger.warning(
@@ -505,15 +869,12 @@ def _resolve_primary_key(
     # Check schema-level primary_key
     schema_pk = table_info.get("primary_key")
     if schema_pk:
-        if isinstance(schema_pk, list) and len(schema_pk) > 0:
-            return schema_pk[0]
-        if isinstance(schema_pk, str):
-            return schema_pk
+        return list(schema_pk) if isinstance(schema_pk, list) else [schema_pk]
 
     # Fallback to 'id' column
     if "id" in column_names:
         logger.info("Table '%s': no explicit primary key found, using 'id' column.", table_name)
-        return "id"
+        return ["id"]
 
     # Last resort: first column (with warning)
     if column_names:
@@ -524,9 +885,14 @@ def _resolve_primary_key(
             table_name,
             column_names[0],
         )
-        return column_names[0]
+        return [column_names[0]]
 
-    return "id"
+    return ["id"]
+
+
+def _key_value(row, key_columns: list[str]) -> str:
+    """A row's primary key value: its key columns' values, joined with ":"."""
+    return ":".join(str(row[column]) for column in key_columns)
 
 
 # Identity map over the identifier alphabet. Rebuilding the sanitized name from
@@ -536,12 +902,103 @@ def _resolve_primary_key(
 _SAFE_IDENT_CHARS = {c: c for c in "abcdefghijklmnopqrstuvwxyz0123456789_"}
 
 
+async def drop_dlt_dataset(dataset_name: str) -> None:
+    """Delete everything dlt keeps of ``dataset_name``, for a dataset deleted for good.
+
+    ``forget`` removes the documents, graph and vectors, not the staging copy: the staging
+    database (``dlt_database_<dataset>``, on SQLite with its attached ``__<dataset>`` and
+    ``__<dataset>_staging`` files) and, under dlt's pipelines directory, the working
+    directory of every pipeline that loaded into it (state, schemas and completed load
+    packages, which hold the rendered text of every row). A later sync would read the
+    staged rows back. Taken under the dataset's staging lock, so no dlt run is mid-write.
+
+    Staging is keyed by dataset name alone, not by owner or dataset id: datasets that
+    share a name (two users' ``main_dataset``, or names that differ only in characters
+    ``_to_safe_ident`` replaces) share one staging database and pipeline state, and this
+    drops it for all of them, sync cursors included. A caller must know no other dataset
+    of that name is still syncing.
+
+    Sources with no pipeline scope (database and CSV sources) share the one
+    ``ingest_dlt_source`` directory across datasets. It is removed only when its last
+    load was into this dataset; otherwise what it holds of this dataset stays.
+    """
+    apply_dlt_runtime_defaults()
+
+    safe_name = _to_safe_ident(dataset_name)
+    db_name = f"dlt_database_{safe_name}"
+    relational_config = get_relational_config()
+    # The unscoped pipeline too: its directory is removed when its last load was here.
+    async with _staging(UNSCOPED_PIPELINE_NAME, safe_name):
+        if relational_config.db_provider == "postgres":
+            await drop_pg_database_if_exists(
+                db_name=db_name,
+                host=relational_config.db_host,
+                port=relational_config.db_port,
+                username=relational_config.db_username,
+                password=relational_config.db_password,
+            )
+            staging_dir = None
+        else:
+            staging_dir = relational_config.db_path
+        await asyncio.to_thread(_delete_dlt_files, safe_name, db_name, staging_dir)
+
+
+def _delete_dlt_files(safe_name: str, db_name: str, staging_dir: str | None) -> None:
+    """Remove a dataset's SQLite staging files (``staging_dir``) and pipeline directories."""
+    import shutil
+    from pathlib import Path
+
+    from dlt.common.pipeline import get_dlt_pipelines_dir
+
+    if staging_dir is not None:
+        # The database and the two datasets dlt attaches to it, under the name as given
+        # and as dlt normalizes it; never by prefix, which also matched a dataset whose
+        # name starts with this one (``<name>__other``).
+        from dlt.common.normalizers.naming.snake_case import NamingConvention
+
+        normalized = NamingConvention().normalize_identifier(safe_name)
+        files = {db_name}
+        for dataset in {safe_name, normalized}:
+            files |= {f"{db_name}__{dataset}", f"{db_name}__{dataset}_staging"}
+        for name in files:
+            Path(staging_dir, name).unlink(missing_ok=True)
+
+    # Only the directories pipeline_name_for_source names: dlt's pipelines directory is
+    # shared with the host's own pipelines, which may load into a dataset of this name.
+    pipelines = Path(get_dlt_pipelines_dir())
+    for pipeline_dir in pipelines.glob("ingest_dlt_*"):
+        state_path = pipeline_dir / "state.json"
+        if state_path.is_file() and _pipeline_dataset(state_path) == safe_name:
+            shutil.rmtree(pipeline_dir)
+
+
+def _pipeline_dataset(state_path) -> str | None:
+    """The dataset a dlt pipeline loads into, or ``None`` for a state dlt did not write.
+
+    dlt writes its state atomically, so a file that cannot be read as a state object
+    (truncated, not UTF-8, unreadable) is not a pipeline of ours and is skipped.
+    """
+    try:
+        state = json.loads(state_path.read_text())
+    except (ValueError, OSError):
+        return None
+    return state.get("dataset_name") if isinstance(state, dict) else None
+
+
 def _to_safe_ident(s: str) -> str:
     s = re.sub(r"[^A-Za-z0-9_]+", "_", s).strip("_").lower()
     s = "".join(_SAFE_IDENT_CHARS.get(ch, "_") for ch in s)
     if not s:
         raise InvalidDLTArgumentError(message="Invalid dataset name given for dlt ingestion.")
-    if s[0].isdigit():
+    # dlt uses this name as its staging dataset, which on Postgres is a schema,
+    # and Postgres reserves the ``pg_`` prefix for system schemas. A merge load
+    # also writes to a ``<name>_staging`` schema, so the bare name ``pg`` is
+    # reserved too. ``information_schema`` exists in every Postgres database and
+    # belongs to the bootstrap superuser: dlt sees the schema and creates the
+    # dataset's tables inside it, which a non-superuser role is denied. Such a
+    # name is prefixed like one that starts with a digit, on every destination,
+    # so a dataset stages under one name whatever the relational provider.
+    if s[0].isdigit() or s == "pg" or s.startswith("pg_") or s == "information_schema":
         s = f"d_{s}"
     return s[:63]
 

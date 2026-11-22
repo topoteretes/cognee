@@ -132,6 +132,11 @@ async def _collections(engine) -> tuple[list[tuple[str, int]], tuple[int, ...] |
 async def migrate(context: MigrationContext) -> None:
     if not _is_pgvector(context.vector_engine):
         return
+    # Session setup, not DDL, so it is shared with the adapter rather than frozen here.
+    from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
+        _SERIAL_BUILD_SQL,
+    )
+
     engine = context.vector_engine.engine
     collections, pgvector_version = await _collections(engine)
     for table_name, dimensions in collections:
@@ -147,6 +152,7 @@ async def migrate(context: MigrationContext) -> None:
                         "target_kb": _BUILD_MAINTENANCE_WORK_MEM_KB,
                     },
                 )
+                await conn.execute(text(_SERIAL_BUILD_SQL))
                 await conn.execute(text(statement))
         except SQLAlchemyError as error:
             logger.warning(

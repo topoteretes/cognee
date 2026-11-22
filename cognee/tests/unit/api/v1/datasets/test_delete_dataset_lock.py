@@ -96,6 +96,7 @@ async def test_delete_data_waits_for_pipeline_lock():
         # calls delete_data_nodes_and_edges.
         patch.object(data_methods_module, "get_data", AsyncMock(return_value=None)),
         patch.object(datasets_module, "delete_data_nodes_and_edges", delete_nodes_and_edges),
+        patch.object(datasets_module, "retire_forgotten_decisions", AsyncMock(return_value=set())),
         patch.object(
             datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
         ),

@@ -127,7 +127,7 @@ async def test_operation_record_does_not_make_unbuilt_dataset_warm(
 
     # This is the row produced by remember(..., session_id=...): it carries
     # the dataset for attribution, but has no pipeline_name or status.
-    async with record_operation("remember", dataset_id=dataset_id, session_id="session-1"):
+    async with record_operation("remember", dataset_id=dataset_id, session_ids=["session-1"]):
         pass
 
     async with get_relational_engine().get_async_session() as session:

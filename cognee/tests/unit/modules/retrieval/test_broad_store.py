@@ -44,17 +44,10 @@ def test_numbers_keep_ids_and_european_decimals_as_text():
     assert _number("00123") is None and _number("12,34") is None and _number("nan") is None
 
 
-def test_a_dlt_row_gives_its_table_fields_and_foreign_keys():
-    text = (
-        "Table: orders\nColumns:\n  - id (INTEGER)\nForeign Keys:\n"
-        "  - customer_id references customers.id\n\nRow Data:\n  id: 7\n  customer_id: 3"
-    )
+def test_a_dlt_row_gives_its_table_and_fields():
+    text = "Table: orders\nRow Data:\n  id: 7\n  customer_id: 3"
 
-    assert parse_dlt_row(text) == (
-        "orders",
-        {"id": "7", "customer_id": "3"},
-        ["customer_id references customers.id"],
-    )
+    assert parse_dlt_row(text) == ("orders", {"id": "7", "customer_id": "3"})
 
 
 def test_a_line_shape_masks_names_and_anything_with_a_digit():

@@ -36,11 +36,15 @@ def client():
 @pytest.fixture(autouse=True)
 def ontology_stub(monkeypatch):
     """The keys never reach a real store here; this test is about the guard."""
-    from cognee.api.v1.ontologies.ontologies import OntologyService
+    from cognee.api.v1.ontologies.ontologies import OntologyFile, OntologyService
 
-    monkeypatch.setattr(
-        OntologyService, "get_ontology_contents", lambda self, keys, user: ["<owl/>"] * len(keys)
-    )
+    async def get_ontology_files(self, keys, user):
+        return [
+            OntologyFile(b"<owl/>", filename="stub.owl", content_type="application/rdf+xml")
+            for _ in keys
+        ]
+
+    monkeypatch.setattr(OntologyService, "get_ontology_files", get_ontology_files)
 
 
 @pytest.fixture

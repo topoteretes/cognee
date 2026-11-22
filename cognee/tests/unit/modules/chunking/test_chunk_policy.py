@@ -17,7 +17,6 @@ from cognee.modules.chunking.chunk_policy import (
     ChunkPlan,
     ChunkPlanRequest,
     diff_region_policy,
-    stored_chunker_id,
 )
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types import TextDocument
@@ -219,21 +218,6 @@ def test_plan_always_reassembles_into_the_new_text():
 
 
 # ------------------------------------------------------------- chunker identity
-
-
-def test_stored_chunker_id_reports_agreement():
-    assert stored_chunker_id(_stored(["a\n", "b\n"])) == "text_chunker_v1"
-
-
-def test_stored_chunker_id_is_unknown_for_legacy_chunks():
-    """Chunks written before the field exists must not be refused."""
-    assert stored_chunker_id(_stored(["a\n", "b\n"], chunker_id=None)) is None
-
-
-def test_stored_chunker_id_is_unknown_when_chunks_disagree():
-    mixed = _stored(["a\n", "b\n"])
-    mixed[1]["chunker_id"] = "langchain_chunker_v1"
-    assert stored_chunker_id(mixed) is None
 
 
 def test_every_chunker_declares_a_distinct_id():

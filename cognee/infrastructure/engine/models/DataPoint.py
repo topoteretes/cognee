@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 # Define metadata type
 class MetaData(TypedDict):
     """
-    Represent a metadata structure with type and index fields.
+    Shape of ``DataPoint.metadata``: which fields are embedded (``index_fields``), which
+    derive the node id (``identity_fields``) and whether the node is unwrapped on write
+    (``transparent``). See ``DataPoint`` for what each key changes.
     """
 
     type: NotRequired[str]
@@ -27,30 +29,59 @@ class MetaData(TypedDict):
 # Updated DataPoint model with versioning and new fields
 class DataPoint(BaseModel):
     """
-    Base class for every graph node cognee stores.
+    Base class for every graph node cognee stores, and the way to give your own data a
+    shape in memory.
 
-    Subclass it with plain pydantic fields. A field holding another ``DataPoint`` (or a
-    list of them) becomes an edge named after the field when the tree is written to the
-    graph; scalar fields become node properties.
+    Subclass it with plain pydantic fields and hand instances to ``add_data_points`` (the
+    storage step at the end of ``cognify()``, and one a custom pipeline task can call).
+    That one call walks the object tree into graph nodes and edges, writes them and
+    embeds the declared fields into the vector store; run inside a pipeline for a
+    document, it also records which document owns each node and edge, so ``forget()``
+    removes them with it. A custom model needs no storage code of its own. A field
+    holding another ``DataPoint`` (or a list of them) becomes an edge named after the
+    field; scalar fields become node properties. Passed as
+    ``graph_model`` to ``cognify()``/``remember()``, a subclass is also the shape the LLM
+    fills instead of the generic ``KnowledgeGraph``.
 
-    The ``metadata`` dict is the storage contract:
+    The ``metadata`` dict decides how instances are found and merged:
 
     * ``index_fields``: field names to embed. Each gets its own vector collection
-      ``<TypeName>_<field>``; the first one is what ``get_embeddable_data`` returns.
+      ``<TypeName>_<field>`` (``vector_collection`` names it), which is what makes the
+      node reachable by semantic search; a field left out is stored in the graph only.
       Declare with ``Annotated[str, Embeddable()]`` or list them explicitly.
-    * ``identity_fields``: fields whose values derive the node id (``uuid5``), so the same
-      real-world thing maps to the same node on every ingestion and graph writes merge.
-      A subclass without them gets a random id and can never be merged.
-      Declare with ``Annotated[str, Dedup()]`` or list them explicitly. Exactly one is
-      required for ``Edge[...]`` endpoints and ``FromIdentity`` references.
+    * ``identity_fields``: fields whose values derive the node id (``id_for``), so the
+      same real-world thing maps to the same node on every ingestion: repeated mentions
+      collapse into one node within a batch and graph writes merge across runs. Without
+      them (and without an explicit ``id``) each instance gets a random id and never
+      merges. Declare with ``Annotated[str, Dedup()]`` or list them explicitly. Exactly
+      one is required for ``Edge[...]`` endpoints and ``FromIdentity`` references.
     * ``transparent`` (optional): the node is unwrapped when written -- its edges attach
       to its children instead (see ``modules.graph.utils.unwrap_transparent_nodes``).
 
     Declaring ``metadata`` explicitly on a subclass disables the ``Annotated``
-    derivation for that class. ``type`` is set from the class name automatically;
-    ``version``/``updated_at`` track edits (``update_version``). Markers live in
+    derivation for that class; an override that omits a parent's ``identity_fields``
+    is logged as a warning. ``type`` is always the class name. Markers live in
     ``FieldAnnotations.py``; the typed-edge and identity-reference forms are documented
     in ``cognee/shared/llm_graph_model.py``.
+
+    The inherited fields are filled by cognee and read back by retrieval; callers
+    normally leave them at their defaults:
+
+    * ``belongs_to_set``: node-set tags (``NodeSet`` points or names), the tags a
+      ``node_name`` scope on ``recall()`` / ``search()`` matches by default.
+    * ``source_pipeline`` / ``source_task`` / ``source_user`` / ``source_node_set`` /
+      ``source_content_hash``: unless ``COGNEE_PROVENANCE_MODE`` disables it, stamped by
+      the pipeline runner on every ``DataPoint`` a task returns, nested ones included,
+      where still ``None`` -- who and which run wrote the node. ``topological_rank``
+      records the producing task's position for the visualization.
+    * ``importance_weight``: chunks take it from their document, and hybrid retrieval
+      scales a chunk's score by it (0.5 is neutral). ``feedback_weight``: adjusted by
+      ``improve()``'s feedback stage and read by graph-completion ranking when
+      ``feedback_influence`` is above 0.
+    * ``ontology_valid`` / ``ontology_uri``: set when the node was grounded in an
+      ontology; the IRI is kept so the graph stays linked to the external vocabulary.
+    * ``version`` / ``updated_at``: ``update_version`` bumps both, and no cognee pipeline
+      calls it; call it yourself if you edit an instance and want that recorded.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -249,11 +280,12 @@ class DataPoint(BaseModel):
     @classmethod
     def get_embeddable_data(cls, data_point: "DataPoint") -> Any | None:
         """
-        Retrieve embeddable data from the data point object based on index fields.
+        Return the value a vector adapter embeds for this data point.
 
-        This method checks if there are defined index fields in the metadata and retrieves the
-        value of the first indexed attribute. If the attribute is a string, it strips whitespace
-        from it before returning.
+        This is the first entry of ``index_fields``, whitespace-stripped when it is a string.
+        ``index_data_points`` hands adapters one copy per indexed field with
+        ``index_fields`` narrowed to that field, so each ``<TypeName>_<field>`` collection
+        embeds its own field.
 
         Parameters:
         -----------
@@ -326,8 +358,8 @@ class DataPoint(BaseModel):
         """
         Increment the version number of the data point and update the timestamp.
 
-        This method will automatically modify the version attribute and refresh the updated_at
-        timestamp to the current time.
+        Bumps ``version`` and sets ``updated_at`` to now. Cognee's own pipelines do not call
+        it; call it before storing an edited instance again if you want the edit recorded.
         """
         self.version += 1
         self.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)

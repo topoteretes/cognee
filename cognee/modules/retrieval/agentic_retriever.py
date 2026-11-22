@@ -75,6 +75,8 @@ class AgenticRetriever(GraphCompletionRetriever):
     - user: the user whose permissions gate every tool call.
     - dataset_id: the dataset under which memory and tools are scoped.
     - max_iter: upper bound on tool-call iterations before forcing a final answer.
+    - max_tool_output_chars: characters of one tool result the agent reads; the rest is cut.
+      0 reads every result in full; a negative value or a non-integer raises.
     - agentic_system_prompt_path, agentic_user_prompt_path: prompt templates
       used inside the loop (distinct from the parent's graph-completion prompts).
     """
@@ -97,6 +99,7 @@ class AgenticRetriever(GraphCompletionRetriever):
         dataset=None,
         dataset_id: UUID | None = None,
         max_iter: int = 6,
+        max_tool_output_chars: int = MAX_TOOL_OUTPUT_CHARS,
         agentic_system_prompt_path: str = "agentic_system.txt",
         agentic_user_prompt_path: str = "agentic_user.txt",
         **kwargs,
@@ -112,6 +115,17 @@ class AgenticRetriever(GraphCompletionRetriever):
         if self.dataset_id is None:
             raise ValueError("AgenticRetriever requires one explicit dataset for skill lookup.")
         self.max_iter = max_iter
+        # bool is an int subclass; True would read as a one-character limit.
+        if (
+            isinstance(max_tool_output_chars, bool)
+            or not isinstance(max_tool_output_chars, int)
+            or max_tool_output_chars < 0
+        ):
+            raise ValueError(
+                "max_tool_output_chars must be a non-negative integer (0 = no limit), "
+                f"got {max_tool_output_chars!r}."
+            )
+        self.max_tool_output_chars = max_tool_output_chars
         self.agentic_system_prompt_path = agentic_system_prompt_path
         self.agentic_user_prompt_path = agentic_user_prompt_path
         self._cached_context: str | None = None
@@ -506,8 +520,9 @@ class AgenticRetriever(GraphCompletionRetriever):
 
             t0 = time.perf_counter()
             tool_result = await self._run_tool_safely(step.tool_call, tool_names)
-            if len(tool_result) > MAX_TOOL_OUTPUT_CHARS:
-                tool_result = tool_result[:MAX_TOOL_OUTPUT_CHARS] + "\n... [truncated]"
+            # 0 means no limit: the agent reads the whole result.
+            if self.max_tool_output_chars and len(tool_result) > self.max_tool_output_chars:
+                tool_result = tool_result[: self.max_tool_output_chars] + "\n... [truncated]"
             duration_ms = int((time.perf_counter() - t0) * 1000)
             if tool_trace is not None:
                 tool_trace.append(

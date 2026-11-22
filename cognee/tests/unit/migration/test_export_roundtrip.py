@@ -15,12 +15,19 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from cognee.modules.migration import loader
+from cognee.modules.migration import export, loader
 from cognee.modules.migration.archive import pack_archive, unpack_archive
 from cognee.modules.migration.cogx import COGX_VERSION, read_archive, read_manifest
-from cognee.modules.migration.export import _write_cogx
 from cognee.modules.migration.loader import translate_records
 from cognee.modules.migration.sources.cogx_archive import COGXArchiveSource
+
+
+def _write_cogx(nodes, edges, destination, dataset_name, **kwargs):
+    """The real export mapping over a graph with no recorded edge evidence and
+    no resolvable users, which is what these graph-only tests describe."""
+    no_facts = export.ExportFacts(edge_support={}, actors={})
+    export._write_cogx(nodes, edges, destination, dataset_name, no_facts, **kwargs)
+
 
 ALICE_ID = "11111111-1111-4111-8111-111111111111"
 BERLIN_ID = "22222222-2222-4222-8222-222222222222"

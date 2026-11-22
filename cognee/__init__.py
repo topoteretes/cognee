@@ -62,6 +62,7 @@ from cognee.modules.visualization.cognee_network_visualization import (
 )
 from .api.v1.ui import start_ui
 from .api.v1.session import session
+from .api.v1.conflicts import list_conflicts, resolve_conflict, ConflictDetail, ConflictFact
 
 # Pipelines
 from .modules import pipelines

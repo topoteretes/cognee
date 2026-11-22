@@ -95,11 +95,18 @@ async def register_agent(user: User, request: RegisterAgentRequest) -> AgentConn
 
 
 async def unregister_agent(user: User, request: UnregisterAgentRequest) -> int:
+    """Deactivate the caller's connection; return how many of theirs stay active.
+
+    The process-wide counter below feeds the agent-mode watchdog only. It
+    spans every user, so it is never returned: the caller learns about their
+    own connections, not how many other users are connected.
+    """
     global _active_count
 
     from cognee.modules.agents.registry import (
         build_agent_connection_id,
         deactivate_agent_connection,
+        list_registered_agent_connections,
     )
 
     connection_id = build_agent_connection_id(
@@ -113,10 +120,17 @@ async def unregister_agent(user: User, request: UnregisterAgentRequest) -> int:
         if connection_id in _active_connection_ids:
             _active_connection_ids.discard(connection_id)
             _active_count = max(0, _active_count - 1)
-        count = _active_count
+        total = _active_count
 
-    logger.info("Agent connection unregistered (active: %d)", count)
-    return count
+    callers_count = sum(
+        1 for connection in list_registered_agent_connections() if connection.user_id == user.id
+    )
+    logger.info(
+        "Agent connection unregistered (caller active: %d, total active: %d)",
+        callers_count,
+        total,
+    )
+    return callers_count
 
 
 def get_active_count() -> int:

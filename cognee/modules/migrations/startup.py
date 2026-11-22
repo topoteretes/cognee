@@ -69,6 +69,20 @@ class MigrationError(Exception):
     """Raised when migrations fail."""
 
 
+def _set_alembic_database_uri(config, db_uri: str) -> None:
+    """Set the live database URI without ConfigParser interpreting URL escapes.
+
+    Alembic's INI interpolation treats raw percent signs as interpolation syntax.
+    Escaping them here preserves SQLAlchemy's percent-encoded URL when the
+    ``sqlalchemy.url`` option is read back.
+    """
+    config.set_section_option(
+        config.config_ini_section,
+        "SQLALCHEMY_DATABASE_URI",
+        db_uri.replace("%", "%%"),
+    )
+
+
 async def abort_write_if_migration_blocked(failed: list[str], datasets, user) -> None:
     """Raise if a database this write targets failed migration — writing into a
     store still on the old scheme is the corruption the migration prevents.

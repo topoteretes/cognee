@@ -718,6 +718,18 @@ def get_permissions_router() -> APIRouter:
         rejects the whole request and nothing is written. Granting is
         idempotent.
 
+        ## Path Parameters
+        - **principal_id** (UUID): Id of the principal receiving the capabilities: a user, a
+          role, or a tenant. An id that does not exist answers 403 (see Error Codes); an
+          unknown capability name is checked first and answers 400.
+
+        ## Query Parameters
+        - **capability** (List[str]): Capability to grant. Must be in the capability catalog. Repeat
+          the parameter to grant several at once: ?capability=a&capability=b.
+        - **tenant_id** (Optional[UUID]): Tenant the grant is scoped to when the principal is a
+          user. Defaults to the caller's current tenant. Ignored for a role or a tenant, whose own
+          tenant is always used.
+
         ## Error Codes
         - **400 Bad Request**: A capability is not in the catalog
         - **403 Forbidden**: Caller lacks grant_capabilities in the target
@@ -767,6 +779,18 @@ def get_permissions_router() -> APIRouter:
 
         Several capabilities can be revoked in one call by repeating the
         capability parameter, all or nothing like granting.
+
+        ## Path Parameters
+        - **principal_id** (UUID): Id of the principal losing the capabilities: a user, a
+          role, or a tenant. An id that does not exist answers 403 (see Error Codes); an
+          unknown capability name is checked first and answers 400.
+
+        ## Query Parameters
+        - **capability** (List[str]): Capability to take away. Repeat the parameter to revoke
+          several at once: ?capability=a&capability=b.
+        - **tenant_id** (Optional[UUID]): Tenant the revoke is scoped to when the principal is a
+          user. Defaults to the caller's current tenant. Ignored for a role or a tenant, whose own
+          tenant is always used.
 
         ## Error Codes
         - **400 Bad Request**: A capability is not in the catalog

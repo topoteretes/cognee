@@ -208,14 +208,15 @@ const ORIGIN_LABELS: Record<string, string> = {
  * `origin`, whose whole vocabulary is a handful of entry points.
  *
  * Rows with no session fall back to `origin`, which is where an upload or a
- * cognify lands: those are pipeline runs, not conversations, so they never
- * carry a session id. Reading "Cloud" there depends on the pod running the
+ * cognify lands: ingestion is not session work, so it carries no session. The
+ * pipelines a session-bound improve launches do carry the session (cognee PR
+ * 6160) and name its client. Reading "Cloud" there depends on the pod running the
  * origin middleware — a pod image without it records "sdk" for every HTTP
  * request, and "sdk" is discarded below rather than rendered, because it is
  * origin.py's default-when-unset and printing "SDK" for a request that
  * plainly arrived over HTTP would be a claim the data does not support.
  */
-export function viaLabel(row: Pick<PipelineRun, "origin" | "session_id">): string {
+export function viaLabel(row: Pick<PipelineRun, "origin" | "session_ids">): string {
   return viaChannel(row) ?? UNKNOWN_VIA_LABEL;
 }
 
@@ -232,8 +233,12 @@ export const UNKNOWN_VIA_LABEL = "—";
  * the Analytics breakdown did on every pod with no origin middleware, i.e.
  * all of them today, collapsing the whole panel to a single dash row.
  */
-export function viaChannel(row: Pick<PipelineRun, "origin" | "session_id">): string | undefined {
-  if (row.session_id) return channelForSessionId(row.session_id);
+export function viaChannel(row: Pick<PipelineRun, "origin" | "session_ids">): string | undefined {
+  // Several sessions name a client only when they agree. A run that bridges
+  // a Claude Code session and a Cursor session has no single client, so it
+  // falls through to origin like a row with no session at all.
+  const channels = new Set(row.session_ids.map(channelForSessionId));
+  if (channels.size === 1) return [...channels][0];
   if (!row.origin || row.origin === "sdk") return undefined;
   return ORIGIN_LABELS[row.origin] ?? row.origin;
 }
@@ -347,7 +352,13 @@ export interface PipelineRun {
   started_at: string | null;
   ended_at: string | null;
   user_id: string | null;
-  session_id: string | null;
+  // Every session the row belongs to, from the pod's `session_ids` list. A
+  // pod from before cognee PR 6191 sends one `session_id` instead, which
+  // normalizeActivityRows folds into a one-element list. Empty for most
+  // rows; one entry for a session-bound search or recall; several for an
+  // improve over several sessions, and for every pipeline such a call
+  // launches.
+  session_ids: string[];
   parent_operation_id: string | null;
   background: boolean | null;
 }
@@ -704,6 +715,10 @@ interface ActivityRun {
   // surfacing a run_info error under this name, and it costs nothing to
   // prefer it when present.
   error?: string | null;
+  // Raw session fields, read through rowSessionIds: the list from cognee PR
+  // 6191, or the single id a pod from before it sends.
+  session_ids?: unknown;
+  session_id?: unknown;
 }
 
 /** The three states the graph-enrichment card renders. This was the whole of
@@ -782,7 +797,7 @@ function enrichmentBurstStatus(raw: string | undefined): EnrichmentStatus {
 }
 
 // The activity endpoint's operation-record fields (`kind`, `operation_name`,
-// `outcome`, `tokens_in`/`tokens_out`, `session_id`, `parent_operation_id`)
+// `outcome`, `tokens_in`/`tokens_out`, `session_ids`, `parent_operation_id`)
 // rolled out to the pod after this frontend shipped. An older pod OMITS them
 // rather than sending null, so `PipelineRun` declaring them non-optional is a
 // contract the wire does not always honour — and `x === null` does not catch
@@ -859,6 +874,20 @@ export function normalizeSessionRows(rows: unknown[]): SessionRow[] {
   return out;
 }
 
+/**
+ * The sessions a raw activity row names.
+ *
+ * cognee PR 6191 lists them in `session_ids`. A pod from before it sends one
+ * `session_id` (null for most rows) and no list, which reads as a list of
+ * one. Anything else is "no sessions": a row never half-carries them.
+ */
+export function rowSessionIds(r: { session_ids?: unknown; session_id?: unknown }): string[] {
+  if (Array.isArray(r.session_ids)) {
+    return r.session_ids.filter((id): id is string => typeof id === "string" && id !== "");
+  }
+  return typeof r.session_id === "string" && r.session_id !== "" ? [r.session_id] : [];
+}
+
 export function normalizeActivityRows(payload: unknown): PipelineRun[] {
   // A non-array 200 is the reachable failure on this endpoint — a gateway or
   // a mid-deploy pod answers with an error envelope, and quietly coercing that
@@ -900,7 +929,7 @@ export function normalizeActivityRows(payload: unknown): PipelineRun[] {
       started_at: r.started_at ?? null,
       ended_at: r.ended_at ?? null,
       user_id: r.user_id ?? null,
-      session_id: r.session_id ?? null,
+      session_ids: rowSessionIds(raw as Record<string, unknown>),
       parent_operation_id: r.parent_operation_id ?? null,
       background: r.background ?? null,
     });
@@ -919,17 +948,15 @@ export function normalizeActivityRows(payload: unknown): PipelineRun[] {
  * that history from the table. Match per row instead — a session row is
  * redundant only when an operation row actually references it.
  *
- * Known gap, and it errs toward showing too much rather than too little: an
- * operation spanning several sessions records no session_id at all (cognee's
- * remember() sets it only for a single-session call, and improve() takes
- * session_ids[0]), so those sessions keep their own rows and the same recall
- * appears twice. Deduping those needs a session id list on the row, which the
- * endpoint does not return.
+ * An operation over several sessions (an improve given two) lists every one
+ * of them (cognee PR 6191), so each of those session rows is covered too. A
+ * pod from before that lists at most one, and the rest keep their own rows.
  */
 export function sessionIdsWithOperationRows(runs: PipelineRun[]): Set<string> {
   const ids = new Set<string>();
   for (const r of runs) {
-    if (r.kind === "operation" && r.session_id) ids.add(r.session_id);
+    if (r.kind !== "operation") continue;
+    for (const id of r.session_ids) ids.add(id);
   }
   return ids;
 }
@@ -1100,6 +1127,7 @@ const ENRICHMENT_FETCH_LIMIT = 200;
 export async function getGraphEnrichmentRuns(
   instance: CogneeInstance,
   datasetId: string,
+  sessionId: string | null = null,
 ): Promise<EnrichmentRun[]> {
   try {
     // Filter server-side. This used to fetch the endpoint's default page and
@@ -1114,15 +1142,26 @@ export async function getGraphEnrichmentRuns(
       dataset_id: datasetId,
       limit: String(ENRICHMENT_FETCH_LIMIT),
     });
+    // The session page wants the improve runs that bridged ITS session, not
+    // every improve on the dataset (CLO-1105). The pod stamps those runs
+    // since cognee PR 6160 and filters on the stamp.
+    if (sessionId) params.set("session_id", sessionId);
     const r = await instance.fetch(`/v1/activity/pipeline-runs?${params}`);
     if (!r.ok) return [];
     const data: unknown = await r.json();
     // Still filtered client-side: a pod that predates these query params
     // ignores them and answers with the unfiltered newest page.
-    const rows = dedupeByRunId(
-      (Array.isArray(data) ? (data as ActivityRun[]) : [])
-        .filter((run) => run.dataset_id === datasetId && run.pipeline_name === ENRICHMENT_PIPELINE),
-    ).sort((a, b) => isoToMs(b.created_at) - isoToMs(a.created_at));
+    const datasetRows = (Array.isArray(data) ? (data as ActivityRun[]) : [])
+      .filter((run) => run.dataset_id === datasetId && run.pipeline_name === ENRICHMENT_PIPELINE);
+    // A pod from before the stamp ignores `session_id` and names no session on
+    // any memify row. Keep the dataset-wide view there, as the card showed
+    // before, rather than nothing; once any row is stamped, another session's
+    // run is dropped even where the pod did not filter.
+    const anyStamped = datasetRows.some((run) => rowSessionIds(run).length > 0);
+    const sessionRows = sessionId && anyStamped
+      ? datasetRows.filter((run) => rowSessionIds(run).includes(sessionId))
+      : datasetRows;
+    const rows = dedupeByRunId(sessionRows).sort((a, b) => isoToMs(b.created_at) - isoToMs(a.created_at));
 
     const bursts: EnrichmentRun[] = [];
     let prevTs = 0;

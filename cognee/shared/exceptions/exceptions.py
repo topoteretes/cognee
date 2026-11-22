@@ -34,3 +34,30 @@ class ExternalSchemaReferenceError(CogneeValidationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ) -> None:
         super().__init__(message, name, status_code)
+
+
+class UnresolvedSchemaReferenceError(CogneeValidationError):
+    """A graph model schema's ``x-cognee-edge`` or ``x-cognee-from-identity`` key named a
+    class its ``$defs`` do not define."""
+
+    def __init__(
+        self,
+        message: str = "graph_model names an edge endpoint or reference target its $defs "
+        "do not define.",
+        name: str = "UnresolvedSchemaReferenceError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ) -> None:
+        super().__init__(message, name, status_code)
+
+
+class InvalidGraphSchemaError(CogneeValidationError):
+    """``graph_model`` is neither a model class nor a JSON schema the converter can build
+    a model from. Raised before anything is stored or any pipeline run is created."""
+
+    def __init__(
+        self,
+        message: str = "graph_model is not a valid graph model schema.",
+        name: str = "InvalidGraphSchemaError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ) -> None:
+        super().__init__(message, name, status_code)

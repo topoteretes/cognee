@@ -6,6 +6,7 @@ from .get_dataset import get_dataset
 from .get_datasets import get_datasets
 from .get_datasets_by_name import get_datasets_by_name
 from .get_dataset_data import get_dataset_data, count_dataset_data
+from .get_data_ids_by_dataset import get_data_ids_by_dataset
 from .get_dataset_data_by_content_hash import get_dataset_data_by_content_hash
 from .get_selected_dataset_data import get_selected_dataset_data
 from .get_dataset_processing_status import get_dataset_processing_status

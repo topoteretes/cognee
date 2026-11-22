@@ -6,6 +6,7 @@ from cognee.api.v1.exceptions import DataDeletionIncompleteError
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.locks import dataset_lock
+from cognee.modules.conflicts.methods import retire_forgotten_decisions
 from cognee.modules.data.content_hash import compute_content_hash, normalize_content_hash
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
@@ -30,6 +31,7 @@ from cognee.modules.pipelines.operations.get_pipeline_status import (
     get_pipeline_progress,
     get_pipeline_status,
 )
+from cognee.modules.provenance.tombstones import tombstone_data_item, tombstone_dataset
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -106,12 +108,30 @@ async def _invalidate_sessions_for_deleted_data_nonfatal(
         )
 
 
-async def _delete_dataset_if_empty(dataset, requested: bool) -> bool:
+async def _retire_forgotten_decisions(
+    dataset, user, deleted_elements: DeletedGraphElements
+) -> DeletedGraphElements:
+    """Delete conflict decisions whose chosen fact went with the deleted data.
+
+    Returns ``deleted_elements`` plus the retired decision nodes, for session
+    invalidation; the receipt keeps counting only the data's own elements. Not
+    best-effort: a kept decision would go on presenting the deleted fact as the
+    accepted one, so a failure fails the delete before the Data row is removed.
+    """
+    retired = await retire_forgotten_decisions(dataset, user)
+    return DeletedGraphElements(
+        node_ids=deleted_elements.node_ids | retired,
+        edge_ids=deleted_elements.edge_ids,
+        owned=deleted_elements.owned,
+    )
+
+
+async def _delete_dataset_if_empty(dataset, requested: bool, user: User) -> bool:
     """Drop ``dataset`` when the caller asked for it and no Data row is left.
 
     One count query, never a listing: the receipt only needs to know whether
     the dataset went away. As in ``empty_dataset``, the dataset's search
-    history goes first, then the dataset.
+    history goes first, then the dataset, then its audit-ledger tombstones.
     """
     if not requested or await has_dataset_data(dataset.id):
         return False
@@ -120,6 +140,7 @@ async def _delete_dataset_if_empty(dataset, requested: bool) -> bool:
 
     await delete_dataset_search_history(dataset.id)
     await delete_dataset(dataset)
+    await tombstone_dataset(dataset.id, user=user)
     return True
 
 
@@ -432,6 +453,11 @@ class datasets:
             # (files refcounted by raw_data_location) with the record.
             result = await delete_dataset(dataset)
 
+            # Last, once the rows are gone: the audit ledger retracts every
+            # data item of the dataset (a no-op unless PROVENANCE_TRACKING
+            # recorded them). It raises when the tombstones cannot be written.
+            await tombstone_dataset(dataset.id, user=user)
+
         return result
 
     @staticmethod
@@ -517,12 +543,20 @@ class datasets:
                         deleted_elements = await delete_data_nodes_and_edges(
                             dataset_id, data_id, user.id
                         )
-                        if deleted_elements.node_ids or deleted_elements.edge_ids:
+                        invalidated = await _retire_forgotten_decisions(
+                            dataset, user, deleted_elements
+                        )
+                        if invalidated.node_ids or invalidated.edge_ids:
                             await _invalidate_sessions_for_deleted_data_nonfatal(
-                                dataset.id, deleted_elements, user.id
+                                dataset.id, invalidated, user.id
                             )
+                        # No Data row, so the document is gone. A ledger row
+                        # still live for the id (a delete whose tombstone
+                        # could not be written, or an id that only ever owned
+                        # graph elements) is retracted here.
+                        await tombstone_data_item(dataset_id, data_id, user=user)
                         dataset_deleted = await _delete_dataset_if_empty(
-                            dataset, delete_dataset_if_empty
+                            dataset, delete_dataset_if_empty, user
                         )
 
                     return _delete_data_receipt(
@@ -568,18 +602,26 @@ class datasets:
                             deleted_elements = DeletedGraphElements()
 
                     await _invalidate_sessions_for_deleted_data_nonfatal(
-                        dataset.id, deleted_elements, user.id
+                        dataset.id,
+                        await _retire_forgotten_decisions(dataset, user, deleted_elements),
+                        user.id,
                     )
 
-                    await delete_data(data, dataset_id)
+                    await delete_data([data], dataset_id, user)
 
                     # Observe the outcome, don't assume it: a row that survived
                     # the delete must never come back as a success receipt.
                     if await has_data(dataset.id, data_id):
                         raise DataDeletionIncompleteError(data_id, dataset.id)
+                    # The row is checked to be gone, so the audit ledger can
+                    # say so (a no-op unless PROVENANCE_TRACKING recorded the
+                    # item). Written last: a delete that failed above leaves
+                    # the ledger row live. It raises when it cannot be written,
+                    # and deleting the same id again writes it.
+                    await tombstone_data_item(dataset_id, data_id, user=user)
                     # Search history first, then the dataset (see the helper).
                     dataset_deleted = await _delete_dataset_if_empty(
-                        dataset, delete_dataset_if_empty
+                        dataset, delete_dataset_if_empty, user
                     )
 
                 # A dataset's code repositories are extracted together, so the

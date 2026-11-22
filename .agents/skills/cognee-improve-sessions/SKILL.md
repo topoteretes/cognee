@@ -65,7 +65,7 @@ spends any LLM or embedding cost, and reports one `StageResult`.
 | 6 | `update_user_preferences` | Folds rated turns into per-user preferences | `session_ids`, `PERSONALIZATION_ENABLED=true` (default false) |
 | 7 | `build_truth_subspace` | Builds the truth subspace from distilled learnings | `session_ids`, `build_truth_subspace=True`, a Ladybug graph |
 | 8 | `review_conflicts` | Reviews dated source facts and stores conflicts | on by default (`review_conflicts=False` or `IMPROVE_REVIEW_CONFLICTS=false` turns it off), an LLM, edge evidence |
-| 9 | `global_context_index` | Bucket and root summaries for global questions | `build_global_context_index=True` |
+| 9 | `global_context_index` | Bucket and root summaries for global questions; also the rows dataset routing scores an unscoped search on | on by default (`build_global_context_index=False` or `IMPROVE_GLOBAL_CONTEXT_INDEX=false` turns it off) |
 
 Stages 1–7 need `session_ids`; 8–9 work on the graph alone. The order
 matters: 4 feeds 5, 5 feeds 7, and 7 runs before 8.
@@ -95,8 +95,8 @@ CLI, and `RememberResult.improve`.
 |---|---|
 | `no_session_ids` | Session stage, no `session_ids` passed |
 | `disabled_by_config` | Listed in `IMPROVE_STAGES_DISABLED` |
-| `opt_in_disabled` | Pass `build_truth_subspace=True` / `build_global_context_index=True` |
-| `turned_off` | Conflict review (on by default) was switched off by `review_conflicts=False` or `IMPROVE_REVIEW_CONFLICTS=false` |
+| `opt_in_disabled` | Pass `build_truth_subspace=True` |
+| `turned_off` | An on-by-default stage was switched off: conflict review by `review_conflicts=False` or `IMPROVE_REVIEW_CONFLICTS=false`, the global context index by `build_global_context_index=False` or `IMPROVE_GLOBAL_CONTEXT_INDEX=false` |
 | `personalization_disabled` | Set `PERSONALIZATION_ENABLED=true` |
 | `auto_feedback_disabled` | Stage 4 needs `CACHING=true` and `AUTO_FEEDBACK=true` |
 | `no_llm_configured` | Stages 4, 5, 8 draft text with an LLM; none configured |
@@ -151,6 +151,22 @@ There is no debounce timer: held-back entries wait for the next
   preferences never do. The guarantee holds within one worker process (an
   in-process lock); with several workers, send a session's writes to one.
   Example: `examples/guides/session_node_sets.py`.
+- **A session belongs to one dataset.** Its first write (plain text, a
+  typed entry, or a recall that records a turn) binds it to that write's
+  dataset. Every later `remember(..., session_id=...)` goes to the bound
+  dataset; naming another one (`dataset_id`, or a `dataset_name` other than
+  the `main_dataset` default) raises `ValueError` (HTTP 409 on
+  `POST /api/v1/remember`, 400 on `/remember/entry`). Start a new session
+  for another dataset. The turn's Q&A vector is written to that dataset's own
+  vector store, where its recalls read it.
+- **Session writes go through the dataset's databases.** With backend
+  access control on, a session write enters its dataset's database context,
+  like a recall turn: it takes a dataset queue slot
+  (`DATASET_QUEUE_MAX_CONCURRENT`, default 6, per process), so it waits
+  while that many datasets are busy, and the first write to a new dataset
+  provisions the dataset's databases (one database per dataset on
+  pgvector/Postgres, a container with `neo4j_community`). If those
+  databases cannot be bound, the write raises instead of storing the turn.
 - **Typed entries do not auto-improve.** `remember(QAEntry/TraceEntry/
   FeedbackEntry, session_id=...)` stores the entry but never starts an
   improve. Call `improve(session_ids=[...])` yourself.

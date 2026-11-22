@@ -193,6 +193,17 @@ def _create_vector_engine(
             ):
                 raise OSError("Missing required pgvector credentials.")
 
+            if not vector_db_name:
+                # The dataset handlers name every dataset's database. With no
+                # name this is the deployment's default store (dataset routing
+                # keeps its collection there): the relational database, as in
+                # the branch below. It exists when the relational database is
+                # Postgres on this server; otherwise the routing store creates
+                # it on first use (``ensure_default_store``).
+                from cognee.infrastructure.databases.relational import get_relational_config
+
+                vector_db_name = get_relational_config().db_name
+
             connection_string: str = (
                 f"postgresql+asyncpg://{vector_db_username}:{vector_db_password}"
                 f"@{vector_db_host}:{vector_db_port}/{vector_db_name}"

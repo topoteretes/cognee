@@ -29,6 +29,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.operations import record_operation
 from cognee.modules.search.methods import search as search_function
+from cognee.modules.search.methods.node_name_scope import node_name_scope
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.search.types.SearchType import resolve_deprecated_search_type
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
@@ -89,9 +90,9 @@ async def search(
 
         **HYBRID_COMPLETION** (Default):
             Document passages plus entity neighbourhoods, then LLM completion.
-            Defers to GRAPH_COMPLETION for a custom node_type, node_name with
-            node_type=None, neighborhood_depth, feedback_influence > 0, or a
-            missing chunk collection.
+            Defers to GRAPH_COMPLETION for a custom node_type, neighborhood_depth,
+            feedback_influence > 0, or a missing chunk collection. node_name with
+            node_type=None raises QueryValidationError, as on every type.
 
         **GRAPH_COMPLETION**:
             Natural language Q&A using full graph context and LLM reasoning.
@@ -161,12 +162,22 @@ async def search(
         top_k: Maximum number of results to return (1-N)
               Higher values provide more comprehensive but potentially noisy results.
 
-        node_type: Filter results to specific entity types (for advanced filtering).
+        node_type: What the names in node_name are. NodeSet (the default) means node-set
+                   tags; any other graph node type (TextDocument, Entity, ...) means the
+                   named nodes of that type and their one-hop neighbours.
 
-        node_name: Filter results to specific named entities (for targeted search).
+        node_name: Names to scope the search to, read according to node_type. Node-set
+                   tags are honoured by CHUNKS, RAG_COMPLETION, HYBRID_COMPLETION, TEMPORAL,
+                   CODING_RULES and the graph-completion family. A graph scope is honoured
+                   by the graph-completion family (it ranks the projected nodes), by CHUNKS
+                   and RAG_COMPLETION (they score the chunks in the projection: a document's
+                   chunks, an entity's mentions) and by HYBRID_COMPLETION (defers to
+                   GRAPH_COMPLETION). A search type that cannot apply the filter raises
+                   QueryValidationError, node_name without a node_type raises too, and
+                   FEELING_LUCKY picks only among the types that can apply it.
 
         node_name_filter_operator: Operator determining how to filter based on node names.
-                                    Possible values: AND, OR (default is OR, i.e. disjunction)
+                                    Possible values: AND, OR (default is OR, i.e. disjunction).
 
         session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
 
@@ -284,6 +295,9 @@ async def search(
 
     client = get_remote_client()
     if client is not None:
+        # The wire carries the class name and cannot tell node_type=None from an
+        # omitted one, so the local rule for names without a type applies here.
+        node_name_scope(node_type, node_name)
         return await client.search(
             query_text,
             search_type=query_type,
@@ -291,6 +305,7 @@ async def search(
             dataset_ids=dataset_ids,
             system_prompt=system_prompt,
             top_k=top_k,
+            node_type=node_type,
             node_name=node_name,
             only_context=only_context,
             verbose=verbose,
@@ -346,7 +361,7 @@ async def search(
                     ) from error
 
             operation_context.set_user(user)
-            operation_context.set_session_id(session_id)
+            operation_context.set_session_ids([session_id])
 
             await set_session_user_context_variable(user)
 

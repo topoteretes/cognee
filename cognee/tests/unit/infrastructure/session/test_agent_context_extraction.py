@@ -190,7 +190,12 @@ def _patch_llm(monkeypatch, lessons, captured=None):
     async def fake_acreate_structured_output(text_input, system_prompt, response_model):
         if captured is not None:
             captured["text_input"] = text_input
-        return AgentContextExtraction(lessons=lessons)
+        return AgentContextExtraction(
+            lessons=[
+                {"evidence": "The test trace demonstrates the repository constraint.", **lesson}
+                for lesson in lessons
+            ]
+        )
 
     monkeypatch.setattr(
         agent_context_extraction.LLMGateway,
@@ -490,3 +495,38 @@ async def test_pending_extraction_reads_and_writes_through_the_shared_helper(mon
     assert await TRACE_EXTRACTION_WATERMARK.read_count(sm, "u", "s") == 5
     # Still exactly one state row, updated in place.
     assert len([row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND]) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_pending_extractions_send_the_window_once(monkeypatch):
+    # The trace write's background batch and improve's extract_agent_context stage
+    # can run at once on one session; the second must see the advanced watermark.
+    import asyncio
+
+    count = agent_context_extraction.TRACE_EXTRACTION_INTERVAL
+    sm = FakeSessionManager(traces=[_trace(f"step-{i}") for i in range(count)])
+    calls = 0
+    release = asyncio.Event()
+
+    async def slow_llm(text_input, system_prompt, response_model):
+        nonlocal calls
+        calls += 1
+        await release.wait()
+        return AgentContextExtraction(lessons=[])
+
+    monkeypatch.setattr(agent_context_extraction.LLMGateway, "acreate_structured_output", slow_llm)
+    background = asyncio.create_task(
+        extract_pending_agent_context(session_manager=sm, user_id="u", session_id="s")
+    )
+    stage = asyncio.create_task(
+        extract_pending_agent_context(
+            session_manager=sm, user_id="u", session_id="s", min_new_traces=1
+        )
+    )
+    await asyncio.sleep(0.05)
+    release.set()
+    await asyncio.gather(background, stage)
+
+    assert calls == 1
+    state = next(row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND)
+    assert state["processed_trace_count"] == count

@@ -7,6 +7,8 @@ Covers:
 - Export endpoint: unsupported format -> 400 listing the options
 - Export endpoint: unknown key -> 404, another user's key -> 404 (no existence leak)
 - Export endpoint: stored file that is not RDF -> 422
+- Turtle upload (SDK-1246 records ``format`` in metadata) parses with the stored
+  format first and exports correctly
 - Export endpoint: JSON-LD referencing an external @context / @import -> 422, no request sent
 - Export endpoint: an ontology the chosen writer cannot express -> 422 naming the format, not 404
 """
@@ -96,20 +98,40 @@ def ontology_service(tmp_path):
         yield OntologyService()
 
 
-def _store(ontology_service, tmp_path, user_id: str, key: str, content: bytes) -> None:
+def _store(
+    ontology_service,
+    tmp_path,
+    user_id: str,
+    key: str,
+    content: bytes,
+    rdf_format: str | None = None,
+) -> None:
+    """Write an ontology file plus metadata entry directly to disk.
+
+    ``rdf_format=None`` mimics uploads made before the ``format`` field existed.
+    """
     user_dir = tmp_path / user_id
     user_dir.mkdir(exist_ok=True)
-    ontology_service._get_ontology_path(user_dir, key).write_bytes(content)
+    (tmp_path / ontology_service._get_ontology_path(user_id, key)).write_bytes(content)
     metadata_path = user_dir / "metadata.json"
     metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
-    metadata[key] = {"filename": "f.owl", "size_bytes": len(content), "uploaded_at": "2024-01-01"}
+    entry = {"filename": "f.owl", "size_bytes": len(content), "uploaded_at": "2024-01-01"}
+    if rdf_format is not None:
+        entry["format"] = rdf_format
+    metadata[key] = entry
     metadata_path.write_text(json.dumps(metadata))
 
 
-def _upload(client, key: str, content: bytes = OWL_FIXTURE) -> None:
+def _upload(
+    client,
+    key: str,
+    content: bytes = OWL_FIXTURE,
+    filename: str = "test.owl",
+    content_type: str = "application/xml",
+) -> None:
     response = client.post(
         "/api/v1/ontologies",
-        files=[("ontology_file", ("test.owl", content, "application/xml"))],
+        files=[("ontology_file", (filename, content, content_type))],
         data={"ontology_key": key},
     )
     assert response.status_code == 200, response.text
@@ -121,62 +143,91 @@ def _upload(client, key: str, content: bytes = OWL_FIXTURE) -> None:
 
 
 class TestOntologyServiceExport:
-    def test_load_ontology_graph_parses_rdf_xml(self, ontology_service, tmp_path):
+    @pytest.mark.asyncio
+    async def test_load_ontology_graph_parses_rdf_xml(self, ontology_service, tmp_path):
         user = SimpleNamespace(id="user-1")
         _store(ontology_service, tmp_path, "user-1", "med", OWL_FIXTURE)
 
-        graph = ontology_service.load_ontology_graph("med", user)
+        graph = await ontology_service.load_ontology_graph("med", user)
 
         assert len(graph) == EXPECTED_TRIPLES
 
-    def test_load_ontology_graph_guesses_turtle_in_owl_file(self, ontology_service, tmp_path):
+    @pytest.mark.asyncio
+    async def test_load_ontology_graph_guesses_turtle_in_owl_file(self, ontology_service, tmp_path):
         """A .owl upload that is really Turtle is still loadable."""
         user = SimpleNamespace(id="user-1")
         turtle = Graph().parse(data=OWL_FIXTURE, format="xml").serialize(format="turtle")
         _store(ontology_service, tmp_path, "user-1", "ttl", turtle.encode("utf-8"))
 
-        graph = ontology_service.load_ontology_graph("ttl", user)
+        graph = await ontology_service.load_ontology_graph("ttl", user)
 
         assert len(graph) == EXPECTED_TRIPLES
 
-    def test_load_ontology_graph_raises_for_unknown_key(self, ontology_service, tmp_path):
+    @pytest.mark.asyncio
+    async def test_load_ontology_graph_uses_stored_format_first(self, ontology_service, tmp_path):
+        """When metadata records ``format`` the file is parsed with it, no probing."""
+        user = SimpleNamespace(id="user-1")
+        turtle = Graph().parse(data=OWL_FIXTURE, format="xml").serialize(format="turtle")
+        _store(ontology_service, tmp_path, "user-1", "ttl", turtle.encode("utf-8"), "turtle")
+        attempted_formats = []
+
+        class RecordingGraph(Graph):
+            def parse(self, *args, **kwargs):
+                attempted_formats.append(kwargs.get("format"))
+                return super().parse(*args, **kwargs)
+
+        # Parsing happens in parse_rdf_content, so record the Graph it instantiates.
+        with patch("cognee.modules.ontology.rdf_xml.parse_rdf_content.Graph", RecordingGraph):
+            graph = await ontology_service.load_ontology_graph("ttl", user)
+
+        assert len(graph) == EXPECTED_TRIPLES
+        assert attempted_formats == ["turtle"]
+
+    @pytest.mark.asyncio
+    async def test_load_ontology_graph_raises_for_unknown_key(self, ontology_service, tmp_path):
         user = SimpleNamespace(id="user-1")
         (tmp_path / "user-1").mkdir()
         (tmp_path / "user-1" / "metadata.json").write_text("{}")
 
         with pytest.raises(ValueError, match="not found"):
-            ontology_service.load_ontology_graph("missing", user)
+            await ontology_service.load_ontology_graph("missing", user)
 
-    def test_load_ontology_graph_is_scoped_to_user(self, ontology_service, tmp_path):
+    @pytest.mark.asyncio
+    async def test_load_ontology_graph_is_scoped_to_user(self, ontology_service, tmp_path):
         _store(ontology_service, tmp_path, "owner", "shared_key", OWL_FIXTURE)
 
         with pytest.raises(ValueError, match="not found"):
-            ontology_service.load_ontology_graph("shared_key", SimpleNamespace(id="intruder"))
+            await ontology_service.load_ontology_graph("shared_key", SimpleNamespace(id="intruder"))
 
-    def test_load_ontology_graph_raises_parse_error_for_garbage(self, ontology_service, tmp_path):
+    @pytest.mark.asyncio
+    async def test_load_ontology_graph_raises_parse_error_for_garbage(
+        self, ontology_service, tmp_path
+    ):
         user = SimpleNamespace(id="user-1")
         _store(ontology_service, tmp_path, "user-1", "junk", b"\x00\x01 definitely not rdf <<<")
 
         with pytest.raises(OntologyParseError):
-            ontology_service.load_ontology_graph("junk", user)
+            await ontology_service.load_ontology_graph("junk", user)
 
     @pytest.mark.parametrize("export_format", sorted(EXPORT_FORMATS))
-    def test_export_ontology_round_trips(self, ontology_service, tmp_path, export_format):
+    @pytest.mark.asyncio
+    async def test_export_ontology_round_trips(self, ontology_service, tmp_path, export_format):
         user = SimpleNamespace(id="user-1")
         _store(ontology_service, tmp_path, "user-1", "med", OWL_FIXTURE)
 
-        payload = ontology_service.export_ontology("med", user, export_format=export_format)
+        payload = await ontology_service.export_ontology("med", user, export_format=export_format)
 
         assert isinstance(payload, bytes)
         rdflib_format = EXPORT_FORMATS[export_format][0]
         assert len(Graph().parse(data=payload, format=rdflib_format)) == EXPECTED_TRIPLES
 
-    def test_export_ontology_rejects_unknown_format(self, ontology_service, tmp_path):
+    @pytest.mark.asyncio
+    async def test_export_ontology_rejects_unknown_format(self, ontology_service, tmp_path):
         user = SimpleNamespace(id="user-1")
         _store(ontology_service, tmp_path, "user-1", "med", OWL_FIXTURE)
 
         with pytest.raises(KeyError):
-            ontology_service.export_ontology("med", user, export_format="csv")
+            await ontology_service.export_ontology("med", user, export_format="csv")
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +270,26 @@ def test_export_ontology_endpoint_defaults_to_turtle(client):
         assert response.headers["content-type"].split(";")[0] == "text/turtle"
         assert response.headers["content-disposition"] == f'attachment; filename="{key}.ttl"'
         assert len(Graph().parse(data=response.content, format="turtle")) == EXPECTED_TRIPLES
+    finally:
+        client.delete(f"/api/v1/ontologies/{key}")
+
+
+def test_export_ontology_endpoint_turtle_upload(client):
+    """A Turtle upload (format recorded at upload time) exports in every format."""
+    key = f"test_export_ttl_{uuid.uuid4().hex[:8]}"
+    turtle = Graph().parse(data=OWL_FIXTURE, format="xml").serialize(format="turtle")
+    _upload(client, key, turtle.encode("utf-8"), filename="test.ttl", content_type="text/turtle")
+    try:
+        for export_format, (rdflib_format, media_type, _) in EXPORT_FORMATS.items():
+            response = client.get(
+                f"/api/v1/ontologies/{key}/export", params={"format": export_format}
+            )
+
+            assert response.status_code == 200, response.text
+            assert response.headers["content-type"].split(";")[0] == media_type
+            assert (
+                len(Graph().parse(data=response.content, format=rdflib_format)) == EXPECTED_TRIPLES
+            )
     finally:
         client.delete(f"/api/v1/ontologies/{key}")
 
@@ -399,26 +470,28 @@ DIGIT_PREDICATE_FIXTURE = (
 )
 
 
-def test_export_ontology_raises_serialization_error_for_inexpressible_format(
+@pytest.mark.asyncio
+async def test_export_ontology_raises_serialization_error_for_inexpressible_format(
     ontology_service, tmp_path
 ):
     user = SimpleNamespace(id="user-1")
     _store(ontology_service, tmp_path, "user-1", "digits", DIGIT_PREDICATE_FIXTURE)
 
     with pytest.raises(OntologySerializationError, match="cannot be serialized as xml"):
-        ontology_service.export_ontology("digits", user, export_format="xml")
-    assert ontology_service.export_ontology("digits", user, export_format="turtle")
+        await ontology_service.export_ontology("digits", user, export_format="xml")
+    assert await ontology_service.export_ontology("digits", user, export_format="turtle")
 
 
-def test_load_ontology_graph_raises_not_found_for_unknown_and_invalid_keys(
+@pytest.mark.asyncio
+async def test_load_ontology_graph_raises_not_found_for_unknown_and_invalid_keys(
     ontology_service, tmp_path
 ):
     user = SimpleNamespace(id="user-1")
 
     with pytest.raises(OntologyNotFoundError):
-        ontology_service.load_ontology_graph("missing", user)
+        await ontology_service.load_ontology_graph("missing", user)
     with pytest.raises(OntologyNotFoundError):
-        ontology_service.load_ontology_graph("../escape", user)
+        await ontology_service.load_ontology_graph("../escape", user)
 
 
 def test_export_ontology_endpoint_inexpressible_format_is_422_not_404(client):

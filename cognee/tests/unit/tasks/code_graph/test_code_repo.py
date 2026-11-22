@@ -70,6 +70,41 @@ def test_partition_buckets(tmp_path):
     }
 
 
+def test_lfs_pointers_of_documents_are_skipped(tmp_path):
+    """git runs with LFS downloads off, so an LFS document arrives as its pointer;
+    the pointer text must not be ingested as if it were the document."""
+    repo = _make_repo(tmp_path)
+    # Git stores pointers with LF endings; newline="\n" keeps Windows from writing CRLF.
+    (repo / "manual.pdf").write_text(
+        f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 2048000\n",
+        newline="\n",
+    )
+    (repo / "deck.pptx").write_text(
+        "version https://git-lfs.github.com/spec/v1\n"
+        f"ext-0-foo sha256:{'b' * 64}\noid sha256:{'a' * 64}\nsize 12",
+        newline="\n",
+    )
+    # Prose that merely quotes the pointer header stays, short or long.
+    (repo / "lfs-notes.md").write_text(
+        "version https://git-lfs.github.com/spec/v1 is the pointer header.\n" + "x" * 2000,
+        newline="\n",
+    )
+    (repo / "lfs-short.md").write_text(
+        "version https://git-lfs.github.com/spec/v1 is the pointer header.\n", newline="\n"
+    )
+    (repo / "lfs-almost.md").write_text(
+        f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 12\nmore prose\n",
+        newline="\n",
+    )
+
+    _covered, documents, skipped = partition_repo_files(repo)
+
+    document_names = {path.relative_to(repo).as_posix() for path in documents}
+    skipped_names = {path.relative_to(repo).as_posix() for path in skipped}
+    assert {"manual.pdf", "deck.pptx"} <= skipped_names
+    assert {"lfs-notes.md", "lfs-short.md", "lfs-almost.md"} <= document_names
+
+
 def test_manifest_hash_tracks_code_content(tmp_path):
     repo = _make_repo(tmp_path)
     covered, _documents, _skipped = partition_repo_files(repo)
@@ -94,8 +129,12 @@ async def test_directory_with_project_resolves_to_repo_item_plus_documents(tmp_p
 
     resolved = await resolve_data_directories([str(repo)])
 
-    manifest_items = [item for item in resolved if isinstance(item, DataItem)]
-    file_items = [item for item in resolved if isinstance(item, str)]
+    manifest_items = [
+        item for item in resolved if isinstance(item, DataItem) and not item.cognee_path
+    ]
+    # The project's documents are cognee-produced paths, marked so the
+    # server-path gate does not apply to them.
+    file_items = [item.data for item in resolved if isinstance(item, DataItem) and item.cognee_path]
     assert len(manifest_items) == 1
     assert manifest_items[0].system_metadata["source"] == "code_repo"
     assert manifest_items[0].system_metadata["file_count"] == 3
@@ -321,20 +360,22 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
 
     # The clone gets the normalised URL, not the browser one, and the branch asked for.
     assert cloned_specs == [("https://github.com/org/repo", "dev")]
-    manifest_items = [item for item in resolved if isinstance(item, DataItem)]
+    manifest_items = [
+        item for item in resolved if isinstance(item, DataItem) and not item.cognee_path
+    ]
     assert len(manifest_items) == 1
     manifest = manifest_items[0]
     assert manifest.system_metadata["source"] == "code_repo"
     assert manifest.system_metadata["repo_path"] == str(clone)
     assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo"
     assert manifest.system_metadata["file_count"] == 3
-    # The repo's documents ride along individually; unrelated items pass through.
-    string_items = [item for item in resolved if isinstance(item, str)]
-    assert {Path(item).name for item in string_items if item != "plain text note"} == {
-        "README.md",
-        "notes.txt",
-    }
-    assert "plain text note" in string_items
+    # The repo's documents ride along individually, as cognee-produced paths
+    # the server-path gate does not apply to; unrelated items pass through.
+    document_items = [
+        item.data for item in resolved if isinstance(item, DataItem) and item.cognee_path
+    ]
+    assert {Path(item).name for item in document_items} == {"README.md", "notes.txt"}
+    assert "plain text note" in resolved
 
 
 @pytest.mark.asyncio

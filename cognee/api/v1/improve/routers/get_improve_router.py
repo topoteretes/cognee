@@ -32,7 +32,8 @@ class ImprovePayloadDTO(InDTO):
     dataset_id: UUID | Literal[""] | None = Field(default=None, examples=[""])
     node_name: list[str] | None = Field(default=None, examples=[[]], deprecated=True)
     run_in_background: bool | None = Field(default=False)
-    build_global_context_index: bool | None = Field(default=False)
+    # None follows the server's IMPROVE_GLOBAL_CONTEXT_INDEX (default true).
+    build_global_context_index: bool | None = Field(default=None)
     build_truth_subspace: bool | None = Field(default=False)
     review_conflicts: bool | None = None
     # Learning rate for the feedback-weight stage. Omitted (None) means the
@@ -64,7 +65,8 @@ def get_improve_router() -> APIRouter:
         `feedback_weights`, `persist_session_qa`, `persist_agent_traces`,
         `extract_agent_context`, `distill_sessions`, `update_user_preferences`,
         `build_truth_subspace`, `review_conflicts`, `global_context_index`.
-        Stages 1-7 need `sessionIds`; stages 7 and 9 are opt-in via the `build*` flags.
+        Stages 1-7 need `sessionIds`; stage 7 is opt-in via `build_truth_subspace`; stages 8
+        and 9 run by default and can be switched off per call.
 
         ## Request Parameters
         - **dataset_name** (Optional[str]): Dataset name.
@@ -75,8 +77,9 @@ def get_improve_router() -> APIRouter:
           tasks. Use a custom pipeline instead.
         - **run_in_background** (Optional[bool]): Run all stages as one background
           task and return immediately with `status == "running"` (default: False).
-        - **build_global_context_index** (Optional[bool]): Build the global context index
-          (default: False).
+        - **build_global_context_index** (Optional[bool]): Build the global context index.
+          Omitted or null follows the server's `IMPROVE_GLOBAL_CONTEXT_INDEX` (default: true);
+          false skips the stage for this call.
         - **review_conflicts** (Optional[bool]): Review conflicts using source documents and
           dates. Omitted or null follows `IMPROVE_REVIEW_CONFLICTS` (default true); skipped
           without an LLM.
@@ -148,7 +151,7 @@ def get_improve_router() -> APIRouter:
             improve_run = await cognee_improve(
                 dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
                 session_ids=payload.session_ids,
-                build_global_context_index=bool(payload.build_global_context_index),
+                build_global_context_index=payload.build_global_context_index,
                 build_truth_subspace=bool(payload.build_truth_subspace),
                 review_conflicts=payload.review_conflicts,
                 user=user,

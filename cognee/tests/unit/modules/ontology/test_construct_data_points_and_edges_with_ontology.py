@@ -301,3 +301,123 @@ def test_strict_mode_logs_one_aggregate_drop_summary(monkeypatch):
     # 1 of 4 nodes dropped, 1 of 1 edges dropped, across 2 graphs.
     assert warning_args[1:3] == (1, 4)
     assert warning_args[4:7] == (1, 1, 2)
+
+
+# --- closing the cognify-side match gap ---------------------------------------------
+
+
+class _LookupResolver(BaseOntologyResolver):
+    """Exposes a ``lookup`` like the RDFLib resolver and answers exact class keys only."""
+
+    def __init__(self):
+        self.lookup = {
+            "classes": {
+                "creditexposure": "https://example.test/fin#CreditExposure",
+                "enterprisecustomer": "https://example.test/fin#EnterpriseCustomer",
+            },
+            "individuals": {},
+        }
+        self.calls = []
+
+    def build_lookup(self) -> None:
+        return None
+
+    def refresh_lookup(self) -> None:
+        return None
+
+    def find_closest_match(self, name: str, category: str):
+        return name if name in self.lookup.get(category, {}) else None
+
+    def get_subgraph(self, node_name: str, node_type: str = "individuals", directed: bool = True):
+        self.calls.append((node_type, node_name))
+        if node_type == "classes":
+            # A deliberately loose match, like the 80% fuzzy cutoff makes on n-grams.
+            if node_name == "enterprise_customer_acme":
+                root = AttachedOntologyNode(self.lookup["classes"]["enterprisecustomer"], "classes")
+                return [root], [], root
+            uri = self.lookup["classes"].get(node_name)
+            if uri is not None:
+                root = AttachedOntologyNode(uri, "classes")
+                return [root], [], root
+        return [], [], None
+
+
+def test_entity_named_after_a_class_is_grounded_in_it_when_its_type_is_not():
+    resolver = _LookupResolver()
+    chunk = _make_chunk()
+    graph = KnowledgeGraph(
+        nodes=[
+            Node(
+                id="n1",
+                name="Credit exposure to Acme Corporation",
+                type="Financial Metric",
+                description="",
+            ),
+            Node(id="n2", name="Customer feedback form", type="Document", description=""),
+        ],
+        edges=[],
+    )
+
+    data_points_by_id, _ = construct_data_points_and_edges_with_ontology(
+        [chunk], [graph], resolver, ontology_mode="annotate"
+    )
+
+    grounded = data_points_by_id[str(EntityType.id_for("CreditExposure"))]
+    assert grounded.ontology_valid is True
+    entity = data_points_by_id[str(Entity.id_for("credit exposure to acme corporation"))]
+    assert entity.is_a.id == grounded.id
+    # "form" is the head noun of the second name; no class matches, type stays as extracted.
+    other = data_points_by_id[str(Entity.id_for("customer feedback form"))]
+    assert other.is_a.name == "document"
+
+
+def test_unsound_multiword_fuzzy_class_match_is_rejected():
+    resolver = _LookupResolver()
+    chunk = _make_chunk()
+    graph = KnowledgeGraph(
+        nodes=[Node(id="n1", name="Acme", type="Enterprise Customer Acme", description="")],
+        edges=[],
+    )
+
+    data_points_by_id, _ = construct_data_points_and_edges_with_ontology(
+        [chunk], [graph], resolver, ontology_mode="annotate"
+    )
+
+    # The fuzzy hit dragged "acme" into a class match; the soundness rule drops it and
+    # the extracted type survives untouched.
+    assert str(EntityType.id_for("EnterpriseCustomer")) not in data_points_by_id
+    assert data_points_by_id[str(Entity.id_for("acme"))].is_a.name == "enterprise customer acme"
+
+
+def _same_name_two_types(first_type: str, second_type: str) -> list[KnowledgeGraph]:
+    """One name in two chunks, typed differently; each chunk links it to a customer."""
+    graphs = []
+    for index, node_type in enumerate((first_type, second_type)):
+        exposure = Node(
+            id=f"e{index}", name="Credit exposure to Acme", type=node_type, description=""
+        )
+        acme = Node(id=f"a{index}", name="Acme", type="EnterpriseCustomer", description="")
+        edge = KGEdge(
+            source_node_id=exposure.id, target_node_id=acme.id, relationship_name="owed_by"
+        )
+        graphs.append(KnowledgeGraph(nodes=[exposure, acme], edges=[edge]))
+    return graphs
+
+
+@pytest.mark.parametrize(
+    "types", [("CreditExposure", "Financial Metric"), ("Financial Metric", "CreditExposure")]
+)
+def test_name_based_class_match_does_not_depend_on_chunk_order(types):
+    graphs = _same_name_two_types(*types)
+    canonicalize_extracted_graphs(
+        [_make_chunk(), _make_chunk()], graphs, _LookupResolver(), strict=False
+    )
+    assert [graph.nodes[0].type for graph in graphs] == ["CreditExposure", "CreditExposure"]
+
+    graphs = _same_name_two_types(*types)
+    canonicalize_extracted_graphs(
+        [_make_chunk(), _make_chunk()], graphs, _LookupResolver(), strict=True
+    )
+    for graph in graphs:
+        assert graph.nodes[0].name == "Credit exposure to Acme"
+        assert len(graph.edges) == 1

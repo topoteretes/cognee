@@ -50,7 +50,7 @@ describe("normalizeActivityRows", () => {
     expect(r.tokens_in).toBeNull();
     expect(r.tokens_out).toBeNull();
     expect(r.parent_operation_id).toBeNull();
-    expect(r.session_id).toBeNull();
+    expect(r.session_ids).toEqual([]);
     expect(r.origin).toBeNull();
     expect(r.outcome).toBeNull();
     expect(r.background).toBeNull();
@@ -90,6 +90,36 @@ describe("normalizeActivityRows", () => {
 
   it("skips entries that are not objects instead of throwing on the whole page", () => {
     expect(normalizeActivityRows([LEGACY_ROW, null, "x", 7]).length).toBe(1);
+  });
+});
+
+describe("normalizeActivityRows session_ids", () => {
+  it("keeps the list a pod running cognee PR 6191 sends, in its order", () => {
+    const [r] = normalizeActivityRows([{ ...LEGACY_ROW, session_ids: ["claude_a", "cursor_b"] }]);
+    expect(r.session_ids).toEqual(["claude_a", "cursor_b"]);
+  });
+
+  it("folds the single session_id of an older pod into a one-element list", () => {
+    // Pods from before PR 6191 (including ones running PR 6160) send
+    // `session_id` and no list; nothing downstream should branch on which.
+    const [r] = normalizeActivityRows([{ ...LEGACY_ROW, session_id: "claude_a" }]);
+    expect(r.session_ids).toEqual(["claude_a"]);
+  });
+
+  it("prefers the list when a row carries both, even an empty one", () => {
+    // A row never half-carries its sessions: the list is the pod's statement.
+    const [r] = normalizeActivityRows([{ ...LEGACY_ROW, session_ids: [], session_id: "claude_a" }]);
+    expect(r.session_ids).toEqual([]);
+  });
+
+  it("reads an explicit null and a non-list as no sessions", () => {
+    expect(normalizeActivityRows([{ ...LEGACY_ROW, session_id: null }])[0].session_ids).toEqual([]);
+    expect(normalizeActivityRows([{ ...LEGACY_ROW, session_ids: "claude_a" }])[0].session_ids).toEqual([]);
+  });
+
+  it("drops entries that are not session ids rather than letting them reach the channel lookup", () => {
+    const [r] = normalizeActivityRows([{ ...LEGACY_ROW, session_ids: ["claude_a", 7, null, ""] }]);
+    expect(r.session_ids).toEqual(["claude_a"]);
   });
 });
 
@@ -212,12 +242,27 @@ describe("dedupeByRunId", () => {
 
 describe("sessionIdsWithOperationRows", () => {
   it("reports the session an operation row references", () => {
+    const rows = [row({ kind: "operation", session_ids: ["search-ui-1"] })];
+    expect(sessionIdsWithOperationRows(rows).has("search-ui-1")).toBe(true);
+  });
+
+  it("reports every session of an operation over several, so each is covered", () => {
+    // The gap this closes: an improve over two sessions used to record no
+    // session at all, so both sessions kept their rows and the same recall
+    // rendered twice.
+    const rows = [row({ kind: "operation", session_ids: ["search-ui-1", "search-ui-2"] })];
+    const ids = sessionIdsWithOperationRows(rows);
+    expect(ids.has("search-ui-1")).toBe(true);
+    expect(ids.has("search-ui-2")).toBe(true);
+  });
+
+  it("still reads the single session an older pod sends", () => {
     const rows = [row({ kind: "operation", session_id: "search-ui-1" })];
     expect(sessionIdsWithOperationRows(rows).has("search-ui-1")).toBe(true);
   });
 
   it("ignores a pipeline row's session, which does not cover a session row", () => {
-    const rows = [row({ kind: "pipeline", session_id: "search-ui-1" })];
+    const rows = [row({ kind: "pipeline", session_ids: ["search-ui-1"] })];
     expect(sessionIdsWithOperationRows(rows).size).toBe(0);
   });
 
@@ -325,5 +370,25 @@ describe("viaLabel", () => {
 
   it("passes an origin it has not been taught through unchanged", () => {
     expect(viaLabel(row({ session_id: null, origin: "webhook" }))).toBe("webhook");
+  });
+
+  it("reads the client from the session list a pod running cognee PR 6191 sends", () => {
+    expect(viaLabel(row({ session_ids: ["claude_1"], origin: "background" }))).toBe("Claude Code");
+  });
+
+  it("names the client when every session of a multi-session run agrees", () => {
+    expect(viaLabel(row({ session_ids: ["claude_1", "claude_2"], origin: "background" }))).toBe("Claude Code");
+  });
+
+  it("falls back to origin when the sessions name different clients", () => {
+    // An improve bridging a Claude Code session and a Cursor session has no
+    // single client; claiming either would be wrong for the other.
+    expect(viaLabel(row({ session_ids: ["claude_1", "cursor_2"], origin: "background" }))).toBe("Background");
+    expect(viaChannel(row({ session_ids: ["claude_1", "cursor_2"], origin: "sdk" }))).toBeUndefined();
+  });
+
+  it("treats an empty list like no session", () => {
+    expect(viaLabel(row({ session_ids: [], origin: "api" }))).toBe("API");
+    expect(viaChannel(row({ session_ids: [], origin: null }))).toBeUndefined();
   });
 });

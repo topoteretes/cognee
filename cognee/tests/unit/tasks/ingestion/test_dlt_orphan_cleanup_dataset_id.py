@@ -14,6 +14,10 @@ from uuid import uuid4
 import pytest
 
 resolve = importlib.import_module("cognee.tasks.ingestion.resolve_dlt_sources")
+# The package re-exports get_dataset_data under the same name as its submodule, so
+# a dotted patch() target resolves to the function on Python 3.10 (mock walks the
+# path with getattr there); import the submodule itself and patch that.
+get_dataset_data_module = importlib.import_module("cognee.modules.data.methods.get_dataset_data")
 
 
 @pytest.mark.asyncio
@@ -62,10 +66,7 @@ async def test_orphan_cleanup_skips_without_delete_permission():
             "cognee.modules.data.methods.get_authorized_existing_datasets",
             new=AsyncMock(side_effect=PermissionDeniedError("no delete")),
         ),
-        patch(
-            "cognee.modules.data.methods.get_dataset_data.get_dataset_data",
-            new=AsyncMock(),
-        ) as dataset_data,
+        patch.object(get_dataset_data_module, "get_dataset_data", new=AsyncMock()) as dataset_data,
     ):
         await resolve._delete_dlt_orphans("notes", user, set(), dataset_id=uuid4())
 
