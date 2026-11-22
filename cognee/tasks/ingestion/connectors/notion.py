@@ -250,7 +250,10 @@ def _list_block_children(client: _NotionClient, block_id: str):
         if cursor:
             params["start_cursor"] = cursor
         response = client.request("GET", f"blocks/{block_id}/children", params=params)
-        yield from response.get("results", [])
+        results = response.get("results")
+        if not isinstance(results, list):
+            raise NotionAPIError(0, "Notion answered without a results list.")
+        yield from results
         cursor = response.get("next_cursor")
         if not response.get("has_more"):
             return
@@ -270,7 +273,10 @@ def _query_data_source(client: _NotionClient, data_source_id: str):
         if cursor:
             body["start_cursor"] = cursor
         response = client.request("POST", f"data_sources/{data_source_id}/query", json_body=body)
-        yield from response.get("results", [])
+        results = response.get("results")
+        if not isinstance(results, list):
+            raise NotionAPIError(0, "Notion answered without a results list.")
+        yield from results
         # Notion stops a query at 10,000 rows with has_more false and this
         # status; the rows past the cut would otherwise be tombstoned.
         if (response.get("request_status") or {}).get("type") == "incomplete":
