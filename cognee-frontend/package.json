@@ -6,9 +6,9 @@
     "node": ">=20.9.0"
   },
   "scripts": {
-    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack",
-    "build": "NEXT_TELEMETRY_DISABLED=1 next build",
-    "start": "NEXT_TELEMETRY_DISABLED=1 next start",
+    "dev": "node init && NEXT_TELEMETRY_DISABLED=1 next dev --turbopack",
+    "build": "node init && NEXT_TELEMETRY_DISABLED=1 next build",
+    "start": "node init && NEXT_TELEMETRY_DISABLED=1 next start",
     "lint": "eslint ."
   },
   "dependencies": {
