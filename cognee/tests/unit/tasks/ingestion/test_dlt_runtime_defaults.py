@@ -243,7 +243,9 @@ def test_pipeline_dataset_reads_state_as_utf8(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dropping_a_dataset_removes_pipeline_with_non_ascii_state(tmp_path, monkeypatch):
+async def test_dropping_a_dataset_removes_pipeline_with_non_ascii_state(
+    staging, tmp_path, monkeypatch
+):
     """A pipeline directory whose state.json contains non-ASCII text is removed when dropped,
     even under non-UTF-8 system ANSI code pages."""
     from pathlib import Path
