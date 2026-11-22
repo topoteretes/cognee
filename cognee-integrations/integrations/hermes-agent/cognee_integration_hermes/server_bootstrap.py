@@ -231,6 +231,10 @@ def _isolated_env_file():
 
 def _spawn(port, data_root, system_root, log_path, python=None):
     env = dict(os.environ)
+    python = python or sys.executable
+    if str(python) != str(sys.executable):
+        for name in ("PYTHONPATH", "PYTHONHOME"):
+            env.pop(name, None)
     # An explicit COGNEE_ENV_FILE from the user wins; otherwise pin an empty one.
     if not env.get("COGNEE_ENV_FILE"):
         isolated = _isolated_env_file()
@@ -295,7 +299,6 @@ def _spawn(port, data_root, system_root, log_path, python=None):
         log = open(log_path, "ab", buffering=0)  # noqa: SIM115 — handed to the child
     except Exception:
         log = subprocess.DEVNULL
-    python = python or sys.executable
     try:
         proc = subprocess.Popen(
             [
