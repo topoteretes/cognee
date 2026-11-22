@@ -216,3 +216,59 @@ async def test_dropping_applies_the_defaults_before_dlt_starts(tmp_path, monkeyp
     await ingest.drop_dlt_dataset("mine")
 
     assert seen == {TELEMETRY: "false"}
+
+
+def test_pipeline_dataset_reads_state_as_utf8(tmp_path, monkeypatch):
+    """state.json must be read as UTF-8 so non-ASCII connector state (e.g. Hindi, CJK)
+    does not fail under Windows ANSI code pages."""
+    from pathlib import Path
+
+    from cognee.tasks.ingestion.ingest_dlt_source import _pipeline_dataset
+
+    state_path = tmp_path / "state.json"
+    state_path.write_bytes(
+        b'{"dataset_name": "my_ds", "members": ["\xe0\xa4\xa8\xe0\xa5\x8b\xe0\xa4\x9f\xe0\xa5\x8d\xe0\xa4\xb8.md"]}'
+    )
+
+    real_read_text = Path.read_text
+
+    def fake_read_text(self, encoding=None, errors=None):
+        if encoding is None:
+            # Emulate non-UTF-8 system ANSI code page (e.g. cp1252) where byte 0x8D is undefined
+            return self.read_bytes().decode("cp1252", errors=errors or "strict")
+        return real_read_text(self, encoding=encoding, errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", fake_read_text)
+    assert _pipeline_dataset(state_path) == "my_ds"
+
+
+@pytest.mark.asyncio
+async def test_dropping_a_dataset_removes_pipeline_with_non_ascii_state(tmp_path, monkeypatch):
+    """A pipeline directory whose state.json contains non-ASCII text is removed when dropped,
+    even under non-UTF-8 system ANSI code pages."""
+    from pathlib import Path
+
+    from cognee.tasks.ingestion.ingest_dlt_source import drop_dlt_dataset
+
+    monkeypatch.setenv("DLT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv(DELETE_JOBS, "false")
+
+    real_read_text = Path.read_text
+
+    def fake_read_text(self, encoding=None, errors=None):
+        if encoding is None:
+            return self.read_bytes().decode("cp1252", errors=errors or "strict")
+        return real_read_text(self, encoding=encoding, errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", fake_read_text)
+
+    pipeline_dir = tmp_path / "pipelines" / "ingest_dlt_hindi"
+    pipeline_dir.mkdir(parents=True)
+    state_file = pipeline_dir / "state.json"
+    state_file.write_bytes(
+        b'{"dataset_name": "mine", "members": ["\xe0\xa4\xa8\xe0\xa5\x8b\xe0\xa4\x9f\xe0\xa5\x8d\xe0\xa4\xb8.md"]}'
+    )
+
+    await drop_dlt_dataset("mine")
+
+    assert not pipeline_dir.exists()
