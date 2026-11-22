@@ -58,7 +58,7 @@ class FakeEngine:
         self.embed_error = embed_error
         self.created, self.deleted, self.scored_ids, self.embedded = [], [], [], []
         self.vectors = {}  # row id -> the vector written by upsert_raw_vectors
-        self.dropped = []
+        self.dropped, self.compacted = [], []
         self.embedding_engine = types.SimpleNamespace(
             embed_text=self._embed, get_vector_size=lambda: 2
         )
@@ -112,6 +112,9 @@ class FakeEngine:
 
     async def delete_collection(self, collection_name):
         self.dropped.append(collection_name)
+
+    async def compact(self, collection_name=None):
+        self.compacted.append(collection_name)
 
 
 def _patch(monkeypatch, engine, documents, access_control=True):
@@ -453,6 +456,23 @@ async def test_sync_writes_new_and_changed_rows_and_deletes_the_rest(monkeypatch
     assert engine.vectors == {kept_id: [1.0, 0.0], changed_id: [0.0, 1.0]}
     assert engine.embedded == []
     assert sorted(index_store.retrieved) == sorted([kept_id, changed_id])
+    assert engine.compacted == [DATASET_ROUTE_COLLECTION]
+
+
+@pytest.mark.asyncio
+async def test_sync_with_nothing_to_change_does_not_compact(monkeypatch):
+    dataset_id = uuid4()
+    (root_id,) = dataset_route_ids(dataset_id, [])
+    engine = FakeEngine(existing={root_id: "root"})
+    _patch(monkeypatch, engine, {dataset_id: []})
+
+    touched = await sync_dataset_routes(
+        str(dataset_id),
+        [_summary(dataset_id, UUID(root_id), "root", is_root=True)],
+        FakeIndexStore({}),
+    )
+
+    assert touched == 0 and engine.compacted == []
 
 
 @pytest.mark.asyncio
