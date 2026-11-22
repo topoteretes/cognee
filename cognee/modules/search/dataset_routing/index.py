@@ -130,6 +130,10 @@ async def sync_dataset_routes(
                 dataset_id,
             )
             return len(stale)
+    if stale or changed:
+        # No cognify runs on the default store, so its compaction never
+        # reaches this collection. Each sync appends fragments here.
+        await engine.compact(DATASET_ROUTE_COLLECTION)
     logger.info(
         "Dataset routing index for %s: %d row(s) written, %d removed",
         dataset_id,

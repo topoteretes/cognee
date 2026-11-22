@@ -839,7 +839,8 @@ class LanceDBAdapter(VectorDBInterface):
         rows on disk; LanceDB never reclaims either on its own, so a store in
         daily use grows without bound (issue #4684: 136 GB on disk for ~6 GB of
         live vectors). Called once at the end of every cognify run (see
-        ``compact_vector_store``); a no-op on a compact table.
+        ``compact_vector_store``) and after every dataset routing sync that
+        writes (``sync_dataset_routes``); a no-op on a compact table.
 
         Bounded, not whole-store: a pass executes at most
         ``DEFAULT_MAX_TASKS_PER_RUN`` compaction tasks and deletes
