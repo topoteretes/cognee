@@ -62,9 +62,10 @@ all 100 documents / 1,000,000 records, and made zero model or vector-search call
 The candidate's `PRAGMA database_list` reported an empty filename for `main`, confirming
 the store was in memory. The baseline reported a temporary `records.db` path.
 
-The RAM candidate was 68.7% slower overall in these observations and used 3.68 times the
+The RAM candidate was 68.7% slower overall in this initial pair and used 3.68 times the
 peak process RSS. Parsing/insertion and the final SQL were faster, but schema description
-dominated both runs. This is not evidence of an overall speed improvement from this PR.
+dominated both runs. The slowdown did not reproduce in the follow-up below; this pair
+does not establish that the storage change caused a regression or a speed improvement.
 A one-second native stack sample during the RAM run showed SQLite invoking Python Unicode
 normalization/join code, consistent with `_probe` repeatedly applying `norm(column)` to
 text values for each question word. The benchmark times the whole `describe` stage; it
@@ -80,3 +81,64 @@ This synthetic CSV workload has repeated payloads and should not be treated as a
 benchmark of arbitrary documents or semantic reading. Runs are serial with no deliberate
 filesystem cache flushing. Results from one run per variant are observations, not a
 statistically established speedup.
+
+## Follow-up diagnosis
+
+An unmodified 1 GB RAM repeat, with `PYTHONHASHSEED=0`, returned the same correct result
+in **339.7224 s**, compared with 605.3115 s initially. No normalizer replacement or
+diagnostic callback was used in this repeat.
+
+| Metric | RAM repeat |
+| --- | ---: |
+| Parse and insert | 9.7491 s |
+| Schema description / query hints | 329.1134 s |
+| Final SQL | 0.1781 s |
+| Total retrieval | 339.7224 s |
+| Process CPU time | 339.2787 s |
+| Peak process RSS | 3,150,970,880 B (2.935 GiB) |
+| Largest event-loop scheduling gap | 331.9523 s |
+
+Reproduce the repeat with:
+
+```sh
+PYTHONHASHSEED=0 uv run python cognee/tests/performance/benchmark_broad_store.py --dataset-mb 1000 --documents 100 --json-output /tmp/broad-ram-repeat.json
+```
+
+The initial 68.7% gap is therefore not a reproducible storage regression from these
+measurements. Its specific cause remains unestablished. The repeat is also insufficient
+to claim a reliable RAM speedup over the original disk observation.
+
+Eight smaller, separate-process runs used 10 MB / 10 documents, `PYTHONHASHSEED=0`, and
+the order RAM, disk, disk with memory temporary storage, RAM with default temporary
+storage, disk, RAM, RAM with default temporary storage, disk with memory temporary
+storage. The two ordinary RAM runs took 3.3934–3.4330 s and ordinary disk runs took
+3.4695–3.5024 s. Changing `temp_store` did not reproduce the large gap at this size;
+this does not establish its effect on arbitrary larger workloads.
+
+### Confirmed CPU bottleneck
+
+Temporary instrumentation of the 1 GB fixture counted **33,000,000** calls to SQLite's
+Python `norm()` function, processing **10,944,972,500 characters**. `_probe` runs a
+separate `SELECT DISTINCT ... WHERE norm(column) LIKE ?` for each question word and
+text column. For this question, 11 words scan each of three text columns across one
+million rows. Normalization repeats even when a column contains identical payloads.
+
+An ablation replaced only the SQLite `norm` callback with an ASCII-specific equivalent
+for this fixture: `str(value).casefold()`, preserving `None` and asserting ASCII input.
+The fixture's fields contain no accents or whitespace requiring normalization. With
+call/character counting still enabled, the full-coverage runs returned the same answer:
+
+| Metric | Disk, ASCII ablation | RAM, ASCII ablation |
+| --- | ---: | ---: |
+| Total retrieval | 38.8622 s | 31.8480 s |
+| Schema description / query hints | 27.2489 s | 20.9471 s |
+| `_probe` alone | 22.4050 s | 19.0521 s |
+
+This is diagnostic instrumentation, not a production optimization or a general-purpose
+replacement for Unicode normalization. It isolates repeated Python character processing
+as the dominant cost on this fixture, without explaining the initial timing gap.
+
+The next optimization to evaluate is reducing repeated normalization while preserving
+Unicode matching and all existing query hints. Moving the store's create/use/close
+lifecycle to a worker would separately address event-loop stalls; storage placement
+alone does neither.
