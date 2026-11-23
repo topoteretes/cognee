@@ -36,8 +36,10 @@ All are `remember()` arguments (and `cognify()` ones):
 | `self_improvement` | `True` | `improve()` after the graph is built. `False` (or `IMPROVE_AUTO_ENABLED=false`) skips that extra work. |
 
 Worst-case concurrent LLM calls are about
-`data_per_batch × min(chunks per document, chunks_per_batch) × 2`, and there
-is no separate concurrency cap. The rate limiter below is the brake.
+`data_per_batch × min(chunks per document, chunks_per_batch) × 2`, all in
+flight at once unless `LLM_MAX_CONCURRENT_REQUESTS` is set (below). The rate
+limiter only spaces out when calls start; the concurrency cap bounds how many
+run at the same time.
 
 Several datasets in one `cognify(datasets=[...])` call run one after
 another, not in parallel.
@@ -49,6 +51,7 @@ another, not in parallel.
 | `LLM_RATE_LIMIT_ENABLED` | `false` | Turn on a requests-per-interval limit |
 | `LLM_RATE_LIMIT_REQUESTS` / `LLM_RATE_LIMIT_INTERVAL` | 60 / 60 s | 10 requests for local providers (Ollama, llama.cpp, LM Studio) |
 | `AUTO_RATE_LIMIT` | `true` | On a 429/503/529 or timeout, switches the limiter on for 15 minutes (extended while errors continue) |
+| `LLM_MAX_CONCURRENT_REQUESTS` | `0` (unlimited) | Max LLM requests in flight at once, per model and per process. Off for every provider until set. For a serial local server (Ollama, llama.cpp) match what it runs in parallel (Ollama's `OLLAMA_NUM_PARALLEL`), usually 1 to 4 |
 | `LLM_EXTRACTION_MODEL` / `_PROVIDER` / `_ENDPOINT` / `_API_KEY` / `_API_VERSION` | the main model | Use a cheaper or faster model just for graph extraction |
 | `LLM_SUMMARIZATION_*`, `LLM_QUERY_*` | the main model | Same, for summaries and for answering queries |
 | `LLM_MAX_COMPLETION_TOKENS` | 16384 | Also caps the default chunk size (half of it) |
@@ -162,7 +165,9 @@ the task chain (classify, chunk, extract graph + summarize, store). Tasks
 receive their input in batches of `chunks_per_batch`.
 `extract_graph_and_summarize` runs extraction and summarization together,
 each gathering one LLM call per chunk in the batch. Every LLM call passes
-through one process-wide rate limiter.
+through one process-wide rate limiter and, when `LLM_MAX_CONCURRENT_REQUESTS`
+is set, waits for a free slot of its model's concurrency cap (a streamed
+answer holds its slot until the stream ends).
 
 - Cognify task list and defaults: `cognee/api/v1/cognify/cognify.py`
 - Concurrency (`data_per_batch` semaphore): `cognee/modules/pipelines/operations/run_tasks.py`
