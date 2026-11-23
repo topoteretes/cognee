@@ -2,7 +2,8 @@
 
 Install ``cognee[gmail]``, ``cognee[google-drive]`` or ``cognee[google-calendar]`` for the
 Google dependencies and ``cognee[evernote]`` for Evernote's Thrift client; the Apollo, Asana,
-Dropbox, Linear, Notion, Obsidian, OneNote, Slack, Telegram and Vercel sources need none.
+Dropbox, Linear, Notion, Obsidian, OneNote, Slack, Subtitles, Telegram and Vercel sources
+need none.
 Importing this package does not load DLT or client libraries, authenticate, or start ingestion.
 Other connectors remain available in cognee-community.
 """
@@ -19,6 +20,7 @@ from .notion import notion_source
 from .obsidian import obsidian_source
 from .onenote import list_onenote_notebooks, onenote_source
 from .slack import build_slack_service, slack_source
+from .subtitles import subtitles_source
 from .telegram import build_telegram_service, telegram_account_id, telegram_source
 from .vercel import build_vercel_service, vercel_source
 
@@ -48,6 +50,7 @@ __all__ = [
     "obsidian_source",
     "onenote_source",
     "slack_source",
+    "subtitles_source",
     "telegram_account_id",
     "telegram_source",
     "vercel_source",
