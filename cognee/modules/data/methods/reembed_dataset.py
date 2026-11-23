@@ -142,6 +142,44 @@ async def reembed_dataset_in_context(dataset_id: UUID) -> ReembeddedDataset:
         vector_engine_cache.evict(**get_vectordb_context_config())
 
 
+async def abandon_reembed_in_context(dataset_id: UUID) -> None:
+    """Undo an unfinished re-embed of the dataset whose context the caller is in.
+
+    For a re-embed that stopped before it replaced a collection (the process was
+    killed while it embedded): every collection is still as it was, so the staging
+    collections are dropped and the dataset keeps the model that built it.
+
+    Raises:
+        CogneeValidationError: The re-embed had started replacing collections. The
+            dataset holds vectors of two models and can only be finished, with the
+            model the re-embed was moving it to.
+    """
+    from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import (
+        MODEL_KEY,
+        REEMBED_KEY,
+        STAGED_COLLECTIONS_KEY,
+        record_reembed_finished,
+    )
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.tasks.storage.reembed_collections import drop_staging_collections
+
+    dataset_database = await _get_dataset_database(dataset_id)
+    unfinished = dataset_database.vector_database_connection_info.get(REEMBED_KEY)
+    if unfinished is None:
+        return
+    if STAGED_COLLECTIONS_KEY in unfinished:
+        raise CogneeValidationError(
+            message=(
+                f"Dataset {dataset_id} is partly re-embedded with '{unfinished[MODEL_KEY]}': "
+                "some of its collections are already replaced. It can only be finished, "
+                "with that model in force."
+            )
+        )
+    await drop_staging_collections(await get_vector_engine_async())
+    await record_reembed_finished(dataset_database)
+    logger.info("Dataset %s: the unfinished re-embed was undone", dataset_id)
+
+
 async def _reembed(dataset_id: UUID) -> ReembeddedDataset:
     """``reembed_dataset`` inside the dataset's context, with the new model in force."""
     from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import (

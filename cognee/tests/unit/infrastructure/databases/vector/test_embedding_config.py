@@ -33,28 +33,21 @@ def test_resolve_returns_none_for_missing_inputs():
 
 
 def test_resolve_fastembed_uses_registry():
-    # Fake the fastembed import to verify we read both `dim` and `embed_dim`
-    # variants without requiring fastembed to be installed.
-    import sys
-    import types
+    # A registry of our own, to verify that both the `dim` and the `embed_dim`
+    # variant are read. The sizes are not the real models', so only it can answer.
+    from cognee.infrastructure.databases.vector.embeddings import fastembed_models
 
-    fake_module = types.ModuleType("fastembed")
-
-    class _FakeTextEmbedding:
-        @staticmethod
-        def list_supported_models():
-            return [
-                {"model": "BAAI/bge-small-en-v1.5", "dim": 384},
-                {"model": "BAAI/bge-large-en-v1.5", "embed_dim": 1024},
-            ]
-
-    fake_module.TextEmbedding = _FakeTextEmbedding
+    def text_models():
+        return [
+            {"model": "BAAI/bge-small-en-v1.5", "dim": 11},
+            {"model": "BAAI/bge-large-en-v1.5", "embed_dim": 13},
+        ]
 
     # The lookup is cached per (provider, model); clear it so the fake registry answers.
     _resolve_embedding_dimensions.cache_clear()
-    with patch.dict(sys.modules, {"fastembed": fake_module}):
-        assert _resolve_embedding_dimensions("fastembed", "BAAI/bge-small-en-v1.5") == 384
-        assert _resolve_embedding_dimensions("fastembed", "BAAI/bge-large-en-v1.5") == 1024
+    with patch.object(fastembed_models, "fastembed_text_models", text_models):
+        assert _resolve_embedding_dimensions("fastembed", "BAAI/bge-small-en-v1.5") == 11
+        assert _resolve_embedding_dimensions("fastembed", "BAAI/bge-large-en-v1.5") == 13
     # Drop the fake registry's answers so later lookups read the real one.
     _resolve_embedding_dimensions.cache_clear()
 
@@ -76,6 +69,19 @@ def test_resolve_dimensions_reads_the_registry_once_per_model():
     _resolve_embedding_dimensions.cache_clear()
 
     assert len(calls) == 1
+
+
+def test_registering_the_local_default_again_is_harmless():
+    """fastembed refuses a name it already has: a module loaded twice, or a fastembed
+    release that lists the model itself."""
+    import importlib
+
+    from cognee.infrastructure.databases.vector.embeddings import fastembed_models
+
+    importlib.reload(fastembed_models)
+
+    names = [model["model"] for model in fastembed_models.fastembed_text_models()]
+    assert names.count(fastembed_models.PPLX_EMBED_MODEL) == 1
 
 
 def test_the_local_default_is_a_model_fastembed_can_load():

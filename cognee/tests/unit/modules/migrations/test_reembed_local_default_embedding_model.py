@@ -21,16 +21,25 @@ from sqlalchemy import select
 import cognee.infrastructure.databases.vector.create_vector_engine as engine_module
 import cognee.infrastructure.databases.vector.embeddings as embeddings_package
 import cognee.infrastructure.databases.vector.embeddings.config as embedding_settings
-from cognee.context_global_variables import set_database_global_context_variables
-from cognee.exceptions import CogneeConfigurationError, CogneeSystemError
+from cognee.context_global_variables import (
+    DatabaseContextManager,
+    set_database_global_context_variables,
+)
+from cognee.context_global_variables import (
+    embedding_config as embedding_config_override,
+)
+from cognee.exceptions import CogneeConfigurationError, CogneeSystemError, CogneeValidationError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import (
     DIMENSIONS_KEY,
     MODEL_KEY,
     REEMBED_KEY,
+    STAGED_COLLECTIONS_KEY,
     record_reembed_progress,
 )
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
+from cognee.infrastructure.databases.vector.create_vector_engine import vector_engine_cache
 from cognee.infrastructure.databases.vector.embeddings.config import (
     DEFAULT_LOCAL_EMBEDDING_MODEL,
     EmbeddingConfig,
@@ -48,9 +57,14 @@ from cognee.modules.migrations.migration import MigrationContext
 from cognee.modules.migrations.versions import reembed_local_default_embedding_model as migration
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import DatasetDatabase
-from cognee.tasks.storage.reembed_collections import STAGING_PREFIX
+from cognee.tasks.storage.reembed_collections import (
+    STAGING_PREFIX,
+    stage_collections,
+    staging_collection_name,
+)
 
 routing = importlib.import_module("cognee.modules.search.dataset_routing")
+reembed_collections = importlib.import_module("cognee.tasks.storage.reembed_collections")
 
 SLUG = "reembed_local_default_embedding_model"
 BEFORE = "postgres_graph_source_ref_tables"
@@ -209,11 +223,20 @@ async def _record(dataset_id) -> dict:
     return dict((await _row(dataset_id)).vector_database_connection_info)
 
 
-async def _upgrade(dataset_id) -> dict | None:
+async def _upgrade(dataset_id, version_changed: bool = False) -> dict | None:
     """What the runner does for one dataset on startup."""
     return await runner._migrate_dataset(
-        get_relational_engine(), await _row(dataset_id), "test", False, "head"
+        get_relational_engine(), await _row(dataset_id), "test", version_changed, "head"
     )
+
+
+async def _stage_with_the_local_default(dataset_id) -> None:
+    """Stage the dataset's chunks as a re-embed does, and stop there."""
+    async with DatabaseContextManager(dataset_id, check_embedding_model=False):
+        # The cached engine embeds with the model that built the dataset.
+        vector_engine_cache.evict(**get_vectordb_context_config())
+        await stage_collections(await get_vector_engine_async(), ["_Chunk_text"])
+        vector_engine_cache.evict(**get_vectordb_context_config())
 
 
 async def _chunk_vectors(dataset_id, config: EmbeddingConfig | None = None) -> dict:
@@ -240,8 +263,10 @@ async def test_a_dataset_of_the_previous_default_is_reembedded(dataset, caplog):
         async with set_database_global_context_variables(dataset.id):
             pass
 
+    # As on a real upgrade the cognee version changed too, so the vector adapter's
+    # storage sync runs after the chain, on the re-embedded store.
     with caplog.at_level("WARNING"):
-        summary = await _upgrade(dataset.id)
+        summary = await _upgrade(dataset.id, version_changed=True)
 
     assert summary["migrations_applied"] == [SLUG]
     assert (await _row(dataset.id)).migration_revision == SLUG
@@ -388,6 +413,105 @@ async def test_a_reembed_that_was_interrupted_is_finished_by_the_next_run(datase
 
 
 @pytest.mark.asyncio
+async def test_a_model_that_cannot_be_loaded_says_how_to_keep_the_previous_one(
+    dataset, monkeypatch
+):
+    """An offline host: the routing check is the first thing that loads the model."""
+
+    async def cannot_load(engine):
+        raise ValueError("Could not load model perplexity-ai/pplx-embed-v1-0.6b from any source.")
+
+    monkeypatch.setattr(routing, "routing_width_matches", cannot_load)
+
+    with pytest.raises(CogneeSystemError) as raised:
+        await _upgrade(dataset.id)
+
+    kept = runner._error_text(raised.value)
+    assert "is as it was. To keep the previous model, set EMBEDDING_PROVIDER=fastembed" in kept
+    assert "Could not load model" in kept
+    assert await _record(dataset.id) == PREVIOUS_DEFAULT
+
+
+@pytest.mark.asyncio
+async def test_a_reembed_that_fails_while_replacing_is_finished_by_the_next_run(dataset):
+    """Its collections are of two widths then, so the previous model is no way out."""
+
+    async def disk_full(vector_engine, collection_names):
+        raise OSError("No space left on device")
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(reembed_collections, "replace_collections", disk_full)
+        with pytest.raises(CogneeSystemError) as raised:
+            await _upgrade(dataset.id)
+
+    kept = runner._error_text(raised.value)
+    assert "is partly re-embedded" in kept and "Run the migrations again" in kept
+    assert "To keep the previous model" not in kept
+    assert "No space left on device" in kept
+    assert REEMBED_KEY in await _record(dataset.id)
+    assert (await _row(dataset.id)).migration_revision == BEFORE
+
+    await _upgrade(dataset.id)
+
+    assert await _record(dataset.id) == LOCAL_DEFAULT
+    assert await _chunk_vectors(dataset.id) == _vectors_of(LOCAL_DEFAULT)
+
+
+@pytest.mark.asyncio
+async def test_an_interrupted_reembed_is_undone_when_the_previous_model_is_set(
+    dataset, installation
+):
+    """Ctrl-C while it embeds, then the setting the log names. The dataset must not be
+    stamped as migrated while it still refuses every use."""
+    await record_reembed_progress(await _row(dataset.id), LOCAL_DEFAULT)
+    await _stage_with_the_local_default(dataset.id)
+    installation(PREVIOUS)
+
+    summary = await _upgrade(dataset.id)
+
+    assert summary["migrations_applied"] == [SLUG]
+    assert await _record(dataset.id) == PREVIOUS_DEFAULT
+    # Read as any user of the dataset reads it; no staging collection is left either.
+    assert await _chunk_vectors(dataset.id) == _vectors_of(PREVIOUS_DEFAULT)
+
+
+@pytest.mark.asyncio
+async def test_a_half_replaced_dataset_is_not_stamped_when_the_previous_model_is_set(
+    dataset, installation
+):
+    """It can only be finished with the local default, so the run fails and says so."""
+    await _stage_with_the_local_default(dataset.id)
+    await record_reembed_progress(
+        await _row(dataset.id), {**LOCAL_DEFAULT, STAGED_COLLECTIONS_KEY: ["_Chunk_text"]}
+    )
+    installation(PREVIOUS)
+
+    with pytest.raises(CogneeValidationError, match="can only be finished"):
+        await _upgrade(dataset.id)
+    assert (await _row(dataset.id)).migration_revision == BEFORE
+
+    installation(NOTHING_CONFIGURED)
+    await _upgrade(dataset.id)
+
+    assert await _record(dataset.id) == LOCAL_DEFAULT
+    assert await _chunk_vectors(dataset.id) == _vectors_of(LOCAL_DEFAULT)
+
+
+@pytest.mark.asyncio
+async def test_a_callers_own_model_is_not_the_installations(dataset):
+    """A failed run is retried by the next write, from inside that write's context. Its
+    per-call model must not make the local default look configured away."""
+    token = embedding_config_override.set(OTHER)
+    try:
+        await _upgrade(dataset.id)
+    finally:
+        embedding_config_override.reset(token)
+
+    assert await _record(dataset.id) == LOCAL_DEFAULT
+    assert await _chunk_vectors(dataset.id) == _vectors_of(LOCAL_DEFAULT)
+
+
+@pytest.mark.asyncio
 async def test_a_downgrade_reembeds_with_the_previous_default(dataset):
     await _upgrade(dataset.id)
     assert await _record(dataset.id) == LOCAL_DEFAULT
@@ -415,8 +539,12 @@ class _SharedStore:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stored_width", [None, 1024, 3072], ids=["empty", "new", "another"])
 async def test_a_shared_store_is_left_alone(installation, stored_width):
-    """Access control off: a new deployment, one already on the new default, another model's."""
-    await migration.migrate(MigrationContext(None, _SharedStore(stored_width), dataset_id=None))
+    """Access control off: a new deployment, one already on the new default, another model's.
+    None of them is refused (the migration raises for nothing else in this mode)."""
+    assert (
+        await migration.migrate(MigrationContext(None, _SharedStore(stored_width), dataset_id=None))
+        is None
+    )
 
 
 @pytest.mark.asyncio
