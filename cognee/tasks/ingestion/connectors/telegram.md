@@ -31,7 +31,7 @@ Use a **dedicated bot** for cognee:
   or while another process polls it. The connector never deletes a webhook.
 - In groups a bot only sees what privacy mode allows: commands and replies to it. Disable
   privacy mode in @BotFather (`/setprivacy`) or make the bot an admin to sync every message.
-  The connector warns when privacy mode is on.
+  The connector warns when privacy mode is on and reports it as `privacy_mode=1` (see Stats).
 - A bot only sees messages sent after it joined. There is no history backfill.
 
 ## Usage
@@ -79,7 +79,7 @@ never kept in state.
 group, supergroup or channel, it is bound to that chat (state key `username_chats`), and from
 then on it selects that chat and its upgrade chain whatever the chat is called: a chat that
 changes its username keeps syncing, and another chat that later takes the freed username is not
-selected by it (its messages count as `skipped`). Replacing the username with the chat's id in
+selected by it (its messages count as `skipped_unselected`). Replacing the username with the chat's id in
 `chats` forgets nothing; dropping it forgets the chat. A username
 with no binding yet is looked up at the start of the run with `getChat` (`chat_id="@name"`), so
 it binds to its chat at once, before any message of that chat arrives. A username is bound from the saved chat meta only
@@ -257,7 +257,12 @@ exit:
 |---|---|
 | `scanned` | message rows emitted |
 | `deleted` | tombstones emitted |
-| `skipped` | updates that became no row: a chat outside the selection, a message without text, an update type the connector does not read |
+| `skipped` | message updates, and updates of a type the connector does not read, that became no row; always the sum of the four keys below. A `my_chat_member` update is never counted |
+| `skipped_unselected` | messages of a chat outside the selection. With `chats=None` that includes every private chat unless `include_private=True` |
+| `skipped_unsupported_type` | a photo, video, document, audio file, voice message or animation without a caption (files are never downloaded) |
+| `skipped_empty_content` | any other message without text: a service message (a join, a pin, a group upgrade announcement), and every other kind of media without a caption (a sticker, a video note, paid media, a story), a poll |
+| `skipped_unread_update` | an update of a type the connector does not ask for, which Telegram can still deliver for a while after the list of asked types changed |
+| `privacy_mode` | 1 when `getMe` says privacy mode is on, so in groups the bot sees only commands and replies to it. It means something only on a run with `failed` 0: a run that fails before or at `getMe`, or with `failed_bot_mismatch`, leaves it 0, so a host keeps the value of the last run with `failed` 0. It is 1 only when `can_read_all_group_messages` is JSON `false`: a missing field, `null`, `0` or `"false"` give 0. A host that adds up several Telegram sources (`add_source_counts`) gets the number of sources in privacy mode |
 | `backlog` | 1 when the run read a full page: more updates may be waiting |
 | `gap` | update ids that may have been lost: the ids skipped between the saved cursor and this run's first update, counted only when the last update the connection saw is more than 24 hours old. 0 otherwise |
 | `failed` | 1 when the run stopped or raised, with one reason key below |
@@ -292,9 +297,9 @@ nonzero value after a quiet day may be nothing.
 | Updates per run | 100 | the Bot API's `getUpdates` `limit` maximum; there is no knob to read less |
 | Requests per run | 2 (`getMe`, `getUpdates`), plus one `getChat` per selected `@username` not bound yet, and, on a run where a selected `@username` is not found, one by id per stored group or channel the run would drop | this connector: a second `getUpdates` would confirm a page before it is loaded |
 | Unconfirmed updates kept | about 24 hours | Telegram: updates "will not be kept longer than 24 hours" |
-| Wait on a 429 | Telegram's `retry_after` | Telegram |
+| Wait on a 429 | Telegram's `retry_after`. NaN, a negative value or anything that is not a number is ignored and the backoff below applies; a value beyond the largest float (Infinity included) is a wait no budget fits, so the run stops | Telegram |
 | Attempts per request | 5 | our decision; it only delays a run |
-| Backoff on a 5xx or no answer | 1, 2, 4, 8 s | our decision; it only delays a run |
+| Backoff on a 5xx, no answer, or a 429 without a usable `retry_after` | 1, 2, 4, 8 s | our decision; it only delays a run |
 | Sleep per run, all requests together | 60 s | our decision (OneNote waits at most 60 s a run too): the walk holds the process-wide staging lock while it sleeps. A wait that does not fit stops the run with `failed_rate_limit` (`failed_unavailable` for a 5xx); it delays the sync, it drops nothing |
 | Socket timeout | 30 s a request | our decision; Telegram documents no latency |
 | Title, quoted reply | 80, 200 characters | display only; the full text stays in the document |

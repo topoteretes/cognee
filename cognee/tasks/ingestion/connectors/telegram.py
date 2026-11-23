@@ -61,7 +61,9 @@ Design
 
 import http.client
 import json
+import math
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -153,7 +155,8 @@ class TelegramAuthError(TelegramAPIError):
 
 
 class TelegramRateLimitError(TelegramAPIError):
-    """Telegram answered HTTP 429; ``retry_after`` is the wait it named, when it named one."""
+    """Telegram answered HTTP 429; ``retry_after`` is the wait it named, when it named a usable
+    one (``math.inf`` for a wait beyond the largest float, ``None`` for NaN or a negative)."""
 
     def __init__(self, message: str, *, retry_after: float | None = None, description: str = ""):
         super().__init__(message, status=429, description=description)
@@ -188,10 +191,18 @@ class TelegramStagingError(TelegramSourceError):
 def new_stats() -> dict[str, int]:
     """The counts of a run, every key present from its start so a host finds them on any exit.
 
-    ``scanned`` message rows emitted, ``deleted`` tombstones emitted, ``skipped`` updates that
-    became no row (a chat outside the selection, a message without text), ``backlog`` 1 when the
+    ``scanned`` message rows emitted, ``deleted`` tombstones emitted, ``skipped`` message and
+    unread updates that became no row (a ``my_chat_member`` update is never counted), always the
+    sum of ``skipped_unselected`` (a chat outside the selection, private chats included unless
+    ``include_private``), ``skipped_unsupported_type`` (a photo, video, document, audio, voice or
+    animation without a caption), ``skipped_empty_content`` (any other message without text) and
+    ``skipped_unread_update`` (an update type this source does not read), ``backlog`` 1 when the
     run read a full page, ``gap`` update ids that may have expired at Telegram before this run
-    (see :func:`count_gap`). ``failed`` is 1 when the run stopped or raised, with one reason key
+    (see :func:`count_gap`), ``privacy_mode`` 1 when ``getMe`` said the bot sees only commands
+    and replies in groups. ``privacy_mode`` means something only on a run with ``failed == 0``:
+    a run that failed before or at ``getMe``, or on a bot mismatch, leaves it 0, and so does a
+    ``can_read_all_group_messages`` that is anything but JSON ``false``.
+    ``failed`` is 1 when the run stopped or raised, with one reason key
     set: ``failed_unexpected`` for a failure that is not Telegram's (a defect of this source),
     ``failed_provider`` for any other failure without a reason of its own, a failed staging read
     included.
@@ -211,6 +222,11 @@ def new_stats() -> dict[str, int]:
             "failed_bot_mismatch",
             "backlog",
             "gap",
+            "skipped_unselected",
+            "skipped_unsupported_type",
+            "skipped_empty_content",
+            "skipped_unread_update",
+            "privacy_mode",
         ),
         0,
     )
@@ -393,9 +409,13 @@ def _json_object(raw: bytes) -> dict:
 
 def _retry_after(payload: dict) -> float | None:
     value = (payload.get("parameters") or {}).get("retry_after")
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value)
+    # NaN and a negative wait are no wait, so the backoff applies. Anything beyond the largest
+    # float (Infinity included) is longer than any budget, so the run stops on it.
+    if not 0 <= value:
+        return None
+    return float(value) if value <= sys.float_info.max else math.inf
 
 
 def _retry_wait(error: BaseException, number: int) -> float:
@@ -925,6 +945,11 @@ def plan_page(
     def selected(chat_key: str) -> bool:
         return selection.selects(int(chat_key), migrated_from, meta, bound)
 
+    def skip(reason: str) -> None:
+        # ``skipped`` stays the total that hosts already read; the reason splits it.
+        stats["skipped"] += 1
+        stats[reason] += 1
+
     saved = state.get("selection")
     if saved is not None and saved != selection.stored():
         dropped = {chat_key for chat_key in stored.by_chat() if not selected(chat_key)}
@@ -954,14 +979,14 @@ def plan_page(
 
         kind = next((k for k in _MESSAGE_KEYS if update.get(k)), None)
         if kind is None:
-            stats["skipped"] += 1  # an update type this connector does not read
+            skip("skipped_unread_update")  # an update type this connector does not read
             continue
         message = update[kind]
         chat = message["chat"]
         chat_id: int = chat["id"]
         _remember_chat(meta, chat)
         if not selection.selects(chat_id, migrated_from, meta, bound):
-            stats["skipped"] += 1
+            skip("skipped_unselected")
             continue
         row = message_to_row(message, _root(chat_id, migrated_from))
         if row is not None:
@@ -972,8 +997,10 @@ def plan_page(
         if kind in _EDIT_KEYS and (key in rows or key in stored.by_chat().get(str(chat_id), ())):
             # The old text must not stay in memory.
             rows[key] = deleted_row(key)
+        elif any(message.get(media) for media in _MEDIA_KINDS):
+            skip("skipped_unsupported_type")  # files are never downloaded, only captions read
         else:
-            stats["skipped"] += 1
+            skip("skipped_empty_content")  # a service message, a sticker, a poll
 
     live = sum(1 for row in rows.values() if not row["_deleted"])
     stats["scanned"] += live
@@ -1151,7 +1178,9 @@ def sync_rows(
     try:
         me = client.call("getMe", check_active=check_active, budget=budget)
         _check_owner(state, me, resource_name)
-        if me.get("can_read_all_group_messages") is False:
+        # An int, not a bool: hosts keep only int counts.
+        stats["privacy_mode"] = int(me.get("can_read_all_group_messages") is False)
+        if stats["privacy_mode"]:
             logger.warning(
                 "Telegram: privacy mode is on, so in groups this bot only sees commands and "
                 "replies to it. Disable it in @BotFather (/setprivacy) or make the bot an admin "

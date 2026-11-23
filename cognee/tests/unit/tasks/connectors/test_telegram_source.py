@@ -951,7 +951,18 @@ STATS_KEYS = {
     "failed_bot_mismatch",
     "backlog",
     "gap",
+    "skipped_unselected",
+    "skipped_unsupported_type",
+    "skipped_empty_content",
+    "skipped_unread_update",
+    "privacy_mode",
 }
+SKIP_REASONS = (
+    "skipped_unselected",
+    "skipped_unsupported_type",
+    "skipped_empty_content",
+    "skipped_unread_update",
+)
 
 
 def test_stats_hold_every_key_before_during_and_after_a_run():
@@ -966,7 +977,56 @@ def test_stats_hold_every_key_before_during_and_after_a_run():
         **dict.fromkeys(STATS_KEYS, 0),
         "scanned": 1,
         "skipped": 1,
+        "skipped_empty_content": 1,
     }
+
+
+def test_every_skip_is_counted_under_one_reason_and_skipped_stays_their_sum():
+    """A host reads ``skipped`` as before; the reasons tell a chat outside the selection from a
+    file that is never downloaded and from a message that has no text at all."""
+    bot = FakeBot()
+    # Every reason gets a count of its own, so swapping two labels fails here.
+    bot.add(message=msg(OTHER, 1, "outside the selection"))
+    bot.add(message=msg(OTHER, 2, "outside the selection too"))
+    bot.add(message=msg(GROUP, 2, None, new_chat_members=[BOB]))
+    bot.add(message=msg(GROUP, 3, None, sticker={"file_id": "s"}))
+    bot.add(message=msg(GROUP, 4, None, video_note={"file_id": "v"}))
+    bot.add(message=msg(GROUP, 5, None, poll={"id": "p", "question": "lunch?"}))
+    bot.add(message=msg(GROUP, 6, None, paid_media={"star_count": 1, "paid_media": []}))
+    for message_id, media in enumerate(module._MEDIA_KINDS, start=10):
+        bot.add(message=msg(GROUP, message_id, None, **{media: {"file_id": media}}))
+    bot.add(message=msg(GROUP, 20, None, photo=[{"file_id": "p"}], caption="read"))
+    bot.add(edited_message=msg(GROUP, 21, None, voice={"file_id": "v"}))
+    bot.add(poll_answer={"poll_id": "p", "option_ids": [0]})
+    stats = new_stats()
+    rows = run(bot, {}, chats=[GROUP["id"]], stats=stats, staging=FakeStaging())
+    assert [row["id"] for row in rows] == ["-100:20"]
+    assert {key: stats[key] for key in SKIP_REASONS} == {
+        "skipped_unselected": 2,
+        "skipped_empty_content": 5,
+        "skipped_unsupported_type": len(module._MEDIA_KINDS) + 1,
+        "skipped_unread_update": 1,
+    }
+    assert stats["skipped"] == sum(stats[key] for key in SKIP_REASONS) == 15
+
+
+def test_an_update_type_the_source_does_not_read_is_not_counted_as_an_unread_file():
+    """An update outside ``allowed_updates`` (one asked for before the list changed) carries no
+    file, so a card must not read it as a dropped photo or voice message."""
+    bot = FakeBot()
+    bot.add(poll_answer={"poll_id": "p", "option_ids": [0]})
+    stats = new_stats()
+    run(bot, {}, stats=stats)
+    assert stats["skipped_unsupported_type"] == 0
+    assert stats["skipped_unread_update"] == stats["skipped"] == 1
+
+
+def test_a_private_message_under_the_default_selection_counts_as_unselected():
+    bot = FakeBot()
+    bot.add(message=msg(PRIVATE, 1, "hi bot"))
+    stats = new_stats()
+    assert run(bot, {}, stats=stats) == []
+    assert stats["skipped_unselected"] == stats["skipped"] == 1
 
 
 @pytest.mark.parametrize(
@@ -1047,13 +1107,43 @@ def test_other_provider_failures_are_counted_and_raised(bot, error):
 
 
 def test_a_sync_state_from_another_bot_is_refused_typed_and_counted():
-    bot = FakeBot(bot_id=222)
+    # Privacy mode on: privacy_mode describes the bot that owns the state, so the stranger's
+    # setting is never reported.
+    bot = FakeBot(bot_id=222, can_read_all=False)
     state = {"bot_id": "111"}
     stats = new_stats()
     with pytest.raises(TelegramBotMismatchError, match="belongs to another bot"):
         run(bot, state, stats=stats)
     assert stats["failed"] == 1 and stats["failed_bot_mismatch"] == 1
+    assert stats["privacy_mode"] == 0
     assert bot.get_updates_calls() == [], "the other bot never read (or confirmed) anything"
+
+
+def test_privacy_mode_is_0_on_a_run_whose_getme_was_rate_limited():
+    """The rule a host applies: privacy_mode is read only from a run with failed == 0. Here a
+    privacy-on bot's getMe got a 429, so the 0 means unknown and must not replace a stored 1."""
+    bot = FakeBot(can_read_all=False)
+    bot.errors["getMe"] = [TelegramRateLimitError("flood", retry_after=3600)]
+    stats = new_stats()
+    run(bot, {}, stats=stats)
+    assert stats["failed"] == 1 and stats["failed_rate_limit"] == 1
+    assert stats["privacy_mode"] == 0
+
+
+class _BotWithoutPrivacyField(FakeBot):
+    def call(self, method, params=None, *, check_active=None, budget=None):
+        answer = super().call(method, params, check_active=check_active, budget=budget)
+        if method == "getMe":
+            answer = {
+                key: value for key, value in answer.items() if key != "can_read_all_group_messages"
+            }
+        return answer
+
+
+def test_a_getme_that_does_not_state_privacy_mode_reports_0():
+    stats = new_stats()
+    run(_BotWithoutPrivacyField(), {}, stats=stats)
+    assert stats["failed"] == 0 and stats["privacy_mode"] == 0
 
 
 def test_logs_carry_counts_only(monkeypatch):
@@ -1078,8 +1168,19 @@ def test_logs_carry_counts_only(monkeypatch):
 def test_privacy_mode_gets_a_warning(monkeypatch):
     recorder = RecordingLogger()
     monkeypatch.setattr(module, "logger", recorder)
-    run(FakeBot(can_read_all=False), {})
+    stats = new_stats()
+    run(FakeBot(can_read_all=False), {}, stats=stats)
     assert any("privacy mode is on" in line for line in recorder.lines)
+    assert stats["privacy_mode"] == 1
+
+
+def test_privacy_mode_is_0_when_the_bot_reads_every_group_message(monkeypatch):
+    recorder = RecordingLogger()
+    monkeypatch.setattr(module, "logger", recorder)
+    stats = new_stats()
+    run(FakeBot(can_read_all=True), {}, stats=stats)
+    assert stats["privacy_mode"] == 0
+    assert not any("privacy mode" in line for line in recorder.lines)
 
 
 # --------------------------------------------------------------------- possible loss (gap)
