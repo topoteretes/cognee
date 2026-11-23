@@ -28,6 +28,7 @@ async def main():
     await cognee.remember(
         "https://en.wikipedia.org/api/rest_v1/page/html/Large_language_model",
         incremental_loading=False,
+        # {loader_name: options}; the list form [{loader_name: options}] is equivalent.
         preferred_loaders={"beautiful_soup_loader": {"extraction_rules": extraction_rules}},
         self_improvement=False,
     )
