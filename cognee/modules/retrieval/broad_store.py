@@ -14,11 +14,8 @@ import email
 import email.utils
 import io
 import json
-import os
 import re
-import shutil
 import sqlite3
-import tempfile
 import time
 import unicodedata
 from collections import Counter
@@ -307,11 +304,11 @@ _READ_ONLY = {
 
 
 class RecordStore:
-    """A temporary SQLite database of one dataset's records, built document by document."""
+    """A private in-memory SQLite database for one retrieval, independent of DB_PROVIDER."""
 
     def __init__(self) -> None:
-        self.directory = tempfile.mkdtemp(prefix="broad_")
-        self.connection = sqlite3.connect(os.path.join(self.directory, "records.db"))
+        self.connection = sqlite3.connect(":memory:")
+        self.connection.execute("PRAGMA temp_store = MEMORY")
         self.connection.create_function("words", 2, _words, deterministic=True)
         self.connection.create_function("norm", 1, norm, deterministic=True)
         self.tables: dict[str, _Built] = {}
@@ -328,7 +325,6 @@ class RecordStore:
 
     def close(self) -> None:
         self.connection.close()
-        shutil.rmtree(self.directory, ignore_errors=True)
 
     # --- building --------------------------------------------------------------------
 

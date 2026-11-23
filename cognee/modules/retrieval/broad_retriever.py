@@ -52,7 +52,7 @@ BROAD_READING_TOKENS = 12_000
 BROAD_BATCH_MB = 256
 # A dataset up to this many megabytes is loaded into the store whole; a larger one is
 # represented by the parts most similar to the question, up to this size.
-BROAD_STORE_MB = 32
+BROAD_STORE_MB = 1_000
 # The least text a chunk is assumed to hold, when deciding how many to ask the vector
 # store for; a chunk is rarely shorter.
 _MIN_CHUNK_CHARS = 1_000
@@ -224,10 +224,10 @@ class BroadRetriever(CompletionRetriever):
     - ``reading_tokens``: the size of the prompt the reading route fills with the parts of
       the text most similar to the question.
     - ``batch_mb``: megabytes of text held in memory at once while the store is built.
-    - ``store_mb``: a dataset up to this size is loaded into the store whole, so counts are
-      exact; a larger one is represented by the parts most similar to the question, up to
-      this size, and the answer says so. Bounds the work per question however large the
-      dataset.
+    - ``store_mb``: a dataset up to this stored size is loaded into the in-memory SQLite
+      store whole (default 1,000 MB / 1 GB). A larger one is represented by the parts most
+      similar to the question, up to this many million characters, and the answer says so.
+      This is a coverage threshold, not a bound on process RAM.
     """
 
     def __init__(

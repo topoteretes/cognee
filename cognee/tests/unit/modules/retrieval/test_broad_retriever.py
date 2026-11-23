@@ -1,6 +1,8 @@
 """BROAD's routes: a small dataset shown whole, a large one queried with SQL, and reading
 the most similar chunks when a query cannot express the question (SDK-324)."""
 
+import asyncio
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -13,7 +15,7 @@ from cognee.modules.retrieval.broad_retriever import (
     DecisionLarge,
     DecisionSmall,
 )
-from cognee.modules.retrieval.broad_store import BroadQueryError
+from cognee.modules.retrieval.broad_store import BroadQueryError, RecordStore
 
 
 class _Graph:
@@ -243,6 +245,65 @@ def test_the_settings_are_positive():
         BroadRetriever(context_tokens=0)
     with pytest.raises(ValueError):
         BroadRetriever(reading_tokens=0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("dataset_bytes", "expected_rows", "partial"),
+    [(32_000_001, 2, False), (1_000_000_000, 2, False), (1_000_000_001, 1, True)],
+)
+async def test_default_store_covers_all_records_through_one_gb(
+    monkeypatch, dataset_bytes, expected_rows, partial
+):
+    class Vector:
+        async def search(self, collection, *args, **kwargs):
+            if collection != "DocumentChunk_text":
+                raise CollectionNotFoundError("none")
+            return [
+                SimpleNamespace(
+                    id="c1",
+                    score=0.1,
+                    payload={"text": "Beta only.", "document_id": "d1", "document_name": "b"},
+                )
+            ]
+
+    _use(monkeypatch, {"a": "Alpha only.", "b": "Beta only."}, vector=Vector())
+
+    async def dataset_size(self):
+        return dataset_bytes
+
+    monkeypatch.setattr(BroadRetriever, "dataset_size", dataset_size)
+    _llm(monkeypatch, [DecisionLarge(sql="SELECT COUNT(*) FROM lines")])
+
+    found = await BroadRetriever(context_tokens=1).get_retrieved_objects("How many lines?")
+
+    assert found.rows == [(expected_rows,)]
+    assert bool(found.coverage) is partial
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [RuntimeError("decision failed"), asyncio.CancelledError()])
+async def test_record_store_is_closed_when_retrieval_fails_or_is_cancelled(monkeypatch, error):
+    _use(monkeypatch, {"notes": "The meeting moved to Tuesday."})
+    connections = []
+
+    class TrackedStore(RecordStore):
+        def __init__(self):
+            super().__init__()
+            connections.append(self.connection)
+
+    async def fail(self, *args):
+        raise error
+
+    monkeypatch.setattr(broad_retriever, "RecordStore", TrackedStore)
+    monkeypatch.setattr(BroadRetriever, "_ask", fail)
+
+    with pytest.raises(type(error)):
+        await BroadRetriever().get_retrieved_objects("When is the meeting?")
+
+    assert len(connections) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connections[0].execute("SELECT 1")
 
 
 @pytest.mark.asyncio
