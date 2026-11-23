@@ -1092,7 +1092,7 @@ def plan_page(
         # The ids of a page rise (_check_page), so the last one is the highest.
         new_state["last_update_id"] = updates[-1]["update_id"]
         # Telegram's restart clock runs from its last update, not from when this run read it.
-        # A date before 1970 counts as missing, and none is later than this run.
+        # A date of 0 or before 1970 counts as missing, and none is later than this run.
         dates = [date for date in map(_update_date, updates) if date and date > 0]
         new_state["last_update_seen_at"] = min(max(dates), now) if dates else now
     return list(rows.values()), new_state

@@ -1300,10 +1300,11 @@ def test_a_page_whose_update_ids_do_not_rise_is_refused(ids_):
     _assert_refused_with_cursor_kept(state, stats, error)
 
 
-def test_a_page_below_the_offset_the_run_sent_is_refused():
+@pytest.mark.parametrize("first_id", [500, 999], ids=["far-below", "already-read"])
+def test_a_page_below_the_offset_the_run_sent_is_refused(first_id):
     """With an offset, Telegram answers only ids at or above it, so a page starting below it is
     a broken answer: refused as failed_provider, and the cursor never moves back."""
-    bot = _PageBot([{"update_id": 500, "message": msg(GROUP, 1, "a")}])
+    bot = _PageBot([{"update_id": first_id, "message": msg(GROUP, 1, "a")}])
     state = {"v": STATE_VERSION, "last_update_id": 999, "last_update_seen_at": T0}
     stats = new_stats()
     rows, error = _rows_until_error(bot, state, stats)
@@ -1320,15 +1321,17 @@ def test_a_page_below_the_offset_the_run_sent_is_refused():
     ],
     ids=["fresh", "after-a-quiet-week"],
 )
-def test_without_an_offset_a_page_of_lower_ids_is_read(state):
+@pytest.mark.parametrize("update_id", [5, 1])
+def test_without_an_offset_a_page_of_lower_ids_is_read(state, update_id):
     """With no offset sent (a first run, or after six quiet days when ids may restart lower)
-    any rising positive ids are read and the cursor follows them."""
-    bot = _PageBot([{"update_id": 5, "message": msg(GROUP, 1, "a")}])
+    any rising positive ids are read, 1 included, and the cursor follows them."""
+    state = dict(state)
+    bot = _PageBot([{"update_id": update_id, "message": msg(GROUP, 1, "a")}])
     stats = new_stats()
     rows, error = _rows_until_error(bot, state, stats)
     assert bot.get_updates_calls()[-1].get("offset") is None
     assert error is None and [row["id"] for row in rows] == ["-100:1"]
-    assert state["last_update_id"] == 5
+    assert state["last_update_id"] == update_id
 
 
 @pytest.mark.parametrize("update_id", [0, -5])

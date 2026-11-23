@@ -194,7 +194,7 @@ run). Either way nothing is lost.
 **After a quiet week** Telegram may restart `update_id` at a random value below the stored
 cursor, so after six days without updates the connector reads without an offset, which confirms
 nothing. The six days run from the newest update's own `date` (an edit's `edit_date`), Telegram's
-clock, not from when the run read it. A date before 1970 counts as missing, and the clock is never set later than the run itself.
+clock, not from when the run read it. A date of 0 or before 1970 counts as missing, and the clock is never set later than the run itself.
 
 **Edits** arrive as `edited_message` / `edited_channel_post` with the same message id and
 replace the row; the new text is extracted, the old one leaves memory. An edit that removes the
