@@ -101,6 +101,14 @@ converge it on the next upgrade.
   (`_is_hybrid_provider`) and refuse rather than corrupt.
 - `get_graph_data()` loads the ENTIRE graph into memory; fine at current
   scales, budget for it in a migration that targets chunk-scale data.
+- The runner enters a dataset WITHOUT the embedding-model check
+  (`runner._dataset_context`), so a migration can meet a vector store the
+  configured model cannot write to (another width), or one whose re-embed did
+  not finish. Do not embed into a store before comparing widths.
+- A migration cannot take the dataset lock: the runner already holds the
+  dataset's queue slot, and slot -> lock raises (SDK-483). Re-embed with
+  `reembed_dataset_in_context`, never `reembed_dataset`. See
+  `versions/reembed_local_default_embedding_model.py`.
 
 ## Concurrency
 

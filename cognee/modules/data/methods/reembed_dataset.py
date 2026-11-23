@@ -118,6 +118,30 @@ async def reembed_dataset(
                 vector_engine_cache.evict(**get_vectordb_context_config())
 
 
+async def reembed_dataset_in_context(dataset_id: UUID) -> ReembeddedDataset:
+    """Re-embed the dataset whose context the caller is in, with the model in force there.
+
+    For a data migration. The migration runner is already inside the dataset's context
+    and holds its queue slot, and the dataset lock ``reembed_dataset`` takes must be
+    taken before that slot (SDK-483), so it cannot be taken any more. The runner holds
+    the migration lock instead, and every other entry into the dataset is refused while
+    the re-embed runs.
+
+    Raises what ``reembed_dataset`` raises, but for access control being off: without
+    it there is no dataset context to be in.
+    """
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
+    from cognee.infrastructure.databases.vector.create_vector_engine import vector_engine_cache
+
+    await _require_no_truth_subspace(dataset_id, await get_vector_engine_async())
+    try:
+        return await _reembed(dataset_id)
+    finally:
+        # As in reembed_dataset: the next use creates the engine with the model in force then.
+        vector_engine_cache.evict(**get_vectordb_context_config())
+
+
 async def _reembed(dataset_id: UUID) -> ReembeddedDataset:
     """``reembed_dataset`` inside the dataset's context, with the new model in force."""
     from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import (

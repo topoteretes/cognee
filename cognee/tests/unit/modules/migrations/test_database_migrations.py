@@ -151,6 +151,7 @@ def test_shipped_slugs_are_pinned():
         "rekey_fork_document_ids",
         "pgvector_hnsw_indexes",
         "postgres_graph_source_ref_tables",
+        "reembed_local_default_embedding_model",
     ]
 
 

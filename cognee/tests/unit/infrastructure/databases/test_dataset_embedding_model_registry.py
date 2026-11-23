@@ -44,6 +44,7 @@ preflight_mod = importlib.import_module("cognee.modules.preflight.config_preflig
 
 SMALL = {MODEL_KEY: "BAAI/bge-small-en-v1.5", DIMENSIONS_KEY: 384}
 LARGE = {MODEL_KEY: "openai/text-embedding-3-large", DIMENSIONS_KEY: 3072}
+LOCAL_DEFAULT = {MODEL_KEY: "perplexity-ai/pplx-embed-v1-0.6b", DIMENSIONS_KEY: 1024}
 
 
 def _row(**info):
@@ -328,7 +329,7 @@ async def test_creation_records_the_model_and_prune_clears_it(monkeypatch):
 @pytest.mark.parametrize(
     ("llm_api_key", "expected"),
     [
-        (None, SMALL),  # keyless: embeddings are rerouted to the local model
+        (None, LOCAL_DEFAULT),  # keyless: embeddings are rerouted to the local model
         ("sk-a-real-key", LARGE),  # a usable key keeps the configured embedder
     ],
 )

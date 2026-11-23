@@ -35,8 +35,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
 from cognee.context_global_variables import (
+    DatabaseContextManager,
     backend_access_control_enabled,
-    set_database_global_context_variables,
 )
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -393,6 +393,17 @@ async def _run_global_migrations(
     return [{"database": "global", "migrations_applied": applied}]
 
 
+def _dataset_context(row) -> DatabaseContextManager:
+    """The dataset's context, entered without the embedding-model check.
+
+    Every other entry refuses a dataset whose vectors the configured embedding model
+    cannot serve, or whose re-embed has not finished. A migration is what brings such
+    a dataset back in line (``reembed_local_default_embedding_model``), so it has to
+    get in.
+    """
+    return DatabaseContextManager(row.dataset_id, row.owner_id, check_embedding_model=False)
+
+
 async def _migrate_dataset(
     db_engine, row, current_version: str, version_changed: bool, target: str
 ) -> dict | None:
@@ -420,7 +431,7 @@ async def _migrate_dataset(
 
     # Resolve this dataset's graph/vector databases through the
     # per-dataset context — the same way every other operation does.
-    async with set_database_global_context_variables(row.dataset_id, row.owner_id):
+    async with _dataset_context(row):
         graph_engine = await get_graph_engine()
         vector_engine = await get_vector_engine_async()
         migration_context = MigrationContext(
@@ -561,7 +572,7 @@ async def _downgrade_dataset(db_engine, row, target: str | None) -> dict | None:
     async def stamp(revision):
         await _stamp_dataset(db_engine, row.dataset_id, revision)
 
-    async with set_database_global_context_variables(row.dataset_id, row.owner_id):
+    async with _dataset_context(row):
         graph_engine = await get_graph_engine()
         vector_engine = await get_vector_engine_async()
         migration_context = MigrationContext(
