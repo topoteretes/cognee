@@ -31,8 +31,13 @@ class ReembeddedDataset:
     rows_embedded: int
 
 
-async def reembed_dataset(dataset_id: UUID, embedding_config: EmbeddingConfig) -> ReembeddedDataset:
-    """Compute a dataset's vectors again with the embedding model of ``embedding_config``.
+async def reembed_dataset(
+    dataset_id: UUID, embedding_config: EmbeddingConfig | None = None
+) -> ReembeddedDataset:
+    """Compute a dataset's vectors again with the configured embedding model.
+
+    The model is the deployment's (the ``.env`` embedding settings, as every other
+    call resolves them), unless ``embedding_config`` names another.
 
     Every collection of the dataset's vector store is rebuilt from the text its rows
     hold, so no document is read, nothing is extracted and no LLM is called; the
@@ -64,8 +69,8 @@ async def reembed_dataset(dataset_id: UUID, embedding_config: EmbeddingConfig) -
 
     Args:
         dataset_id: The dataset whose vectors to rebuild.
-        embedding_config: The model to embed with, resolved as for any call that
-            takes an ``embedding_config``.
+        embedding_config: The model to embed with, when it is not the deployment's.
+            Resolved as for any call that takes an ``embedding_config``.
 
     Raises:
         CogneeValidationError: Backend access control is off, so the datasets share
@@ -95,7 +100,7 @@ async def reembed_dataset(dataset_id: UUID, embedding_config: EmbeddingConfig) -
         )
 
     async with dataset_lock(dataset_id):
-        # Read first, and without the new model in force: a dataset that is refused
+        # Read first, and without this call's model in force: a dataset that is refused
         # stays as it is, down to the engine its other users get. This is also where
         # an adapter that cannot list its collections and rows raises.
         async with DatabaseContextManager(dataset_id, check_embedding_model=False):

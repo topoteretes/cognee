@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 import cognee.infrastructure.databases.vector.create_vector_engine as engine_module
 import cognee.infrastructure.databases.vector.embeddings as embeddings_package
+import cognee.infrastructure.databases.vector.embeddings.config as embedding_settings
 from cognee.context_global_variables import (
     embedding_config as embedding_config_override,
 )
@@ -233,6 +234,25 @@ async def test_a_dataset_is_rebuilt_and_recorded_with_the_new_model(dataset):
     # store once the record says so (the copy itself decides whether the models match).
     assert dataset.routing.removed == [dataset.id]
     assert dataset.routing.copied == [dataset.id]
+
+
+@pytest.mark.asyncio
+async def test_without_a_config_the_dataset_moves_to_the_deployment_model(dataset, monkeypatch):
+    """No ``embedding_config``: the model is the one the deployment is configured with."""
+    monkeypatch.setattr(embedding_settings, "get_embedding_config", lambda: NEW)
+
+    result = await reembed_dataset(dataset.id)
+
+    assert (result.embedding_model, result.embedding_dimensions) == ("new", 5)
+    record = await _record(dataset.id)
+    assert (record[MODEL_KEY], record[DIMENSIONS_KEY]) == ("new", 5)
+    # The dataset is then used as every call of the deployment uses it: with no config.
+    new_model = _Model(NEW)
+    async with set_database_global_context_variables(dataset.id):
+        store = await get_vector_engine_async()
+        assert store.embedding_engine.model == "new"
+        vectors = await _chunk_vectors(store)
+    assert vectors == {c.text: pytest.approx(new_model.vector(c.text)) for c in CHUNKS}
 
 
 @pytest.mark.asyncio
