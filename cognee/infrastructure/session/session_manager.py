@@ -907,6 +907,50 @@ class SessionManager:
             )
             return False
 
+    async def increment_session_context_counter(
+        self,
+        *,
+        user_id: str,
+        entry_id: str,
+        field: str,
+        delta: int,
+        session_id: str | None = None,
+    ) -> bool:
+        """
+        Atomically increment a counter field in a session-context entry.
+
+        This prevents race conditions where concurrent operations read the same
+        count and both write the same next value. The increment happens under
+        a row lock in a single transaction.
+
+        Args:
+            user_id: The user ID
+            entry_id: The entry ID to increment
+            field: The counter field name (e.g., "helpful_count", "harmful_count")
+            delta: The amount to increment (typically 1, can be negative)
+            session_id: Optional session ID (uses active session if None)
+
+        Returns:
+            True if the counter was incremented, False if cache unavailable or failed
+
+        Raises:
+            SessionParameterValidationError: For invalid user_id/session_id
+        """
+        session_id = self.resolve_session_id(session_id)
+        self._validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping increment_session_context_counter")
+            return False
+        try:
+            return await self._cache.increment_session_context_counter(
+                user_id, session_id, entry_id, field, delta
+            )
+        except Exception as e:
+            logger.warning(
+                "SessionManager: increment_session_context_counter failed: %s", e, exc_info=True
+            )
+            return False
+
     async def delete_session_context_entry(
         self,
         *,

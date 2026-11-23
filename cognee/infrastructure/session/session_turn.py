@@ -311,37 +311,30 @@ async def apply_served_context_ratings(
         entries = await session_manager.get_session_context_entries(
             user_id=user_id, session_id=session_id
         )
-        counts = {}
+        # Build set of valid entry IDs
+        valid_entry_ids = set()
         for raw in entries or []:
             row = raw if isinstance(raw, dict) else getattr(raw, "__dict__", {})
-            if row.get("kind", "context") != "context":
-                continue
-            entry_id = row.get("id")
-            if entry_id is not None:
-                counts[str(entry_id)] = (
-                    int(row.get("helpful_count", 0) or 0),
-                    int(row.get("harmful_count", 0) or 0),
-                )
+            if row.get("kind", "context") == "context":
+                entry_id = row.get("id")
+                if entry_id is not None:
+                    valid_entry_ids.add(str(entry_id))
+
         for rating in ratings:
             try:
                 entry_id = str(getattr(rating, "entry_id", None) or "")
                 verdict = str(getattr(rating, "rating", "") or "").strip().lower()
-                if entry_id not in counts or verdict not in ("helpful", "harmful"):
+                if entry_id not in valid_entry_ids or verdict not in ("helpful", "harmful"):
                     continue
-                helpful, harmful = counts[entry_id]
-                if verdict == "helpful":
-                    merge = {"helpful_count": helpful + 1}
-                    next_counts = (helpful + 1, harmful)
-                else:
-                    merge = {"harmful_count": harmful + 1}
-                    next_counts = (helpful, harmful + 1)
-                await session_manager.update_session_context_entry(
+                # Atomically increment the counter
+                field = "helpful_count" if verdict == "helpful" else "harmful_count"
+                await session_manager.increment_session_context_counter(
                     user_id=user_id,
                     entry_id=entry_id,
-                    merge=merge,
+                    field=field,
+                    delta=1,
                     session_id=session_id,
                 )
-                counts[entry_id] = next_counts
             except Exception:
                 logger.debug(
                     "Skipping item after error in apply_served_context_ratings", exc_info=True

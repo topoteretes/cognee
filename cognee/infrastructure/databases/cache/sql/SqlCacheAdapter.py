@@ -1116,6 +1116,78 @@ class SqlCacheAdapter(CacheDBInterface):
                 logger.error(error_msg)
                 raise CacheConnectionError(error_msg) from error
 
+    async def increment_session_context_counter(
+        self, user_id: str, session_id: str, entry_id: str, field: str, delta: int
+    ) -> bool:
+        """Atomically increment a counter field in the session-context entry.
+
+        Locks the row with with_for_update(), reads the current counter value,
+        increments it by delta, and writes it back in the same transaction.
+        This prevents race conditions where concurrent increments would otherwise
+        read the same value and both write the same next value.
+
+        Args:
+            user_id: The user ID
+            session_id: The session ID
+            entry_id: The entry ID to increment
+            field: The counter field name (e.g., "helpful_count")
+            delta: The amount to increment (can be negative)
+
+        Returns:
+            True if a matching entry was incremented, False otherwise.
+        """
+        await self._ensure_initialized()
+        attempt = 0
+        while True:
+            try:
+                async with self.sessionmaker() as session, session.begin():
+                    await self._lock_session_writes(
+                        session, cache_session_context, user_id, session_id
+                    )
+                    result = await session.execute(
+                        select(cache_session_context.c.payload)
+                        .where(
+                            self._session_filter(cache_session_context, user_id, session_id),
+                            cache_session_context.c.entry_id == entry_id,
+                            self._not_expired(cache_session_context),
+                        )
+                        .order_by(cache_session_context.c.seq.desc())
+                        .limit(1)
+                        .with_for_update()
+                    )
+                    payload = result.scalars().first()
+                    if payload is None:
+                        return False
+                    # Atomically increment the counter
+                    payload_dict = dict(payload)
+                    current_value = int(payload_dict.get(field, 0) or 0)
+                    new_value = current_value + delta
+                    payload_dict[field] = new_value
+                    await session.execute(
+                        update(cache_session_context)
+                        .where(
+                            self._session_filter(cache_session_context, user_id, session_id),
+                            cache_session_context.c.entry_id == entry_id,
+                        )
+                        .values(payload=payload_dict)
+                    )
+                    await self._refresh_session_ttl(
+                        session, cache_session_context, user_id, session_id
+                    )
+                    return True
+            except DBAPIError as error:
+                attempt += 1
+                if is_deadlock(error) and attempt < _DEADLOCK_ATTEMPTS:
+                    await asyncio.sleep(0.05 * (2**attempt))
+                    continue
+                error_msg = f"Unexpected error while incrementing session context counter in SQL cache: {error}"
+                logger.error(error_msg)
+                raise CacheConnectionError(error_msg) from error
+            except Exception as error:
+                error_msg = f"Unexpected error while incrementing session context counter in SQL cache: {error}"
+                logger.error(error_msg)
+                raise CacheConnectionError(error_msg) from error
+
     async def delete_session_context_entry(
         self, user_id: str, session_id: str, entry_id: str
     ) -> bool:
