@@ -232,7 +232,7 @@ def _isolated_env_file():
 def _spawn(port, data_root, system_root, log_path, python=None):
     env = dict(os.environ)
     python = python or sys.executable
-    if str(python) != str(sys.executable):
+    if os.path.realpath(str(python)) != os.path.realpath(sys.executable):
         for name in ("PYTHONPATH", "PYTHONHOME"):
             env.pop(name, None)
     # An explicit COGNEE_ENV_FILE from the user wins; otherwise pin an empty one.

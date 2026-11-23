@@ -185,6 +185,45 @@ class TestServerSpawn(unittest.TestCase):
         kwargs, _ = self._spawn({"COGNEE_ENV_FILE": str(env_path)})
         self.assertNotIn("LLM_MODEL", kwargs["env"])
 
+    def test_pythonpath_stripped_when_spawning_with_different_venv(self):
+        """PYTHONPATH and PYTHONHOME are stripped when the spawned server uses a different
+        Python interpreter, even when paths point to the same executable via symlinks."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        different_python = Path(tmp.name) / "venv" / "bin" / "python"
+        different_python.parent.mkdir(parents=True, exist_ok=True)
+        different_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+        with (
+            mock.patch.dict(os.environ, {"PYTHONPATH": "/inherited", "PYTHONHOME": "/home"}, clear=False),
+            mock.patch.object(config_mod, "_hermes_get_secret", lambda x: None),
+            mock.patch.object(sb, "server_workdir", return_value=str(tmp.name)),
+            mock.patch.object(sb.subprocess, "Popen") as popen,
+        ):
+            sb._spawn(8011, "", "", os.devnull, python=str(different_python))
+
+        env = popen.call_args.kwargs["env"]
+        self.assertNotIn("PYTHONPATH", env)
+        self.assertNotIn("PYTHONHOME", env)
+
+    def test_pythonpath_kept_when_spawning_with_same_interpreter(self):
+        """PYTHONPATH and PYTHONHOME are preserved when the spawned server uses the same
+        Python interpreter as the current process."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+
+        with (
+            mock.patch.dict(os.environ, {"PYTHONPATH": "/kept", "PYTHONHOME": "/home"}, clear=False),
+            mock.patch.object(config_mod, "_hermes_get_secret", lambda x: None),
+            mock.patch.object(sb, "server_workdir", return_value=str(tmp.name)),
+            mock.patch.object(sb.subprocess, "Popen") as popen,
+        ):
+            sb._spawn(8011, "", "", os.devnull, python=sys.executable)
+
+        env = popen.call_args.kwargs["env"]
+        self.assertEqual(env.get("PYTHONPATH"), "/kept")
+        self.assertEqual(env.get("PYTHONHOME"), "/home")
+
 
 class TestExitWatcherKey(unittest.TestCase):
     def _spawned_env(self, environ, api_key):
