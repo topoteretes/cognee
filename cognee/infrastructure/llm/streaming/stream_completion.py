@@ -64,9 +64,9 @@ async def stream_text_completion(
     sink.begin_attempt()
 
     # The iteration stays inside the rate limiter so a mid-stream failure is
-    # still seen by the overload policy. Note this does NOT bound how many
-    # generations run at once: AsyncLimiter caps request *rate* and releases
-    # nothing on exit, so concurrency here is unbounded either way.
+    # still seen by the overload policy. The RPM limiter only caps how many
+    # requests start; with LLM_MAX_CONCURRENT_REQUESTS set, the stream holds
+    # one of its model's slots until it ends, so a long answer occupies it.
     async with llm_rate_limiter_context_manager():
         stream = await litellm.acompletion(
             model=model,

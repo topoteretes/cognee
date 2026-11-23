@@ -1065,6 +1065,10 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - Enable client-side rate limiting: `LLM_RATE_LIMIT_ENABLED=true`
 - Adjust limits: `LLM_RATE_LIMIT_REQUESTS` and `LLM_RATE_LIMIT_INTERVAL`
 
+**Local LLM server times out during ingestion**
+- Issue: cognify sends one extraction call per chunk at once, so a serial server (Ollama, llama.cpp, a small vLLM deployment) queues them until callers time out and retry. The RPM limiter does not help: it limits how many calls start per interval, not how many are running
+- Solution: set `LLM_MAX_CONCURRENT_REQUESTS` to what the server runs in parallel (Ollama's `OLLAMA_NUM_PARALLEL`), usually 1 to 4. It applies per model and per process, so N workers can send N times that
+
 ## Resources
 
 - [Documentation](https://docs.cognee.ai/)

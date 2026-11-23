@@ -26,9 +26,10 @@ _embedding_rate_limiter: "AsyncLimiter | None" = None
 # because the cap protects a serving backend: two stages routed to the same
 # model share that model's slots. The governing cap comes from the *context*
 # config, the one pipeline-stage routing selects. Caps are
-# per-process, the same scope as DATASET_QUEUE_MAX_CONCURRENT. ``loop`` entries
-# die with their loop; the dict holds one small tuple per (loop, model), which
-# is bounded in practice.
+# per-process, the same scope as DATASET_QUEUE_MAX_CONCURRENT. Entries are
+# never pruned: the dict keeps one (cap, semaphore) per (loop, model) for the
+# life of the process, and a semaphore that ever had a waiter keeps its closed
+# loop alive.
 _concurrency_state: "dict[tuple, tuple]" = {}
 
 
