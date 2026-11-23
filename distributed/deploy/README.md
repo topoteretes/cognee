@@ -204,7 +204,7 @@ docker-compose --profile ui up
 
 3. **Enable authentication for multi-tenant deployments**: Set `ENABLE_BACKEND_ACCESS_CONTROL=true` (default) and configure user management. For a single-user internal deployment with auth off, set `ENABLE_BACKEND_ACCESS_CONTROL=false`; `REQUIRE_AUTHENTICATION=false` alone is not sufficient when multi-tenant mode is on.
 
-4. **Configure rate limiting**: Set `LLM_RATE_LIMIT_ENABLED=true` to avoid hitting provider limits.
+4. **Configure rate limiting**: Set `LLM_RATE_LIMIT_ENABLED=true` to avoid hitting provider limits. For a self-hosted model server, also set `LLM_MAX_CONCURRENT_REQUESTS`; it is per process, so with N workers the server can see up to N times the value.
 
 5. **Trace**: Enable OpenTelemetry tracing with `COGNEE_TRACING_ENABLED=true` and an OTLP endpoint. Install with `pip install cognee[tracing]`.
 
