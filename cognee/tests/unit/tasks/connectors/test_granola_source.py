@@ -19,8 +19,8 @@ from cognee.tasks.ingestion.connectors.granola import (
     MAX_NOTE_RETRIES,
     GranolaError,
     _get_note,
-    _in_scope,
     _iter_rows,
+    _membership,
     _render,
     granola_source,
 )
@@ -246,10 +246,11 @@ def test_a_retry_by_id_imports_only_a_note_still_in_the_folder(folders, imported
 
 def test_a_retry_by_id_checks_the_space_through_membership():
     space = "spa_123456789ABCDE"
-    assert _in_scope(member(spaces=[space]), space)
-    assert _in_scope(member(folders=[{"id": FOLDER, "space_id": space}]), space)
-    assert not _in_scope(member(spaces=["spa_OTHER789ABCDEF"]), space)
-    assert _in_scope(note(), "all")
+    assert _membership(member(spaces=[space]), space) is True
+    assert _membership(member(folders=[{"id": FOLDER, "space_id": space}]), space) is True
+    assert _membership(member(spaces=["spa_OTHER789ABCDEF"]), space) is False
+    assert _membership(note(), space) is None, "no membership in the answer: unknown"
+    assert _membership(note(), "all") is True
 
 
 def test_large_transcript_is_paged_and_admin_disabled_is_summary_only():
@@ -308,10 +309,10 @@ def test_disappearing_note_does_not_block_later_notes_or_hold_the_watermark():
 @pytest.mark.parametrize(
     "responses",
     [
-        [GranolaError("forbidden", 403), GranolaError("forbidden", 403)],
+        # A 403 on the note while the account still lists (the probe answers): this note's.
+        [GranolaError("forbidden", 403), GranolaError("forbidden", 403), page([])],
         [{**note(), "transcript": [{"text": None}]}],
         [note(NOTE2)],
-        [{**note(), "transcript": [{"text": "x" * 11}]}],
     ],
 )
 def test_note_specific_errors_do_not_poison_the_queue(responses, monkeypatch):
@@ -527,13 +528,16 @@ def test_an_empty_complete_listing_deletes_nothing_and_reports_failed_access():
 
 
 def test_the_first_reconcile_of_a_table_synced_before_it_existed_deletes_nothing():
-    """A table synced by the pod source has no ``known``: its first reconcile only fills it."""
+    """A table synced by the pod source has no ``known``: its first reconcile deletes nothing
+    and reads every listed note once, since nothing says the table holds it (an unchanged row
+    keeps its identity, so nothing is extracted again)."""
     fake = account()
     state = {"watermark": (fake.clock - timedelta(minutes=5)).isoformat()}
 
     rows, stats = sync(fake, state)
 
-    assert rows == [] and stats["deleted"] == 0 and stats["failed"] == 0
+    assert ids(rows) == [note_id(1), note_id(2), note_id(3)]
+    assert stats["deleted"] == 0 and stats["failed"] == 0
     assert state["known"] == [note_id(1), note_id(2), note_id(3)]
     assert "reconciled_at" in state
 
@@ -739,7 +743,7 @@ def test_an_interrupted_transcript_is_never_published_and_the_note_is_retried():
     fake.edit(note_id(1), transcript=[{"text": f"part {i}"} for i in range(5)])
     fake.tick(hours=1)
     fake.fail("transcript", GranolaError("down", 503), after=1)
-    state: dict = {}
+    state: dict = {"reconciled_at": fake.clock.isoformat()}  # the walk alone
 
     rows, stats = sync(fake, state)
 
@@ -858,25 +862,35 @@ def test_the_whole_scenario_replays_on_one_state():
 
 
 def test_the_factory_validates_before_any_request():
+    named = {"resource_name": "granola_x"}
     with pytest.raises(ValueError, match="folder or space"):
-        granola_source(scope="fol_short", api_key="grn_x")
+        granola_source(scope="fol_short", api_key="grn_x", **named)
     with pytest.raises(ValueError, match="folder or space"):
-        granola_source(scope=["all"], api_key="grn_x")
+        granola_source(scope=["all"], api_key="grn_x", **named)
     with pytest.raises(ValueError, match="service or an api_key"):
-        granola_source(scope="all")
+        granola_source(scope="all", **named)
     with pytest.raises(ValueError, match="include_transcript"):
-        granola_source(scope="all", api_key="grn_x", include_transcript="no")
+        granola_source(scope="all", api_key="grn_x", include_transcript="no", **named)
     for name in ("max_requests", "max_rows", "deadline_seconds"):
         with pytest.raises(ValueError, match=name):
-            granola_source(scope="all", api_key="grn_x", **{name: 0})
+            granola_source(scope="all", api_key="grn_x", **named, **{name: 0})
+    with pytest.raises(ValueError, match="resource_name"):
+        granola_source(scope="all", api_key="grn_x", resource_name=" ")
     with pytest.raises(ValueError, match="invalid format") as raised:
-        granola_source(scope="all", api_key="grn secret")
+        granola_source(scope="all", api_key="grn secret", **named)
     assert "secret" not in str(raised.value)
 
 
+def test_resource_name_is_required_so_two_keys_never_share_a_table():
+    """A default named after the scope let two keys syncing ``all`` into datasets of one name
+    share a table and its state: the second tombstoned the first's notes (review X2)."""
+    with pytest.raises(TypeError, match="resource_name"):
+        granola_source(scope="all", api_key="grn_x")
+
+
 def test_the_factory_names_the_table_from_the_scope_and_tags_the_source():
-    source = granola_source(scope="fol_AbCdEfGhIjKlMn", service=FakeGranola())
-    assert source.name == "granola_notes_fol_abcdefghijklmn"
+    source = granola_source(scope="fol_AbCdEfGhIjKlMn", service=FakeGranola(), resource_name="mine")
+    assert source.name == "mine"
     assert getattr(source, granola.DOCUMENT_SOURCE_ATTR) == "granola"
     assert getattr(source, granola.dlt_utils.PIPELINE_SCOPE_ATTR) == source.name
     assert set(source.cognee_sync_stats) == {
@@ -890,10 +904,12 @@ def test_the_factory_names_the_table_from_the_scope_and_tags_the_source():
         "failed_unavailable",
         "failed_budget",
         "failed_access",
+        "failed_listing",
+        "transcript_too_large",
+        "reconcile_unconfirmed",
         "retry_after_seconds",
         "requests",
     }
-    assert granola_source(scope="all", service=FakeGranola(), resource_name="mine").name == "mine"
 
 
 def test_a_cut_after_a_failed_note_counts_both_in_failed():
@@ -906,7 +922,7 @@ def test_a_cut_after_a_failed_note_counts_both_in_failed():
 
 
 def test_the_url_column_is_declared_so_a_first_url_changes_no_older_row():
-    source = granola_source(scope="all", service=FakeGranola())
+    source = granola_source(scope="all", service=FakeGranola(), resource_name="mine")
     assert source.columns["url"] == {"name": "url", "data_type": "text", "nullable": True}
 
 
@@ -1028,3 +1044,231 @@ def test_a_table_synced_before_the_option_existed_is_not_listed_again():
     rows, _ = sync(fake, state)
 
     assert rows == [] and state["include_transcript"] is True
+
+
+# ---------------------------------------------------------------- review round 1
+
+GRAND = "fol_GGGGGGGGGGGGGG"
+ELSEWHERE = "fol_EEEEEEEEEEEEEE"
+ELSEWHERE_CHILD = "fol_DDDDDDDDDDDDDD"
+ELSEWHERE_GRAND = "fol_FFFFFFFFFFFFFF"
+
+
+def _deep_account(n: int = 40) -> FakeGranola:
+    """``n`` notes in folder A, a grandchild folder under A's child, and a two-level folder
+    tree elsewhere."""
+    fake = FakeGranola()
+    fake.folder(A)
+    fake.folder(CHILD, A)
+    fake.folder(GRAND, CHILD)
+    fake.folder(ELSEWHERE)
+    fake.folder(ELSEWHERE_CHILD, ELSEWHERE)
+    fake.folder(ELSEWHERE_GRAND, ELSEWHERE_CHILD)
+    for i in range(1, n + 1):
+        fake.add(i, folder=A)
+    return fake
+
+
+def _skipped_by_the_reconcile_listing(fake: FakeGranola) -> tuple[list[dict], dict]:
+    """A reconcile cut after its first page, then a note on that page deleted: the offset
+    cursor's second page never shows note 10, whatever folder it sits in."""
+    fake.tick(hours=1)
+    state: dict = {}
+    while "reconciled_at" not in state:
+        sync(fake, state)
+    fake.tick(hours=24)
+    sync(fake, state, max_requests=2)
+    fake.delete(note_id(40))
+    rows, _ = sync(fake, state)
+    return rows, state
+
+
+@pytest.mark.parametrize("where", ["grandchild folder", "answer without membership"])
+def test_a_skipped_candidate_whose_membership_cannot_tell_is_asked_of_the_scope_listing(where):
+    fake = _deep_account()
+    if where == "grandchild folder":
+        fake.move(note_id(10), GRAND, touches=False)
+    else:
+        fake.no_membership.add(note_id(10))
+
+    rows, state = _skipped_by_the_reconcile_listing(fake)
+
+    assert ids(rows, deleted=True) == [], "a live note Granola lists under A is never forgotten"
+    assert note_id(10) in state["known"]
+    asked = [p for path, p in fake.calls if path == "/v1/notes" and "created_after" in p]
+    assert asked and asked[0]["folder_id"] == A
+
+
+def test_a_candidate_moved_to_another_folders_grandchild_is_kept_unconfirmed():
+    """Its membership cannot place it and the narrow listing does not show it: that absence
+    rests on Granola's ``created_at`` filter alone, so the note is kept and counted."""
+    fake = _deep_account(3)
+    fake.tick(hours=1)
+    state: dict = {}
+    sync(fake, state)
+    fake.move(note_id(2), ELSEWHERE_GRAND)
+    fake.tick(hours=24)
+
+    rows, stats = sync(fake, state)
+
+    assert rows == [] and stats["reconcile_unconfirmed"] == 1
+    assert note_id(2) in state["known"]
+
+
+def test_a_live_note_the_narrow_listing_misses_is_kept_not_tombstoned():
+    """If the ``created_after``/``created_before`` filter disagrees with the note's own
+    ``created_at``, the narrow listing shows nothing for a live note (review F13)."""
+    fake, state = _reconciled(3)
+    fake.no_membership.add(note_id(2))
+    fake.listing_hidden.add(note_id(2))  # every listing, the narrow one included
+
+    rows, stats = sync(fake, state)
+
+    assert rows == [] and stats["deleted"] == 0
+    assert stats["reconcile_unconfirmed"] == 1 and note_id(2) in state["known"]
+    assert "reconcile_candidates" not in state
+
+
+def test_a_retry_by_id_of_a_grandchild_folder_note_imports_it():
+    fake = _deep_account(2)
+    fake.move(note_id(2), GRAND)
+    fake.tick(hours=1)
+    fake.fail("note", GranolaError("gone", 404))  # its first read fails once
+    state: dict = {"reconciled_at": fake.clock.isoformat()}  # the walk alone
+
+    rows, _ = sync(fake, state)
+    assert ids(rows) == [note_id(1)] and note_id(2) in state["note_failures"]
+    rows, _ = sync(fake, state)
+
+    assert ids(rows) == [note_id(2)] and "note_failures" not in state
+
+
+def test_a_candidate_refused_alone_is_kept_and_the_reconcile_still_finishes():
+    """One note answering 403 while the account lists stopped every reconcile before (R7)."""
+    fake, state = _reconciled(4)
+    fake.delete(note_id(1))
+    fake.listing_hidden.add(note_id(2))
+    fake.refused_notes.add(note_id(2))
+
+    rows, stats = sync(fake, state)
+
+    assert rows == [{"id": note_id(1), "_deleted": True}]
+    assert note_id(2) in state["known"] and stats["skipped"] == 1 and stats["failed"] == 0
+    assert "reconcile_candidates" not in state and "reconciled_at" in state
+
+
+def test_a_refused_account_mid_walk_stops_with_failed_access_and_charges_no_note():
+    fake = account(15)
+    state: dict = {}
+
+    def lapse():
+        if sum(path.startswith("/v1/notes/") for path, _ in fake.calls) >= 3:
+            fake.refuse_account = True
+
+    rows, stats = sync(fake, state, check_active=lapse)
+
+    assert len(ids(rows)) == 3
+    assert stats["failed_access"] == 1 and stats["failed"] == 1
+    assert "note_failures" not in state, "no note is blamed for the account"
+    fake.refuse_account = False
+    emitted = ids(rows)
+    while "reconciled_at" not in state or "pending" in state:
+        more, stats = sync(fake, state)
+        emitted += ids(more)
+    assert sorted(emitted) == [note_id(i) for i in range(1, 16)]
+
+
+def test_a_refused_listing_stops_with_failed_access():
+    fake = account()
+    fake.refuse_account = True
+
+    rows, stats = sync(fake, {})
+
+    assert rows == [] and stats["failed_access"] == 1 and stats["failed_listing"] == 0
+
+
+def test_a_note_moved_in_without_an_edit_is_read_and_emitted_by_the_reconcile():
+    """``updated_after`` never lists a note shared or moved in without an edit (X4a)."""
+    fake, state = _reconciled(3)
+    moved_in = fake.add(50, folder=B)
+    fake.tick(hours=1)
+    sync(fake, state)
+    fake.move(moved_in, A, touches=False)
+    fake.tick(hours=24)
+
+    rows, stats = sync(fake, state)
+
+    assert ids(rows) == [moved_in] and stats["deleted"] == 0
+    assert moved_in in state["known"] and "reconcile_new" not in state
+
+
+def test_a_note_the_reconcile_cannot_read_stays_out_of_known_for_the_next_reconcile():
+    fake, state = _reconciled(3)
+    moved_in = fake.add(50, folder=B)
+    fake.tick(hours=1)
+    sync(fake, state)
+    fake.move(moved_in, A, touches=False)
+    fake.refused_notes.add(moved_in)
+    fake.tick(hours=24)
+
+    rows, _ = sync(fake, state)
+    assert rows == [] and moved_in not in state["known"]
+
+    fake.refused_notes.clear()
+    fake.tick(hours=24)
+    rows, _ = sync(fake, state)
+    assert ids(rows) == [moved_in]
+
+
+@pytest.mark.parametrize("inline", [True, False])
+def test_a_transcript_over_the_cap_imports_the_summary_and_is_counted(monkeypatch, inline):
+    monkeypatch.setattr(granola, "MAX_TRANSCRIPT_CHARS", 10)
+    fake = account(1)
+    if not inline:
+        fake.inline_limit = 5
+    fake.edit(note_id(1), transcript=[{"text": "x" * 8}, {"text": "y" * 8}, {"text": "z"}])
+    fake.tick(hours=1)
+    state: dict = {"reconciled_at": fake.clock.isoformat()}
+
+    rows, stats = sync(fake, state)
+
+    assert ids(rows) == [note_id(1)] and "Summary of meeting 1" in rows[0]["content"]
+    assert "Transcript:" not in rows[0]["content"]
+    assert stats["transcript_too_large"] == 1 and stats["failed"] == 0
+
+
+def test_an_inline_answer_over_the_body_cap_reads_the_transcript_page_by_page():
+    client = Client(
+        [
+            granola.GranolaTooLargeError("too large"),
+            note(),
+            {"transcript": [{"text": "one"}], "hasMore": False, "cursor": None},
+        ]
+    )
+    assert [p["text"] for p in _get_note(client, NOTE)["transcript"]] == ["one"]
+    # A bare note over the cap is this note's error.
+    client = Client([granola.GranolaTooLargeError("x"), granola.GranolaTooLargeError("x")])
+    with pytest.raises(granola.GranolaNoteError):
+        _get_note(client, NOTE)
+
+
+@pytest.mark.parametrize(
+    "listing",
+    [{"notes": "nope"}, page([{"id": "../users"}]), page([], "same")],
+)
+def test_a_listing_granola_answers_malformed_stops_with_failed_listing(listing):
+    responses = [listing, listing] if listing.get("cursor") == "same" else [listing]
+    rows, state, stats = run(Client(responses))
+    assert rows == [] and stats["failed_listing"] == 1 and stats["failed_unavailable"] == 0
+    assert "watermark" not in state
+
+
+def test_a_note_the_reconcile_emits_leaves_the_retry_list():
+    """The walk set it aside; the same run's reconcile reads it whole, so no retry is left."""
+    fake = account(1)
+    fake.fail("note", GranolaError("down", 503))
+    state: dict = {}
+
+    rows, _ = sync(fake, state)
+
+    assert ids(rows) == [note_id(1)] and "note_failures" not in state

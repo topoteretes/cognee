@@ -1,10 +1,15 @@
 """Granola's public API (docs.granola.ai, v1.7.0) in memory, behind ``GranolaClient.get``.
 
-Listings are newest first by ``created_at``, filtered by ``folder_id`` (child folders
-included), ``space_id`` and ``updated_after``, and paged by an opaque cursor that the fake can
-expire. A note is read with ``include=transcript`` (413 above ``inline_limit`` characters, 403
-while transcripts are disabled) or through the paged transcript endpoint. A deletion seen by a
+Listings are newest first by ``created_at``, filtered by ``folder_id`` (every descendant folder
+included), ``space_id``, ``updated_after`` and ``created_after`` / ``created_before``
+(exclusive), and paged by an offset cursor that the fake can expire. A note is read with
+``include=transcript`` (413 above ``inline_limit`` characters; ``transcript: null`` while
+transcripts are disabled) or through the paged transcript endpoint (403 while disabled). Its
+``folder_membership`` names its own folder and that folder's parent only. A deletion seen by a
 workspace-wide key keeps the note listed with ``deleted_at``; any other deletion removes it.
+``refuse_account`` answers every request 403 (subscription inactive, IP allowlist); notes in
+``refused_notes`` answer their reads 403; notes in ``no_membership`` are read without
+``folder_membership`` or ``space_membership``.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -28,6 +33,9 @@ class FakeGranola:
         self.calls: list[tuple[str, dict]] = []
         self.failures: list[list] = []  # [kind, error, requests of that kind to let through]
         self.transcripts_disabled = False
+        self.refuse_account = False
+        self.refused_notes: set[str] = set()
+        self.no_membership: set[str] = set()
         self.inline_limit: int | None = None
         self.transcript_page = 2
         self.expired: set[str] = set()
@@ -103,6 +111,8 @@ class FakeGranola:
             check_active()
         params = dict(params or {})
         self.calls.append((path, params))
+        if self.refuse_account:
+            raise GranolaError("forbidden", 403)
         kind = (
             "list"
             if path == "/v1/notes"
@@ -124,9 +134,14 @@ class FakeGranola:
 
     def _in(self, note: dict, params: dict) -> bool:
         folder_id = params.get("folder_id")
-        if folder_id is not None:
-            folder = note["folder"]
-            if folder is None or folder_id not in (folder, self.folders.get(folder)):
+        if folder_id is not None and folder_id not in self._chain(note["folder"]):
+            return False
+        created = datetime.fromisoformat(note["created_at"])
+        for bound, outside in (
+            ("created_after", lambda edge: created <= edge),
+            ("created_before", lambda edge: created >= edge),
+        ):
+            if params.get(bound) is not None and outside(_time(params[bound])):
                 return False
         if params.get("space_id") is not None and note["space"] != params["space_id"]:
             return False
@@ -136,6 +151,14 @@ class FakeGranola:
         ):
             return False
         return note["id"] not in self.listing_hidden
+
+    def _chain(self, folder: str | None) -> list[str]:
+        """The folder and every ancestor of it."""
+        chain = []
+        while folder is not None:
+            chain.append(folder)
+            folder = self.folders.get(folder)
+        return chain
 
     def _list(self, params: dict) -> dict:
         cursor = params.get("cursor")
@@ -166,6 +189,8 @@ class FakeGranola:
         note = self.notes.get(nid)
         if note is None:
             raise GranolaError("missing", 404)
+        if nid in self.refused_notes:
+            raise GranolaError("forbidden", 403)
         answer = {
             key: note[key]
             for key in (
@@ -186,9 +211,12 @@ class FakeGranola:
             else []
         )
         answer["space_membership"] = [{"id": note["space"]}] if note["space"] else []
+        if nid in self.no_membership:
+            del answer["folder_membership"], answer["space_membership"]
         if params.get("include") == "transcript":
             if self.transcripts_disabled:
-                raise GranolaError("disabled", 403)
+                answer["transcript"] = None
+                return answer
             size = sum(len(part["text"]) for part in note["transcript"])
             if self.inline_limit is not None and size > self.inline_limit:
                 raise GranolaError("too large", 413)
@@ -207,3 +235,7 @@ class FakeGranola:
 
     def paths(self) -> list[str]:
         return [path for path, _ in self.calls]
+
+
+def _time(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))

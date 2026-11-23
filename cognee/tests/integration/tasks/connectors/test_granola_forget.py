@@ -95,7 +95,7 @@ def _now(fake: FakeGranola) -> None:
 
 
 async def _sync(fake, **kwargs):
-    source = granola_source(scope=FOLDER, service=fake, **kwargs)
+    source = granola_source(scope=FOLDER, resource_name=TABLE, service=fake, **kwargs)
     await cognee.remember(
         source,
         dataset_name=DATASET,

@@ -132,6 +132,56 @@ def test_a_200_that_is_not_a_json_object_is_an_invalid_response(monkeypatch, bod
         client().get("/v1/notes")
 
 
+def test_an_unreadable_body_is_no_errors_context(monkeypatch):
+    """A JSON error keeps the body in ``.doc``; raised inside the ``except`` it would ride
+    along as ``__context__`` to anyone calling the client (review X3)."""
+    Transport(monkeypatch, answer(200, f"not json {KEY} {NOTE}".encode()))
+    with pytest.raises(GranolaNoteError) as raised:
+        client().get(f"/v1/notes/{NOTE}")
+    assert raised.value.__context__ is None and raised.value.__cause__ is None
+
+    broken = answer(200)
+
+    def iter_content(_size):
+        raise requests.exceptions.ChunkedEncodingError(f"https://{URL_PART}/v1/notes/{NOTE}")
+
+    broken.iter_content = iter_content
+    Transport(monkeypatch, broken)
+    with pytest.raises(GranolaError, match="Could not read") as raised:
+        client().get(f"/v1/notes/{NOTE}")
+    assert raised.value.__context__ is None
+
+
+def test_urllib3_debug_lines_about_granola_never_name_a_note(monkeypatch, caplog):
+    """urllib3 logs every request line at DEBUG, path and all; a real socket proves the
+    client's filter drops them."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps({"id": NOTE}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setattr(granola, "API_BASE", f"http://127.0.0.1:{server.server_port}")
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    try:
+        with caplog.at_level(logging.DEBUG, logger="urllib3"):
+            assert client().get(f"/v1/notes/{NOTE}") == {"id": NOTE}
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert NOTE not in caplog.text and KEY not in caplog.text
+
+
 def test_a_5xx_is_tried_once_more_at_once_and_then_raised(monkeypatch):
     wire = Transport(monkeypatch, answer(503), answer(502))
     with pytest.raises(GranolaError) as raised:
