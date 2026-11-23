@@ -450,3 +450,56 @@ def test_dropbox_service_from_providers_sends_the_oauth_token_as_bearer():
         service.rpc("users/get_current_account", None)
     assert seen == [f"Bearer {token}"]
     assert token not in f"{error.value} {error.value!r}"
+
+
+def test_granola_names_are_pinned_and_a_dlt_table_name():
+    # Same rule as the Linear pin: the literal is deliberate. One scope (``all``, a folder or a
+    # space) is one source and one table, and the Cloud control plane only tracks tables that
+    # start with the provider prefix.
+    name = ingestion.resource_name("granola", CREDENTIAL, "fol_123456789ABCDE")
+    assert name == "granola_1eea05a80c498c37d607bf3e"
+    assert ingestion.resource_name("granola", CREDENTIAL, "all") == (
+        "granola_911eeeb211c574888c636ffe"
+    )
+    assert name == name.lower() and set(name) <= set("abcdefghijklmnopqrstuvwxyz0123456789_")
+    assert len(name) <= 63
+    assert ingestion.source_factory("granola").__module__ == (
+        "cognee.tasks.ingestion.connectors.granola"
+    )
+
+
+def test_granola_service_from_providers_sends_the_api_key_as_bearer_and_shows_it_nowhere(
+    monkeypatch,
+):
+    # Granola has no OAuth for its REST API: the credential a host hands the builder is the
+    # pasted API key (Cloud: its API-key connector), and the client sends it as
+    # ``Authorization: Bearer`` on the request requests really sends.
+    import requests
+
+    from cognee.tasks.ingestion.connectors.granola import GranolaClient, GranolaError
+
+    api_key = "grn_SECRET-granola-key-123"
+    sent = []
+
+    def send(self, request, **kwargs):
+        sent.append(request.headers.get("Authorization"))
+        response = requests.Response()
+        response.status_code = 401
+        response._content = f'{{"error": "bad key {api_key}"}}'.encode()
+        response._content_consumed = True
+        return response
+
+    monkeypatch.setattr(requests.sessions.Session, "send", send)
+    service = ingestion.build_service("granola", api_key)
+    assert isinstance(service, GranolaClient)
+
+    with pytest.raises(GranolaError) as raised:
+        service.get("/v1/notes", {"page_size": 1})
+
+    assert sent == [f"Bearer {api_key}"]
+    assert raised.value.status == 401
+    assert api_key not in str(raised.value) and api_key not in repr(service)
+    source = ingestion.source_factory("granola")(
+        scope="fol_123456789ABCDE", resource_name="granola_x", service=service
+    )
+    assert source.name == "granola_x"
