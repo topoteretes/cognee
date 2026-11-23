@@ -14,12 +14,11 @@ import pytest
 from pydantic import BaseModel
 
 import cognee.infrastructure.llm.config as llm_config_module
-import cognee.infrastructure.llm.overload_policy as overload_policy_module
-from cognee.infrastructure.llm.overload_policy import OverloadPolicy
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.bedrock.adapter import (
     BedrockAdapter,
 )
 from cognee.shared import rate_limiting
+from cognee.shared.overload_policy import OverloadPolicy
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 
@@ -37,8 +36,8 @@ class PacerSpy:
 
 @pytest.fixture
 def seam(monkeypatch):
-    policy = OverloadPolicy()
-    monkeypatch.setattr(overload_policy_module, "llm_overload_policy", policy)
+    policy = OverloadPolicy(llm_config_module.llm_pacing_budget)
+    monkeypatch.setattr(llm_config_module, "llm_overload_policy", policy)
     spy = PacerSpy()
     monkeypatch.setattr(rate_limiting, "_llm_rate_limiter", spy)
     monkeypatch.setattr(
@@ -87,4 +86,4 @@ async def test_bedrock_overload_error_reaches_policy_and_paces_next_dispatch(sea
 
     async with llm_rate_limiter_context_manager():
         pass
-    assert seam.spy.entered == 1  # the episode paces subsequent dispatches
+    assert seam.spy.entered == 1  # throttling paces subsequent dispatches

@@ -4,15 +4,30 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import cognee.infrastructure.databases.vector.embeddings.config as embedding_config_module
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import EmbeddingGateway
 from cognee.infrastructure.engine import DataPoint
-from cognee.tasks.storage.index_data_points import IndexingBudget, index_data_points
+from cognee.shared import rate_limiting
+from cognee.tasks.storage.index_data_points import index_data_points
 
 
 class TestDataPoint(DataPoint):
     name: str
     description: str = "test description"
+
+
+@pytest.fixture(autouse=True)
+def embedding_cap(monkeypatch):
+    """Fresh process-wide slots per test; returns a setter for EMBEDDING_MAX_CONCURRENT_REQUESTS."""
+    monkeypatch.setattr(rate_limiting, "_concurrency_state", {})
+
+    def set_cap(cap: int) -> None:
+        config = SimpleNamespace(embedding_max_concurrent_requests=cap)
+        monkeypatch.setattr(embedding_config_module, "get_embedding_config", lambda: config)
+
+    set_cap(128)
+    return set_cap
 
 
 @pytest.mark.asyncio
@@ -83,7 +98,7 @@ async def test_index_data_points_calls_vector_engine():
     assert mock_vector_engine.index_data_points.await_count >= 1
 
 
-async def _run_and_measure_peak_concurrency(data_points, batch_size, max_concurrent_data_points):
+async def _run_and_measure_peak_concurrency(data_points, batch_size):
     """Measure provider requests through the real gateway and storage planner."""
     in_flight = 0
     peak = 0
@@ -109,9 +124,6 @@ async def _run_and_measure_peak_concurrency(data_points, batch_size, max_concurr
     with patch.dict(
         index_data_points.__globals__,
         {
-            "get_embedding_context_config": lambda: SimpleNamespace(
-                embedding_max_concurrent_data_points=max_concurrent_data_points
-            ),
             # One write per embedding request, so the batch count is the request count.
             "get_vectordb_config": lambda: SimpleNamespace(vector_write_batch_size=batch_size),
         },
@@ -122,29 +134,27 @@ async def _run_and_measure_peak_concurrency(data_points, batch_size, max_concurr
 
 
 @pytest.mark.asyncio
-async def test_concurrency_derived_from_max_concurrent_data_points():
-    """Concurrent batches = max_concurrent_data_points // batch_size (6 // 2 = 3)."""
+async def test_concurrent_batches_bounded_by_max_concurrent_requests(embedding_cap):
+    """Batches admitted at once = EMBEDDING_MAX_CONCURRENT_REQUESTS."""
+    embedding_cap(3)
     data_points = [TestDataPoint(name=f"point{i}") for i in range(20)]
     for data_point in data_points:
         data_point.metadata["index_fields"] = ["name"]
 
-    peak = await _run_and_measure_peak_concurrency(
-        data_points, batch_size=2, max_concurrent_data_points=6
-    )
+    peak = await _run_and_measure_peak_concurrency(data_points, batch_size=2)
 
     assert peak == 3
 
 
 @pytest.mark.asyncio
-async def test_concurrency_floors_at_one_when_batch_size_exceeds_limit():
-    """batch_size > max_concurrent_data_points must still run one batch, not deadlock."""
+async def test_batch_size_above_the_cap_still_runs(embedding_cap):
+    """A batch larger than EMBEDDING_MAX_CONCURRENT_REQUESTS still runs, not deadlocks."""
+    embedding_cap(6)
     data_points = [TestDataPoint(name=f"point{i}") for i in range(10)]
     for data_point in data_points:
         data_point.metadata["index_fields"] = ["name"]
 
-    peak = await _run_and_measure_peak_concurrency(
-        data_points, batch_size=100, max_concurrent_data_points=6
-    )
+    peak = await _run_and_measure_peak_concurrency(data_points, batch_size=100)
 
     assert peak == 1
 
@@ -203,8 +213,9 @@ async def test_a_point_with_one_index_field_is_handed_over_without_a_copy():
 
 
 @pytest.mark.asyncio
-async def test_a_shared_budget_bounds_concurrent_calls_together():
-    """Two index calls handed one budget never exceed its request bound between them."""
+async def test_concurrent_calls_share_the_process_wide_bound(embedding_cap):
+    """Two concurrent index calls never exceed EMBEDDING_MAX_CONCURRENT_REQUESTS between them."""
+    embedding_cap(2)
     in_flight = 0
     peak = 0
 
@@ -229,15 +240,14 @@ async def test_a_shared_budget_bounds_concurrent_calls_together():
     second = [TestDataPoint(name=f"b{i}") for i in range(6)]
     for data_point in first + second:
         data_point.metadata["index_fields"] = ["name"]
-    shared = IndexingBudget(requests=asyncio.Semaphore(2), batches=asyncio.Semaphore(12))
 
     with patch.dict(
         index_data_points.__globals__,
         {"get_vectordb_config": lambda: SimpleNamespace(vector_write_batch_size=1)},
     ):
         await asyncio.gather(
-            index_data_points(first, vector_engine=mock_vector_engine, budget=shared),
-            index_data_points(second, vector_engine=mock_vector_engine, budget=shared),
+            index_data_points(first, vector_engine=mock_vector_engine),
+            index_data_points(second, vector_engine=mock_vector_engine),
         )
 
     assert peak == 2
@@ -287,16 +297,12 @@ async def test_failed_batch_waits_for_sibling_writes():
         patch.dict(index_data_points.__globals__, {"write_batch_size": lambda: 1}),
         pytest.raises(ValueError, match="write failed"),
     ):
-        await index_data_points(
-            points,
-            vector_engine=engine,
-            budget=IndexingBudget(requests=asyncio.Semaphore(2), batches=asyncio.Semaphore(2)),
-        )
+        await index_data_points(points, vector_engine=engine)
     assert completed.is_set(), "no sibling write may outlive the failed storage call"
 
 
 @pytest.mark.asyncio
-async def test_a_blocked_store_holds_back_embedding():
+async def test_a_blocked_store_holds_back_embedding(embedding_cap):
     """Batches waiting on the store keep their slots, so embedding cannot run ahead of it."""
     total = 4096
     embedded = 0
@@ -326,20 +332,16 @@ async def test_a_blocked_store_holds_back_embedding():
     for point in points:
         point.metadata = {"index_fields": ["name"]}
 
+    embedding_cap(4)
     with patch.dict(
         index_data_points.__globals__,
-        {
-            "get_vectordb_config": lambda: SimpleNamespace(vector_write_batch_size=128),
-            "get_embedding_context_config": lambda: SimpleNamespace(
-                embedding_max_concurrent_data_points=150
-            ),
-        },
+        {"get_vectordb_config": lambda: SimpleNamespace(vector_write_batch_size=128)},
     ):
         indexing = asyncio.create_task(index_data_points(points, vector_engine=engine))
         try:
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(all_embedded.wait(), timeout=0.5)
-            # 150 // 32 = 4 batches admitted, 128 rows each.
+            # 4 batches admitted, 128 rows each.
             assert embedded == 4 * 128
         finally:
             release_storage.set()
@@ -348,12 +350,11 @@ async def test_a_blocked_store_holds_back_embedding():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "count,request_size,cap,expected", [(128, 32, 150, 4), (1024, 256, 1024, 8)]
-)
+@pytest.mark.parametrize("count,request_size,cap,expected", [(128, 32, 1, 4), (1024, 256, 8, 8)])
 async def test_provider_requests_overlap_independently_of_write_batches(
-    count, request_size, cap, expected
+    count, request_size, cap, expected, embedding_cap
 ):
+    embedding_cap(cap)
     active = peak = 0
     reached = asyncio.Event()
 
@@ -384,12 +385,7 @@ async def test_provider_requests_overlap_independently_of_write_batches(
     points = [TestDataPoint(name=str(i), metadata={"index_fields": ["name"]}) for i in range(count)]
     with patch.dict(
         index_data_points.__globals__,
-        {
-            "write_batch_size": lambda: 128,
-            "get_embedding_context_config": lambda: SimpleNamespace(
-                embedding_max_concurrent_data_points=cap
-            ),
-        },
+        {"write_batch_size": lambda: 128},
     ):
         await index_data_points(points, vector_engine=engine)
     assert peak == expected

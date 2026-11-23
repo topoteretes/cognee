@@ -409,15 +409,18 @@ async def test_terminal_quota_error_is_not_retried(response_model, monkeypatch):
     LLMQuotaExceededError (shared llm_retry_condition, SDK-1222)."""
     import litellm
 
-    from cognee.infrastructure.llm import overload_policy as overload_policy_module
+    from cognee.infrastructure.llm import config as llm_config_module
     from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
         NativeLiteLLMAdapter,
     )
+    from cognee.shared.overload_policy import OverloadPolicy
 
-    # A RateLimitError opens an overload episode on the process-wide policy, which
-    # paces later tests through the shared limiter; keep that episode test-local.
+    # A RateLimitError starts throttling on the process-wide policy, which paces
+    # later tests through the shared limiter; keep that throttling test-local.
     monkeypatch.setattr(
-        overload_policy_module, "llm_overload_policy", overload_policy_module.OverloadPolicy()
+        llm_config_module,
+        "llm_overload_policy",
+        OverloadPolicy(llm_config_module.llm_pacing_budget),
     )
 
     adapter = NativeLiteLLMAdapter(

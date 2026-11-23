@@ -5,6 +5,8 @@ from typing import Any
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cognee.shared.overload_policy import OverloadPolicy, PacingBudget
+
 try:
     from baml_py import ClientRegistry  # ty:ignore[unresolved-import]
 except ImportError:
@@ -178,8 +180,11 @@ class LLMConfig(BaseSettings):
     # KV-cache self-hosters) are protected by how many requests they hold,
     # not how many start per minute. Opt-in: set it for such backends.
     llm_max_concurrent_requests: int = 0
-    # When the provider reports a rate limit, warn and switch on the RPM limiter
-    # (with the llm_rate_limit_requests/interval budget) for the rest of the process.
+    # When a provider shows overload (rate limit, timeout, HTTP 429/503/529), warn
+    # and throttle that side through its RPM limiter for a throttling period that each
+    # new overload restarts and that lapses after a quiet cooldown (900 s for LLM
+    # calls, 60 s for embedding calls). Covers LLM calls (llm_rate_limit_* budget) and
+    # embedding calls (embedding_rate_limit_* budget), each throttled on its own.
     auto_rate_limit: bool = True
 
     llama_cpp_model_path: str | None = None
@@ -488,6 +493,21 @@ def get_llm_config() -> LLMConfig:
           LLM.
     """
     return LLMConfig()
+
+
+def llm_pacing_budget() -> PacingBudget:
+    """The LLM RPM budget an overload warning names."""
+    llm_config = get_llm_config()
+    return PacingBudget(
+        llm_config.llm_rate_limit_requests,
+        llm_config.llm_rate_limit_interval,
+        "LLM_RATE_LIMIT_REQUESTS",
+        "LLM_RATE_LIMIT_INTERVAL",
+    )
+
+
+# Process-wide overload policy consulted by LLM dispatch; embeddings have their own.
+llm_overload_policy = OverloadPolicy(llm_pacing_budget)
 
 
 def resolve_structured_output_framework(config: LLMConfig) -> str:

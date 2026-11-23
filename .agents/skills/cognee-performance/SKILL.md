@@ -50,7 +50,7 @@ another, not in parallel.
 |---|---|---|
 | `LLM_RATE_LIMIT_ENABLED` | `false` | Turn on a requests-per-interval limit |
 | `LLM_RATE_LIMIT_REQUESTS` / `LLM_RATE_LIMIT_INTERVAL` | 60 / 60 s | 10 requests for local providers (Ollama, llama.cpp, LM Studio) |
-| `AUTO_RATE_LIMIT` | `true` | On a 429/503/529 or timeout, switches the limiter on for 15 minutes (extended while errors continue) |
+| `AUTO_RATE_LIMIT` | `true` | On a 429/503/529 or timeout, throttles through the limiter until no such error has been seen for 900 s (LLM calls) or 60 s (embedding calls); each side throttles on its own |
 | `LLM_MAX_CONCURRENT_REQUESTS` | `0` (unlimited) | Max LLM requests in flight at once, per model and per process. Off for every provider until set. For a serial local server (Ollama, llama.cpp) match what it runs in parallel (Ollama's `OLLAMA_NUM_PARALLEL`), usually 1 to 4 |
 | `LLM_EXTRACTION_MODEL` / `_PROVIDER` / `_ENDPOINT` / `_API_KEY` / `_API_VERSION` | the main model | Use a cheaper or faster model just for graph extraction |
 | `LLM_SUMMARIZATION_*`, `LLM_QUERY_*` | the main model | Same, for summaries and for answering queries |
@@ -70,14 +70,16 @@ a local model does not get the local default of 10 requests; set
 | Env var | Default |
 |---|---|
 | `EMBEDDING_BATCH_SIZE` | 32 texts per request |
-| `EMBEDDING_MAX_CONCURRENT_DATA_POINTS` | 150 (so 150 / 32 = 4 concurrent requests) |
+| `EMBEDDING_MAX_CONCURRENT_REQUESTS` | Requests in flight at once for the whole process: 32 without `EMBEDDING_ENDPOINT`, 16 with it, 4 for Ollama and LM Studio, unless set; also caps indexing write batches admitted at once (replaces the removed `EMBEDDING_MAX_CONCURRENT_DATA_POINTS`) |
 | `VECTOR_WRITE_BATCH_SIZE` | 128 rows per vector write, embedded in 32-text requests under the shared request concurrency limit |
-| `EMBEDDING_RATE_LIMIT_ENABLED` / `_REQUESTS` / `_INTERVAL` | off / 60 / 60 s |
+| `EMBEDDING_RATE_LIMIT_ENABLED` / `_REQUESTS` / `_INTERVAL` | off / 100 / 60 s (1000 requests for Ollama and LM Studio unless set) |
 
 Embedding calls retry transient errors, rate-limit 429s included, with
 exponential jitter for up to 128 s (budget-exhaustion errors are terminal,
-not retried), but `AUTO_RATE_LIMIT` does not apply to them; enable
-`EMBEDDING_RATE_LIMIT_ENABLED` yourself for sustained load. Without any
+not retried), waiting for the provider's `Retry-After` when it sends one.
+With `AUTO_RATE_LIMIT` on, an overload also throttles embedding calls by
+itself until 60 s pass without one; set `EMBEDDING_RATE_LIMIT_ENABLED` to throttle them all
+the time. Without any
 credentials cognee embeds locally with fastembed (`perplexity-ai/pplx-embed-v1-0.6b`,
 a 0.6B-parameter model), which runs on the CPU and blocks while it works: a few
 chunks per second on a laptop. `EMBEDDING_PROVIDER=fastembed` with
@@ -177,7 +179,7 @@ answer holds its slot until the stream ends).
 - LLM calls per chunk: `cognee/tasks/graph/extract_graph_and_summarize.py`
 - Chunk-size default: `cognee/infrastructure/llm/utils.py:get_max_chunk_tokens`
 - LLM config, rate limits, stage routing: `cognee/infrastructure/llm/config.py`,
-  `cognee/shared/rate_limiting.py`, `cognee/infrastructure/llm/overload_policy.py`,
+  `cognee/shared/rate_limiting.py`, `cognee/shared/overload_policy.py`,
   `cognee/infrastructure/llm/retry_config.py`
 - Embedding config: `cognee/infrastructure/databases/vector/embeddings/config.py`
 - Dataset queue: `cognee/infrastructure/databases/dataset_queue/queue.py`

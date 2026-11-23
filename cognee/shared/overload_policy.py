@@ -1,17 +1,20 @@
-"""Overload detection and reaction policy for LLM dispatch.
+"""Overload detection and reaction policy for LLM and embedding dispatch.
 
 Everything runs at full speed until there is evidence the provider cannot
 keep up; then dispatches are paced by the RPM limiter for a cooldown window
 that extends while evidence keeps arriving and lapses back to the configured
-state afterwards. The dispatch seam (``shared.rate_limiting``) consults a
-process-wide ``OverloadPolicy`` instance; tests construct their own.
+state afterwards. The dispatch seams (``shared.rate_limiting``) consult two
+process-wide ``OverloadPolicy`` instances, one per side, so overload on one
+side never paces the other; tests construct their own.
 """
 
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from cognee.shared.logging_utils import get_logger
 
-logger = get_logger("llm_dispatch")
+logger = get_logger("dispatch_pacing")
 
 # How long one piece of overload evidence keeps dispatch paced; every further
 # piece extends the window. When it lapses, behavior returns to the
@@ -24,6 +27,16 @@ COOLDOWN_SECONDS = 900.0
 # 429 (rate limited), 503 (service unavailable — e.g. Ollama's queue-full
 # reply), 529 (Anthropic overloaded).
 _OVERLOAD_STATUS_CODES = frozenset({429, 503, 529})
+
+
+@dataclass(frozen=True)
+class PacingBudget:
+    """The RPM budget a policy's warning names, and the settings that tune it."""
+
+    requests: int
+    interval: int
+    requests_setting: str
+    interval_setting: str
 
 
 def overload_evidence(error: BaseException) -> str | None:
@@ -69,14 +82,19 @@ def overload_evidence(error: BaseException) -> str | None:
 
 
 class OverloadPolicy:
-    """Pace-on-evidence policy with cooldown-episode semantics.
+    """Throttle-on-evidence policy: overload evidence starts a throttling period.
 
-    Warns once per overload episode; further evidence inside the window
-    extends it silently, and a fresh episode after a quiet cooldown warns
-    again.
+    Warns once per throttling period; further evidence inside it extends it
+    silently, and a new throttling period after a quiet cooldown warns again.
     """
 
-    def __init__(self, cooldown_seconds: float = COOLDOWN_SECONDS):
+    def __init__(
+        self,
+        budget: Callable[[], PacingBudget],
+        cooldown_seconds: float = COOLDOWN_SECONDS,
+    ):
+        # Read when a throttling period starts, so the warning names the current budget.
+        self.budget = budget
         self.cooldown_seconds = cooldown_seconds
         self._paced_until = 0.0
 
@@ -91,27 +109,22 @@ class OverloadPolicy:
             self._react(evidence)
 
     def _react(self, reason: str) -> None:
-        # NOTE: Import inside function to avoid a circular import at module load.
-        from cognee.infrastructure.llm.config import get_llm_config
-
         now = time.monotonic()
-        new_episode = now >= self._paced_until
+        starts_throttling = now >= self._paced_until
         self._paced_until = now + self.cooldown_seconds
-        if new_episode:
-            llm_config = get_llm_config()
+        if starts_throttling:
+            budget = self.budget()
             logger.warning(
                 "Potential RPM issues detected (%s) — slowing down processing to "
                 "accommodate: enabling the RPM limiter (%d requests per %ds) for "
                 "the next %.0fs, extended while issues persist. Tune "
-                "LLM_RATE_LIMIT_REQUESTS / LLM_RATE_LIMIT_INTERVAL to match what "
+                "%s / %s to match what "
                 "your provider or machine can handle, or set AUTO_RATE_LIMIT=false "
                 "to opt out.",
                 reason,
-                llm_config.llm_rate_limit_requests,
-                llm_config.llm_rate_limit_interval,
+                budget.requests,
+                budget.interval,
                 self.cooldown_seconds,
+                budget.requests_setting,
+                budget.interval_setting,
             )
-
-
-# Process-wide default instance consulted by the dispatch seam.
-llm_overload_policy = OverloadPolicy()

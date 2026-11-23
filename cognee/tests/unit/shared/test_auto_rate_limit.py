@@ -8,9 +8,8 @@ import openai
 import pytest
 
 import cognee.infrastructure.llm.config as llm_config_module
-import cognee.infrastructure.llm.overload_policy as overload_policy_module
-from cognee.infrastructure.llm.overload_policy import OverloadPolicy
 from cognee.shared import rate_limiting
+from cognee.shared.overload_policy import OverloadPolicy
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 
@@ -42,8 +41,8 @@ def _config(**overrides):
 @pytest.fixture(autouse=True)
 def seam(monkeypatch):
     """Fresh policy + pacer spy + config stub for every test."""
-    policy = OverloadPolicy()
-    monkeypatch.setattr(overload_policy_module, "llm_overload_policy", policy)
+    policy = OverloadPolicy(llm_config_module.llm_pacing_budget)
+    monkeypatch.setattr(llm_config_module, "llm_overload_policy", policy)
     spy = PacerSpy()
     monkeypatch.setattr(rate_limiting, "_llm_rate_limiter", spy)
     monkeypatch.setattr(llm_config_module, "get_llm_config", lambda: _config())
@@ -72,7 +71,7 @@ async def test_overload_error_reaches_the_policy_and_paces_next_dispatch(seam):
 
     async with llm_rate_limiter_context_manager():
         pass
-    assert seam.spy.entered == 1  # paced while the episode lasts
+    assert seam.spy.entered == 1  # paced while throttling lasts
 
 
 @pytest.mark.asyncio
@@ -93,3 +92,33 @@ async def test_explicit_rate_limit_setting_paces_from_the_start(seam, monkeypatc
     async with llm_rate_limiter_context_manager():
         pass
     assert seam.spy.entered == 1
+
+
+@pytest.mark.asyncio
+async def test_a_request_queued_when_throttling_starts_is_paced(seam, monkeypatch):
+    monkeypatch.setattr(rate_limiting, "_concurrency_state", {})
+    monkeypatch.setattr(
+        llm_config_module,
+        "get_llm_config",
+        lambda: _config(llm_max_concurrent_requests=1, llm_model="test-model"),
+    )
+    release = asyncio.Event()
+    reached = []
+
+    async def request(name):
+        async with llm_rate_limiter_context_manager():
+            reached.append(name)
+            if name == "first":
+                await release.wait()
+
+    first = asyncio.create_task(request("first"))
+    await asyncio.sleep(0.01)
+    second = asyncio.create_task(request("second"))  # queues for the one slot
+    await asyncio.sleep(0.01)
+
+    seam.policy.on_error(_rate_limit_error())  # throttling starts while it waits
+    release.set()
+    await asyncio.gather(first, second)
+
+    assert reached == ["first", "second"]
+    assert seam.spy.entered == 1  # the queued request was paced

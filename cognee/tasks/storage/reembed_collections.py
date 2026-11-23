@@ -34,8 +34,6 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import (
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotReembeddableError
 from cognee.shared.logging_utils import get_logger
 
-from .index_data_points import indexing_budget
-
 logger = get_logger("reembed_collections")
 
 # No collection cognee writes can have this name: collections are named
@@ -161,7 +159,6 @@ async def _stage_unstaged_rows(vector_engine, collection_name: str) -> int:
         for row_id in await vector_engine.get_data_point_ids(collection_name)
         if row_id not in staged_ids
     ]
-    requests = indexing_budget(vector_engine).requests
     if unstaged_ids:
         logger.info("Re-embedding %d row(s) of %s", len(unstaged_ids), collection_name)
     for start in range(0, len(unstaged_ids), ROWS_PER_STEP):
@@ -169,8 +166,9 @@ async def _stage_unstaged_rows(vector_engine, collection_name: str) -> int:
             collection_name, unstaged_ids[start : start + ROWS_PER_STEP]
         )
         texts = [_embedded_text(collection_name, row) for row in rows]
-        # A step's texts are embedded in provider-sized requests, as an index write's are.
-        with embedding_request_scope(requests):
+        # A step's texts are embedded in provider-sized requests, as an index write's are;
+        # each request takes a slot of the process-wide embedding cap.
+        with embedding_request_scope():
             vectors = await vector_engine.embed_data(texts)
         await vector_engine.upsert_raw_vectors(
             staging_name,

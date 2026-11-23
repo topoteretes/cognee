@@ -90,7 +90,7 @@ async def test_a_storage_step_splits_a_write_batch_into_provider_sized_requests(
     """A write batch larger than the provider's request size is embedded in requests of
     that size, the vectors in input order and the token counts summed and recorded once."""
     engine = _SizedEngine(batch_size=2)
-    with patch(RECORD, new=AsyncMock()) as record, embedding_request_scope(asyncio.Semaphore(1)):
+    with patch(RECORD, new=AsyncMock()) as record, embedding_request_scope():
         vectors = await EmbeddingGateway(engine).embed_text(["a", "bb", "ccc", "dddd", "e"])
 
     assert engine.requests == [["a", "bb"], ["ccc", "dddd"], ["e"]]
@@ -102,7 +102,7 @@ async def test_a_storage_step_splits_a_write_batch_into_provider_sized_requests(
 @pytest.mark.asyncio
 async def test_a_request_sized_call_is_one_request():
     engine = _SizedEngine(batch_size=3)
-    with patch(RECORD, new=AsyncMock()), embedding_request_scope(asyncio.Semaphore(1)):
+    with patch(RECORD, new=AsyncMock()), embedding_request_scope():
         vectors = await EmbeddingGateway(engine).embed_text(["a", "b", "c"])
 
     assert engine.requests == [["a", "b", "c"]]
@@ -113,7 +113,7 @@ async def test_a_request_sized_call_is_one_request():
 @pytest.mark.parametrize("batch_size", [None, 0, -4, True])
 async def test_an_engine_without_a_usable_request_size_gets_one_request(batch_size):
     engine = _SizedEngine(batch_size=batch_size)
-    with patch(RECORD, new=AsyncMock()), embedding_request_scope(asyncio.Semaphore(1)):
+    with patch(RECORD, new=AsyncMock()), embedding_request_scope():
         vectors = await EmbeddingGateway(engine).embed_text(["a", "b", "c"])
 
     assert engine.requests == [["a", "b", "c"]]
