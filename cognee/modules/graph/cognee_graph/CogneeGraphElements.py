@@ -1,7 +1,7 @@
 from typing import Any
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import BaseModel, ConfigDict, PrivateAttr, computed_field, field_serializer
 
 from cognee.modules.graph.exceptions import DimensionOutOfRangeError, InvalidDimensionsError
 
@@ -12,16 +12,24 @@ class Node(BaseModel):
     Attributes:
         id (str): A unique identifier for the node.
         attributes (Dict[str, Any]): A dictionary of attributes associated with the node.
-        neighbors (List[Node]): Represents the original nodes
-        skeleton_edges (List[Edge]): Represents the original edges
+        skeleton_neighbours (List[Node]): The neighbouring nodes, in the order they were
+            added. Read-only: every read returns a new list, so changing it does not change
+            the node; use add_skeleton_neighbor and remove_skeleton_neighbor.
+        skeleton_edges (List[Edge]): The edges that connect this node to its neighbours.
+        status (np.ndarray): Whether the node is alive (1) or not (0) in each dimension.
     """
 
     id: str
     attributes: dict[str, Any]
-    skeleton_neighbours: list["Node"]
     skeleton_edges: list["Edge"]
     status: np.ndarray
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    # Neighbours by id, in the order they were added. The dict makes the duplicate
+    # check one lookup and keeps the order, so no separate list is stored. A list
+    # scan made projecting a node with N edges O(N^2): minutes for a hub of ~50k edges.
+    # Created in __init__, not by a default factory: pydantic 2.13 inspects a private
+    # attribute's factory for every instance, which costs more than building the node.
+    _neighbours: dict[str, "Node"] = PrivateAttr()
 
     def __init__(
         self,
@@ -37,10 +45,20 @@ class Node(BaseModel):
         super().__init__(
             id=node_id,
             attributes=node_attributes,
-            skeleton_neighbours=[],
             skeleton_edges=[],
             status=np.ones(dimension, dtype=int),
         )
+        self._neighbours = {}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def skeleton_neighbours(self) -> list["Node"]:
+        """The neighbours in the order they were added, as a new list on every read.
+
+        Changing the returned list does not change the node: use
+        add_skeleton_neighbor and remove_skeleton_neighbor.
+        """
+        return list(self._neighbours.values())
 
     @field_serializer("status")
     def serialize_status(self, status: np.ndarray, _info) -> list[int]:
@@ -77,12 +95,10 @@ class Node(BaseModel):
         distances[query_index] = score
 
     def add_skeleton_neighbor(self, neighbor: "Node") -> None:
-        if neighbor not in self.skeleton_neighbours:
-            self.skeleton_neighbours.append(neighbor)
+        self._neighbours.setdefault(neighbor.id, neighbor)
 
     def remove_skeleton_neighbor(self, neighbor: "Node") -> None:
-        if neighbor in self.skeleton_neighbours:
-            self.skeleton_neighbours.remove(neighbor)
+        self._neighbours.pop(neighbor.id, None)
 
     def add_skeleton_edge(self, edge: "Edge") -> None:
         self.skeleton_edges.append(edge)
@@ -115,6 +131,10 @@ class Node(BaseModel):
         return self.skeleton_edges
 
     def get_skeleton_neighbours(self):
+        """Return the neighbours in the order they were added, as a new list.
+
+        Changing the returned list does not change the node.
+        """
         return self.skeleton_neighbours
 
     def to_json(self) -> dict[str, Any]:
