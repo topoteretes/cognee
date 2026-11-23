@@ -8,6 +8,7 @@ access control on.
 
 from .config import DatasetRoutingConfig, get_dataset_routing_config
 from .index import (
+    copy_dataset_routes,
     dataset_route_ids,
     prune_dataset_routes,
     remove_dataset_routes,
@@ -25,6 +26,7 @@ __all__ = [
     "DATASET_ROUTE_COLLECTION",
     "DatasetRoutingConfig",
     "DatasetRoutingDecision",
+    "copy_dataset_routes",
     "dataset_route_ids",
     "ensure_default_store",
     "get_dataset_route_engine",

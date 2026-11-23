@@ -52,6 +52,56 @@ class EmbeddingDimensionMismatchError(CogneeValidationError):
         )
 
 
+class DatasetReembedIncompleteError(CogneeValidationError):
+    """A re-embed of the dataset started and did not finish, so its vectors are in two states."""
+
+    def __init__(
+        self,
+        dataset_id,
+        target_model: str | None,
+        name: str = "DatasetReembedIncompleteError",
+        status_code: int = status.HTTP_409_CONFLICT,
+    ):
+        self.dataset_id = dataset_id
+        self.target_model = target_model
+        super().__init__(
+            message=(
+                f"Dataset {dataset_id} is being re-embedded with '{target_model}', or a "
+                "re-embed of it stopped before it finished. It cannot be used until the "
+                "re-embed completes."
+            ),
+            name=name,
+            status_code=status_code,
+            remediation=(
+                "If no re-embed of this dataset is running, run reembed_dataset for it again "
+                f"with '{target_model}': it continues where the last one stopped."
+            ),
+        )
+
+
+class CollectionNotReembeddableError(CogneeValidationError):
+    """A collection holds a row that was not embedded from its own ``text``."""
+
+    def __init__(
+        self,
+        collection_name: str,
+        data_point_id,
+        name: str = "CollectionNotReembeddableError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        self.collection_name = collection_name
+        self.data_point_id = data_point_id
+        super().__init__(
+            message=(
+                f"Row {data_point_id} of collection '{collection_name}' has no text in its "
+                "payload, so its vector cannot be computed again from the store. No "
+                "collection was changed."
+            ),
+            name=name,
+            status_code=status_code,
+        )
+
+
 class StoredVectorWidthMismatchError(CogneeValidationError):
     """A table's vectors are not the configured embedding width, so its schema cannot be migrated.
 
