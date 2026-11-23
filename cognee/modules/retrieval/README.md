@@ -43,7 +43,13 @@ Cognee's relational backend is PostgreSQL. The store and SQLite temporary tables
 stay in RAM; closing the connection discards the store after retrieval, including on
 errors or cancellation.
 
-`retriever_specific_config["store_mb"]` defaults to `1000` (1 GB in decimal units).
+Each retrieval owns a worker thread. Parsing, joining chunks, describing the store,
+token counting and SQL execution run there, including creation and closure of the SQLite
+connection. Graph/vector I/O and LLM calls remain on the caller's async event loop.
+Cancelling a retrieval interrupts active SQLite work; any running Python stage must
+finish before the queued close can release its store. Waiting for cleanup is asynchronous.
+
+`retriever_specific_config["store_mb"]` defaults to `512` (512 MB in decimal units).
 Datasets whose stored document sizes sum to at most that threshold are loaded whole.
 Above it, the existing similarity-selected subset is used and the answer reports partial
 coverage. The selected text is budgeted in million characters. This setting does not cap

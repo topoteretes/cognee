@@ -1,10 +1,10 @@
 """Benchmark BROAD retrieval with synthetic graph data and no model or database services.
 
 Run from the repository root:
-    uv run python cognee/tests/performance/benchmark_broad_store.py --dataset-mb 1000
+    uv run python cognee/tests/performance/benchmark_broad_store.py --http-probe
 
 To compare a previous file-backed store, save its broad_store.py outside the checkout
-and pass --store-source /path/to/broad_store.py. Both runs use a 1 GB coverage threshold;
+and pass --store-source /path/to/broad_store.py. Both runs use a 512 MB coverage threshold;
 the previous store's 32 MB default would otherwise benchmark a different retrieval route.
 
 The mock graph generates exactly the requested bytes of ASCII CSV, lazily per graph
@@ -20,9 +20,11 @@ import json
 import os
 import platform
 import resource
+import socket
 import sqlite3
 import sys
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -96,7 +98,7 @@ class MockGraph:
                     {
                         "type": "DocumentChunk",
                         "chunk_index": 0,
-                        "text": self.document(self.sizes[document]),
+                        "text": await asyncio.to_thread(self.document, self.sizes[document]),
                     },
                 )
             )
@@ -108,6 +110,73 @@ class MockGraph:
 class MockVector:
     async def search(self, *args, **kwargs):
         raise AssertionError("The complete dataset must be loaded; vector sampling is forbidden")
+
+
+@asynccontextmanager
+async def http_probe(enabled):
+    """Measure real localhost HTTP responses while retrieval uses the same event loop."""
+    metrics = {}
+    if not enabled:
+        yield metrics
+        return
+
+    import httpx
+    import uvicorn
+    from fastapi import FastAPI
+
+    app = FastAPI()
+
+    @app.get("/health")
+    async def health():
+        return {"ok": True}
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    config = uvicorn.Config(app, log_level="error", access_log=False, lifespan="off")
+    server = uvicorn.Server(config)
+    server_task = asyncio.create_task(server.serve(sockets=[sock]))
+    samples, errors = [], []
+    running = True
+
+    async def probe():
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", timeout=10) as client:
+            while running:
+                started = time.perf_counter()
+                try:
+                    response = await client.get("/health")
+                    assert response.status_code == 200 and response.json() == {"ok": True}
+                except httpx.HTTPError as error:
+                    errors.append(type(error).__name__)
+                else:
+                    if running:
+                        samples.append(time.perf_counter() - started)
+                await asyncio.sleep(0.05)
+
+    try:
+        while not server.started:
+            if server_task.done():
+                await server_task
+                raise RuntimeError("HTTP probe server stopped before startup")
+            await asyncio.sleep(0.01)
+        task = asyncio.create_task(probe())
+        try:
+            yield metrics
+        finally:
+            running = False
+            await task
+    finally:
+        server.should_exit = True
+        await server_task
+        sock.close()
+    ordered = sorted(samples)
+    metrics.update(
+        responses_during_retrieval=len(samples),
+        errors=errors,
+        max_seconds=max(samples) if samples else None,
+        p95_seconds=ordered[int(0.95 * (len(ordered) - 1))] if ordered else None,
+    )
+    assert samples and not errors, metrics
 
 
 def load_store(source: Path | None):
@@ -186,7 +255,11 @@ async def benchmark(args):
     heartbeat_task = asyncio.create_task(heartbeat())
     await asyncio.sleep(0)
     # The baseline needs an explicit override to take the same complete-data path.
-    config = {"store_mb": 1000} if args.store_source else {}
+    config = {}
+    if args.store_source or args.store_mb is not None:
+        config["store_mb"] = (
+            args.store_mb if args.store_mb is not None else broad_retriever.BROAD_STORE_MB
+        )
     started, cpu_started = time.perf_counter(), time.process_time()
     try:
         with (
@@ -196,9 +269,10 @@ async def benchmark(args):
                 broad_retriever.LLMGateway, "acreate_structured_output", side_effect=forbid_models
             ),
         ):
-            found = await FixedSQLRetriever(**config).get_retrieved_objects(
-                "How many open records are there, and what is their total amount?"
-            )
+            async with http_probe(args.http_probe) as http_metrics:
+                found = await FixedSQLRetriever(**config).get_retrieved_objects(
+                    "How many open records are there, and what is their total amount?"
+                )
         timings["retrieval_total"] = time.perf_counter() - started
         timings["cpu"] = time.process_time() - cpu_started
     finally:
@@ -221,6 +295,7 @@ async def benchmark(args):
         "coverage_complete": True,
         "model_calls": 0,
         "vector_searches": 0,
+        "http_probe": http_metrics,
         "timings_seconds": {key: round(value, 4) for key, value in timings.items()},
         "peak_rss_bytes": peak_rss if sys.platform == "darwin" else peak_rss * 1024,
         **storage,
@@ -236,7 +311,9 @@ async def benchmark(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset-mb", type=int, default=1000)
+    parser.add_argument("--dataset-mb", type=int, default=512)
+    parser.add_argument("--store-mb", type=float)
+    parser.add_argument("--http-probe", action="store_true")
     parser.add_argument("--documents", type=int, default=100)
     parser.add_argument("--store-source", type=Path)
     parser.add_argument("--json-output", type=Path)

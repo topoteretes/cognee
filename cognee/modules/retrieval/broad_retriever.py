@@ -37,6 +37,7 @@ from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.broad_store import BroadQueryError, RecordStore
+from cognee.modules.retrieval.broad_worker import BroadWorker
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.shared.logging_utils import get_logger
@@ -52,7 +53,7 @@ BROAD_READING_TOKENS = 12_000
 BROAD_BATCH_MB = 256
 # A dataset up to this many megabytes is loaded into the store whole; a larger one is
 # represented by the parts most similar to the question, up to this size.
-BROAD_STORE_MB = 1_000
+BROAD_STORE_MB = 512
 # The least text a chunk is assumed to hold, when deciding how many to ask the vector
 # store for; a chunk is rarely shorter.
 _MIN_CHUNK_CHARS = 1_000
@@ -151,10 +152,11 @@ class Corpus:
     names: dict[str, str]
     sizes: dict[str, int]
     batch_chars: int
+    worker: BroadWorker
 
     async def fetch(self, documents: list[str]) -> list[Unit]:
         nodes, edges = await self.graph.get_neighborhood(documents, depth=1)
-        return _units_of(nodes, edges, self.names)
+        return await self.worker.run(_units_of, nodes, edges, self.names)
 
     async def batches(self) -> AsyncIterator[list[Unit]]:
         ratio, start = 1.0, 0
@@ -184,6 +186,74 @@ class Corpus:
 
 def _documents_of(units: list[Unit]) -> list[tuple[str, list[Unit]]]:
     return [(document, list(parts)) for document, parts in groupby(units, key=lambda u: u.document)]
+
+
+def _store_batch(
+    store: RecordStore, units: list[Unit], names: dict[str, str], chars: int, context_chars: int
+) -> tuple[list[str], int]:
+    """Join and parse a corpus batch on the store's worker."""
+    whole = []
+    for document, parts in _documents_of(units):
+        name = names.get(document, document)
+        rows = [u.text for u in parts if u.kind == "DltRow"]
+        if rows:
+            store.add_dlt_rows(rows)
+            text = "\n\n".join(rows)
+        else:
+            # Chunks partition the document exactly; preserve their concatenation.
+            text = "".join(u.text for u in parts)
+            store.add_document(name, text)
+        chars += len(text)
+        if chars <= context_chars:
+            whole.append(f"=== Document: {name} ===\n{text}")
+    return whole, chars
+
+
+def _store_similar_parts(
+    store: RecordStore, ranked: list[tuple[str, list]], store_chars: int
+) -> tuple[int, int]:
+    """Assemble the similarity-selected text and parse it on the store's worker."""
+    found = [(kind, result) for kind, results in ranked for result in results]
+    found.sort(key=lambda pair: pair[1].score)
+    by_document: dict[tuple[str, str], list[tuple[int, str, str]]] = {}
+    chars = parts = 0
+    for kind, result in found:
+        payload = result.payload or {}
+        text = str(payload.get("text", ""))
+        if not text or chars + len(text) > store_chars:
+            continue
+        chars += len(text)
+        parts += 1
+        document = str(payload.get("document_id") or result.id)
+        name = str(payload.get("document_name") or document)
+        index = int(payload.get("chunk_index") or 0)
+        by_document.setdefault((name, document), []).append((index, text, kind))
+    for (name, _), pieces in sorted(by_document.items()):
+        pieces.sort()
+        rows = [text for _, text, kind in pieces if kind == "DltRow"]
+        if rows:
+            store.add_dlt_rows(rows)
+            continue
+        text = pieces[0][1] + "".join(
+            ("" if current[0] == previous[0] + 1 else "\n") + current[1]
+            for previous, current in pairwise(pieces)
+        )
+        store.add_document(name, text)
+    return chars, parts
+
+
+def _reading_parts(ranked: list[list], tokenizer, reading_tokens: int) -> list[str]:
+    parts, used, seen = [], 0, set()
+    for result in _merged(ranked):
+        if result.id in seen:
+            continue
+        seen.add(result.id)
+        text = str((result.payload or {}).get("text", ""))
+        tokens = len(tokenizer.extract_tokens(text))
+        if text and used + tokens <= reading_tokens:
+            parts.append(text)
+            used += tokens
+    return parts
 
 
 def _merged(ranked: list[list]) -> list:
@@ -225,7 +295,7 @@ class BroadRetriever(CompletionRetriever):
       the text most similar to the question.
     - ``batch_mb``: megabytes of text held in memory at once while the store is built.
     - ``store_mb``: a dataset up to this stored size is loaded into the in-memory SQLite
-      store whole (default 1,000 MB / 1 GB). A larger one is represented by the parts most
+      store whole (default 512 MB, decimal). A larger one is represented by the parts most
       similar to the question, up to this many million characters, and the answer says so.
       This is a coverage threshold, not a bound on process RAM.
     """
@@ -251,13 +321,12 @@ class BroadRetriever(CompletionRetriever):
 
     async def get_retrieved_objects(self, query: str) -> BroadContext:
         engine = await get_unified_engine()
-        store = RecordStore()
-        try:
-            store.add_dlt_tables(await self.dlt_foreign_keys(engine.graph))
+        async with BroadWorker(RecordStore) as store:
+            await store.run(store.store.add_dlt_tables, await self.dlt_foreign_keys(engine.graph))
             total = await self.dataset_size()
             corpus = None
             if total is None:
-                corpus = await self.open_corpus(engine.graph)
+                corpus = await self.open_corpus(engine.graph, store)
                 total = sum(corpus.sizes.values())
             if total > self.store_chars:
                 chars, parts = await self.build_most_similar(store, engine.vector, query)
@@ -279,15 +348,17 @@ class BroadRetriever(CompletionRetriever):
                 if found.route == "sql":
                     found.note = found.note.replace("over the whole dataset", f"over {coverage}")
                 return found
-            corpus = corpus or await self.open_corpus(engine.graph)
+            corpus = corpus or await self.open_corpus(engine.graph, store)
             whole, chars = await self.build(store, corpus)
             if not chars:
                 raise BroadNoTextError("BROAD found no document text in this dataset.")
-            fits = bool(whole) and len(self.tokenizer.extract_tokens(whole)) <= self.context_tokens
+            fits = (
+                bool(whole)
+                and len(await store.run(self.tokenizer.extract_tokens, whole))
+                <= self.context_tokens
+            )
             logger.info("BROAD dataset: %d characters, shown whole: %s", chars, fits)
             return await self.decide(query, store, whole if fits else None)
-        finally:
-            store.close()
 
     async def dataset_size(self) -> int | None:
         """The stored size in bytes of the dataset being searched, from one query over its
@@ -321,7 +392,7 @@ class BroadRetriever(CompletionRetriever):
             listed.extend(line for line in lines if line not in listed)
         return foreign_keys
 
-    async def open_corpus(self, graph_engine) -> Corpus:
+    async def open_corpus(self, graph_engine, worker: BroadWorker) -> Corpus:
         """The dataset's documents, their names and stored sizes; text is fetched later."""
         document_types = [cls.__name__ for cls in get_all_subclasses(Document)]
         nodes, _ = await graph_engine.get_filtered_graph_data([{"type": document_types}])
@@ -333,6 +404,7 @@ class BroadRetriever(CompletionRetriever):
             names=names,
             sizes=await self.document_sizes(documents),
             batch_chars=self.batch_chars,
+            worker=worker,
         )
 
     async def document_sizes(self, documents: list[str]) -> dict[str, int]:
@@ -347,35 +419,31 @@ class BroadRetriever(CompletionRetriever):
                 sizes.update({str(data_id): size or 0 for data_id, size in rows})
         return sizes
 
-    async def build(self, store: RecordStore, corpus: Corpus) -> tuple[str, int]:
+    async def build(self, store: BroadWorker, corpus: Corpus) -> tuple[str, int]:
         """Fill the store batch by batch; return the dataset's text when it may fit one
         prompt (else "") and its size in characters."""
         whole: list[str] = []
         chars = 0
         async for units in corpus.batches():
-            for document, parts in _documents_of(units):
-                name = corpus.names.get(document, document)
-                rows = [u.text for u in parts if u.kind == "DltRow"]
-                if rows:
-                    store.add_dlt_rows(rows)
-                    text = "\n\n".join(rows)
-                else:
-                    # Chunks partition their document exactly: joined, they are the document.
-                    text = "".join(u.text for u in parts)
-                    store.add_document(name, text)
-                chars += len(text)
-                if chars <= self.context_tokens * _MAX_CHARS_PER_TOKEN:
-                    whole.append(f"=== Document: {name} ===\n{text}")
+            texts, chars = await store.run(
+                _store_batch,
+                store.store,
+                units,
+                corpus.names,
+                chars,
+                self.context_tokens * _MAX_CHARS_PER_TOKEN,
+            )
+            whole.extend(texts)
         fits = chars <= self.context_tokens * _MAX_CHARS_PER_TOKEN
         return ("\n\n".join(whole) if fits else ""), chars
 
-    async def build_most_similar(self, store: RecordStore, vector, query: str) -> tuple[int, int]:
+    async def build_most_similar(self, store: BroadWorker, vector, query: str) -> tuple[int, int]:
         """Fill the store with the chunks most similar to the question, up to store_mb of
         text: one vector search per text collection, the best matches kept until the size is
         reached. A chunk's payload names its document and position, so no graph call is
         needed. Returns the characters and parts loaded."""
         limit = max(1, self.store_chars // _MIN_CHUNK_CHARS)
-        found = []
+        ranked = []
         for kind in BROAD_TEXT_NODE_TYPES:
             try:
                 results = await vector.search(
@@ -383,39 +451,13 @@ class BroadRetriever(CompletionRetriever):
                 )
             except CollectionNotFoundError:
                 continue
-            found += [(kind, result) for result in results]
-        found.sort(key=lambda pair: pair[1].score)
-        by_document: dict[tuple[str, str], list[tuple[int, str, str]]] = {}
-        chars = parts = 0
-        for kind, result in found:
-            payload = result.payload or {}
-            text = str(payload.get("text", ""))
-            if not text or chars + len(text) > self.store_chars:
-                continue
-            chars += len(text)
-            parts += 1
-            document = str(payload.get("document_id") or result.id)
-            name = str(payload.get("document_name") or document)
-            index = int(payload.get("chunk_index") or 0)
-            by_document.setdefault((name, document), []).append((index, text, kind))
-        for (name, _), pieces in sorted(by_document.items()):
-            pieces.sort()
-            rows = [text for _, text, kind in pieces if kind == "DltRow"]
-            if rows:
-                store.add_dlt_rows(rows)
-                continue
-            # Parts that are not adjacent in their document are separated by a line break.
-            text = pieces[0][1] + "".join(
-                ("" if current[0] == previous[0] + 1 else "\n") + current[1]
-                for previous, current in pairwise(pieces)
-            )
-            store.add_document(name, text)
-        return chars, parts
+            ranked.append((kind, results))
+        return await store.run(_store_similar_parts, store.store, ranked, self.store_chars)
 
     # --- deciding and answering ---------------------------------------------------------
 
-    async def decide(self, query: str, store: RecordStore, whole: str | None) -> BroadContext:
-        schema = store.describe(query)
+    async def decide(self, query: str, store: BroadWorker, whole: str | None) -> BroadContext:
+        schema = await store.run(store.store.describe, query)
         if whole is not None:
             prompt = (
                 f"Question: {query}\n\nThe whole dataset:\n{whole}\n\nIts record store:\n{schema}"
@@ -432,23 +474,23 @@ class BroadRetriever(CompletionRetriever):
             decision = await self._ask(prompt, "broad_decide_large.txt", DecisionLarge)
             phrasings = [query, *decision.search_queries]
             if decision.sql is None or decision.needs_reading:
-                return await self.read_most_similar(query, phrasings)
+                return await self.read_most_similar(query, store, phrasings)
             found = await self.run_query(query, prompt, decision.sql, store, False)
             if found.route == "sql" and _reads_text(found.sql) and _found_nothing(found.rows):
                 # A word match that finds nothing does not show the text lacks the answer.
                 logger.info("BROAD query over the text found nothing; reading instead")
-                reading = await self.read_most_similar(query, phrasings)
+                reading = await self.read_most_similar(query, store, phrasings)
                 reading.note = f"(A query over the text found nothing: {found.sql}) " + reading.note
                 return reading
             return found
         return await self.run_query(query, prompt, decision.sql, store, whole is not None)
 
     async def run_query(
-        self, query: str, prompt: str, sql: str, store: RecordStore, small: bool
+        self, query: str, prompt: str, sql: str, store: BroadWorker, small: bool
     ) -> BroadContext:
         """Run the query; a failing one is sent back once with the error."""
         try:
-            columns, rows, cut = store.run(sql)
+            columns, rows, cut = await store.run(store.store.run, sql)
         except BroadQueryError as error:
             logger.info("BROAD query failed (%s); asking once more", error)
             retry = (
@@ -463,9 +505,9 @@ class BroadRetriever(CompletionRetriever):
             if not decision.sql:
                 raise BroadQueryError(f"BROAD could not write a working query: {error}") from error
             sql = decision.sql
-            columns, rows, cut = store.run(sql)
+            columns, rows, cut = await store.run(store.store.run, sql)
         logger.info("BROAD query: %s -> %d rows", sql, len(rows))
-        shown = _result_table(columns, rows, BROAD_RESULT_ROWS_SHOWN)
+        shown = await store.run(_result_table, columns, rows, BROAD_RESULT_ROWS_SHOWN)
         more = " (more rows exist; only the first were returned)" if cut else ""
         text = (
             f"Question: {query}\n\nSQL computed over every record of the dataset:\n{sql}\n\n"
@@ -481,7 +523,7 @@ class BroadRetriever(CompletionRetriever):
         )
 
     async def read_most_similar(
-        self, query: str, phrasings: list[str] | None = None
+        self, query: str, store: BroadWorker, phrasings: list[str] | None = None
     ) -> BroadContext:
         """Fill one prompt with the chunks most similar to the question: one bounded vector
         search per phrasing, their results merged rank by rank."""
@@ -500,16 +542,7 @@ class BroadRetriever(CompletionRetriever):
                 "context_tokens, and it has no chunk embeddings to choose the most relevant "
                 "parts. Raise context_tokens in retriever_specific_config."
             ) from error
-        parts, used, seen = [], 0, set()
-        for result in _merged(ranked):
-            if result.id in seen:
-                continue
-            seen.add(result.id)
-            text = str((result.payload or {}).get("text", ""))
-            tokens = len(self.tokenizer.extract_tokens(text))
-            if text and used + tokens <= self.reading_tokens:
-                parts.append(text)
-                used += tokens
+        parts = await store.run(_reading_parts, ranked, self.tokenizer, self.reading_tokens)
         logger.warning(
             "BROAD cannot read the whole dataset: only the %d chunks most similar to the "
             "question fit reading_tokens (%d). To read more, raise reading_tokens in "

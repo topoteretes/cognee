@@ -3,6 +3,7 @@ the most similar chunks when a query cannot express the question (SDK-324)."""
 
 import asyncio
 import sqlite3
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -250,9 +251,9 @@ def test_the_settings_are_positive():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("dataset_bytes", "expected_rows", "partial"),
-    [(32_000_001, 2, False), (1_000_000_000, 2, False), (1_000_000_001, 1, True)],
+    [(32_000_001, 2, False), (512_000_000, 2, False), (512_000_001, 1, True)],
 )
-async def test_default_store_covers_all_records_through_one_gb(
+async def test_default_store_covers_all_records_through_512_mb(
     monkeypatch, dataset_bytes, expected_rows, partial
 ):
     class Vector:
@@ -285,12 +286,14 @@ async def test_default_store_covers_all_records_through_one_gb(
 @pytest.mark.parametrize("error", [None, RuntimeError("decision failed"), asyncio.CancelledError()])
 async def test_record_store_is_closed_after_success_failure_or_cancellation(monkeypatch, error):
     _use(monkeypatch, {"notes": "The meeting moved to Tuesday."})
-    connections = []
+    closed = []
 
     class TrackedStore(RecordStore):
-        def __init__(self):
-            super().__init__()
-            connections.append(self.connection)
+        def close(self):
+            super().close()
+            with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+                self.connection.execute("SELECT 1")
+            closed.append(True)
 
     async def decide(self, *args):
         if error is not None:
@@ -307,9 +310,113 @@ async def test_record_store_is_closed_after_success_failure_or_cancellation(monk
         with pytest.raises(type(error)):
             await BroadRetriever().get_retrieved_objects("When is the meeting?")
 
-    assert len(connections) == 1
-    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
-        connections[0].execute("SELECT 1")
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["add_document", "describe", "run"])
+async def test_server_handles_other_requests_during_broad_cpu_work(monkeypatch, stage):
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    _use(monkeypatch, {"notes": "One line."})
+    _llm(monkeypatch, [DecisionLarge(sql="SELECT COUNT(*) FROM lines")])
+    started, release = threading.Event(), threading.Event()
+    threads = []
+    main_thread = threading.get_ident()
+
+    class BusyStore(RecordStore):
+        def __init__(self):
+            threads.append(threading.get_ident())
+            super().__init__()
+
+        def close(self):
+            threads.append(threading.get_ident())
+            super().close()
+
+    original = getattr(RecordStore, stage)
+
+    def busy(self, *args):
+        threads.append(threading.get_ident())
+        started.set()
+        assert release.wait(5), "The event loop could not release the BROAD worker"
+        return original(self, *args)
+
+    monkeypatch.setattr(BusyStore, stage, busy)
+    monkeypatch.setattr(broad_retriever, "RecordStore", BusyStore)
+    app = FastAPI()
+
+    @app.get("/broad")
+    async def broad():
+        found = await BroadRetriever(context_tokens=1).get_retrieved_objects("Count lines")
+        return {"rows": found.rows}
+
+    @app.get("/health")
+    async def health():
+        return {"ok": True}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        request = asyncio.create_task(client.get("/broad"))
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            response = await asyncio.wait_for(client.get("/health"), timeout=1)
+            assert response.json() == {"ok": True}
+            assert not request.done()
+        finally:
+            release.set()
+            response = await request
+    assert response.json() == {"rows": [[1]]}
+    assert len(threads) == 3 and len(set(threads)) == 1 and threads[0] != main_thread
+
+
+@pytest.mark.asyncio
+async def test_cancellation_interrupts_running_sql_and_closes_on_its_worker(monkeypatch):
+    _use(monkeypatch, {"notes": "One line."})
+    started = threading.Event()
+    closed = []
+    sql = (
+        "WITH RECURSIVE numbers(n) AS (VALUES(1) UNION ALL "
+        "SELECT n+1 FROM numbers WHERE n < 100000000) SELECT SUM(observe(n)) FROM numbers"
+    )
+    _llm(monkeypatch, [DecisionLarge(sql=sql)])
+
+    class SlowStore(RecordStore):
+        def __init__(self):
+            super().__init__()
+            self.thread = threading.get_ident()
+
+            def observe(value):
+                started.set()
+                return value
+
+            self.connection.create_function("observe", 1, observe)
+
+        def close(self):
+            assert threading.get_ident() == self.thread
+            super().close()
+            closed.append(True)
+
+    monkeypatch.setattr(broad_retriever, "RecordStore", SlowStore)
+    request = asyncio.create_task(
+        BroadRetriever(context_tokens=1).get_retrieved_objects("Count lines")
+    )
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+    finally:
+        request.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(request, timeout=2)
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_dlt_rows_are_loaded_through_the_worker(monkeypatch):
+    _use(monkeypatch, {"orders": "Table: orders\nRow Data:\n  id: 7\n  amount: 12"})
+    engine = await broad_retriever.get_unified_engine()
+    engine.graph.nodes[1][1]["type"] = "DltRow"
+    _llm(monkeypatch, [DecisionLarge(sql="SELECT id, amount FROM orders")])
+    found = await BroadRetriever(context_tokens=1).get_retrieved_objects("Orders")
+    assert found.rows == [(7, 12)]
 
 
 @pytest.mark.asyncio

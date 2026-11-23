@@ -373,7 +373,7 @@ async def run(args):
             model_calls += 1
             return await original_llm(*values, **kwargs)
 
-        config = {"store_mb": 32 if args.variant == "old" else 1000}
+        config = {"store_mb": 32} if args.variant == "old" else {}
         retriever = Retriever(system_prompt_path="broad_answer.txt", **config)
         row = {
             "id": identifier,
@@ -431,24 +431,26 @@ async def run(args):
 async def replay(args):
     """Replay live SQL against a complete disk store, isolating storage correctness."""
     from cognee.modules.retrieval.broad_retriever import BroadRetriever, Corpus
+    from cognee.modules.retrieval.broad_worker import BroadWorker
 
     fixture = Fixture(args.fixture_dir)
     spec = importlib.util.spec_from_file_location("quality_disk_store", args.disk_store_source)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    store = module.RecordStore()
-    corpus = Corpus(
-        graph=fixture,
-        documents=sorted(fixture.documents, key=lambda key: fixture.documents[key]["name"]),
-        names={key: doc["name"] for key, doc in fixture.documents.items()},
-        sizes={key: doc["bytes"] for key, doc in fixture.documents.items()},
-        batch_chars=256_000_000,
-    )
     results = {"mode": "sql_replay", "variant": "disk-full", "model_calls": 0, "cases": []}
-    try:
+    async with BroadWorker(module.RecordStore) as worker:
+        store = worker.store
+        corpus = Corpus(
+            graph=fixture,
+            documents=sorted(fixture.documents, key=lambda key: fixture.documents[key]["name"]),
+            names={key: doc["name"] for key, doc in fixture.documents.items()},
+            sizes={key: doc["bytes"] for key, doc in fixture.documents.items()},
+            batch_chars=256_000_000,
+            worker=worker,
+        )
         started = time.perf_counter()
-        _, characters = await BroadRetriever().build(store, corpus)
+        _, characters = await BroadRetriever().build(worker, corpus)
         results.update(
             build_seconds=time.perf_counter() - started,
             dataset_bytes=fixture.manifest["bytes"],
@@ -461,13 +463,16 @@ async def replay(args):
             if not case.get("sql") or case["id"] == "meaning":
                 continue
             started = time.perf_counter()
-            columns, rows, truncated = store.run(case["sql"])
+            columns, rows, truncated = await worker.run(store.run, case["sql"])
             plans = [
                 {
                     "sql": attempt["response"]["sql"],
-                    "plan": store.connection.execute(
-                        "EXPLAIN QUERY PLAN " + attempt["response"]["sql"]
-                    ).fetchall(),
+                    "plan": await worker.run(
+                        lambda sql: store.connection.execute(
+                            "EXPLAIN QUERY PLAN " + sql
+                        ).fetchall(),
+                        attempt["response"]["sql"],
+                    ),
                 }
                 for attempt in case["decisions"]
                 if attempt["response"].get("sql")
@@ -485,8 +490,6 @@ async def replay(args):
                     "decision_query_plans": plans,
                 }
             )
-    finally:
-        store.close()
     args.json_output.write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n")
     print(json.dumps(results, indent=2, ensure_ascii=False), flush=True)
 

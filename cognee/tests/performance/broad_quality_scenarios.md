@@ -1,5 +1,10 @@
 # BROAD: large mock-corpus answer checks
 
+These live-model results were measured before the default changed from 1 GB to 512 MB
+and before store operations moved onto a worker. The 139.5 MB fixture fits either
+threshold. The historical model responses are preserved below; the subsequent worker
+validation is recorded in [the storage benchmark](broad_store_benchmark.md).
+
 On this fixture, the draft's full-coverage path answered **7/7 scenarios correctly**;
 the previous 32 MB path answered **3/7** against the same full-dataset ground truth.
 The join passed after the existing SQL timeout/retry recovered from an inefficient
@@ -106,10 +111,10 @@ The old and new runs overlapped in separate processes for part of the experiment
 These elapsed times are diagnostic observations, not a controlled speed comparison.
 The earlier serial storage benchmark remains a separate experiment.
 
-No production normalization, prompts, SQL limits, or worker execution changed for these
-tests. Reducing repeated query-hint normalization and guiding identifier joins toward
-direct equality are follow-up improvements to evaluate. Heavy synchronous work also
-still needs execution outside the event loop.
+No production normalization, prompts, SQL limits, or worker execution changed during
+these original live-model tests. The later worker change moves synchronous work off the
+event loop. Reducing repeated query-hint normalization and guiding identifier joins
+toward direct equality remain follow-up improvements to evaluate.
 
 ## Reproduce
 

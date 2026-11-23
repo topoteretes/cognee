@@ -1,9 +1,68 @@
 # BROAD record-store benchmark
 
-This benchmark measures full-coverage BROAD retrieval for a synthetic 1 GB dataset.
+This benchmark measures full-coverage BROAD retrieval for synthetic data. The current
+default is **512 MB**, with synchronous BROAD work executed on a private worker thread.
+Earlier 1 GB measurements below describe the implementation before that worker change.
 It calls the real corpus reader, record parser, schema description, SQL execution and
 cleanup. It does not measure ingestion, embeddings, graph/vector network calls, or
 LLM decision/answer latency.
+
+## Current 512 MB worker validation
+
+The current default was exercised with `--http-probe`, which starts a real localhost
+HTTP health server on the same event loop as retrieval and sends requests throughout
+the search. Mock graph data generation runs off the loop too, so the fixture generator
+does not introduce synchronous CPU stalls into the simulated async database adapter.
+
+```sh
+PYTHONHASHSEED=0 uv run python cognee/tests/performance/benchmark_broad_store.py --http-probe --json-output /tmp/broad-512mb-worker.json
+```
+
+Measured on the same M3 Max / 36 GiB machine, Python 3.13.16 / SQLite 3.53.1:
+
+| Metric | Current default |
+| --- | ---: |
+| Actual source bytes | 512,000,000 |
+| Documents / records | 100 / 512,000 |
+| Result `(open_count, amount_sum)` | `(256000, 1024000)`, correct |
+| Coverage | Complete; zero vector searches |
+| LLM / local-model calls | 0 |
+| Total retrieval and HTTP-probe lifecycle | 203.2423 s |
+| Parse and insert | 5.6000 s |
+| Schema description / hints | 196.5958 s |
+| Final SQL | 0.1892 s |
+| SQLite logical database size | 700,678,144 B |
+| Peak process RSS | 1,719,042,048 B (1.60 GiB) |
+| Successful HTTP responses during retrieval | 2,158 |
+| HTTP errors | 0 |
+| HTTP response latency, 95th percentile | 0.16794 s |
+| HTTP response latency, maximum | 1.36471 s |
+| Largest event-loop scheduling gap | 0.5249 s |
+
+The heartbeat/total include local HTTP-probe startup and teardown. The latency samples
+are requests completed while retrieval was active. This is a responsiveness check with
+one large retrieval, not a latency guarantee or a multi-request capacity benchmark.
+Threads still share the Python GIL; offloading does not eliminate CPU contention.
+
+The 512 MB setting is a source-size coverage threshold, not a 512 MB RAM ceiling.
+SQLite rows, pages and per-row metadata expand the source; loaded text batches, parsed
+Python objects and SQLite temporary query structures can coexist. The process-RSS
+measurement includes imports, allocators and the HTTP probe. It is not a measurement
+of SQLite alone or a precise allocation breakdown. Each concurrent retrieval has its
+own store and worker, so aggregate memory use still depends on concurrency.
+
+Cancellation tests verify active SQLite queries are interrupted and the store closes
+on its creating thread. Other tests cover cancellation during creation, repeated
+cancellation, request context propagation, independent workers and HTTP handling during
+parsing, schema description and SQL. Running Python stages finish before queued cleanup.
+
+## Historical 1 GB measurements
+
+The following observations were collected before the worker/default changes, using
+the harness and production code at `9fafab37e54b15ffe40f81554a5a7c6f15e6bbb9` or its
+earlier measurement commits. They do not describe the current default or event-loop
+behavior. To exercise 1 GB with the current harness, explicitly pass
+`--dataset-mb 1000 --store-mb 1000`.
 
 ## Workload
 
@@ -22,17 +81,17 @@ The baseline is the file-backed `RecordStore` from dev commit
 `e919461945cc8603e1084c7380c075b6449bae46`; the candidate uses `:memory:` and
 `PRAGMA temp_store=MEMORY`. All other retrieval code and dependencies are the same.
 
-## Reproduce
+## Reproduce the historical workload with the current harness
 
 Run from the repository root on macOS or Linux:
 
 ```sh
 git show e919461945cc8603e1084c7380c075b6449bae46:cognee/modules/retrieval/broad_store.py > /tmp/broad-disk.py
-uv run python cognee/tests/performance/benchmark_broad_store.py --store-source /tmp/broad-disk.py --json-output /tmp/broad-disk.json
-uv run python cognee/tests/performance/benchmark_broad_store.py --json-output /tmp/broad-ram.json
+uv run python cognee/tests/performance/benchmark_broad_store.py --dataset-mb 1000 --store-mb 1000 --store-source /tmp/broad-disk.py --json-output /tmp/broad-disk.json
+uv run python cognee/tests/performance/benchmark_broad_store.py --dataset-mb 1000 --store-mb 1000 --json-output /tmp/broad-ram.json
 ```
 
-The defaults are `--dataset-mb 1000 --documents 100`. Each run prints JSON with timings,
+The current defaults are `--dataset-mb 512 --documents 100`. Each run prints JSON with timings,
 peak process RSS, SQLite logical size, the count/sum result and coverage checks.
 
 `retrieval_total` includes source generation, parsing/insertion, schema description,
@@ -72,10 +131,9 @@ text values for each question word. The benchmark times the whole `describe` sta
 does not separately attribute every helper's cost or establish why that stage differed
 between the two runs.
 
-The large event-loop gaps are a separate existing problem: parsing, schema description
-and SQL execution remain synchronous on the caller's event loop. Changing storage to RAM
-does not offload that work or make cancellation interrupt synchronous processing. The
-store is closed when retrieval completes or receives an exception/cancellation.
+In the historical implementation, parsing, schema description and SQL execution ran
+synchronously on the caller's event loop. RAM storage alone did not offload that work.
+The current worker validation above measures the subsequent offloading change.
 
 This synthetic CSV workload has repeated payloads and should not be treated as a
 benchmark of arbitrary documents or semantic reading. Runs are serial with no deliberate
@@ -101,7 +159,7 @@ diagnostic callback was used in this repeat.
 Reproduce the repeat with:
 
 ```sh
-PYTHONHASHSEED=0 uv run python cognee/tests/performance/benchmark_broad_store.py --dataset-mb 1000 --documents 100 --json-output /tmp/broad-ram-repeat.json
+PYTHONHASHSEED=0 uv run python cognee/tests/performance/benchmark_broad_store.py --dataset-mb 1000 --store-mb 1000 --documents 100 --json-output /tmp/broad-ram-repeat.json
 ```
 
 The initial 68.7% gap is therefore not a reproducible storage regression from these
@@ -138,7 +196,6 @@ This is diagnostic instrumentation, not a production optimization or a general-p
 replacement for Unicode normalization. It isolates repeated Python character processing
 as the dominant cost on this fixture, without explaining the initial timing gap.
 
-The next optimization to evaluate is reducing repeated normalization while preserving
-Unicode matching and all existing query hints. Moving the store's create/use/close
-lifecycle to a worker would separately address event-loop stalls; storage placement
-alone does neither.
+Reducing repeated normalization while preserving Unicode matching and all existing
+query hints remains an optimization to evaluate. The current worker change addresses
+the long event-loop stalls; it does not optimize that normalization algorithm.
