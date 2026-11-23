@@ -52,7 +52,6 @@ from cognee.modules.migrations.migration import (
 )
 from cognee.modules.migrations.models import GLOBAL_DATABASE_VERSION_ROW_ID, GlobalDatabaseVersion
 from cognee.modules.migrations.registry import MIGRATIONS
-from cognee.modules.migrations.upgrade_stops import check_upgrade_stops
 from cognee.modules.migrations.versions.adapter_storage_migration import (
     migrate as _run_adapter_storage_migration,
 )
@@ -172,11 +171,8 @@ async def _apply(
     stamp=None,
 ) -> list[str]:
     """Run every migration pending up to ``target_revision``, in order,
-    stamping after each step via ``stamp(new_revision)`` when provided.
-
-    A database an upgrade stop applies to is refused before any step runs."""
+    stamping after each step via ``stamp(new_revision)`` when provided."""
     pending = pending_migrations(MIGRATIONS, stored_revision, target_revision)
-    await check_upgrade_stops(context, pending)
     applied = []
     for migration in pending:
         logger.info(
