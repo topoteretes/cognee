@@ -25,6 +25,15 @@ def result_id(result: Any) -> str | None:
     return display_value(result_payload.get("id")) or display_value(getattr(result, "id", None))
 
 
+def hit_score(result: Any) -> float | None:
+    """The numeric ``score`` a search hit carries (a vector distance: lower is closer),
+    or None when it has none."""
+    score = getattr(result, "score", None)
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return None
+    return float(score)
+
+
 def first_display_value(*values: Any) -> str | None:
     for value in values:
         text = display_value(value)

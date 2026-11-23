@@ -5,11 +5,13 @@ from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY
 from cognee.modules.ontology.query_grounding import (
     GroundedConcept,
     ground,
+    grounding_block_for,
     with_grounding_block,
 )
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -27,17 +29,20 @@ from cognee.modules.retrieval.hybrid.context import (
 from cognee.modules.retrieval.hybrid.context import (
     format_hybrid_context,
     format_hybrid_context_batch,
+    render_passage,
 )
 from cognee.modules.retrieval.hybrid.entities import (
     build_entities,
     entity_collections,
     pin_grounded_entities,
+    render_entity,
     search_entities,
 )
 from cognee.modules.retrieval.hybrid.external_metadata import project_external_metadata
 from cognee.modules.retrieval.hybrid.facts import (
     FactCandidates,
     edge_rank_by_id,
+    render_fact_hit,
 )
 from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
 from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions
@@ -55,6 +60,7 @@ from cognee.modules.retrieval.utils.global_context import (
     search_top_global_context_summaries,
 )
 from cognee.modules.retrieval.utils.resolved_context import user_resolution_scope
+from cognee.modules.retrieval.utils.results import payload, result_id
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.modules.user_preferences import load_preference_text, load_preference_weights
 from cognee.shared.logging_utils import get_logger
@@ -62,6 +68,8 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("HybridRetriever")
 
 DEFAULT_HYBRID_LANE_TOP_K = 10
+# The fact lane's collection: one row per distinct edge text (``EdgeType``).
+_EDGE_TYPE_COLLECTION = "EdgeType_relationship_name"
 
 
 class HybridRetriever(BaseRetriever):
@@ -214,9 +222,98 @@ class HybridRetriever(BaseRetriever):
         return HybridCandidates(
             chunks=chunk_objects["chunks"],
             chunk_summaries=chunk_objects["chunk_summaries"],
+            chunk_scores=chunk_objects.get("chunk_scores", {}),
             entities=entities,
             fact_candidates=fact_candidates,
         )
+
+    @user_resolution_scope()
+    async def expand_records(self, query: str, ids_by_kind: dict[str, list[str]]) -> dict:
+        """The records named by id, rendered exactly as this retriever's context shows them.
+
+        ``ids_by_kind`` maps ``"passage"``, ``"entity"`` and ``"fact"`` to record ids
+        from a recall index. Returns ``{(kind, id): {"body", "conflicts", "item"}}`` for
+        the ids found; a missing id is simply absent. Passages and facts are read by id
+        alone. An entity's bullets are ranked against ``query`` as the index call ranked
+        them, so this pays one query embedding and one edge search when entities are
+        asked for, and no chunk or entity search. Must run inside the dataset's database
+        context.
+        """
+        self._unified_engine = await get_unified_engine()
+        vector_engine = self._unified_engine.vector
+        graph_engine = self._unified_engine.graph
+        include_dlt = await dlt_rows_indexed(vector_engine)
+        from cognee.modules.retrieval.utils.resolved_context import (
+            apply_entity_resolutions,
+            apply_fact_hit_resolutions,
+            read_user_resolutions,
+        )
+
+        resolutions = await read_user_resolutions(graph_engine)
+        found: dict = {}
+
+        if passage_ids := ids_by_kind.get("passage"):
+            chunks = await _retrieve_by_ids(
+                vector_engine, chunk_collections(include_dlt), passage_ids
+            )
+            project_external_metadata(
+                chunks, self.include_external_metadata, self.external_metadata_keys
+            )
+            await attach_chunk_conflicts(chunks, graph_engine=graph_engine)
+            if self.include_references:
+                await name_chunk_documents(chunks)
+            for chunk in chunks:
+                found[("passage", result_id(chunk))] = {
+                    "body": render_passage(chunk),
+                    "conflicts": list(payload(chunk).get("conflicts", [])),
+                    "item": chunk,
+                }
+
+        if fact_ids := ids_by_kind.get("fact"):
+            fact_hits = apply_fact_hit_resolutions(
+                await _retrieve_by_ids(vector_engine, (_EDGE_TYPE_COLLECTION,), fact_ids),
+                resolutions,
+            )
+            for hit in fact_hits:
+                found[("fact", result_id(hit))] = {
+                    "body": render_fact_hit(hit),
+                    "conflicts": [],
+                    "item": hit,
+                }
+
+        if entity_ids := ids_by_kind.get("entity"):
+            entity_hits = await _retrieve_by_ids(
+                vector_engine, entity_collections(include_dlt), entity_ids
+            )
+            query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
+            max_ranked_bullets = self.entities_top_k * max(0, self.max_edges_per_entity)
+            edge_hits = await search_collection(
+                vector_engine,
+                _EDGE_TYPE_COLLECTION,
+                query,
+                max_ranked_bullets + self.facts_top_k,
+                self.node_name,
+                self.node_name_filter_operator,
+                apply_node_filter=False,
+                query_vector=query_vector,
+            )
+            entities, _ = await build_entities(
+                graph_engine,
+                entity_hits,
+                self.max_edges_per_entity,
+                edge_rank_by_id(edge_hits),
+                self.node_name,
+                self.node_name_filter_operator,
+            )
+            apply_entity_resolutions(entities, resolutions)
+            for entity in entities:
+                found[("entity", entity["id"])] = {
+                    "body": render_entity(entity),
+                    "conflicts": list(entity.get("conflicts", [])),
+                    "item": entity,
+                }
+
+        return found
 
     async def _retrieve_entities_and_facts(
         self,
@@ -244,7 +341,7 @@ class HybridRetriever(BaseRetriever):
             ),
             search_collection(
                 self._unified_engine.vector,
-                "EdgeType_relationship_name",
+                _EDGE_TYPE_COLLECTION,
                 query,
                 max_ranked_bullets + self.facts_top_k,
                 self.node_name,
@@ -307,9 +404,13 @@ class HybridRetriever(BaseRetriever):
                 await with_grounding_block(q, context) for q, context in zip(query_batch, contexts)
             ]
         global_context = await self._build_global_context_section(query, retrieved_objects)
-        return await with_grounding_block(
-            query, format_hybrid_context(global_context, retrieved_objects)
-        )
+        context = format_hybrid_context(global_context, retrieved_objects)
+        grounding = await grounding_block_for(query, context)
+        # The two context sections that have no record id, kept for the recall index
+        # (``result_mode="index"``), which returns them as frame rows. One instance
+        # serves one search, so the last single-query context is the one returned.
+        self.context_frame = {"grounding": grounding, "global_context": global_context}
+        return f"{grounding}\n\n{context}" if grounding else context
 
     async def _build_global_context_section(
         self, query: str | None, retrieved_objects: Any = None
@@ -438,3 +539,21 @@ class HybridRetriever(BaseRetriever):
             retrieved_objects=retrieved_objects,
             context=context,
         )
+
+
+async def _retrieve_by_ids(
+    vector_engine: Any, collections: tuple[str, ...], ids: list[str]
+) -> list:
+    """The points with ``ids`` across ``collections``, one per id; a missing collection
+    holds none of them."""
+    found: dict = {}
+    for collection in collections:
+        try:
+            points = await vector_engine.retrieve(collection, list(ids))
+        except CollectionNotFoundError:
+            continue
+        for point in points or []:
+            point_id = result_id(point)
+            if point_id and point_id not in found:
+                found[point_id] = point
+    return list(found.values())

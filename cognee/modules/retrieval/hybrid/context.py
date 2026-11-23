@@ -6,7 +6,7 @@ from cognee.modules.retrieval.utils.conflict_context import PASSAGE_HEADER_KEY, 
 from cognee.modules.retrieval.utils.results import display_value, payload, result_id
 
 
-def _attached_conflict_texts(retrieved_objects: dict) -> set[str]:
+def attached_conflict_texts(retrieved_objects: dict) -> set[str]:
     """Conflict explanations the chunk and entity sections already carry.
 
     They get one block of their own at the end, so the related-facts section
@@ -21,7 +21,7 @@ def _attached_conflict_texts(retrieved_objects: dict) -> set[str]:
 
 def format_hybrid_context(global_context: str, retrieved_objects: Any) -> str:
     retrieved_objects = retrieved_objects or {}
-    conflict_texts = _attached_conflict_texts(retrieved_objects)
+    conflict_texts = attached_conflict_texts(retrieved_objects)
     sections = (
         global_context,
         format_passages(retrieved_objects.get("chunks", [])),
@@ -78,18 +78,25 @@ def extract_context_object_ids(retrieved_objects: Any) -> dict[str, list[str]] |
 
 
 def format_passages(chunks: list[Any]) -> str:
-    passages = []
-    for chunk in chunks or []:
-        chunk_payload = payload(chunk)
-        text = display_value(chunk_payload.get("text"))
-        if not text:
-            continue
-        source = display_value(chunk_payload.get(PASSAGE_HEADER_KEY))
-        header = f"source: {source}\n" if source else ""
-        passages.append(header + _metadata_lines(chunk_payload.get("external_metadata")) + text)
+    passages = [passage for passage in map(render_passage, chunks or []) if passage]
     if not passages:
         return ""
     return "## Relevant passages\n" + "\n---\n".join(passages)
+
+
+def render_passage(chunk: Any) -> str:
+    """One passage as ``## Relevant passages`` shows it, or "" for a chunk without text.
+
+    The recall index and expand render passage bodies here too, so a passage's
+    ``chars`` and ``version`` describe exactly the text this section would show.
+    """
+    chunk_payload = payload(chunk)
+    text = display_value(chunk_payload.get("text"))
+    if not text:
+        return ""
+    source = display_value(chunk_payload.get(PASSAGE_HEADER_KEY))
+    header = f"source: {source}\n" if source else ""
+    return header + _metadata_lines(chunk_payload.get("external_metadata")) + text
 
 
 def _metadata_lines(metadata: Any) -> str:

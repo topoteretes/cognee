@@ -47,10 +47,11 @@ the context actually retrieved, not a replay of a full turn.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, NamedTuple
 
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_turn import (
     build_session_prompt,
@@ -184,6 +185,49 @@ def retriever_sends_one_prompt(retriever) -> bool:
     )
 
 
+class PromptFrame(NamedTuple):
+    """The parts of an ``only_context`` user prompt around the retrieved context.
+
+    ``history`` and ``guidance`` are the session layer; ``template_prefix`` and
+    ``template_suffix`` are the retriever's user template rendered with the question,
+    before and after the context. ``history``, prefix, context, suffix and ``guidance``
+    rebuild the user prompt. Both template parts are None when the template does not
+    render the context exactly once, so the prompt cannot be split around it.
+    """
+
+    history: str
+    template_prefix: str | None
+    template_suffix: str | None
+    guidance: str
+
+
+class OnlyContextPrompt(tuple):
+    """The ``(user_prompt, system_prompt)`` pair, unpacking as before, plus its ``frame``.
+
+    The recall index (``result_mode="index"``) returns the frame's parts as rows of
+    their own; every other caller reads the pair.
+    """
+
+    frame: PromptFrame
+
+    def __new__(cls, user_prompt: str, system_prompt: str, frame: PromptFrame):
+        pair = super().__new__(cls, (user_prompt, system_prompt))
+        pair.frame = frame
+        return pair
+
+
+# Stands in for the context when the user template is split around it; never in a prompt.
+_CONTEXT_MARK = "\x00cognee-context\x00"
+
+
+def _split_user_template(user_prompt_path: str, query: str) -> tuple[str | None, str | None]:
+    rendered = render_prompt(user_prompt_path, {"question": query, "context": _CONTEXT_MARK})
+    if rendered.count(_CONTEXT_MARK) != 1:
+        return None, None
+    prefix, suffix = rendered.split(_CONTEXT_MARK)
+    return prefix, suffix
+
+
 async def build_only_context_prompt(
     retriever,
     *,
@@ -191,7 +235,7 @@ async def build_only_context_prompt(
     context: Any,
     session_id: str | None = None,
     shared_history: SharedSessionHistory | None = None,
-) -> tuple[str, str] | None:
+) -> OnlyContextPrompt | None:
     """The ``(user_prompt, system_prompt)`` pair one ``only_context`` call stands in for,
     or ``None`` when there is none.
 
@@ -229,4 +273,11 @@ async def build_only_context_prompt(
         system_prompt=getattr(retriever, "system_prompt", None),
         session=session,
     )
-    return user_prompt, system_prompt
+    template_prefix, template_suffix = _split_user_template(retriever.user_prompt_path, query)
+    frame = PromptFrame(
+        history=session.history,
+        template_prefix=template_prefix,
+        template_suffix=template_suffix,
+        guidance=session.guidance,
+    )
+    return OnlyContextPrompt(user_prompt, system_prompt, frame)

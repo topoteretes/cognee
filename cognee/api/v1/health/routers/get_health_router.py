@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from cognee.api.v1.health import HealthStatus, health_checker
+from cognee.api.v1.health import HealthStatus, get_capabilities, health_checker
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -18,11 +18,7 @@ def get_health_router():
         try:
             health_status = await health_checker.get_health_status(detailed=False)
             status_code = 503 if health_status.status == HealthStatus.UNHEALTHY else 200
-            from cognee.infrastructure.session.capture import CAPABILITY, supported
-
-            capabilities = ["session_summary_v1", "context_usage_v1"]
-            if supported():
-                capabilities.append(CAPABILITY)
+            capabilities = get_capabilities()
 
             return JSONResponse(
                 status_code=status_code,

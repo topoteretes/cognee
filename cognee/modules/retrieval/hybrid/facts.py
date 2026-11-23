@@ -3,7 +3,12 @@ from typing import Any
 
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
-from cognee.modules.retrieval.utils.results import first_display_value, payload, result_id
+from cognee.modules.retrieval.utils.results import (
+    first_display_value,
+    hit_score,
+    payload,
+    result_id,
+)
 
 MIN_FACT_WORD_COUNT = 3
 
@@ -117,16 +122,34 @@ def select_facts(edge_hits: list[Any], exclude_ids: set[str], facts_top_k: int) 
             break
 
         hit_id = result_id(hit)
-        hit_payload = payload(hit)
-        text = first_display_value(hit_payload.get("text"), hit_payload.get("relationship_name"))
+        text = _fact_hit_text(hit)
         if not hit_id or not text or hit_id in used_ids:
             continue
         if len(text.split()) < MIN_FACT_WORD_COUNT:
             continue
 
         used_ids.add(hit_id)
-        facts.append({"id": hit_id, "text": _fact_display_text(text)})
+        fact = {"id": hit_id, "text": _fact_display_text(text)}
+        score = hit_score(hit)
+        if score is not None:
+            # The hit's vector distance (lower is closer), for the recall index.
+            fact["score"] = score
+        facts.append(fact)
     return facts
+
+
+def _fact_hit_text(hit: Any) -> str | None:
+    hit_payload = payload(hit)
+    return first_display_value(hit_payload.get("text"), hit_payload.get("relationship_name"))
+
+
+def render_fact_hit(hit: Any) -> str:
+    """A fact hit's text as ``## Related facts`` shows it, or "" when it has none.
+
+    Expand renders fact bodies here, the way ``select_facts`` does for recall.
+    """
+    text = _fact_hit_text(hit)
+    return _fact_display_text(text) if text else ""
 
 
 def _fact_display_text(text: str) -> str:

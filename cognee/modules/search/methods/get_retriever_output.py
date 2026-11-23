@@ -155,5 +155,22 @@ async def get_retriever_output(
         only_context=only_context,
         user_prompt=prompts[0] if prompts else None,
         system_prompt=prompts[1] if prompts else None,
+        context_frame=_context_frame(retriever_instance, prompts) if only_context else None,
         **_dataset_fields(kwargs),
     )
+
+
+def _context_frame(retriever_instance, prompts) -> dict | None:
+    """The parts of an ``only_context`` result that have no record id, for the recall
+    index: the prompt's session layer and template halves, and the context's grounding
+    and global-context sections (set by retrievers that build them). None without a prompt.
+    """
+    prompt_frame = getattr(prompts, "frame", None)
+    if prompt_frame is None:
+        return None
+    context_frame = getattr(retriever_instance, "context_frame", None) or {}
+    return {
+        **prompt_frame._asdict(),
+        "grounding": context_frame.get("grounding", ""),
+        "global_context": context_frame.get("global_context", ""),
+    }

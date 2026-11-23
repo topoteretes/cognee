@@ -581,7 +581,13 @@ async def test_independent_retrieval_channels_run_concurrently():
     ):
         retrieved = await asyncio.wait_for(retriever.get_retrieved_objects(query="q"), timeout=1)
 
-    assert retrieved == {"chunks": [], "chunk_summaries": {}, "entities": [], "facts": []}
+    assert retrieved == {
+        "chunks": [],
+        "chunk_summaries": {},
+        "chunk_scores": {},
+        "entities": [],
+        "facts": [],
+    }
 
 
 @pytest.mark.asyncio
@@ -792,7 +798,13 @@ async def test_missing_entity_collection_returns_empty_channel():
     ):
         retrieved = await retriever.get_retrieved_objects(query="q")
 
-    assert retrieved == {"chunks": [], "chunk_summaries": {}, "entities": [], "facts": []}
+    assert retrieved == {
+        "chunks": [],
+        "chunk_summaries": {},
+        "chunk_scores": {},
+        "entities": [],
+        "facts": [],
+    }
 
 
 @pytest.mark.asyncio

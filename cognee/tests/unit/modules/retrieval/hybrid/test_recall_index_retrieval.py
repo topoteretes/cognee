@@ -1,0 +1,173 @@
+"""The retrieval pieces recall's index mode builds on (SDK-1099)."""
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
+
+from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+from cognee.modules.retrieval import hybrid_retriever as hybrid_retriever_module
+from cognee.modules.retrieval import only_context_prompt
+from cognee.modules.retrieval.hybrid.chunks import chunk_scores_by_id
+from cognee.modules.retrieval.hybrid.context import format_passages, render_passage
+from cognee.modules.retrieval.hybrid.entities import format_entities, render_entity
+from cognee.modules.retrieval.hybrid.pairs import chunk_summary_pairs
+from cognee.modules.retrieval.hybrid.ranking import rank_chunk_summary_pairs
+from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+from cognee.modules.retrieval.utils import resolved_context
+from cognee.modules.retrieval.utils.completion import SessionPrompt
+
+
+def _hit(text: str, score: float, **fields) -> ScoredResult:
+    point_id = uuid4()
+    return ScoredResult(
+        id=point_id, score=score, payload={"id": str(point_id), "text": text, **fields}
+    )
+
+
+def test_section_renderers_join_the_single_record_renderers():
+    chunks = [
+        {"text": "First passage."},
+        {"text": "", "id": "empty"},
+        {"text": "Second passage.", "external_metadata": {"team": "sdk"}},
+    ]
+    assert format_passages(chunks) == "## Relevant passages\n" + "\n---\n".join(
+        body for body in map(render_passage, chunks) if body
+    )
+    entities = [
+        {
+            "id": "e1",
+            "name": "tenant server",
+            "type": "software",
+            "edges": [{"text": "runs cognee"}],
+        },
+        {"id": "e2", "name": "plugin", "type": None, "edges": []},
+    ]
+    assert format_entities(entities) == "## Relevant entities\n" + "\n\n".join(
+        render_entity(entity) for entity in entities
+    )
+
+
+def test_chunk_scores_keep_the_fused_score_and_the_closer_raw_distance():
+    chunk = _hit("Chunk text", 0.4)
+    summary = _hit("Summary", 0.1, source_chunk_id=chunk.payload["id"])
+    pairs = chunk_summary_pairs([chunk], [summary])
+    ranked = rank_chunk_summary_pairs(pairs, 5, use_importance_weight=False)
+
+    scores = chunk_scores_by_id(ranked)[chunk.payload["id"]]
+    assert scores["distance"] == pytest.approx(0.1)
+    assert scores["score"] > 0
+
+
+@pytest.mark.asyncio
+async def test_only_context_prompt_keeps_its_frame_and_still_unpacks(monkeypatch):
+    monkeypatch.setattr(
+        only_context_prompt,
+        "load_read_only_session_prompt",
+        AsyncMock(return_value=SessionPrompt(history="Earlier turns", guidance="Rules")),
+    )
+    retriever = SimpleNamespace(
+        user_prompt_path="hybrid_context_for_question.txt",
+        system_prompt_path="answer_simple_question.txt",
+        system_prompt=None,
+        session_id=None,
+    )
+    prompt = await only_context_prompt.build_only_context_prompt(
+        retriever, query="why?", context="## Relevant passages\nctx"
+    )
+
+    user_prompt, system_prompt = prompt
+    frame = prompt.frame
+    assert frame.history == "Earlier turns" and frame.guidance == "Rules"
+    rebuilt = "\n\n".join(
+        [
+            frame.history,
+            frame.template_prefix + "## Relevant passages\nctx" + frame.template_suffix,
+            frame.guidance,
+        ]
+    )
+    assert rebuilt == user_prompt
+    assert system_prompt
+
+
+@pytest.mark.asyncio
+async def test_hybrid_expand_reads_records_by_id_and_renders_them(monkeypatch):
+    passage = _hit("Full passage body", 0.0, document_id=str(uuid4()))
+    fact = ScoredResult(
+        id=uuid4(), score=0.0, payload={"text": "Pinning keeps recall on the active dataset."}
+    )
+    stored = {"DocumentChunk_text": [passage], "EdgeType_relationship_name": [fact]}
+
+    async def retrieve(collection, ids):
+        return [point for point in stored.get(collection, []) if str(point.id) in ids]
+
+    engine = SimpleNamespace(vector=SimpleNamespace(retrieve=retrieve), graph=SimpleNamespace())
+    monkeypatch.setattr(
+        hybrid_retriever_module, "get_unified_engine", AsyncMock(return_value=engine)
+    )
+    monkeypatch.setattr(hybrid_retriever_module, "dlt_rows_indexed", AsyncMock(return_value=False))
+    monkeypatch.setattr(hybrid_retriever_module, "attach_chunk_conflicts", AsyncMock())
+    monkeypatch.setattr(resolved_context, "read_user_resolutions", AsyncMock(return_value=[]))
+
+    found = await HybridRetriever().expand_records(
+        "q",
+        {
+            "passage": [passage.payload["id"], "gone"],
+            "fact": [str(fact.id)],
+        },
+    )
+
+    assert found[("passage", passage.payload["id"])]["body"] == "Full passage body"
+    assert found[("fact", str(fact.id))]["body"] == "Pinning keeps recall on the active dataset."
+    assert ("passage", "gone") not in found
+
+
+@pytest.mark.asyncio
+async def test_hybrid_expand_ranks_entity_bullets_against_the_query(monkeypatch):
+    entity_hit = _hit("tenant server", 0.0, name="tenant server")
+    stored = {"Entity_name": [entity_hit]}
+
+    async def retrieve(collection, ids):
+        return [point for point in stored.get(collection, []) if str(point.id) in ids]
+
+    embed = AsyncMock(return_value=[[0.1, 0.2]])
+    engine = SimpleNamespace(
+        vector=SimpleNamespace(
+            retrieve=retrieve, embedding_engine=SimpleNamespace(embed_text=embed)
+        ),
+        graph=SimpleNamespace(),
+    )
+    edge_hits = [SimpleNamespace(id="edge-type-1", payload={"id": "edge-type-1"})]
+    build_entities = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": entity_hit.payload["id"],
+                    "name": "tenant server",
+                    "type": "software",
+                    "edges": [{"text": "The tenant server runs cognee."}],
+                }
+            ],
+            set(),
+        )
+    )
+    monkeypatch.setattr(
+        hybrid_retriever_module, "get_unified_engine", AsyncMock(return_value=engine)
+    )
+    monkeypatch.setattr(hybrid_retriever_module, "dlt_rows_indexed", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        hybrid_retriever_module, "search_collection", AsyncMock(return_value=edge_hits)
+    )
+    monkeypatch.setattr(hybrid_retriever_module, "build_entities", build_entities)
+    monkeypatch.setattr(resolved_context, "read_user_resolutions", AsyncMock(return_value=[]))
+
+    found = await HybridRetriever(max_edges_per_entity=3).expand_records(
+        "who runs cognee?", {"entity": [entity_hit.payload["id"]]}
+    )
+
+    record = found[("entity", entity_hit.payload["id"])]
+    assert record["body"] == "### tenant server (software)\n- The tenant server runs cognee."
+    embed.assert_awaited_once_with(["who runs cognee?"])
+    # Bullets are ranked by the edge search for the same query the index call ran.
+    assert build_entities.await_args.args[3] == {"edge-type-1": 0}

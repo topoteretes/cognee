@@ -1,6 +1,7 @@
 import asyncio
 import re
 from contextlib import nullcontext
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -30,6 +31,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.operations import get_current_operation, record_operation
 from cognee.modules.recall.methods.graph_warmup import STATE_BUILD_FAILED, STATE_PARTIAL
+from cognee.modules.recall.types.RecallIndex import ExpandItem
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -458,6 +460,74 @@ async def _session_usage_scope(session_id: str | None, user):
     return track_session_usage(session_id, user.id)
 
 
+async def _recall_user(user):
+    """The caller, or the default user; refuses a recall before cognee is initialized."""
+    if user is not None:
+        return user
+    try:
+        return await get_default_user()
+    except (DatabaseNotCreatedError, UserNotFoundError) as error:
+        raise CogneeValidationError(
+            message=(
+                "Recall prerequisites not met: no database/default user found. "
+                "Initialize Cognee before recalling by:\n"
+                "- running `await cognee.add(...)` followed by `await cognee.cognify()`."
+            ),
+            name="RecallPreconditionError",
+        ) from error
+
+
+def _validate_index_request(
+    *,
+    result_mode: str,
+    expand_items: list | None,
+    only_context: bool,
+    query_type: SearchType | None,
+    sources: list[str],
+) -> None:
+    """Refuse index and expand requests recall cannot answer, before any lane runs."""
+    from cognee.api.v1.recall.query_router import INDEX_SEARCH_TYPES
+    from cognee.modules.recall.methods.recall_index import MAX_EXPAND_ITEMS
+
+    if result_mode not in ("full", "index"):
+        raise CogneeValidationError(
+            message=f"Invalid result_mode '{result_mode}'. Valid values: 'full', 'index'.",
+            name="InvalidResultModeError",
+        )
+    if expand_items is not None:
+        if result_mode == "index":
+            raise CogneeValidationError(
+                message="expand_items expands an index; it cannot be combined with "
+                "result_mode='index'. Send the index call and the expand call separately.",
+                name="InvalidExpandRequestError",
+            )
+        if not 1 <= len(expand_items) <= MAX_EXPAND_ITEMS:
+            raise CogneeValidationError(
+                message=f"expand_items takes 1 to {MAX_EXPAND_ITEMS} items, got {len(expand_items)}.",
+                name="InvalidExpandItemsError",
+            )
+        return
+    if result_mode != "index":
+        return
+    if not only_context:
+        raise CogneeValidationError(
+            message="result_mode='index' requires only_context=True.",
+            name="IndexRequiresOnlyContextError",
+        )
+    if query_type is not None and query_type not in INDEX_SEARCH_TYPES:
+        raise CogneeValidationError(
+            message=f"result_mode='index' supports {sorted(t.value for t in INDEX_SEARCH_TYPES)}, "
+            f"not {query_type.value}. Omit query_type to let recall pick one.",
+            name="IndexUnsupportedSearchTypeError",
+        )
+    if sources != ["graph"]:
+        raise CogneeValidationError(
+            message="result_mode='index' searches the graph only: pass scope=['graph'], or "
+            f"omit session_id with the default scope (resolved sources: {sources}).",
+            name="IndexRequiresGraphScopeError",
+        )
+
+
 @telemetry_on_error("cognee.recall ERRORED")
 async def recall(
     query_text: str,
@@ -492,6 +562,8 @@ async def recall(
     tool_connections: list[str] | None = None,
     tools_trigger: str = "always",
     code_query: dict | None = None,
+    result_mode: Literal["full", "index"] = "full",
+    expand_items: list[ExpandItem] | None = None,
     user: object | None = None,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
@@ -558,6 +630,21 @@ async def recall(
             tagged ``source="code"``. A seed the code graph cannot resolve, a
             dataset without a code graph, or flows on a graph without them
             contribute nothing rather than failing the recall.
+        result_mode: ``"full"`` (default) returns the results as they always were.
+            ``"index"`` returns an ``only_context`` HYBRID_COMPLETION recall of the
+            graph alone as rows instead of one prompt: a short row per passage,
+            entity and fact (record id, rank, score, version, length, conflicts,
+            sources) and a full row per part of the prompt that has no id. Requires
+            ``only_context=True`` and graph-only sources; an explicit ``query_type``
+            other than HYBRID_COMPLETION is refused, a routed one falls back to it.
+            Row fields are documented on ``IndexRowMetadata``.
+        expand_items: Index rows to return in full, at most 20, each as
+            ``{dataset_id, record_kind, record_id}`` from the index. Pass the index
+            call's query and settings (``top_k``, ``node_name``,
+            ``retriever_specific_config``) so entities come back as the index ranked
+            them. Each row says ``available``, ``missing`` (no longer stored) or
+            ``forbidden`` (dataset not readable) in ``metadata["status"]``. Not
+            combined with ``result_mode="index"``.
 
     Returns:
         Search results. When searching session-only, returns a list of
@@ -644,6 +731,13 @@ async def recall(
     # context — so tools must observe every other source's results first.
     if tools_trigger == "on_empty" and "tools" in sources:
         sources = [source for source in sources if source != "tools"] + ["tools"]
+    _validate_index_request(
+        result_mode=result_mode,
+        expand_items=expand_items,
+        only_context=only_context,
+        query_type=query_type,
+        sources=sources,
+    )
 
     span_scope = ",".join(sources)
 
@@ -707,10 +801,36 @@ async def recall(
                 tool_connections=tool_connections,
                 tools_trigger=tools_trigger,
                 code_query=code_query,
+                result_mode=result_mode,
+                expand_items=expand_items,
             )
             span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
             return results
+
+        if expand_items is not None:
+            user = await _recall_user(user)
+            await set_session_user_context_variable(user)
+            from cognee.modules.recall.methods.recall_index import expand_records
+
+            expanded = await expand_records(
+                expand_items,
+                query_text=query_text,
+                user=user,
+                retriever_kwargs={
+                    "top_k": top_k,
+                    "system_prompt_path": system_prompt_path,
+                    "system_prompt": system_prompt,
+                    "node_type": node_type,
+                    "node_name": node_name,
+                    "node_name_filter_operator": node_name_filter_operator,
+                    "session_id": session_id,
+                    "retriever_specific_config": retriever_specific_config,
+                    "include_references": include_references,
+                },
+            )
+            span.set_attribute(COGNEE_RESULT_COUNT, len(expanded))
+            return [ResponseGraphEntry(**item.model_dump(), source="graph") for item in expanded]
 
         usage_scope = await _session_usage_scope(session_id, user)
         async with usage_scope, record_operation("recall", user=user, session_ids=[session_id]):
@@ -762,18 +882,7 @@ async def recall(
                 from cognee.modules.search.methods.search import authorized_search
                 from cognee.modules.search.operations import log_search_history
 
-                if user is None:
-                    try:
-                        user = await get_default_user()
-                    except (DatabaseNotCreatedError, UserNotFoundError) as error:
-                        raise CogneeValidationError(
-                            message=(
-                                "Recall prerequisites not met: no database/default user found. "
-                                "Initialize Cognee before recalling by:\n"
-                                "- running `await cognee.add(...)` followed by `await cognee.cognify()`."
-                            ),
-                            name="RecallPreconditionError",
-                        ) from error
+                user = await _recall_user(user)
 
                 current_operation = get_current_operation()
                 if current_operation is not None:
@@ -797,7 +906,7 @@ async def recall(
                 # A node_name filter also limits routing to the types that apply it,
                 # as node_type reads it: node-set tags, or a typed graph scope.
                 constraints = RoutingConstraints.from_config(
-                    llm_config, node_type=node_type, node_name=node_name
+                    llm_config, node_type=node_type, node_name=node_name, result_mode=result_mode
                 )
                 fallback_decision = default_route(constraints)
 
@@ -1049,7 +1158,12 @@ async def recall(
 
                 tagged = []
                 for r in graph_results:
-                    items: list[SearchResultItem] = normalize_search_payload(r)
+                    if result_mode == "index":
+                        from cognee.modules.recall.methods.recall_index import build_index_items
+
+                        items: list[SearchResultItem] = await build_index_items(r)
+                    else:
+                        items = normalize_search_payload(r)
                     tagged.extend(
                         [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
                     )

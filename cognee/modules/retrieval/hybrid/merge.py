@@ -1,7 +1,7 @@
 """Merge two hybrid retrievals into one result of the same shape.
 
-Each channel merges under its own budget, and ``chunk_summaries`` is rebuilt for the chunks
-that survived so it never references a dropped chunk. Keys the retriever carries but this
+Each channel merges under its own budget, and ``chunk_summaries`` and ``chunk_scores`` are
+rebuilt for the chunks that survived so they never reference a dropped chunk. Keys the retriever carries but this
 module does not own are taken from the primary result unchanged.
 """
 
@@ -54,13 +54,14 @@ def merge_hybrid_results(
     merged.update(channels)
 
     chunk_ids = [chunk_id for chunk in channels["chunks"] if (chunk_id := result_id(chunk))]
-    primary_summaries = primary.get("chunk_summaries", {})
-    secondary_summaries = secondary.get("chunk_summaries", {})
-    merged["chunk_summaries"] = {
-        chunk_id: summary
-        for chunk_id in chunk_ids
-        if (summary := primary_summaries.get(chunk_id) or secondary_summaries.get(chunk_id))
-    }
+    for key in ("chunk_summaries", "chunk_scores"):
+        primary_values = primary.get(key, {})
+        secondary_values = secondary.get(key, {})
+        merged[key] = {
+            chunk_id: value
+            for chunk_id in chunk_ids
+            if (value := primary_values.get(chunk_id) or secondary_values.get(chunk_id))
+        }
     return merged
 
 
@@ -92,13 +93,14 @@ def merge_hybrid_results_union(results: list[dict | None]) -> dict:
     }
     merged.update(channels)
 
-    summaries = [result.get("chunk_summaries") or {} for result in results]
-    merged["chunk_summaries"] = {
-        chunk_id: summary
-        for chunk in channels["chunks"]
-        if (chunk_id := result_id(chunk))
-        and (summary := next((s[chunk_id] for s in summaries if s.get(chunk_id)), None))
-    }
+    for key in ("chunk_summaries", "chunk_scores"):
+        per_result = [result.get(key) or {} for result in results]
+        merged[key] = {
+            chunk_id: value
+            for chunk in channels["chunks"]
+            if (chunk_id := result_id(chunk))
+            and (value := next((v[chunk_id] for v in per_result if v.get(chunk_id)), None))
+        }
     return merged
 
 

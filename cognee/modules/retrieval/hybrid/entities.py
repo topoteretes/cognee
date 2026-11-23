@@ -23,6 +23,7 @@ from cognee.modules.retrieval.hybrid.results import payload_matches_node_filter
 from cognee.modules.retrieval.utils.results import (
     display_value,
     first_display_value,
+    hit_score,
     payload,
     result_id,
 )
@@ -302,7 +303,7 @@ def _reachable_edge_type_ids(
 def format_entities(entities: list[dict]) -> str:
     blocks = []
     for entity in entities or []:
-        block = _format_entity(entity)
+        block = render_entity(entity)
         if block:
             blocks.append(block)
     if not blocks:
@@ -315,7 +316,7 @@ def _entity_from_result(result: Any) -> dict:
     entity_id = result_id(result) or ""
     # No description: each chunk that names the entity overwrites it, and each
     # chunk's own description of the entity is on its "contains" edge.
-    return {
+    entity = {
         "id": entity_id,
         "name": first_display_value(
             result_payload.get("name"), result_payload.get("text"), entity_id
@@ -324,9 +325,19 @@ def _entity_from_result(result: Any) -> dict:
         "type": _entity_type(result_payload),
         "edges": [],
     }
+    score = hit_score(result)
+    if score is not None:
+        # The hit's vector distance (lower is closer), for the recall index; a
+        # pinned ontology concept carries 0.0.
+        entity["score"] = score
+    return entity
 
 
-def _format_entity(entity: dict) -> str:
+def render_entity(entity: dict) -> str:
+    """One entity as ``## Relevant entities`` shows it: its heading and edge bullets.
+
+    The recall index and expand render entity bodies here too.
+    """
     name = display_value(entity.get("name"))
     if not name:
         return ""

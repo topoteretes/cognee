@@ -44,6 +44,10 @@ class SearchResultPayload(BaseModel):
     # both are None and `result` falls back to `context`.
     user_prompt: str | None = None
     system_prompt: str | None = None
+    # The parts of user_prompt (and of the context) that carry no record id, kept apart
+    # for recall's index mode: history, template_prefix, template_suffix, guidance,
+    # grounding, global_context. Set exactly when user_prompt is.
+    context_frame: dict | None = None
 
     dataset_name: str | None = None
     dataset_id: UUID | None = None

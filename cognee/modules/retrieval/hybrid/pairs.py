@@ -2,7 +2,7 @@ from typing import Any
 from uuid import UUID, uuid5
 
 from cognee.modules.retrieval.hybrid.results import payload_matches_node_filter
-from cognee.modules.retrieval.utils.results import display_value, payload, result_id
+from cognee.modules.retrieval.utils.results import display_value, hit_score, payload, result_id
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("HybridRetriever")
@@ -30,6 +30,7 @@ def chunk_summary_pairs(
             set_pair_chunk(pair, chunk)
         if pair["vector_rank"] is None:
             pair["vector_rank"] = rank
+            pair["vector_distance"] = hit_score(chunk)
 
     for rank, summary in enumerate(summary_hits or []):
         summary_payload = payload(summary)
@@ -49,6 +50,7 @@ def chunk_summary_pairs(
             pairs.append(pair)
         if pair["summary_rank"] is None:
             pair["summary_rank"] = rank
+            pair["summary_distance"] = hit_score(summary)
             pair["summary_id"] = result_id(summary)
             pair["summary_text"] = display_value(summary_payload.get("text"))
 
@@ -117,4 +119,17 @@ def _new_chunk_summary_pair(
         "chunk": None,
         "vector_rank": None,
         "summary_rank": None,
+        "vector_distance": None,
+        "summary_distance": None,
     }
+
+
+def pair_distance(pair: dict) -> float | None:
+    """The closer of the pair's chunk and summary distances: the raw query distance the
+    fused rank started from, comparable across datasets that share an embedding model."""
+    distances = [
+        value
+        for value in (pair.get("vector_distance"), pair.get("summary_distance"))
+        if value is not None
+    ]
+    return min(distances) if distances else None

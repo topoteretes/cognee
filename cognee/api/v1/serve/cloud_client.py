@@ -360,6 +360,12 @@ class CloudClient:
             payload["tools_trigger"] = kwargs["tools_trigger"]
         if kwargs.get("code_query") is not None:
             payload["code_query"] = kwargs["code_query"]
+        if kwargs.get("result_mode", "full") != "full":
+            payload["result_mode"] = kwargs["result_mode"]
+        if kwargs.get("expand_items"):
+            payload["expand_items"] = [
+                item.model_dump(mode="json") for item in kwargs["expand_items"]
+            ]
 
         async with session.post(
             f"{self.service_url}/api/v1/recall",

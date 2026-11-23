@@ -6,7 +6,7 @@ The readers shared with every other retriever live in
 
 
 def empty_hybrid_result() -> dict:
-    return {"chunks": [], "chunk_summaries": {}, "entities": [], "facts": []}
+    return {"chunks": [], "chunk_summaries": {}, "chunk_scores": {}, "entities": [], "facts": []}
 
 
 def payload_matches_node_filter(

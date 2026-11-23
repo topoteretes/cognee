@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
@@ -12,6 +13,7 @@ from cognee.api.sse import SSE_MEDIA_TYPE, sse_headers, wants_event_stream
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.api.v1.recall.recall_stream import begin_recall_stream
 from cognee.exceptions import CogneeApiError
+from cognee.modules.recall.types.RecallIndex import ExpandItem
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
@@ -159,6 +161,26 @@ class RecallPayloadDTO(InDTO):
             "flows on a graph without them contribute no results rather than failing "
             "the recall; an unknown operation or invalid argument answers 422 with a "
             "stable 'code' and 'param'."
+        ),
+    )
+    result_mode: Literal["full", "index"] = Field(
+        default="full",
+        description=(
+            "'full' returns results as before. 'index' returns an only_context "
+            "HYBRID_COMPLETION recall of the graph as rows: one short row per passage, "
+            "entity and fact (metadata: record_kind, record_id, rank, score, distance, "
+            "chars, version, conflicts, sources) and one full row per prompt part without "
+            "an id. Requires only_context=true and graph-only sources."
+        ),
+    )
+    expand_items: list[ExpandItem] | None = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Index rows to return in full (1 to 20), each {dataset_id, record_kind, "
+            "record_id} as the index gave them. Send the index call's query, top_k, "
+            "node_name and retriever_specific_config. Each row's metadata.status is "
+            "'available', 'missing' or 'forbidden'."
         ),
     )
     record_context_usage: bool = Field(
@@ -351,6 +373,8 @@ def get_recall_router() -> APIRouter:
                 tool_connections=payload.tool_connections,
                 tools_trigger=payload.tools_trigger,
                 code_query=payload.code_query,
+                result_mode=payload.result_mode,
+                expand_items=payload.expand_items,
                 retriever_specific_config=payload.retriever_specific_config,
             )
 

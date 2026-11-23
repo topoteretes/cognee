@@ -62,6 +62,9 @@ class RoutingConstraints:
     llm_available: bool = True
     cypher_allowed: bool = True
     scoped_types: frozenset[SearchType] | None = None
+    # Set when the recall asks for an index (result_mode="index"): the types that can
+    # return one. A routed type outside it falls back to the default.
+    index_types: frozenset[SearchType] | None = None
 
     @classmethod
     def from_config(
@@ -69,6 +72,7 @@ class RoutingConstraints:
         llm_config=None,
         node_type: type | None = NodeSet,
         node_name: list[str] | None = None,
+        result_mode: str = "full",
     ) -> "RoutingConstraints":
         """Constraints for this deployment and request.
 
@@ -86,6 +90,7 @@ class RoutingConstraints:
             llm_available=llm_available(llm_config),
             cypher_allowed=cypher_queries_allowed(),
             scoped_types=lucky_search_types(node_type, node_name),
+            index_types=INDEX_SEARCH_TYPES if result_mode == "index" else None,
         )
 
 
@@ -198,6 +203,9 @@ COMPLETION_ONLY_TYPES: frozenset[SearchType] = frozenset(
 )
 # Run the query text as Cypher, directly or after an LLM writes it.
 CYPHER_TYPES: frozenset[SearchType] = frozenset({SearchType.CYPHER, SearchType.NATURAL_LANGUAGE})
+# The types recall's index mode (result_mode="index") can return as rows: the ones
+# whose retrieval keeps passages, entities and facts apart with their ids.
+INDEX_SEARCH_TYPES: frozenset[SearchType] = frozenset({SearchType.HYBRID_COMPLETION})
 
 # (rule name, pattern, search type). Shape rules (what the input looks like) come
 # first and win: a quoted string is handled as what it is, even when its text
@@ -319,7 +327,7 @@ def _constrain_llm(decision: RouteDecision, llm_available: bool) -> RouteDecisio
 def constrain(
     decision: RouteDecision, constraints: RoutingConstraints | None = None
 ) -> RouteDecision:
-    """Apply scope, Cypher, and LLM constraints to a route in that order."""
+    """Apply scope, Cypher, index, and LLM constraints to a route in that order."""
     if constraints is None:
         return decision
 
@@ -327,6 +335,14 @@ def constrain(
     if not constraints.cypher_allowed and decision.search_type in CYPHER_TYPES:
         logger.debug(
             "query_router: %s disabled by ALLOW_CYPHER_QUERY; using fallback",
+            decision.search_type.value,
+        )
+        decision = replace(decision, search_type=ROUTER_FALLBACK_TYPE, retriever_config=None)
+    if constraints.index_types is not None and decision.search_type not in constraints.index_types:
+        # An index request gets an index whatever its wording routed to: a code or
+        # count question then returns memory rows instead of its own lane's answer.
+        logger.debug(
+            "query_router: %s cannot return an index; using fallback",
             decision.search_type.value,
         )
         decision = replace(decision, search_type=ROUTER_FALLBACK_TYPE, retriever_config=None)

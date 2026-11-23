@@ -9,6 +9,7 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.retrieval.hybrid.pairs import (
     attach_source_chunks,
     chunk_summary_pairs,
+    pair_distance,
     source_chunk_ids_to_load,
     summary_id_for_chunk,
     summary_text_by_chunk_id,
@@ -110,6 +111,17 @@ async def retrieve_hybrid_chunks(
     return {
         "chunks": [pair["chunk"] for pair in ranked_pairs if pair["chunk"] is not None],
         "chunk_summaries": summary_text_by_chunk_id(ranked_pairs),
+        "chunk_scores": chunk_scores_by_id(ranked_pairs),
+    }
+
+
+def chunk_scores_by_id(ranked_pairs: list[dict]) -> dict[str, dict]:
+    """Per kept chunk: the fused ``score`` it was ranked by (higher is better) and the
+    raw query ``distance`` of its closer hit (lower is better). Read by the recall index."""
+    return {
+        str(pair["chunk_id"]): {"score": pair.get("score"), "distance": pair_distance(pair)}
+        for pair in ranked_pairs
+        if pair["chunk"] is not None and pair["chunk_id"]
     }
 
 
