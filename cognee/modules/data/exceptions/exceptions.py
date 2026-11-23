@@ -66,6 +66,22 @@ class DatasetNotFoundError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
+class InvalidDatasetNameError(CogneeValidationError, ValueError):
+    """A dataset name contains spaces or dots.
+
+    Also a ``ValueError``, which is what ``check_dataset_name`` raised before.
+    """
+
+    def __init__(
+        self,
+        message: str = "Dataset name cannot contain spaces or dots.",
+        name: str = "InvalidDatasetNameError",
+        status_code=status.HTTP_400_BAD_REQUEST,
+        remediation: str | None = None,
+    ):
+        super().__init__(message, name, status_code, remediation=remediation)
+
+
 class DatasetTypeError(CogneeValidationError):
     def __init__(
         self,

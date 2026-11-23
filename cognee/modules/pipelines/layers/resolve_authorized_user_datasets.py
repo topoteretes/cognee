@@ -5,7 +5,6 @@ from cognee.modules.data.methods import (
     check_dataset_name,
     get_authorized_existing_datasets,
     load_or_create_datasets,
-    normalize_dataset_name,
 )
 from cognee.modules.data.models import Dataset
 from cognee.modules.users.methods import get_default_user
@@ -35,13 +34,11 @@ async def resolve_authorized_user_datasets(
     if isinstance(datasets, (str, UUID)):
         datasets = [datasets]
 
-    # Names are normalized before lookup and creation so a name with spaces or
-    # dots maps onto its stored form instead of creating a dataset that fails
-    # check_dataset_name below (and every later call) once it exists.
-    datasets = [
-        normalize_dataset_name(dataset) if isinstance(dataset, str) else dataset
-        for dataset in datasets
-    ]
+    # Reject an invalid name before anything is looked up or created, so a failed
+    # request never leaves a dataset behind that every later call fails on.
+    for dataset in datasets:
+        if isinstance(dataset, str):
+            check_dataset_name(dataset)
 
     # Get datasets user wants write permissions for (verify user has permissions if datasets are provided as well)
     # NOTE: If a user wants to write to a dataset he does not own it must be provided through UUID
