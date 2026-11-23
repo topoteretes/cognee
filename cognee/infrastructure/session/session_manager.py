@@ -690,7 +690,7 @@ class SessionManager:
             raise SessionParameterValidationError(
                 message="start and end go together and exclude last_n"
             )
-        if start is not None and not 0 <= start < end:
+        if start is not None and end is not None and not 0 <= start < end:
             raise SessionParameterValidationError(
                 message=f"need 0 <= start < end, got start={start}, end={end}"
             )
