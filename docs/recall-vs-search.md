@@ -286,6 +286,33 @@ source unless you ask for the session by name with `scope`. REST clients that re
 `HYBRID_COMPLETION` default should pass `"searchType": "HYBRID_COMPLETION"`
 explicitly.
 
+### Index and expand
+
+`recall(only_context=True, result_mode="index")` returns the hybrid prompt as rows
+instead of one string, so a caller can pick what to read in full (SDK-1099):
+
+- one short row per passage, entity and fact, its `metadata` carrying `record_kind`,
+  `record_id`, `rank`, `score`, `version` (a content hash of the full body), `chars`,
+  `conflicts` and `sources`;
+- one full row per part of the prompt that has no id (session history, the template
+  halves, ontology grounding, global context, session guidance).
+
+`recall(query, expand_items=[...])` then returns up to 20 of those records in full,
+each with `metadata["status"]` `available`, `missing` or `forbidden` (the caller
+cannot read the dataset). Items are `ExpandItem`s or dicts of a row's `dataset_id`,
+`metadata["record_kind"]` and `metadata["record_id"]`; send the index call's query and
+settings so entity bullets rank as they did. The rows and the expanded bodies rebuild
+the `only_context` prompt exactly; the rule is on
+`cognee.modules.recall.types.RecallIndex` and `rebuild_user_prompt` implements it.
+
+Index mode runs `HYBRID_COMPLETION` only: an explicit other `query_type` is refused,
+and a routed one falls back to it. A request hybrid would hand to `GRAPH_COMPLETION`
+(a typed `node_type`, `neighborhood_depth`, `feedback_influence > 0`, including a
+deployment's `DEFAULT_FEEDBACK_INFLUENCE`) and a searched dataset without passages (a
+code-only dataset) raise `IndexRequiresHybridError`. Index needs graph-only sources.
+Over `serve()` both are sent only to a server whose `GET /health` lists
+`recall_index_v1`. The CLI and the MCP tools do not expose them.
+
 ### Seeing what ran
 
 Graph results carry the resolved type as `search_type`. The CLI prints it in

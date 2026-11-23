@@ -319,6 +319,18 @@ def get_recall_router() -> APIRouter:
         - **toolsTrigger** (str): When the 'tools' scope runs: 'always', or 'on_empty' to query the
           external database only when every other requested source returned nothing. Defaults to
           'always'.
+        - **resultMode** (str): 'full' (default) or 'index'. 'index' needs onlyContext=true and
+          graph-only sources, runs HYBRID_COMPLETION and returns the prompt as rows: one short
+          row per passage, entity and fact (metadata recordKind, recordId, rank, score,
+          version, chars, conflicts, sources) and one full row per prompt part without an id.
+          A request hybrid would hand to GRAPH_COMPLETION (a typed nodeType,
+          neighborhoodDepth, feedbackInfluence > 0) or a dataset without passages answers 422
+          IndexRequiresHybridError. Servers that support it list "recall_index_v1" in
+          GET /health capabilities.
+        - **expandItems** (Optional[List[dict]]): 1 to 20 index rows to return in full, each
+          {datasetId, recordKind, recordId} (snake_case too) as the index gave them; send the
+          index call's query and settings. Each row's metadata.status is 'available',
+          'missing' or 'forbidden'. Not combined with resultMode='index'.
 
         ## Error Codes
         - **402/403/404/409/422**: Cognee errors (payment required, permission

@@ -4,7 +4,7 @@ from contextlib import nullcontext
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from typing_extensions import TypedDict
 
 from cognee.base_config import get_base_config
@@ -484,10 +484,14 @@ def _validate_index_request(
     only_context: bool,
     query_type: SearchType | None,
     sources: list[str],
+    node_type: type | None,
+    neighborhood_depth: int | None,
+    feedback_influence: float,
 ) -> None:
     """Refuse index and expand requests recall cannot answer, before any lane runs."""
     from cognee.api.v1.recall.query_router import INDEX_SEARCH_TYPES
     from cognee.modules.recall.methods.recall_index import MAX_EXPAND_ITEMS
+    from cognee.modules.search.methods.hybrid_deferral import request_deferral_reason
 
     if result_mode not in ("full", "index"):
         raise CogneeValidationError(
@@ -526,6 +530,43 @@ def _validate_index_request(
             f"omit session_id with the default scope (resolved sources: {sources}).",
             name="IndexRequiresGraphScopeError",
         )
+    # The index cuts the hybrid prompt into rows, so a request hybrid would hand to
+    # GRAPH_COMPLETION is refused here; a dataset without chunks is refused per dataset
+    # in build_index_items.
+    deferral_reason = request_deferral_reason(
+        {
+            "node_type": node_type,
+            "neighborhood_depth": neighborhood_depth,
+            "feedback_influence": feedback_influence,
+        }
+    )
+    if deferral_reason:
+        raise CogneeValidationError(
+            message=f"result_mode='index' needs hybrid retrieval, but {deferral_reason}. "
+            "Drop that option (pass feedback_influence=0 when the deployment sets "
+            "DEFAULT_FEEDBACK_INFLUENCE), or use result_mode='full'.",
+            name="IndexRequiresHybridError",
+        )
+
+
+def _expand_items_as_models(expand_items: list | None) -> list[ExpandItem] | None:
+    """``expand_items`` as ``ExpandItem`` models.
+
+    SDK callers send an index row's fields back as dicts (over ``serve()`` the rows are
+    dicts), so each item is validated here, as the HTTP route validates its body.
+    """
+    if expand_items is None:
+        return None
+    items = []
+    for position, item in enumerate(expand_items):
+        try:
+            items.append(ExpandItem.model_validate(item))
+        except ValidationError as error:
+            raise CogneeValidationError(
+                message=f"expand_items[{position}] is not a valid item: {error}",
+                name="InvalidExpandItemsError",
+            ) from error
+    return items
 
 
 @telemetry_on_error("cognee.recall ERRORED")
@@ -563,7 +604,7 @@ async def recall(
     tools_trigger: str = "always",
     code_query: dict | None = None,
     result_mode: Literal["full", "index"] = "full",
-    expand_items: list[ExpandItem] | None = None,
+    expand_items: list[ExpandItem | dict] | None = None,
     user: object | None = None,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
@@ -637,9 +678,15 @@ async def recall(
             sources) and a full row per part of the prompt that has no id. Requires
             ``only_context=True`` and graph-only sources; an explicit ``query_type``
             other than HYBRID_COMPLETION is refused, a routed one falls back to it.
-            Row fields are documented on ``IndexRowMetadata``.
-        expand_items: Index rows to return in full, at most 20, each as
-            ``{dataset_id, record_kind, record_id}`` from the index. Pass the index
+            A request hybrid would hand to GRAPH_COMPLETION (a typed ``node_type``,
+            ``neighborhood_depth``, ``feedback_influence > 0``) and a searched dataset
+            with no chunk collection raise ``IndexRequiresHybridError``. Row fields
+            and how the rows rebuild the prompt are documented in ``RecallIndex``.
+        expand_items: Index rows to return in full, at most 20, each an ``ExpandItem``
+            or a dict ``{dataset_id, record_kind, record_id}`` (camelCase keys too) with
+            the values the index row carries (``dataset_id`` and
+            ``metadata["record_kind"]`` / ``metadata["record_id"]``); an invalid item
+            raises ``InvalidExpandItemsError``. Pass the index
             call's query and settings (``top_k``, ``node_name``,
             ``retriever_specific_config``) so entities come back as the index ranked
             them. Each row says ``available``, ``missing`` (no longer stored) or
@@ -737,7 +784,11 @@ async def recall(
         only_context=only_context,
         query_type=query_type,
         sources=sources,
+        node_type=node_type,
+        neighborhood_depth=neighborhood_depth,
+        feedback_influence=feedback_influence,
     )
+    expand_items = _expand_items_as_models(expand_items)
 
     span_scope = ",".join(sources)
 

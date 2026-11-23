@@ -3,12 +3,28 @@
 An index row is a ``ResponseGraphEntry`` whose ``metadata`` follows ``IndexRowMetadata``.
 ``SearchResultItem.kind`` keeps its usual meaning; the row's own kind is
 ``metadata["record_kind"]``.
+
+The rows rebuild the user prompt ``only_context`` returns, given each memory row's full
+body (from expand, or the row's ``text`` when ``chars == len(text)``).
+``recall_index.rebuild_user_prompt`` implements the rule:
+
+* context = the non-empty of: the ``global_context`` row; ``"## Relevant passages\n"``
+  plus the passage bodies joined by ``"\n---\n"``; ``"## Relevant entities\n"`` plus
+  the entity bodies joined by ``"\n\n"``; ``"## Related facts\n"`` plus one
+  ``"- <body>"`` line per fact; ``"## Fact conflicts\n"`` plus one ``"- <text>"`` line
+  per distinct conflict of the passage and entity rows, sorted; joined by ``"\n\n"``.
+  A ``grounding`` row goes first, followed by ``"\n\n"``;
+* rendered = ``template_prefix`` + context + ``template_suffix``;
+* user prompt = the non-empty of ``session_history``, rendered and
+  ``session_guidance``, joined by ``"\n\n"``.
 """
 
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
+
+from cognee.api.DTO import InDTO
 
 # Rows that name a stored memory and can be expanded by id.
 MemoryRecordKind = Literal["passage", "entity", "fact"]
@@ -25,12 +41,17 @@ RecordKind = MemoryRecordKind | FrameRecordKind
 ExpandStatus = Literal["available", "missing", "forbidden"]
 
 
-class ExpandItem(BaseModel):
-    """One record to expand: an index row's dataset, kind and id, sent back as given."""
+class ExpandItem(InDTO):
+    """One record to expand: an index row's dataset, kind and id, sent back as given.
+
+    A request body model, so its keys may be camelCase or snake_case like every other
+    request field. Every record id is a UUID; a malformed one is refused here instead of
+    reaching the vector store.
+    """
 
     dataset_id: UUID
     record_kind: MemoryRecordKind
-    record_id: str
+    record_id: UUID
 
 
 class RecordSource(BaseModel):

@@ -17,6 +17,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.exceptions import CogneeSystemError, CogneeValidationError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.content_hash import compute_content_hash
 from cognee.modules.data.exceptions import DatasetNotFoundError
@@ -32,6 +33,7 @@ from cognee.modules.recall.types.RecallIndex import (
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.retrieval.hybrid.context import attached_conflict_texts, render_passage
 from cognee.modules.retrieval.hybrid.entities import render_entity
+from cognee.modules.retrieval.utils.conflict_context import format_conflicts
 from cognee.modules.retrieval.utils.results import display_value, payload, result_id
 from cognee.modules.search.methods.get_search_type_retriever_instance import (
     get_search_type_retriever_instance,
@@ -58,17 +60,37 @@ def record_version(body: str) -> str:
 async def build_index_items(payload_: SearchResultPayload) -> list[SearchResultItem]:
     """One dataset's ``only_context`` hybrid result as index rows, in prompt order.
 
-    Raises ``ValueError`` when the payload carries no prompt frame (retrieval found
-    nothing returns [] instead) or its template cannot be split around the context.
+    Retrieval that found nothing returns []. Raises ``IndexRequiresHybridError`` when
+    hybrid handed this dataset to another search type (``hybrid_deferral_reason``: the
+    dataset has no chunk collection), and ``IndexTemplateNotSplittableError`` when the
+    retriever's user template cannot be split around the context.
     """
     retrieved = payload_.result_object
     if not payload_.user_prompt:
         return []
+    if payload_.search_type != SearchType.HYBRID_COMPLETION:
+        raise CogneeValidationError(
+            message=f"result_mode='index' needs hybrid retrieval, but dataset "
+            f"'{payload_.dataset_name}' was answered by {payload_.search_type}: it has no "
+            "passages to index (no DocumentChunk_text or DltRow_text collection). Leave it "
+            "out of datasets, or use result_mode='full'.",
+            name="IndexRequiresHybridError",
+        )
     frame = payload_.context_frame
     if not isinstance(retrieved, dict) or frame is None:
-        raise ValueError("The index needs a hybrid only_context result with its prompt frame.")
+        # Request-level deferrals are refused before the search runs and the dataset-level
+        # one above, so a hybrid only_context payload without its frame is a bug.
+        raise CogneeSystemError(
+            message="A hybrid only_context result reached the recall index without its "
+            "prompt frame.",
+            name="IndexFrameMissingError",
+        )
     if frame["template_prefix"] is None:
-        raise ValueError("The retriever's user template cannot be split around the context.")
+        raise CogneeValidationError(
+            message="result_mode='index' needs a user prompt template that renders the "
+            "context exactly once; this retriever's template cannot be split around it.",
+            name="IndexTemplateNotSplittableError",
+        )
 
     chunk_scores = retrieved.get("chunk_scores") or {}
     chunks = retrieved.get("chunks") or []
@@ -155,6 +177,54 @@ async def build_index_items(payload_: SearchResultPayload) -> list[SearchResultI
     return rows
 
 
+def rebuild_user_prompt(rows: list[SearchResultItem], bodies: dict[tuple[str, str], str]) -> str:
+    """The ``only_context`` user prompt one dataset's index rows stand for.
+
+    ``rows`` are one dataset's index rows in the order ``build_index_items`` returns them;
+    ``bodies`` maps ``(record_kind, record_id)`` of each memory row to its full body (an
+    expand row's ``text``). A memory row missing from ``bodies`` uses its own ``text``,
+    which is the whole body when ``chars == len(text)``. The rule is written out in
+    ``cognee.modules.recall.types.RecallIndex``; this is its one implementation.
+    """
+    frame: dict[str, str] = {}
+    sections: dict[str, list[str]] = defaultdict(list)
+    conflicts: set[str] = set()
+    for row in rows:
+        metadata = IndexRowMetadata.model_validate(row.metadata)
+        if metadata.record_id is None:
+            frame[metadata.record_kind] = row.text
+            continue
+        sections[metadata.record_kind].append(
+            bodies.get((metadata.record_kind, metadata.record_id), row.text)
+        )
+        if metadata.record_kind in ("passage", "entity"):
+            conflicts.update(metadata.conflicts)
+
+    context = "\n\n".join(
+        section
+        for section in (
+            frame.get("global_context", ""),
+            _section("## Relevant passages\n", "\n---\n", sections["passage"]),
+            _section("## Relevant entities\n", "\n\n", sections["entity"]),
+            _section("## Related facts\n", "\n", [f"- {fact}" for fact in sections["fact"]]),
+            format_conflicts(conflicts),
+        )
+        if section
+    )
+    if frame.get("grounding"):
+        context = f"{frame['grounding']}\n\n{context}"
+    rendered = frame.get("template_prefix", "") + context + frame.get("template_suffix", "")
+    return "\n\n".join(
+        part
+        for part in (frame.get("session_history"), rendered, frame.get("session_guidance"))
+        if part
+    )
+
+
+def _section(header: str, joiner: str, bodies: list[str]) -> str:
+    return header + joiner.join(bodies) if bodies else ""
+
+
 async def expand_records(
     items: list[ExpandItem],
     *,
@@ -171,7 +241,7 @@ async def expand_records(
     bullets come out as the index call ranked them.
     """
     unique_items = list(
-        dict.fromkeys((item.dataset_id, item.record_kind, item.record_id) for item in items)
+        dict.fromkeys((item.dataset_id, item.record_kind, str(item.record_id)) for item in items)
     )
     by_dataset: dict[UUID, list[tuple[str, str]]] = defaultdict(list)
     for dataset_id, record_kind, record_id in unique_items:
@@ -336,28 +406,31 @@ async def _entity_sources(entities: list[dict], dataset_id: Any) -> dict[str, li
     """
     if not entities or not dataset_id:
         return {}
-    edge_owner: dict[UUID, str] = {}
+    # An edge between two shown entities is a bullet of both, so its evidence is a
+    # source of both.
+    edge_entities: dict[UUID, list[str]] = defaultdict(list)
     for entity in entities:
         for edge in entity.get("edges", []):
             edge_object_id = display_value(edge.get("edge_object_id"))
-            if edge_object_id:
-                edge_owner.setdefault(UUID(edge_object_id), entity["id"])
-    if not edge_owner:
+            if edge_object_id and entity["id"] not in edge_entities[UUID(edge_object_id)]:
+                edge_entities[UUID(edge_object_id)].append(entity["id"])
+    if not edge_entities:
         return {}
-    records = await get_edge_evidence_records(list(edge_owner), UUID(str(dataset_id)))
+    records = await get_edge_evidence_records(list(edge_entities), UUID(str(dataset_id)))
     created_at = await _created_at_by_data_id([str(record.data_id) for record in records])
     sources: dict[str, dict[tuple[str, str], RecordSource]] = defaultdict(dict)
     for record in records:
         key = (str(record.data_id), str(record.chunk_id))
-        sources[edge_owner[record.edge_id]].setdefault(
-            key,
-            RecordSource(
-                data_id=key[0],
-                document_name=record.document_name,
-                chunk_id=key[1],
-                created_at=created_at.get(key[0]),
-            ),
-        )
+        for entity_id in edge_entities[record.edge_id]:
+            sources[entity_id].setdefault(
+                key,
+                RecordSource(
+                    data_id=key[0],
+                    document_name=record.document_name,
+                    chunk_id=key[1],
+                    created_at=created_at.get(key[0]),
+                ),
+            )
     return {entity_id: list(by_key.values()) for entity_id, by_key in sources.items()}
 
 
