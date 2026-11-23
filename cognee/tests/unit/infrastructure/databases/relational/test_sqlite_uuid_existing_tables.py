@@ -166,3 +166,39 @@ async def test_upgrade_keeps_the_table_indexes(upgraded_pre_hook_database):
         )
 
     assert index_sql == EVIDENCE_INDEX
+
+
+@pytest.mark.asyncio
+async def test_upgrade_interrupted_before_the_rename_keeps_the_table(tmp_path):
+    adapter, _ = await _pre_hook_database(tmp_path)
+    before = await _schema(adapter)
+
+    def interrupt_rename(conn, cursor, statement, *args):
+        if statement.startswith('ALTER TABLE "_uuid_as_text_'):
+            raise RuntimeError("interrupted")
+
+    # Migrations open their own engine, so listen on every engine.
+    sa.event.listen(sa.engine.Engine, "before_cursor_execute", interrupt_rename)
+    try:
+        with pytest.raises(MigrationError):
+            await _upgrade(adapter)
+    finally:
+        sa.event.remove(sa.engine.Engine, "before_cursor_execute", interrupt_rename)
+
+    assert await _schema(adapter) == before
+    async with adapter.engine.connect() as connection:
+        evidence_rows = await connection.scalar(
+            sa.text("SELECT count(*) FROM provenance_edge_evidence")
+        )
+    assert evidence_rows == 2
+
+    await _upgrade(adapter)
+    async with adapter.engine.connect() as connection:
+        evidence_rows = await connection.scalar(
+            sa.text("SELECT count(*) FROM provenance_edge_evidence")
+        )
+        index_sql = await connection.scalar(
+            sa.text("SELECT sql FROM sqlite_master WHERE name = 'ix_prov_evidence_edge'")
+        )
+    assert (evidence_rows, index_sql) == (1, EVIDENCE_INDEX)
+    await adapter.engine.dispose()

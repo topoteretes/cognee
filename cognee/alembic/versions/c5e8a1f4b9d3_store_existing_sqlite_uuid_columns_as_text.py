@@ -92,7 +92,8 @@ def _rebuild_with_text_uuids(connection, table: str, create_sql: str) -> None:
     rebuilt_sql = CREATE_TABLE_PREFIX.sub(
         f'CREATE TABLE "{rebuilt}" (', DECLARED_UUID.sub(r"\1CHAR(32)", create_sql), count=1
     )
-    # The driver commits DDL outside a transaction, so a crashed run can leave this behind.
+    # The driver commits this CREATE on its own. The copy's INSERT opens a transaction that
+    # the DROP and RENAME join, so a crash can leave only this scratch table behind.
     connection.exec_driver_sql(f'DROP TABLE IF EXISTS "{rebuilt}"')
     connection.exec_driver_sql(rebuilt_sql)
     connection.exec_driver_sql(f'INSERT INTO "{rebuilt}" SELECT * FROM "{table}"')
