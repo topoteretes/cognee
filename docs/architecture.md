@@ -51,7 +51,7 @@ How it works:
 - A default handler is derived from the configured provider (`GraphConfig.fill_derived` and the vector-config equivalent), so in-tree backends work with no handler setting at all. An explicit `GRAPH_DATASET_DATABASE_HANDLER` / `VECTOR_DATASET_DATABASE_HANDLER` is never overwritten by that derivation — that is how you reach the non-default handlers named above (`neo4j_community`, `neo4j_aura_dev`, `postgres_graph_shared`, `pgvector_shared`), each of which also requires its matching provider.
 - **Both** the graph and vector backends must support isolation. If either doesn't, cognee raises an `EnvironmentError` naming the unsupported handler — with the flag on (its default), an unsupported backend is a hard error, not a silent fallback to shared databases. The fix is switching backends or setting `ENABLE_BACKEND_ACCESS_CONTROL=false`.
 - New backends gain multi-tenancy by registering a `DatasetDatabaseHandlerInterface` implementation in the registry (or at runtime via `use_dataset_database_handler()`).
-- One exception to "everything of a dataset lives in its own store": dataset routing keeps a mirror of each dataset's global context index (its root and one bucket per document: document names, entity names and relation lines, with their vectors) in the deployment's default vector store, the one `VECTOR_DB_URL` configures, so an unscoped search can score every readable dataset in one place. It is read only by derived ids (`score_by_ids`), never by similarity, and follows deletion (`remove_dataset_routes`); dropping a dataset's database by hand does not remove its mirror rows. See [dataset routing](retrieval-internals.md#search-retrieval).
+- The shared dataset routing index lives outside the isolated dataset stores, in the deployment's default vector store configured by `VECTOR_DB_URL`. See [dataset routing](retrieval-internals.md#search-retrieval) for how searches use the index.
 
 ### Layer Structure
 
@@ -121,7 +121,7 @@ FastAPI application with versioned routes under `/api/v1/` (routers registered i
 - `/visualize` - Graph visualization server
 - `/provenance` - Audit-ledger reads (entry/history, verify, statistics, export, anchor, status)
 
-`DELETE /api/v1/search/history` deletes the caller's own search and recall history (the `queries` / `results` rows `GET /api/v1/search` and `GET /api/v1/recall` list); it takes no user parameter, so nobody can delete another user's history. `forget(..., clean_history=True)` removes the same rows as part of a forget, and `forget(clean_history=True)` alone removes only them (the SDK/CLI equivalent of the endpoint); without the flag `forget(data_id=...)` and `prune_system(metadata=False)` leave them.
+`DELETE /api/v1/search/history` clears the caller's own history listed by `GET /api/v1/search` and `GET /api/v1/recall`. The endpoint takes no user parameter. See [search history retention and deletion](memory-internals.md#search-history-retention-and-deletion) for SDK and CLI equivalents and the related deletion rules.
 
 Request bodies accept both snake_case and camelCase (`cognee/api/DTO.py` sets `alias_generator=to_camel` with `populate_by_name=True`). There is no `/feedback` route — feedback is CLI- and SDK-only.
 
@@ -194,7 +194,7 @@ await cognee.remember(data, dataset_name="my_project")
 await cognee.recall("my question", datasets=["my_project"])
 ```
 
-`remember()`/`add()` without `dataset_name` target the default dataset `main_dataset`; `recall()`/`search()` span all accessible datasets unless one is given.
+`remember()` and `add()` target the default dataset `main_dataset` when `dataset_name` is omitted.
 
 ### DataPoints
 Atomic knowledge units that form the foundation of graph structures. All graph nodes extend the `DataPoint` base class with versioning and metadata support.
