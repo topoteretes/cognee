@@ -194,7 +194,7 @@ run). Either way nothing is lost.
 **After a quiet week** Telegram may restart `update_id` at a random value below the stored
 cursor, so after six days without updates the connector reads without an offset, which confirms
 nothing. The six days run from the newest update's own `date` (an edit's `edit_date`), Telegram's
-clock, not from when the run read it.
+clock, not from when the run read it. A date before 1970 counts as missing, and the clock is never set later than the run itself.
 
 **Edits** arrive as `edited_message` / `edited_channel_post` with the same message id and
 replace the row; the new text is extracted, the old one leaves memory. An edit that removes the
@@ -270,7 +270,7 @@ exit:
 | `failed_conflict` | `getUpdates` answered 409: a webhook is set, or another process polls this bot. Run stops, nothing changes |
 | `failed_rate_limit` | a 429 the retries did not get past, or whose wait does not fit the run's wait budget. Run stops, nothing changes |
 | `failed_unavailable` | a 5xx or no answer after the retries. Run stops, nothing changes |
-| `failed_provider` | any other failure Telegram's side caused: another 4xx, an HTTP 200 that is not a Bot API answer, a `getMe` without a numeric bot id, a staging read that fails, a state of a newer version. The run raises |
+| `failed_provider` | any other failure Telegram's side caused: another 4xx, an HTTP 200 that is not a Bot API answer, a `getMe` without a numeric bot id, a `getUpdates` page that is not a list of objects, or holds an update whose `update_id` is not a positive integer above the one before it (and, when the run sent an offset, at or above it), whose message is not an object, or whose `date` or `edit_date` is not an integer the platform can turn into a time (a missing or null date is read as missing), a staging read that fails, a state of a newer version. The run raises before any row is emitted, and the cursor stays, so the next run reads the same page. A refused page is asked for again on every run; if Telegram keeps sending it, the valid updates on that page, before and after the bad one, and every update queued behind the page expire after Telegram's 24 hours, while `gap` reads 0, because a refused run counts nothing |
 | `failed_unexpected` | a failure that is not Telegram's (a defect of this source), at any point of the run, raised as `TelegramUnexpectedError` with the original as its cause. The run raises and the cursor stays |
 | `failed_bot_mismatch` | the state of this `resource_name` belongs to another bot (`TelegramBotMismatchError`). The run raises |
 

@@ -756,15 +756,68 @@ def _removed(member: dict) -> bool:
     return status in _REMOVED_STATUSES or (status == _RESTRICTED and new.get("is_member") is False)
 
 
+def _update_item(update: dict) -> dict | None:
+    """The message, post, edit or ``my_chat_member`` an update carries, if it is one read here."""
+    return update.get("my_chat_member") or next(
+        (update[key] for key in _MESSAGE_KEYS if update.get(key)), None
+    )
+
+
 def _update_date(update: dict) -> int | None:
     """When Telegram produced the update: an edit's ``edit_date``, else the ``date`` every
     message and ``my_chat_member`` carries."""
-    item = update.get("my_chat_member") or next(
-        (update[key] for key in _MESSAGE_KEYS if update.get(key)), None
-    )
+    item = _update_item(update)
     if not item:
         return None
     return item.get("edit_date") or item.get("date") or None
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_timestamp(value: Any) -> bool:
+    """An integer the date rendering can convert. The range is the platform's, not ours."""
+    if not _is_int(value):
+        return False
+    try:
+        datetime.fromtimestamp(value, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return False
+    return True
+
+
+def _check_page(updates: Any, offset: int | None) -> None:
+    """Refuse a page the source cannot store, before any of it is planned: a list of objects
+    whose ``update_id`` values are positive, rise strictly and start at ``offset`` or above
+    when one was sent, each carrying an object whose ``date`` and ``edit_date``, unless missing
+    or null, are integers the platform can turn into a time. Counted as ``failed_provider``.
+    """
+    if not isinstance(updates, list):
+        raise _malformed_page("is not a list")
+    # Telegram answers only ids at or above the offset it was sent.
+    previous = 0 if offset is None else offset - 1
+    for update in updates:
+        if not isinstance(update, dict):
+            raise _malformed_page("holds an update that is not an object")
+        update_id = update.get("update_id")
+        if not _is_int(update_id) or update_id <= previous:
+            raise _malformed_page(
+                "holds an update_id that is not a rising positive integer at or above the offset"
+            )
+        previous = update_id
+        item = _update_item(update)
+        if item is None:
+            continue
+        if not isinstance(item, dict):
+            raise _malformed_page("holds an update whose message is not an object")
+        for field in ("date", "edit_date"):
+            if item.get(field) is not None and not _is_timestamp(item[field]):
+                raise _malformed_page(f"holds an update whose {field} is not a timestamp")
+
+
+def _malformed_page(what: str) -> TelegramAPIError:
+    return TelegramAPIError(f"Telegram getUpdates: HTTP 200 with a page that {what}", status=200)
 
 
 # ---------------------------------------------------------------------------
@@ -789,7 +842,9 @@ def fetch_page(
     The offset confirms everything before it, which is safe: those updates were loaded by an
     earlier run whose state dlt saved. After six days without updates the offset is left out,
     because Telegram may restart ``update_id`` below the saved cursor, and an offset above the
-    new ids would confirm (drop) them. Without an offset nothing is confirmed.
+    new ids would confirm (drop) them. Without an offset nothing is confirmed. A page that is
+    not a list of well-formed updates with rising ids, at or above the offset when one was
+    sent, raises (:func:`_check_page`) before any of it is used.
     """
     last = state.get("last_update_id")
     quiet = _quiet(state, now)
@@ -802,7 +857,9 @@ def fetch_page(
         "timeout": 0,
         "allowed_updates": _ALLOWED_UPDATES,
     }
-    return client.call("getUpdates", params, check_active=check_active, budget=budget) or []
+    updates = client.call("getUpdates", params, check_active=check_active, budget=budget) or []
+    _check_page(updates, offset)
+    return updates
 
 
 def _chat_not_found(error: TelegramAPIError) -> bool:
@@ -1032,10 +1089,12 @@ def plan_page(
         "username_chats": bound,
     }
     if updates:
+        # The ids of a page rise (_check_page), so the last one is the highest.
         new_state["last_update_id"] = updates[-1]["update_id"]
-        dates = [date for date in map(_update_date, updates) if date]
         # Telegram's restart clock runs from its last update, not from when this run read it.
-        new_state["last_update_seen_at"] = max(dates) if dates else now
+        # A date before 1970 counts as missing, and none is later than this run.
+        dates = [date for date in map(_update_date, updates) if date and date > 0]
+        new_state["last_update_seen_at"] = min(max(dates), now) if dates else now
     return list(rows.values()), new_state
 
 

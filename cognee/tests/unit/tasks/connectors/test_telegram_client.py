@@ -371,6 +371,46 @@ def test_a_retry_after_of_0_is_a_wait_of_0_seconds():
     assert sleeps == [0.0]
 
 
+@pytest.mark.parametrize(
+    "update",
+    [
+        (
+            b'{"update_id": NaN, "message": {"message_id": 1, "date": 1700000000, "text": "a",'
+            b' "chat": {"id": -100, "type": "group", "title": "T"}}}'
+        ),
+        (
+            b'{"update_id": 1000, "message": {"message_id": 1, "date": NaN, "text": "a",'
+            b' "chat": {"id": -100, "type": "group", "title": "T"}}}'
+        ),
+    ],
+    ids=["update_id", "date"],
+)
+def test_a_nan_in_a_getupdates_answer_on_the_wire_fails_as_a_provider_defect(update, monkeypatch):
+    """A getUpdates answer whose JSON carries NaN for update_id or date, read through the
+    real client and a real socket, fails the run as failed_provider and emits nothing."""
+    from cognee.tasks.ingestion.connectors import telegram_source
+
+    server, _ = _serve(
+        {
+            "/getMe": (200, json.dumps({"ok": True, "result": {"id": 111}}).encode(), {}),
+            "/getUpdates": (200, b'{"ok": true, "result": [' + update + b"]}", {}),
+        }
+    )
+    monkeypatch.setattr(module, "_API_BASE", f"http://127.0.0.1:{server.server_port}")
+    resource = telegram_source(
+        service=TelegramBotClient(TOKEN, sleep=lambda _: None), resource_name="telegram_111"
+    )
+    try:
+        # dlt wraps what the resource raised; the host reads the reason through the chain.
+        with pytest.raises(Exception) as info:
+            list(resource)
+    finally:
+        server.shutdown()
+    assert module.classify_sync_error(info.value) == "failed_provider"
+    stats = resource.cognee_sync_stats
+    assert [key for key, value in stats.items() if value] == ["failed", "failed_provider"]
+
+
 def test_a_run_whose_429s_name_a_nan_wait_stops_as_a_rate_limit(monkeypatch):
     """Through the source and a real socket: every getUpdates answers 429 with a NaN wait, so
     the run backs off 1, 2, 4 and 8 s and stops with failed_rate_limit, not failed_unexpected.
