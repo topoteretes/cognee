@@ -693,7 +693,9 @@ failure behaviour: `docs/embedding-worker.md`.
 LLM_RATE_LIMIT_ENABLED=true
 LLM_RATE_LIMIT_REQUESTS=60  # Requests per interval
 LLM_RATE_LIMIT_INTERVAL=60  # Interval in seconds
+LLM_MAX_CONCURRENT_REQUESTS=0  # Max requests in flight at once per model; 0 = unlimited (default)
 ```
+The RPM limiter bounds how many requests *start* per interval; `LLM_MAX_CONCURRENT_REQUESTS` bounds how many are *running* at once, which is what a serial backend (Ollama, llama.cpp, a small vLLM server) needs. It is off for every provider until set, applies per model (stages routed to the same model share its slots) and per process.
 
 #### Instructor Mode (Structured Output)
 ```bash
@@ -1062,6 +1064,10 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 **Rate Limiting Errors**
 - Enable client-side rate limiting: `LLM_RATE_LIMIT_ENABLED=true`
 - Adjust limits: `LLM_RATE_LIMIT_REQUESTS` and `LLM_RATE_LIMIT_INTERVAL`
+
+**Local LLM server times out during ingestion**
+- Issue: cognify sends one extraction call per chunk at once, so a serial server (Ollama, llama.cpp, a small vLLM deployment) queues them until callers time out and retry. The RPM limiter does not help: it limits how many calls start per interval, not how many are running
+- Solution: set `LLM_MAX_CONCURRENT_REQUESTS` to what the server runs in parallel (Ollama's `OLLAMA_NUM_PARALLEL`), usually 1 to 4. It applies per model and per process, so N workers can send N times that
 
 ## Resources
 
