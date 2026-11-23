@@ -277,6 +277,9 @@ async def run(args):
     from cognee.infrastructure.llm.LLMGateway import LLMGateway
     from cognee.modules.retrieval import broad_retriever
     from cognee.modules.retrieval.broad_retriever import (
+        BroadLimitError,
+        BroadNoTextError,
+        BroadQueryError,
         BroadRetriever,
         DecisionLarge,
         DecisionSmall,
@@ -288,6 +291,8 @@ async def run(args):
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
+        # The shared retriever must recognize baseline errors for its normal retry.
+        module.BroadQueryError = BroadQueryError
         parent_store = module.RecordStore
     fixture = Fixture(args.fixture_dir)
     results = {
@@ -401,7 +406,7 @@ async def run(args):
                 row["matches_truth"] = "security" in text and "audit" in text
             else:
                 row["matches_truth"] = [list(values) for values in found.rows] == row["expected"]
-        except Exception as error:  # noqa: BLE001 - report each independent scenario's failure
+        except (BroadQueryError, BroadLimitError, BroadNoTextError) as error:
             message = str(error)
             secret = os.environ.get("LLM_API_KEY")
             row.update(
