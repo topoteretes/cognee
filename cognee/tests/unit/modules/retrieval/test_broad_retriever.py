@@ -282,8 +282,8 @@ async def test_default_store_covers_all_records_through_one_gb(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("error", [RuntimeError("decision failed"), asyncio.CancelledError()])
-async def test_record_store_is_closed_when_retrieval_fails_or_is_cancelled(monkeypatch, error):
+@pytest.mark.parametrize("error", [None, RuntimeError("decision failed"), asyncio.CancelledError()])
+async def test_record_store_is_closed_after_success_failure_or_cancellation(monkeypatch, error):
     _use(monkeypatch, {"notes": "The meeting moved to Tuesday."})
     connections = []
 
@@ -292,14 +292,20 @@ async def test_record_store_is_closed_when_retrieval_fails_or_is_cancelled(monke
             super().__init__()
             connections.append(self.connection)
 
-    async def fail(self, *args):
-        raise error
+    async def decide(self, *args):
+        if error is not None:
+            raise error
+        return DecisionSmall(answer="Tuesday.")
 
     monkeypatch.setattr(broad_retriever, "RecordStore", TrackedStore)
-    monkeypatch.setattr(BroadRetriever, "_ask", fail)
+    monkeypatch.setattr(BroadRetriever, "_ask", decide)
 
-    with pytest.raises(type(error)):
-        await BroadRetriever().get_retrieved_objects("When is the meeting?")
+    if error is None:
+        found = await BroadRetriever().get_retrieved_objects("When is the meeting?")
+        assert found.answer == "Tuesday."
+    else:
+        with pytest.raises(type(error)):
+            await BroadRetriever().get_retrieved_objects("When is the meeting?")
 
     assert len(connections) == 1
     with pytest.raises(sqlite3.ProgrammingError, match="closed"):
