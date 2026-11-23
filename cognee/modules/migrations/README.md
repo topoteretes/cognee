@@ -42,6 +42,24 @@ re-arms the chain for a database whose data drifted from its stamp (restored
 backup, old-code writes after migration), letting the idempotent chain
 converge it on the next upgrade.
 
+## Upgrade stops (`upgrade_stops.py`)
+
+A migration that writes through a store adapter runs with the adapter of the
+release doing the upgrade. When that adapter no longer accepts the layout an old
+database is still in, the step fails, and fails again on every start. An
+`UpgradeStop` names such a case and the release whose adapter still accepts it:
+the runner checks the stops before it applies any step, so the database is left
+as it was, and the stored error (`cognee-cli current`) says what to do — install
+that release and run `cognee-cli upgrade`, then this release and run it again.
+
+| Stop before | Applies to | Upgrade through |
+|---|---|---|
+| `rekey_fork_document_ids` | a Postgres graph still in the `source_ref_keys` layout with documents several datasets shared before cognee 1.5 | 1.6.10 |
+
+Add a stop only for a case reproduced against a database written by the old
+release, and keep its condition as narrow as the failure: a database that
+migrates in one go must not be sent through another release.
+
 ## Authoring contract — read before writing migration #2
 
 1. **Slugs are append-only and immutable.** The slug IS the revision stored in

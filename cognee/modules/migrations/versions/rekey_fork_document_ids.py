@@ -54,9 +54,9 @@ case, per-document work only where forks exist.
 Note: this migration works through the graph adapter's own methods, so it runs
 with the adapter of the cognee release doing the upgrade. A Postgres graph that
 still keeps source refs in the ``source_ref_keys`` columns is refused by the
-current adapter (see ``postgres_graph_source_ref_tables``). A database that has
-not passed this migration yet must be upgraded to cognee 1.6.8 first, and to the
-current release after that.
+current adapter (see ``postgres_graph_source_ref_tables``). Such a database with
+fork documents has to be migrated by cognee 1.6.10 first; the runner refuses it
+before changing anything and says so (``upgrade_stops.py``).
 """
 
 from uuid import UUID

@@ -335,6 +335,15 @@ async def _schema_of(connection, table: str, with_legacy_columns: bool = False) 
     return (await connection.execute(text(statement))).scalar()
 
 
+async def stores_refs_in_array_columns(graph_engine) -> bool:
+    """Whether ``graph_engine`` is a Postgres graph still in the layout this migration converts."""
+    engine = _postgres_engine(graph_engine)
+    if engine is None:
+        return False
+    async with engine.connect() as connection:
+        return await _schema_of(connection, "graph_node", with_legacy_columns=True) is not None
+
+
 async def _run_in_batches(connection, schema: str, artifact: _Artifact, statement_for) -> None:
     """Run ``statement_for(schema, artifact, after)`` once per batch of ``artifact.table``.
 
