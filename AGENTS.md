@@ -13,6 +13,7 @@ This file provides shared project instructions for coding agents. `CLAUDE.md` im
 7. **Be concise but informative**: No essays, but the docstrings and comments a reader needs.
 8. **No invented limits**: Never add a cutoff (`max_n`, `[:k]`, "older than X") or an expiry (TTL, cooldown, eviction) the task did not ask for — both are silent data loss. If you believe one is unavoidable, stop and ask, stating what would be dropped and why; never add it first and justify it afterwards. Existing bounds (lock leases, recovery floors, batch caps) are deliberate: removing or changing one is the same question.
 9. **Honor DRY principle**: Before adding a helper, utility or wrapper, search for an existing one in the package's utils and cognee/shared/. Extend what exists rather than adding a near-duplicate, unless it conflicts with principle #1. If the existing helper doesn't fit, say why in the PR.
+10. **Keep the event loop responsive**: Use async I/O and offload blocking I/O or CPU-heavy work from async request paths, especially stages that may take a second or more; verify other requests can complete while they run.
 
 **Methodology**: surgical changes only; evidence-based debugging (minimal, targeted logging); fix root causes, not symptoms. Debug like a detective: form the theory of the crime, collect evidence, and change code only once the evidence proves it.
 
