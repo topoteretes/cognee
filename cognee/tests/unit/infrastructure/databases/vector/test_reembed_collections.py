@@ -200,9 +200,9 @@ async def test_every_collection_is_rebuilt_with_the_new_model(open_store):
 async def test_a_failed_embedding_changes_no_collection_and_the_next_call_continues(
     open_store, monkeypatch
 ):
-    # Rows are staged one write batch at a time; two rows per batch here, so the
-    # provider fails with some of a collection staged and some not.
-    monkeypatch.setattr("cognee.tasks.storage.reembed_collections.write_batch_size", lambda: 2)
+    # Rows are staged a step at a time; two rows per step here, so the provider
+    # fails with some of a collection staged and some not.
+    monkeypatch.setattr("cognee.tasks.storage.reembed_collections.ROWS_PER_STEP", 2)
     old = await _write_old_store(open_store)
     failing = _Model(marker=2.0, width=NEW_WIDTH, fail_after=4, request_limit=REQUEST_SIZE)
     store = open_store(failing)
@@ -254,7 +254,7 @@ async def test_a_replace_that_stopped_is_finished_by_the_next_call(open_store, m
         await real_upsert(self, collection_name, points[:2], payload_schema)
 
     monkeypatch.setattr(type(store), "upsert_raw_vectors", upsert_once_then_die)
-    monkeypatch.setattr("cognee.tasks.storage.reembed_collections.write_batch_size", lambda: 3)
+    monkeypatch.setattr("cognee.tasks.storage.reembed_collections.ROWS_PER_STEP", 3)
     with pytest.raises(OSError):
         await replace_collections(store, names)
     assert len(await store.get_data_point_ids(chunks)) == 2

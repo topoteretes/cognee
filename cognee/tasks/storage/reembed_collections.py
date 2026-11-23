@@ -34,13 +34,18 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import (
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotReembeddableError
 from cognee.shared.logging_utils import get_logger
 
-from .index_data_points import indexing_budget, write_batch_size
+from .index_data_points import indexing_budget
 
 logger = get_logger("reembed_collections")
 
 # No collection cognee writes can have this name: collections are named
 # ``<Type>_<field>`` after a DataPoint class.
 STAGING_PREFIX = "__reembed_"
+
+# Rows read, embedded and written per step. A step looks its rows up by id, which on
+# LanceDB reads the whole collection, so at the size of an index write (128 rows) a
+# large collection is slow: 200,000 rows took 8.7 minutes, and 1 minute at this size.
+ROWS_PER_STEP = 1000
 
 
 def staging_collection_name(collection_name: str) -> str:
@@ -101,7 +106,6 @@ async def replace_collections(vector_engine, collection_names: list[str]) -> int
     untouched.
     """
     staging_names = set(await vector_engine.get_collection_names())
-    rows_per_write = write_batch_size()
     embedded = 0
     for collection_name in collection_names:
         staging_name = staging_collection_name(collection_name)
@@ -120,9 +124,9 @@ async def replace_collections(vector_engine, collection_names: list[str]) -> int
             )
         await vector_engine.delete_collection(collection_name)
         await vector_engine.create_collection(collection_name)
-        for start in range(0, len(staged_ids), rows_per_write):
+        for start in range(0, len(staged_ids), ROWS_PER_STEP):
             rows = await vector_engine.retrieve(
-                staging_name, staged_ids[start : start + rows_per_write], include_vector=True
+                staging_name, staged_ids[start : start + ROWS_PER_STEP], include_vector=True
             )
             await vector_engine.upsert_raw_vectors(
                 collection_name,
@@ -158,13 +162,12 @@ async def _stage_unstaged_rows(vector_engine, collection_name: str) -> int:
         if row_id not in staged_ids
     ]
     requests = indexing_budget(vector_engine).requests
-    rows_per_write = write_batch_size()
-    for start in range(0, len(unstaged_ids), rows_per_write):
+    for start in range(0, len(unstaged_ids), ROWS_PER_STEP):
         rows = await vector_engine.retrieve(
-            collection_name, unstaged_ids[start : start + rows_per_write]
+            collection_name, unstaged_ids[start : start + ROWS_PER_STEP]
         )
         texts = [_embedded_text(collection_name, row) for row in rows]
-        # One write batch is embedded in provider-sized requests, as an index write is.
+        # A step's texts are embedded in provider-sized requests, as an index write's are.
         with embedding_request_scope(requests):
             vectors = await vector_engine.embed_data(texts)
         await vector_engine.upsert_raw_vectors(

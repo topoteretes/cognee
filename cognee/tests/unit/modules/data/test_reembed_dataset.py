@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import importlib
 from contextvars import copy_context
-from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -111,9 +110,36 @@ class _Centroid(BaseModel):
 CHUNKS = [_Chunk(text="a", belongs_to_set=["alpha"]), _Chunk(text="bb"), _Chunk(text="ccc")]
 
 
+class _Routing:
+    """Dataset routing, as ``reembed_dataset`` calls it.
+
+    It records the dataset ids only. The engine a call is handed must not be kept: a
+    reference held past the test would put off the engine's close until the test's event
+    loop is gone, and its worker process would outlive the test.
+    """
+
+    def __init__(self):
+        self.removed: list = []
+        self.copied: list = []
+        # What the copy does besides being recorded: an async callable, or nothing.
+        self.during_copy = None
+
+    async def remove_dataset_routes(self, dataset_id, document_ids):
+        self.removed.append(dataset_id)
+
+    async def copy_dataset_routes(self, dataset_id, index_engine):
+        self.copied.append(dataset_id)
+        if self.during_copy is not None:
+            await self.during_copy()
+        return 0
+
+
 @pytest_asyncio.fixture
 async def dataset(monkeypatch):
     """A dataset built with the OLD model: three chunks."""
+    # A dataset has a vector store of its own only with access control on, and the
+    # suite does not run with it on everywhere (a test module turns it off at import).
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "true")
 
     # An engine embeds with the config in force when it is created, as in production.
     def engine_of_the_config_in_force():
@@ -124,9 +150,9 @@ async def dataset(monkeypatch):
     monkeypatch.setattr(_Model, "fails_after", {})
     monkeypatch.setattr(_Model, "embedded", [])
     monkeypatch.setattr(_Model, "held", None)
-    remove_routes, copy_routes = AsyncMock(), AsyncMock(return_value=0)
-    monkeypatch.setattr(routing, "remove_dataset_routes", remove_routes)
-    monkeypatch.setattr(routing, "copy_dataset_routes", copy_routes)
+    dataset_routing = _Routing()
+    monkeypatch.setattr(routing, "remove_dataset_routes", dataset_routing.remove_dataset_routes)
+    monkeypatch.setattr(routing, "copy_dataset_routes", dataset_routing.copy_dataset_routes)
 
     user = await get_default_user()
     async with get_relational_engine().get_async_session() as session:
@@ -136,7 +162,7 @@ async def dataset(monkeypatch):
     async with set_database_global_context_variables(created.id, embedding_config=OLD):
         await (await get_vector_engine_async()).index_data_points("_Chunk", "text", CHUNKS)
 
-    created.remove_routes, created.copy_routes = remove_routes, copy_routes
+    created.routing = dataset_routing
     try:
         yield created
     finally:
@@ -205,14 +231,16 @@ async def test_a_dataset_is_rebuilt_and_recorded_with_the_new_model(dataset):
 
     # Its routing rows held the old vectors: removed, then copied from the rebuilt
     # store once the record says so (the copy itself decides whether the models match).
-    dataset.remove_routes.assert_awaited_once()
-    dataset.copy_routes.assert_awaited_once()
-    assert dataset.copy_routes.await_args.args[0] == dataset.id
+    assert dataset.routing.removed == [dataset.id]
+    assert dataset.routing.copied == [dataset.id]
 
 
 @pytest.mark.asyncio
 async def test_a_failed_routing_copy_is_raised_with_the_dataset_converted(dataset):
-    dataset.copy_routes.side_effect = ConnectionError("the routing store is down")
+    async def the_routing_store_is_down():
+        raise ConnectionError("the routing store is down")
+
+    dataset.routing.during_copy = the_routing_store_is_down
 
     with pytest.raises(ConnectionError):
         await reembed_dataset(dataset.id, NEW)
@@ -235,13 +263,12 @@ async def test_a_search_in_flight_when_the_call_ends_still_finishes(dataset, mon
             store = await get_vector_engine_async()
             return await store.search("_Chunk_text", query_text="a held query", limit=1)
 
-    async def a_search_starts_during_the_copy(dataset_id, index_engine):
+    async def a_search_starts():
         # The record is finished by now, so a user of the new model is admitted.
         searches.append(asyncio.create_task(search()))
         await entered.wait()
-        return 0
 
-    dataset.copy_routes.side_effect = a_search_starts_during_the_copy
+    dataset.routing.during_copy = a_search_starts
 
     await reembed_dataset(dataset.id, NEW)
     release.set()
@@ -251,8 +278,8 @@ async def test_a_search_in_flight_when_the_call_ends_still_finishes(dataset, mon
 
 @pytest.mark.asyncio
 async def test_a_failed_embedding_leaves_the_dataset_as_it_was(dataset, monkeypatch):
-    # One row per write, so the provider goes down with some rows staged.
-    monkeypatch.setattr(reembed_collections, "write_batch_size", lambda: 1)
+    # One row per step, so the provider goes down with some rows staged.
+    monkeypatch.setattr(reembed_collections, "ROWS_PER_STEP", 1)
     monkeypatch.setattr(_Model, "fails_after", {"new": 2})
 
     with pytest.raises(ConnectionError):
@@ -264,15 +291,17 @@ async def test_a_failed_embedding_leaves_the_dataset_as_it_was(dataset, monkeypa
     assert REEMBED_KEY not in record
     # Nothing staged is left, and the same process goes on with the old model.
     await _assert_used_like_a_dataset_of(OLD, dataset.id)
-    dataset.remove_routes.assert_not_awaited()
+    assert dataset.routing.removed == []
 
 
 @pytest.mark.asyncio
 async def test_an_unfinished_reembed_blocks_the_dataset_until_it_is_run_again(dataset, monkeypatch):
     replace = reembed_collections.replace_collections
-    monkeypatch.setattr(
-        reembed_collections, "replace_collections", AsyncMock(side_effect=OSError("died"))
-    )
+
+    async def the_process_dies(vector_engine, collection_names):
+        raise OSError("died")
+
+    monkeypatch.setattr(reembed_collections, "replace_collections", the_process_dies)
     with pytest.raises(OSError):
         await reembed_dataset(dataset.id, NEW)
 

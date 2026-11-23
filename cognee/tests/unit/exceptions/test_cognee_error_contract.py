@@ -96,6 +96,10 @@ SAMPLE_ARGUMENTS = {
     "configured_dimensions": 1536,
     # StoredVectorWidthMismatchError: the LanceDB table whose vectors are not that width.
     "collection_name": "DocumentChunk_text",
+    # CollectionNotReembeddableError: the row of that collection with no text to embed.
+    "data_point_id": "sample-data-point-id",
+    # DatasetReembedIncompleteError: the model an unfinished re-embed is moving the dataset to.
+    "target_model": "sample-provider/new-model",
     # GlinerWorkerModelMismatchError: the model required vs the one the worker serves.
     "expected": "sample-org/required-model",
     "served": "sample-org/served-model",
