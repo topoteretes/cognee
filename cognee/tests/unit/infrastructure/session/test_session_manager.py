@@ -809,7 +809,26 @@ class TestSessionManager:
         entries = await sm.get_agent_trace_session(user_id="u1", session_id="s1")
         assert len(entries) == 1
         assert entries[0]["trace_id"] == "t1"
-        mock_cache.get_agent_trace_session.assert_called_once_with("u1", "s1", last_n=None)
+        mock_cache.get_agent_trace_session.assert_called_once_with(
+            "u1", "s1", last_n=None, start=None, end=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_agent_trace_session_forwards_a_range(self, sm, mock_cache):
+        mock_cache.get_agent_trace_session.return_value = []
+        await sm.get_agent_trace_session(user_id="u1", session_id="s1", start=0, end=9)
+        mock_cache.get_agent_trace_session.assert_called_once_with(
+            "u1", "s1", last_n=None, start=0, end=9
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{"start": 1}, {"end": 2}, {"start": 3, "end": 3}, {"start": 0, "end": 2, "last_n": 1}],
+    )
+    async def test_get_agent_trace_session_rejects_a_bad_range(self, sm, kwargs):
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_agent_trace_session(user_id="u1", session_id="s1", **kwargs)
 
     @pytest.mark.asyncio
     async def test_get_agent_trace_session_unavailable_returns_empty(self, sm_unavailable):

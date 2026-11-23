@@ -677,17 +677,30 @@ class SessionManager:
         user_id: str,
         session_id: str | None = None,
         last_n: int | None = None,
+        start: int | None = None,
+        end: int | None = None,
     ) -> list[SessionAgentTraceEntry]:
         """
-        Get the agent trace session for the given user/session pair.
+        Get the agent trace session for the given user/session pair: the last ``last_n``
+        steps, or the steps at positions ``start`` to ``end`` (exclusive), or all.
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
+        if (start is None) != (end is None) or (start is not None and last_n is not None):
+            raise SessionParameterValidationError(
+                message="start and end go together and exclude last_n"
+            )
+        if start is not None and not 0 <= start < end:
+            raise SessionParameterValidationError(
+                message=f"need 0 <= start < end, got start={start}, end={end}"
+            )
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace session")
             return []
 
-        entries = await self._cache.get_agent_trace_session(user_id, session_id, last_n=last_n)
+        entries = await self._cache.get_agent_trace_session(
+            user_id, session_id, last_n=last_n, start=start, end=end
+        )
         return entries
 
     async def get_agent_trace_feedback(

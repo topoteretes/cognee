@@ -659,7 +659,12 @@ class RedisAdapter(CacheDBInterface):
             raise CacheConnectionError(error_msg) from e
 
     async def get_agent_trace_session(
-        self, user_id: str, session_id: str, last_n: int | None = None
+        self,
+        user_id: str,
+        session_id: str,
+        last_n: int | None = None,
+        start: int | None = None,
+        end: int | None = None,
     ) -> list[SessionAgentTraceEntry]:
         """Retrieve stored trace steps for the given session."""
         trace_key = self._agent_trace_key(user_id, session_id)
@@ -667,6 +672,11 @@ class RedisAdapter(CacheDBInterface):
             return [
                 SessionAgentTraceEntry(**entry)
                 for entry in await self._load_entries(trace_key, -last_n, -1)
+            ]
+        if start is not None:
+            return [
+                SessionAgentTraceEntry(**entry)
+                for entry in await self._load_entries(trace_key, start, end - 1)
             ]
         return [SessionAgentTraceEntry(**entry) for entry in await self._load_entries(trace_key)]
 

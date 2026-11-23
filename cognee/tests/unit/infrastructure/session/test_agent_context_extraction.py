@@ -50,6 +50,8 @@ class FakeSessionManager:
         self.store = []
         self.traces = list(traces or [])
         self.trace_session_last_n_calls = []
+        self.trace_ranges = []
+        self.traces_read = 0
 
     async def get_session_context_entries(self, user_id, session_id):
         return list(self.store)
@@ -64,11 +66,17 @@ class FakeSessionManager:
                 return True
         return False
 
-    async def get_agent_trace_session(self, user_id, session_id, last_n=None):
+    async def get_agent_trace_session(self, user_id, session_id, last_n=None, start=None, end=None):
         self.trace_session_last_n_calls.append(last_n)
         if last_n is not None:
-            return list(self.traces[-last_n:])
-        return list(self.traces)
+            traces = list(self.traces[-last_n:])
+        elif start is not None:
+            self.trace_ranges.append((start, end))
+            traces = list(self.traces[start:end])
+        else:
+            traces = list(self.traces)
+        self.traces_read += len(traces)
+        return traces
 
     async def get_agent_trace_count(self, user_id, session_id):
         return len(self.traces)
@@ -746,6 +754,21 @@ async def test_a_backlog_above_the_window_is_extracted_oldest_first(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_a_window_reads_only_its_own_traces(monkeypatch):
+    # A long-lived session must not be read whole on every due window.
+    calls = _count_llm_calls(monkeypatch)
+    sm = FakeSessionManager(traces=[_trace(f"step-{i}") for i in range(2000)])
+    await TRACE_EXTRACTION_WATERMARK.write_count(sm, USER_ID, "s", count=1990)
+
+    await extract_pending_agent_context(
+        session_manager=sm, user_id=USER_ID, session_id="s", automatic=False
+    )
+
+    assert sm.traces_read == 13  # 10 new traces and the overlap of 3
+    assert "step-1987 " in calls[0] and "step-1986 " not in calls[0]
+
+
+@pytest.mark.asyncio
 async def test_traces_written_after_the_plan_wait_for_the_next_window(monkeypatch):
     # Trace writes take no lock, so traces can land between the plan and the read.
     # The window must still cover exactly the planned traces, oldest first.
@@ -766,6 +789,7 @@ async def test_traces_written_after_the_plan_wait_for_the_next_window(monkeypatc
 
     assert all(f"step-{i} " in calls[0] for i in range(10, 20))
     assert "late-" not in calls[0]
+    assert sm.trace_ranges == [(7, 20)]  # the read stops at the planned total
     assert await TRACE_EXTRACTION_WATERMARK.read_count(sm, USER_ID, "s") == 20
 
 
