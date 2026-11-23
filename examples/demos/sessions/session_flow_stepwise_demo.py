@@ -32,7 +32,8 @@ Flow traced:
     (D)   recall(question, fresh session)  the distilled lessons are now permanent
     (E)   visualize_graph                  distilled nodes shown with a gold ring
 
-Requires a configured LLM provider (see CLAUDE.md). Wording of answers/lessons varies by model.
+Requires a configured LLM provider (see docs/runtime-configuration.md).
+Wording of answers and lessons varies by model.
 """
 
 import asyncio
