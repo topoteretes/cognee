@@ -295,8 +295,7 @@ async def search(
 
     client = get_remote_client()
     if client is not None:
-        # The wire carries the class name and cannot tell node_type=None from an
-        # omitted one, so the local rule for names without a type applies here.
+        # Names without a type are refused here, as locally, before any request.
         node_name_scope(node_type, node_name)
         return await client.search(
             query_text,

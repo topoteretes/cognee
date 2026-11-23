@@ -229,32 +229,66 @@ lose their routes too (both apply node sets only) and a date question lands on
 `HYBRID_COMPLETION`, which defers to `GRAPH_COMPLETION` for the scope. Session
 sources are never scoped by `node_name`.
 
-Over HTTP (`POST /api/v1/search`, `POST /api/v1/recall`) the field is `nodeType`,
-the bare class name as a string (`"SchemaColumn"`, never a dotted module path);
-omitted means node-set tags, and anything else is a 422 naming the value. The server
-resolves the name to the class (`resolve_node_type` in
+Over HTTP (`POST /api/v1/search`, `POST /api/v1/recall`) the field is `nodeType`
+(`node_type` is accepted too), the class name as a string. The server resolves it
+to the class (`resolve_node_type` in
 `cognee/modules/search/methods/node_type_resolution.py`) before calling the SDK, so
-the search is the one a local caller would run. Only classes the server ships or
-imports resolve: a class a remote cognify rebuilt from a `graph_model` JSON schema
-stays loaded on the worker that served that request, so its name is refused on every
-worker rather than resolving on one. `cognee.serve()` sends the class name the same
-way, and with `node_name` given it first checks the server's `/openapi.json` once for
-the field: a server that predates it would read the names as node-set tags and
-return results for the wrong scope without an error, so a typed scope is refused
+the search is the one a local caller would run:
+
+- Omitted, or `"NodeSet"` (the default in `/openapi.json`): `nodeName` holds
+  node-set tags.
+- Any other name: `nodeName` holds names of nodes of that type, a typed graph scope.
+  The name is exact and case-sensitive: the bare class name (`"SchemaColumn"`, never
+  a dotted module path) of a DataPoint subclass loaded in the server process, at any
+  depth of inheritance. That covers the built-in models, a custom model the
+  deployment imports, and a class the graph-model ingestion path generated from a
+  `graph_model` schema in that process. A server must load its custom models before
+  it is searched by them; nothing is persisted, so after a restart a generated
+  class resolves again only once it is rebuilt.
+- An unknown name is a 422 naming the value, with or without `nodeName`, and no
+  retrieval runs (on recall, streaming or not).
+- `null` is passed on as `node_type=None`: with `nodeName` the SDK refuses it (422)
+  instead of widening the scope to node sets; without names it reaches the SDK
+  unchanged.
+
+On recall the type scopes the graph source only; session, trace, tools, code and
+skill results are not filtered by it. A pinned `searchType` that cannot apply a typed
+scope is refused, as on the SDK.
+
+`cognee.serve()` sends the same field: a class as its exact `__name__`, an explicit
+`None` as `null`, and the `NodeSet` default as nothing. The server must have a class
+of that name loaded, or the call fails with its 422. With `node_name` given, a
+non-default type is sent only after the client checks the server's `/openapi.json`
+once for the field: a server that predates it would read the names as node-set tags
+and return results for the wrong scope without an error, so the call is refused
 against such a server, and against one whose schema cannot be read. The node-set
 default, and a type with no names, go to any server.
 
 ```python
-# The DLT column anchors of SDK-1429, locally and over HTTP.
+# The DLT column anchors of SDK-1429, locally and over serve().
+await cognee.search(
+    "List every value in users:name.",
+    query_type=SearchType.GRAPH_COMPLETION,
+    node_type=SchemaColumn,
+    node_name=["users:name"],
+    only_context=True,
+)
 await cognee.recall(
     "Which genres sell best?",
     query_type=SearchType.GRAPH_COMPLETION,
     node_type=SchemaColumn,
     node_name=["genre:name"],
 )
-# POST /api/v1/recall
-# {"query": "...", "searchType": "GRAPH_COMPLETION",
-#  "nodeType": "SchemaColumn", "nodeName": ["genre:name"]}
+```
+
+```json
+// POST /api/v1/search
+{"query": "List every value in users:name.", "searchType": "GRAPH_COMPLETION",
+ "nodeType": "SchemaColumn", "nodeName": ["users:name"], "onlyContext": true}
+
+// POST /api/v1/recall
+{"query": "Which genres sell best?", "searchType": "GRAPH_COMPLETION",
+ "nodeType": "SchemaColumn", "nodeName": ["genre:name"]}
 ```
 
 ### When a routed strategy comes up empty

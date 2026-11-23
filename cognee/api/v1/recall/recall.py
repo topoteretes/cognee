@@ -152,6 +152,7 @@ class RecallKwargs(TypedDict, total=False):
 
     system_prompt: str
     system_prompt_path: str
+    node_type: type | None
     node_name: list[str]
     node_name_filter_operator: str
     only_context: bool
@@ -638,7 +639,8 @@ async def recall(
     # Names without a type are refused here, before any lane runs, so a call is
     # accepted or refused the same way locally and over serve(), whatever its
     # scope: the graph lane would raise the same error later, a session-only call
-    # would silently drop the names, and the wire cannot tell None from omitted.
+    # would silently drop the names, and a remote call should not need a round trip
+    # to learn it.
     node_name_scope(node_type, node_name)
     # "on_empty" means: go back to the source database only when cognee lacks
     # context — so tools must observe every other source's results first.

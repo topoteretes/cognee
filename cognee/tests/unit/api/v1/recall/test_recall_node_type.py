@@ -217,6 +217,22 @@ async def test_recall_remote_client_forwards_node_type(api_recall_mod, remote_re
 
 
 @pytest.mark.asyncio
+async def test_recall_remote_client_forwards_an_explicit_none_without_names(
+    api_recall_mod, remote_recall
+):
+    await api_recall_mod.recall(
+        query_text="q",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=[uuid4()],
+        node_type=None,
+        user=_make_user(),
+    )
+
+    assert "node_type" in remote_recall
+    assert remote_recall["node_type"] is None
+
+
+@pytest.mark.asyncio
 async def test_recall_remote_refuses_names_without_a_type_like_the_local_call(
     api_recall_mod, remote_recall
 ):
@@ -277,10 +293,16 @@ async def test_cloud_client_recall_sends_the_node_type_name():
     client._get_session = AsyncMock(return_value=session)
 
     await client.recall("q", None, node_type=SchemaColumn, node_name=["genre:name"])
-    assert session.payload["node_type"] == "SchemaColumn"
+    assert session.payload["nodeType"] == "SchemaColumn"
 
     await client.recall("q", None, node_type=NodeSet, node_name=["proj"])
-    assert "node_type" not in session.payload
+    assert "nodeType" not in session.payload
+
+    await client.recall("q", None, node_name=["proj"])
+    assert "nodeType" not in session.payload
+
+    await client.recall("q", None, node_type=None)
+    assert session.payload["nodeType"] is None
 
 
 # --- router ------------------------------------------------------------------
@@ -293,7 +315,8 @@ def test_recall_dto_takes_node_type_in_both_casings():
     assert RecallPayloadDTO.model_validate({"query": "q", "node_type": "Entity"}).node_type == (
         "Entity"
     )
-    assert RecallPayloadDTO.model_validate({"query": "q"}).node_type is None
+    assert RecallPayloadDTO.model_validate({"query": "q"}).node_type == "NodeSet"
+    assert RecallPayloadDTO.model_validate({"query": "q", "nodeType": None}).node_type is None
 
 
 def test_node_type_is_in_the_openapi_schema_of_the_recall_endpoint():
@@ -303,9 +326,10 @@ def test_node_type_is_in_the_openapi_schema_of_the_recall_endpoint():
     properties = app.openapi()["components"]["schemas"]["RecallPayloadDTO"]["properties"]
 
     assert "nodeType" in properties
+    assert properties["nodeType"]["default"] == "NodeSet"
 
 
-def _router_client(monkeypatch, captured: dict):
+def _router_client(monkeypatch, captured: dict, recall=None):
     """The recall router behind the app's real CogneeApiError handler."""
     from cognee.api.client import exception_handler
     from cognee.exceptions import CogneeApiError
@@ -325,11 +349,13 @@ def _router_client(monkeypatch, captured: dict):
     # The v1 package re-exports the function under the module's name, so import the
     # package by dotted path: the handler imports from that package.
     recall_pkg = importlib.import_module("cognee.api.v1.recall")
-    monkeypatch.setattr(recall_pkg, "recall", fake_recall)
+    monkeypatch.setattr(recall_pkg, "recall", recall or fake_recall)
     return TestClient(app)
 
 
-def test_recall_endpoint_resolves_node_type_to_the_class(monkeypatch):
+@pytest.mark.parametrize("stream", [False, True])
+def test_recall_endpoint_resolves_node_type_to_the_class(monkeypatch, stream):
+    """The JSON and streaming transports share one recall call and its resolved type."""
     captured = {}
     client = _router_client(monkeypatch, captured)
 
@@ -340,6 +366,7 @@ def test_recall_endpoint_resolves_node_type_to_the_class(monkeypatch):
             "query": "which genres sell best?",
             "nodeType": "SchemaColumn",
             "nodeName": ["genre:name"],
+            "stream": stream,
         },
     )
 
@@ -359,16 +386,44 @@ def test_recall_endpoint_without_node_type_reads_node_name_as_node_sets(monkeypa
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_recall_endpoint_rejects_an_unknown_node_type_with_422_naming_it(monkeypatch, stream):
+@pytest.mark.parametrize("node_name", [["x"], None], ids=["with names", "without names"])
+def test_recall_endpoint_rejects_an_unknown_node_type_with_422_naming_it(
+    monkeypatch, stream, node_name
+):
     """Resolution runs before the transport is chosen, so streaming answers 422 too."""
     captured = {}
     client = _router_client(monkeypatch, captured)
 
     response = client.post(
         "/api/v1/recall",
-        json={"query": "q", "nodeType": "Nope", "nodeName": ["x"], "stream": stream},
+        json={"query": "q", "nodeType": "Nope", "nodeName": node_name, "stream": stream},
     )
 
     assert response.status_code == 422, response.text
     assert "'Nope'" in response.json()["detail"]
     assert captured == {}
+
+
+def test_recall_endpoint_passes_an_explicit_null_without_names_on_unchanged(monkeypatch):
+    captured = {}
+    client = _router_client(monkeypatch, captured)
+
+    response = client.post("/api/v1/recall", json={"query": "q", "nodeType": None})
+
+    assert response.status_code == 200, response.text
+    assert "node_type" in captured
+    assert captured["node_type"] is None
+
+
+def test_recall_endpoint_keeps_the_sdk_refusal_of_names_with_a_null_type(
+    monkeypatch, api_recall_mod, graph_lane
+):
+    """A null type is not read as the NodeSet default, which would broaden the scope:
+    the real recall() gets None and refuses the names before any lane runs."""
+    response = _router_client(monkeypatch, {}, recall=api_recall_mod.recall).post(
+        "/api/v1/recall", json={"query": "q", "nodeType": None, "nodeName": ["proj"]}
+    )
+
+    assert response.status_code == 422, response.text
+    assert "node_name needs a node_type" in response.json()["detail"]
+    assert graph_lane == []

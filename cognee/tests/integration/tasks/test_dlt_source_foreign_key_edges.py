@@ -11,6 +11,8 @@ Real add + cognify against local stores; the DLT route is LLM-free, and embeddin
 are mocked so the vector store works offline.
 """
 
+import contextlib
+import contextvars
 import logging
 import pathlib
 import sqlite3
@@ -207,6 +209,148 @@ async def test_column_anchor_exposes_all_values_to_graph_completion(clean_env):
     assert "users:name:Ann" in context
     assert "users:name:Bob" in context
     assert "is_column_of" in context
+
+
+_serving_request = contextvars.ContextVar("serving_request", default=False)
+
+
+@contextlib.asynccontextmanager
+async def _search_and_recall_server(monkeypatch):
+    """The search and recall routers on a real HTTP server in this event loop, so they
+    share the test's stores. Requests run as the default user, like the local calls.
+
+    The server and a serve() client share this process, and with it the remote
+    client serve() sets, so the server's own SDK calls are kept local. Yields the
+    server's URL and the paths POSTed to it.
+    """
+    import asyncio
+
+    import uvicorn
+    from fastapi import FastAPI
+
+    from cognee.api.client import exception_handler
+    from cognee.api.v1.recall.routers import get_recall_router
+    from cognee.api.v1.search.routers import get_search_router
+    from cognee.api.v1.serve import state
+    from cognee.exceptions import CogneeApiError
+    from cognee.modules.users.methods import get_authenticated_user, get_default_user
+
+    app = FastAPI()
+    app.include_router(get_search_router(), prefix="/api/v1/search")
+    app.include_router(get_recall_router(), prefix="/api/v1/recall")
+    app.add_exception_handler(CogneeApiError, exception_handler)
+    app.dependency_overrides[get_authenticated_user] = get_default_user
+
+    posted: list[str] = []
+
+    async def serving(scope, receive, send):
+        if scope["type"] == "http" and scope["method"] == "POST":
+            posted.append(scope["path"])
+        token = _serving_request.set(True)
+        try:
+            await app(scope, receive, send)
+        finally:
+            _serving_request.reset(token)
+
+    remote_client = state.get_remote_client
+    monkeypatch.setattr(
+        state, "get_remote_client", lambda: None if _serving_request.get() else remote_client()
+    )
+
+    server = uvicorn.Server(
+        uvicorn.Config(serving, host="127.0.0.1", port=0, lifespan="off", log_level="warning")
+    )
+    task = asyncio.create_task(server.serve())
+    try:
+        while not server.started:
+            await asyncio.sleep(0.05)
+        port = server.servers[0].sockets[0].getsockname()[1]
+        yield f"http://127.0.0.1:{port}", posted
+    finally:
+        server.should_exit = True
+        await task
+
+
+COLUMN_QUERY = "List every value in users:name."
+COLUMN_PROMPT = "Answer from the context."
+
+
+def _assert_column_context(context: str) -> None:
+    """The named column's values and relationships, and no other column."""
+    assert "users:name:Ann" in context
+    assert "users:name:Bob" in context
+    assert "is_column_of" in context
+    assert "has_value" in context
+    assert "users:user_code" not in context
+
+
+@pytest.mark.asyncio
+async def test_column_anchor_scope_is_the_same_locally_over_http_and_over_serve(
+    clean_env, monkeypatch
+):
+    """A typed SchemaColumn scope gives the same graph context to a local SDK call, a
+    POST to the endpoint and an SDK call over serve(), for search and for recall."""
+    import httpx
+    from fastapi.encoders import jsonable_encoder
+
+    from cognee.api.v1.serve import credentials
+    from cognee.api.v1.serve.state import get_remote_client, set_remote_client
+    from cognee.tasks.schema.models import SchemaColumn
+
+    source_db = _write_source_db(clean_env / "source.sqlite")
+    await cognee.add(f"sqlite:///{source_db}", dataset_name="shop")
+    await cognee.cognify(datasets=["shop"], chunks_per_batch=1)
+
+    sdk_args = {
+        "query_type": cognee.SearchType.GRAPH_COMPLETION,
+        "datasets": ["shop"],
+        "system_prompt": COLUMN_PROMPT,
+        "node_type": SchemaColumn,
+        "node_name": ["users:name"],
+        "top_k": 15,
+        "only_context": True,
+    }
+    body = {
+        "query": COLUMN_QUERY,
+        "searchType": "GRAPH_COMPLETION",
+        "datasets": ["shop"],
+        "systemPrompt": COLUMN_PROMPT,
+        "nodeType": "SchemaColumn",
+        "nodeName": ["users:name"],
+        "topK": 15,
+        "onlyContext": True,
+    }
+
+    def graph_texts(recalled: list) -> list[str]:
+        return [item["text"] for item in recalled if item["source"] == "graph"]
+
+    local_search = jsonable_encoder(await cognee.search(COLUMN_QUERY, **sdk_args))
+    local_recall = graph_texts(jsonable_encoder(await cognee.recall(COLUMN_QUERY, **sdk_args)))
+    _assert_column_context(local_search[0])
+    assert local_recall == local_search
+
+    monkeypatch.setattr(credentials, "_CREDENTIALS_FILE", clean_env / "credentials.json")
+    async with _search_and_recall_server(monkeypatch) as (url, posted):
+        async with httpx.AsyncClient(base_url=url, timeout=120) as http:
+            http_search = await http.post("/api/v1/search", json=body)
+            http_recall = await http.post("/api/v1/recall", json=body)
+        assert http_search.status_code == 200, http_search.text
+        assert http_recall.status_code == 200, http_recall.text
+
+        await cognee.serve(url=url)
+        try:
+            remote_search = await cognee.search(COLUMN_QUERY, **sdk_args)
+            remote_recall = await cognee.recall(COLUMN_QUERY, **sdk_args)
+        finally:
+            await get_remote_client().close()
+            set_remote_client(None)
+
+    assert posted == ["/api/v1/search", "/api/v1/recall"] * 2
+
+    assert http_search.json() == local_search
+    assert remote_search == local_search
+    assert graph_texts(http_recall.json()) == local_recall
+    assert graph_texts(remote_recall) == local_recall
 
 
 @pytest.mark.asyncio

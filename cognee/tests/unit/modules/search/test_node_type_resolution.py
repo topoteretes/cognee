@@ -18,8 +18,12 @@ from cognee.shared.graph_model_utils import (
 )
 
 
-def test_omitted_name_is_the_node_set_default():
-    assert resolve_node_type(None) is NodeSet
+def test_an_explicit_null_stays_none_for_the_sdk_scope_rules():
+    assert resolve_node_type(None) is None
+
+
+def test_node_set_resolves_to_the_class_the_scope_rules_compare_against():
+    assert resolve_node_type("NodeSet") is NodeSet
 
 
 @pytest.mark.parametrize(
@@ -52,25 +56,17 @@ def test_a_snapshot_stand_in_class_does_not_shadow_the_real_one():
     assert resolve_node_type("TextDocument") is TextDocument
 
 
-@pytest.mark.parametrize("name", ["Nope", "schemacolumn", ""])
-def test_unknown_names_are_a_422_naming_the_value(name):
-    with pytest.raises(CogneeValidationError) as error:
-        resolve_node_type(name)
-
-    assert error.value.status_code == 422
-    assert repr(name) in error.value.message
+class _CustomBase(DataPoint):
+    name: str
 
 
-def test_a_dotted_module_path_is_refused_like_an_unknown_name():
-    """The registry also keys ``module.ClassName``; the wire takes the class name alone."""
-    dotted = f"{Entity.__module__}.{Entity.__name__}"
-    assert datapoint_registry()[dotted] is Entity
+class _CustomLeaf(_CustomBase):
+    """A custom model two levels below DataPoint, as a deployment would import it."""
 
-    with pytest.raises(CogneeValidationError) as error:
-        resolve_node_type(dotted)
 
-    assert error.value.status_code == 422
-    assert repr(dotted) in error.value.message
+def test_a_loaded_custom_class_resolves_at_any_depth_of_inheritance():
+    assert resolve_node_type("_CustomBase") is _CustomBase
+    assert resolve_node_type("_CustomLeaf") is _CustomLeaf
 
 
 class _Visitor(DataPoint):
@@ -82,18 +78,45 @@ class _VisitorGraph(DataPoint):
     visitors: list[_Visitor]
 
 
-def test_a_class_a_remote_cognify_built_from_a_schema_does_not_resolve():
-    """The classes a remote cognify rebuilds from a request's graph_model schema stay
-    loaded on the worker that served it, so resolving them would make the answer depend
-    on which worker takes the request. The name is refused on every worker instead."""
+def test_a_class_generated_from_a_graph_model_schema_resolves_once_loaded():
+    """The graph-model ingestion path builds classes from a schema; once the serving
+    process has built one, its node type resolves like any loaded class."""
     # A schema naming a class no loaded module has, the way a remote caller's would.
     schema = json.loads(
         json.dumps(graph_model_to_graph_schema(_VisitorGraph)).replace("_Visitor", "RemoteGuest")
     )
-    graph_schema_to_graph_model(schema)
-    assert datapoint_registry()["RemoteGuest"].__module__ == GENERATED_GRAPH_MODELS_MODULE
+    graph_model = graph_schema_to_graph_model(schema)
+    generated = datapoint_registry()["RemoteGuest"]
+    assert generated.__module__ == GENERATED_GRAPH_MODELS_MODULE
 
+    assert resolve_node_type("RemoteGuest") is generated
+    assert resolve_node_type(graph_model.__name__) is graph_model
+
+
+def _snapshot_only_name() -> str:
+    """A node type only a snapshot stand-in carries: no real class has the name."""
+    rehydrate_node({"type": "SnapshotOnlyType", "name": "memory"}, registry={})
+    return "SnapshotOnlyType"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("Nope", id="unknown"),
+        pytest.param("schemacolumn", id="wrong case"),
+        pytest.param("", id="empty"),
+        pytest.param(f"{Entity.__module__}.{Entity.__name__}", id="dotted module path"),
+        pytest.param(_snapshot_only_name(), id="snapshot stand-in only"),
+    ],
+)
+def test_unresolvable_names_are_a_422_naming_the_value(name):
     with pytest.raises(CogneeValidationError) as error:
-        resolve_node_type("RemoteGuest")
+        resolve_node_type(name)
 
     assert error.value.status_code == 422
+    assert repr(name) in error.value.message
+
+
+def test_the_registry_keys_the_dotted_path_the_resolver_refuses():
+    """The registry also keys ``module.ClassName``; the wire takes the class name alone."""
+    assert datapoint_registry()[f"{Entity.__module__}.{Entity.__name__}"] is Entity

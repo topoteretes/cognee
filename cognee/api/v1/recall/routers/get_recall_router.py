@@ -60,15 +60,17 @@ class RecallPayloadDTO(InDTO):
         default="Answer the question using the provided context. Be as brief as possible."
     )
     node_type: str | None = Field(
-        default=None,
-        examples=[None],
+        default="NodeSet",
+        examples=["NodeSet", "SchemaColumn"],
         description=(
-            "What the names in node_name are. Omitted: node-set tags (the node_set values "
-            "passed to /v1/add or /v1/remember). Otherwise the class name of a graph node "
-            "type, such as 'SchemaColumn', 'TextDocument' or 'Entity': the graph search is "
-            "scoped to the named nodes of that type and their one-hop neighbours, and the "
-            "router picks only a search type that applies such a scope. Case-sensitive; "
-            "an unknown name is a 422."
+            "What the names in node_name are. 'NodeSet' (the default): node-set tags (the "
+            "node_set values passed to /v1/add or /v1/remember). Any other graph node type "
+            "class name loaded on the server, such as 'SchemaColumn', 'TextDocument', "
+            "'Entity' or a custom DataPoint model: the graph search is scoped to the named "
+            "nodes of that type and their one-hop neighbours, and the router picks only a "
+            "search type that applies such a scope. Applies to the graph source only. "
+            "Exact and case-sensitive; an unknown name is a 422. An explicit null is "
+            "passed to recall() as node_type=None, which rejects node_name."
         ),
     )
     node_name: list[str] | None = Field(
@@ -76,7 +78,7 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Names to scope the graph search to, read according to node_type: node-set "
-            "tags when node_type is omitted, else the names of nodes of that type (for "
+            "tags for 'NodeSet' (the default), else the names of nodes of that type (for "
             "SchemaColumn, '<table>:<column>'). Omit to search all nodes."
         ),
     )
@@ -254,10 +256,12 @@ def get_recall_router() -> APIRouter:
           take precedence over dataset names when both are provided
         - **query** (str): The search query string
         - **system_prompt** (Optional[str]): System prompt for completion searches
-        - **node_type** (Optional[str]): What node_name names. Omitted: node-set
-          tags. Otherwise the class name of a graph node type ('SchemaColumn',
-          'TextDocument', 'Entity'): the named nodes of that type and their one-hop
-          neighbours. An unknown name is a 422.
+        - **node_type** (Optional[str]): What node_name names (default: "NodeSet",
+          node-set tags). Otherwise the exact class name of a graph node type loaded
+          on the server ('SchemaColumn', 'TextDocument', 'Entity', or a custom
+          DataPoint model): the named nodes of that type and their one-hop
+          neighbours, on the graph source only. An unknown name is a 422 naming the
+          value; null is passed on as node_type=None, which rejects node_name.
         - **node_name** (Optional[List[str]]): Names to scope the graph search to,
           read according to node_type (node-set tags by default)
         - **top_k** (Optional[int]): Maximum results (default: 15)

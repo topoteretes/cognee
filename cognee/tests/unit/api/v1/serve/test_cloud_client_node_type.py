@@ -5,7 +5,7 @@ the body and reads ``nodeName`` as node-set tags: no error, results for the wron
 scope. The client probes ``/openapi.json`` once and refuses the request instead,
 the way ``find_data()`` refuses a content-hash lookup. Both probes read one cached
 schema fetch. No probe runs when the field has no effect: the node-set default, and
-a typed class with no names, go to every server.
+a typed class or an explicit None with no names, go to every server.
 """
 
 import asyncio
@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from cognee.api.v1.serve.cloud_client import CloudClient
+from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.tasks.schema.models import SchemaColumn
 
@@ -101,9 +102,7 @@ async def test_current_server_gets_the_typed_scope_and_is_probed_once():
     await client.search("q", node_type=SchemaColumn, node_name=["genre:name"])
     await client.recall("q", None, node_type=SchemaColumn, node_name=["genre:name"])
 
-    assert [
-        (route, body.get("nodeType", body.get("node_type"))) for route, body in server.posts
-    ] == [
+    assert [(route, body["nodeType"]) for route, body in server.posts] == [
         ("search", "SchemaColumn"),
         ("recall", "SchemaColumn"),
     ]
@@ -136,12 +135,13 @@ async def test_old_server_refuses_the_typed_scope_before_sending(call):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("node_type", [NodeSet, None])
+@pytest.mark.parametrize("node_type", [NodeSet, "omitted"])
 async def test_old_server_still_takes_the_node_set_default_without_a_probe(node_type):
     client, server = _client(_openapi(with_node_type=False))
 
-    await client.search("q", node_type=node_type, node_name=["proj"])
-    await client.recall("q", None, node_type=node_type, node_name=["proj"])
+    kwargs = {} if node_type == "omitted" else {"node_type": node_type}
+    await client.search("q", node_name=["proj"], **kwargs)
+    await client.recall("q", None, node_name=["proj"], **kwargs)
 
     assert [body["nodeName"] for route, body in server.posts if route == "search"] == [["proj"]]
     assert [body["node_name"] for route, body in server.posts if route == "recall"] == [["proj"]]
@@ -157,10 +157,14 @@ async def test_a_typed_class_without_names_goes_to_any_server_unprobed(openapi):
 
     await client.search("q", node_type=SchemaColumn)
     await client.recall("q", None, node_type=SchemaColumn)
+    await client.search("q", node_type=None)
+    await client.recall("q", None, node_type=None)
 
-    assert [body.get("nodeType", body.get("node_type")) for _, body in server.posts] == [
+    assert [body["nodeType"] for _, body in server.posts] == [
         "SchemaColumn",
         "SchemaColumn",
+        None,
+        None,
     ]
     assert server.schema_reads == 0
 
@@ -188,3 +192,52 @@ async def test_a_timed_out_schema_read_is_unknown_for_the_content_hash_probe_too
 
     assert await client.supports_content_hash_lookup() is None
     assert client._content_hash_lookup_supported is None
+
+
+class _ShopColumn(DataPoint):
+    name: str
+
+
+class _PricedShopColumn(_ShopColumn):
+    """A custom node type, inherited, as a caller's own graph model defines it."""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("node_type", [SchemaColumn, _PricedShopColumn])
+async def test_a_class_travels_as_its_exact_name_on_both_routes(node_type):
+    """The class name only: no module path, no class object, for any loaded class."""
+    client, server = _client(_openapi(with_node_type=True))
+
+    await client.search("q", node_type=node_type, node_name=["x"])
+    await client.recall("q", None, node_type=node_type, node_name=["x"])
+
+    assert [body["nodeType"] for _, body in server.posts] == [node_type.__name__] * 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call", ["search", "recall"])
+async def test_names_with_an_explicit_none_go_as_null_to_a_current_server(call):
+    """The server passes the null on and its SDK refuses the names, as locally."""
+    client, server = _client(_openapi(with_node_type=True))
+
+    if call == "search":
+        await client.search("q", node_type=None, node_name=["proj"])
+    else:
+        await client.recall("q", None, node_type=None, node_name=["proj"])
+
+    assert server.posts[0][1]["nodeType"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call", ["search", "recall"])
+async def test_old_server_refuses_names_with_an_explicit_none(call):
+    """An old server would drop the null and read the names as node-set tags."""
+    client, server = _client(_openapi(with_node_type=False))
+
+    with pytest.raises(RuntimeError, match="predates the field"):
+        if call == "search":
+            await client.search("q", node_type=None, node_name=["proj"])
+        else:
+            await client.recall("q", None, node_type=None, node_name=["proj"])
+
+    assert server.posts == []

@@ -67,7 +67,8 @@ def test_search_dto_takes_node_type_in_both_casings():
     assert SearchPayloadDTO.model_validate({"query": "q", "node_type": "Entity"}).node_type == (
         "Entity"
     )
-    assert SearchPayloadDTO.model_validate({"query": "q"}).node_type is None
+    assert SearchPayloadDTO.model_validate({"query": "q"}).node_type == "NodeSet"
+    assert SearchPayloadDTO.model_validate({"query": "q", "nodeType": None}).node_type is None
 
 
 def test_node_type_is_in_the_openapi_schema_of_the_search_endpoint():
@@ -77,6 +78,7 @@ def test_node_type_is_in_the_openapi_schema_of_the_search_endpoint():
     properties = app.openapi()["components"]["schemas"]["SearchPayloadDTO"]["properties"]
 
     assert "nodeType" in properties
+    assert properties["nodeType"]["default"] == "NodeSet"
     assert "SchemaColumn" in properties["nodeType"]["description"]
 
 
@@ -111,17 +113,52 @@ def test_search_endpoint_without_node_type_reads_node_name_as_node_sets(monkeypa
     assert captured["node_name"] == ["proj"]
 
 
-def test_search_endpoint_rejects_an_unknown_node_type_with_422_naming_it(monkeypatch):
+@pytest.mark.parametrize("node_name", [["x"], None], ids=["with names", "without names"])
+def test_search_endpoint_rejects_an_unknown_node_type_with_422_naming_it(monkeypatch, node_name):
     captured = {}
     client = _client(monkeypatch, _capturing_search(captured))
 
     response = client.post(
-        "/api/v1/search", json={"query": "q", "nodeType": "Nope", "nodeName": ["x"]}
+        "/api/v1/search", json={"query": "q", "nodeType": "Nope", "nodeName": node_name}
     )
 
     assert response.status_code == 422, response.text
     assert "'Nope'" in response.json()["detail"]
     assert captured == {}
+
+
+def test_search_endpoint_passes_an_explicit_null_without_names_on_unchanged(monkeypatch):
+    captured = {}
+    client = _client(monkeypatch, _capturing_search(captured))
+
+    response = client.post("/api/v1/search", json={"query": "q", "nodeType": None})
+
+    assert response.status_code == 200, response.text
+    assert "node_type" in captured
+    assert captured["node_type"] is None
+
+
+def test_search_endpoint_keeps_the_sdk_refusal_of_names_with_a_null_type(monkeypatch):
+    """A null type is not read as the NodeSet default, which would broaden the scope:
+    search() gets None and refuses the names, as it does for a local caller."""
+    from cognee.modules.search.methods.node_name_scope import node_name_scope
+
+    captured = {}
+
+    async def scope_checking_search(**kwargs):
+        captured.update(kwargs)
+        node_name_scope(kwargs["node_type"], kwargs["node_name"])
+        return []
+
+    client = _client(monkeypatch, scope_checking_search)
+
+    response = client.post(
+        "/api/v1/search", json={"query": "q", "nodeType": None, "nodeName": ["proj"]}
+    )
+
+    assert response.status_code == 422, response.text
+    assert "node_name needs a node_type" in response.json()["detail"]
+    assert captured["node_type"] is None
 
 
 def test_search_telemetry_records_only_a_validated_node_type(monkeypatch):
@@ -137,6 +174,9 @@ def test_search_telemetry_records_only_a_validated_node_type(monkeypatch):
     assert telemetry[-1]["node_type"] == "SchemaColumn"
 
     client.post("/api/v1/search", json={"query": "q", "nodeName": ["proj"]})
+    assert telemetry[-1]["node_type"] is None
+
+    client.post("/api/v1/search", json={"query": "q", "nodeType": None})
     assert telemetry[-1]["node_type"] is None
 
 
@@ -198,14 +238,24 @@ async def test_cloud_client_sends_the_node_type_name():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("node_type", [NodeSet, None])
+@pytest.mark.parametrize("node_type", [NodeSet, "omitted"])
 async def test_cloud_client_omits_node_type_for_the_node_set_default(node_type):
     client, session = _cloud_client()
 
-    await client.search("q", node_type=node_type, node_name=["proj"])
+    kwargs = {} if node_type == "omitted" else {"node_type": node_type}
+    await client.search("q", node_name=["proj"], **kwargs)
 
     assert "nodeType" not in session.payload
     assert session.payload["nodeName"] == ["proj"]
+
+
+@pytest.mark.asyncio
+async def test_cloud_client_sends_an_explicit_none_as_null():
+    client, session = _cloud_client()
+
+    await client.search("q", node_type=None)
+
+    assert session.payload["nodeType"] is None
 
 
 @pytest.fixture
@@ -247,6 +297,16 @@ async def test_remote_search_forwards_the_node_set_default(remote_search):
     await search("q", node_name=["proj"])
 
     assert captured["node_type"] is NodeSet
+
+
+@pytest.mark.asyncio
+async def test_remote_search_forwards_an_explicit_none_without_names(remote_search):
+    search, captured = remote_search
+
+    await search("q", node_type=None)
+
+    assert "node_type" in captured
+    assert captured["node_type"] is None
 
 
 @pytest.mark.asyncio

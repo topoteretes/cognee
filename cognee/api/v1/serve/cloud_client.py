@@ -47,17 +47,23 @@ def remote_graph_schema(graph_model: Any) -> dict | None:
     return graph_model_to_graph_schema(graph_model)
 
 
-def _node_type_name(node_type: Any) -> str | None:
-    """The ``node_type`` wire form: the class name, or None for the NodeSet default.
+_NODE_TYPE_OMITTED = object()
 
-    Omitting the field is how the server is told "node-set tags", so the default
-    travels as nothing and only a typed graph scope names its class.
+
+def _node_type_field(node_type: Any) -> dict:
+    """The ``nodeType`` wire form: ``{}`` for the default, else ``{"nodeType": value}``.
+
+    An omitted ``node_type`` and the ``NodeSet`` default travel as nothing, which the
+    server reads as ``NodeSet`` (and which a server predating the field understands
+    too). A class travels as its exact ``__name__``, which the server resolves among
+    the classes it has loaded. An explicit ``None`` travels as JSON null, which the
+    server passes on to the SDK unchanged.
     """
     from cognee.modules.engine.models.node_set import NodeSet
 
-    if node_type is None or node_type is NodeSet:
-        return None
-    return node_type.__name__
+    if node_type is _NODE_TYPE_OMITTED or node_type is NodeSet:
+        return {}
+    return {"nodeType": None if node_type is None else node_type.__name__}
 
 
 def _failed_update_result(body: str) -> dict | None:
@@ -331,11 +337,11 @@ class CloudClient:
             payload["top_k"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["system_prompt"] = kwargs["system_prompt"]
-        node_type_name = await self._node_type_payload(
-            kwargs.get("node_type"), kwargs.get("node_name")
+        payload.update(
+            await self._node_type_payload(
+                kwargs.get("node_type", _NODE_TYPE_OMITTED), kwargs.get("node_name")
+            )
         )
-        if node_type_name is not None:
-            payload["node_type"] = node_type_name
         if kwargs.get("node_name"):
             payload["node_name"] = kwargs["node_name"]
         if kwargs.get("only_context"):
@@ -658,26 +664,26 @@ class CloudClient:
             )
         return self._node_type_supported
 
-    async def _node_type_payload(self, node_type: Any, node_name: Any) -> str | None:
-        """The ``node_type`` to send: None for the node-set default, else the class name.
+    async def _node_type_payload(self, node_type: Any, node_name: Any) -> dict:
+        """The ``nodeType`` field to send, as ``_node_type_field`` builds it.
 
         ``node_type`` only changes what ``node_name`` means, so without names the
-        field has no effect and goes to any server unprobed. With names a typed
-        scope is sent only to a server known to read it: an old server would apply
-        the wrong scope, and a response carries nothing that would show it, so a
-        server whose schema cannot be read is refused too. Dropping the type or the
-        names instead would return results the caller did not ask for, with nothing
-        to tell them.
+        field has no effect and goes to any server unprobed. With names a
+        non-default ``node_type`` is sent only to a server known to read it: an old
+        server would ignore it and read the names as node-set tags, and a response
+        carries nothing that would show it, so a server whose schema cannot be read
+        is refused too. Dropping the type or the names instead would return results
+        the caller did not ask for, with nothing to tell them.
         """
-        node_type_name = _node_type_name(node_type)
-        if node_type_name is None or not node_name:
-            return node_type_name
+        field = _node_type_field(node_type)
+        if not field or not node_name:
+            return field
         supported = await self.supports_node_type()
         if supported is None:
             raise RuntimeError(self._NODE_TYPE_UNKNOWN)
         if not supported:
             raise RuntimeError(self._NODE_TYPE_UNSUPPORTED)
-        return node_type_name
+        return field
 
     async def list_data(self, dataset_id: UUID, *, content_hash: str | None = None) -> list:
         """Traverse bounded pages, deduplicating overlaps during concurrent ingest.
@@ -824,11 +830,11 @@ class CloudClient:
             payload["topK"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["systemPrompt"] = kwargs["system_prompt"]
-        node_type_name = await self._node_type_payload(
-            kwargs.get("node_type"), kwargs.get("node_name")
+        payload.update(
+            await self._node_type_payload(
+                kwargs.get("node_type", _NODE_TYPE_OMITTED), kwargs.get("node_name")
+            )
         )
-        if node_type_name is not None:
-            payload["nodeType"] = node_type_name
         if kwargs.get("node_name"):
             payload["nodeName"] = kwargs["node_name"]
         if kwargs.get("only_context") is not None:

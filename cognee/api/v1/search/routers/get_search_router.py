@@ -59,14 +59,16 @@ class SearchPayloadDTO(InDTO):
         default="Answer the question using the provided context. Be as brief as possible."
     )
     node_type: str | None = Field(
-        default=None,
-        examples=[None],
+        default="NodeSet",
+        examples=["NodeSet", "SchemaColumn"],
         description=(
-            "What the names in node_name are. Omitted: node-set tags (the node_set values"
-            " used during add/remember). Otherwise the class name of a graph node type,"
-            " such as 'SchemaColumn', 'TextDocument' or 'Entity': the search is scoped to"
-            " the named nodes of that type and their one-hop neighbours. Case-sensitive;"
-            " an unknown name is a 422."
+            "What the names in node_name are. 'NodeSet' (the default): node-set tags (the"
+            " node_set values used during add/remember). Any other graph node type class"
+            " name loaded on the server, such as 'SchemaColumn', 'TextDocument', 'Entity'"
+            " or a custom DataPoint model: the search is scoped to the named nodes of that"
+            " type and their one-hop neighbours. Exact and case-sensitive; an unknown name"
+            " is a 422. An explicit null is passed to search() as node_type=None, which"
+            " rejects node_name."
         ),
     )
     node_name: list[str] | None = Field(
@@ -74,7 +76,7 @@ class SearchPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Names to scope the search to, read according to node_type: node-set tags"
-            " when node_type is omitted, else the names of nodes of that type"
+            " for 'NodeSet' (the default), else the names of nodes of that type"
             " (for SchemaColumn, '<table>:<column>')."
         ),
     )
@@ -273,7 +275,7 @@ def get_search_router() -> APIRouter:
         - **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to search within
         - **query** (str): The search query string
         - **system_prompt** Optional[str]: System prompt to be used for Completion type searches in Cognee
-        - **node_type** (Optional[str]): What node_name names. Omitted: node-set tags. Otherwise the class name of a graph node type ('SchemaColumn', 'TextDocument', 'Entity'): the named nodes of that type and their one-hop neighbours. An unknown name is a 422.
+        - **node_type** (Optional[str]): What node_name names (default: "NodeSet", node-set tags). Otherwise the exact class name of a graph node type loaded on the server ('SchemaColumn', 'TextDocument', 'Entity', or a custom DataPoint model): the named nodes of that type and their one-hop neighbours. An unknown name is a 422 naming the value; null is passed on as node_type=None, which rejects node_name.
         - **node_name** Optional[list[str]]: Names to scope the search to, read according to node_type (node-set tags by default).
         - **top_k** (Optional[int]): Maximum number of results to return (default: 15)
         - **only_context** bool: Return what the LLM would have received instead of its answer. For completion type searches the result is the user prompt (conversation history, then question plus retrieval context through the retriever's template, then the session guidance block); the system prompt (the retriever's task template) is `system_prompt_result` with verbose=true. Retrieval-only types return their context. No LLM call is made.
@@ -320,8 +322,8 @@ def get_search_router() -> APIRouter:
                 # endpoint's convention (see recall.py telemetry).
                 "query": len(payload.query or ""),
                 "system_prompt": len(payload.system_prompt or ""),
-                # The resolved class name; None for the node-set default.
-                "node_type": node_type.__name__ if node_type is not NodeSet else None,
+                # The resolved class name; None for the node-set default or a null.
+                "node_type": None if node_type in (None, NodeSet) else node_type.__name__,
                 "node_name": len(payload.node_name or []),
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
