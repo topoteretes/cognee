@@ -93,10 +93,16 @@ class DefaultUrlCrawler:
     async def _ensure_client(self):
         """Initialize the HTTP client if not already created."""
         if self._client is None:
+            from .public_http_transport import PublicHTTPTransport
+
             # follow_redirects stays disabled so a public URL cannot redirect the
             # server to an internal address, bypassing the SSRF host validation.
             self._client = httpx.AsyncClient(
-                timeout=self.timeout, headers=self.headers, follow_redirects=False
+                timeout=self.timeout,
+                headers=self.headers,
+                follow_redirects=False,
+                transport=PublicHTTPTransport(),
+                trust_env=False,
             )
 
     async def close(self):
@@ -328,6 +334,27 @@ class DefaultUrlCrawler:
                 )
                 await asyncio.sleep(delay)
 
+    async def _fetch_browser_route(self, route):
+        """Fulfil browser traffic through the pinned transport; never route.continue_."""
+        request = route.request
+        try:
+            response = await self._client.request(
+                request.method,
+                request.url,
+                headers=await request.all_headers(),
+                content=request.post_data_buffer,
+            )
+            # HTTPX decompresses content; do not ask the browser to decode it again.
+            headers = {
+                key: value
+                for key, value in response.headers.items()
+                if key.lower() not in {"content-encoding", "content-length", "transfer-encoding"}
+            }
+            await route.fulfill(status=response.status_code, headers=headers, body=response.content)
+        except Exception:
+            await route.abort("blockedbyclient")
+            raise
+
     async def _render_with_playwright(
         self, url: str, js_wait: float = 1.0, timeout: float | None = None
     ) -> str:
@@ -362,7 +389,13 @@ class DefaultUrlCrawler:
                     logger.info(f"Launching headless Chromium browser for {url}")
                     browser = await p.chromium.launch(headless=True)
                     try:
-                        context = await browser.new_context()
+                        # Every browser HTTP request (including subresources and
+                        # redirects) goes through the same checked TCP boundary.
+                        # Service workers and WebSockets must not bypass routing.
+                        context = await browser.new_context(service_workers="block")
+                        await self._ensure_client()
+                        await context.route("**/*", self._fetch_browser_route)
+                        await context.route_web_socket("**/*", lambda ws: ws.close())
                         page = await context.new_page()
                         logger.info(f"Navigating to {url} and waiting for network idle")
                         await page.goto(

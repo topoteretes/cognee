@@ -75,6 +75,44 @@ _GITLAB_RESERVED_GROUPS = frozenset(
 )
 
 
+def _pinned_http_env(url: str, addresses: list, env: dict | None) -> dict:
+    """Pin libcurl DNS without changing the URL, TLS hostname or credential scope.
+
+    Redirects are refused because git cannot call our guard on a new target.
+    Config is process-local, never persisted into the cloned repository.
+    """
+    parts = urlsplit(url)
+    host = parts.hostname
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    ips = ",".join(f"[{ip}]" if ip.version == 6 else str(ip) for ip in addresses)
+    result = dict(env or {})
+    config = [
+        ("http.curloptResolve", ""),  # Clear inherited resolution entries.
+        ("http.curloptResolve", f"{host}:{port}:{ips}"),
+        ("http.followRedirects", "false"),
+        ("http.proxy", ""),
+        ("http.sslVerify", "true"),
+    ]
+    count = int(result.get("GIT_CONFIG_COUNT", "0"))
+    for key, value in config:
+        result[f"GIT_CONFIG_KEY_{count}"] = key
+        result[f"GIT_CONFIG_VALUE_{count}"] = value
+        count += 1
+    result["GIT_CONFIG_COUNT"] = str(count)
+    result["GIT_CONFIG_NOSYSTEM"] = "1"
+    result["GIT_CONFIG_GLOBAL"] = os.devnull
+    for name in (
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ):
+        result[name] = ""
+    return result
+
+
 def default_clones_dir() -> Path:
     """Where remote repositories are cloned: ``BaseConfig.repos_root_directory``.
 
@@ -367,11 +405,12 @@ async def resolve_repo_source(
     # common setup. Non-http, non-ssh transports (file://, ext::, which git would
     # execute) never reach here -- they do not match _REMOTE_PREFIXES and are handled
     # as local paths above.
+    resolved_addresses = None
     if url.lower().startswith(("http://", "https://")):
         from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
 
         try:
-            await validate_outbound_url(url)
+            resolved_addresses = await validate_outbound_url(url)
         except SSRFProtectionError as error:
             raise CodeRepositoryError(
                 message=f"Refusing to clone '{redact_repo_spec(url)}': {error.message}",
@@ -393,6 +432,8 @@ async def resolve_repo_source(
         return re.sub(r"://[^/\s@]+@", "://", text)
 
     auth_env = _credential_env(credentials, clean_url) if credentials else None
+    if resolved_addresses is not None:
+        auth_env = _pinned_http_env(clean_url, resolved_addresses, auth_env)
 
     base = Path(clones_dir) if clones_dir else default_clones_dir()
     target = clone_dir(clean_url, branch, base)
