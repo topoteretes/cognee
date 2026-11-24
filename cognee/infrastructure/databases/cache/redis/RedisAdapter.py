@@ -727,6 +727,47 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
+    async def increment_session_context_counter(
+        self, user_id: str, session_id: str, entry_id: str, field: str, delta: int
+    ) -> bool:
+        """Atomically increment a counter field in the session-context entry.
+
+        Loads the entry, increments the counter field by delta, and writes it back.
+        Redis operations are atomic at the entry level.
+
+        Args:
+            user_id: The user ID
+            session_id: The session ID
+            entry_id: The entry ID to increment
+            field: The counter field name (e.g., "helpful_count")
+            delta: The amount to increment (can be negative)
+
+        Returns:
+            True if a matching entry was incremented, False otherwise.
+        """
+        try:
+            context_key = self._session_context_key(user_id, session_id)
+            entries = await self._load_entries(context_key)
+            for i, entry in enumerate(entries):
+                if entry.get("id") == entry_id:
+                    # Get current value, default to 0 if missing
+                    current_value = int(entry.get(field, 0) or 0)
+                    new_value = current_value + delta
+                    # Update the entry with new counter value
+                    entries[i] = {**entry, field: new_value}
+                    await self._write_entry_at(context_key, i, entries[i])
+                    await self._apply_session_ttl(context_key)
+                    return True
+            return False
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while incrementing session context counter: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while incrementing session context counter in Redis: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
     async def delete_session_context_entry(
         self, user_id: str, session_id: str, entry_id: str
     ) -> bool:

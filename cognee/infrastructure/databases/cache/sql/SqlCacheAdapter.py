@@ -1121,10 +1121,9 @@ class SqlCacheAdapter(CacheDBInterface):
     ) -> bool:
         """Atomically increment a counter field in the session-context entry.
 
-        Locks the row with with_for_update(), reads the current counter value,
-        increments it by delta, and writes it back in the same transaction.
-        This prevents race conditions where concurrent increments would otherwise
-        read the same value and both write the same next value.
+        Uses a single atomic UPDATE with json_set() to avoid race conditions on SQLite
+        where with_for_update() is a no-op. The UPDATE extracts the current value,
+        coalesces it to 0 if missing, adds delta, and writes back in one statement.
 
         Args:
             user_id: The user ID
@@ -1144,33 +1143,28 @@ class SqlCacheAdapter(CacheDBInterface):
                     await self._lock_session_writes(
                         session, cache_session_context, user_id, session_id
                     )
-                    result = await session.execute(
-                        select(cache_session_context.c.payload)
+                    # Atomic UPDATE using json_set() - works on both SQLite and Postgres
+                    stmt = (
+                        update(cache_session_context)
                         .where(
                             self._session_filter(cache_session_context, user_id, session_id),
                             cache_session_context.c.entry_id == entry_id,
                             self._not_expired(cache_session_context),
                         )
-                        .order_by(cache_session_context.c.seq.desc())
-                        .limit(1)
-                        .with_for_update()
-                    )
-                    payload = result.scalars().first()
-                    if payload is None:
-                        return False
-                    # Atomically increment the counter
-                    payload_dict = dict(payload)
-                    current_value = int(payload_dict.get(field, 0) or 0)
-                    new_value = current_value + delta
-                    payload_dict[field] = new_value
-                    await session.execute(
-                        update(cache_session_context)
-                        .where(
-                            self._session_filter(cache_session_context, user_id, session_id),
-                            cache_session_context.c.entry_id == entry_id,
+                        .values(
+                            payload=func.json_set(
+                                cache_session_context.c.payload,
+                                f'$.{field}',
+                                func.coalesce(
+                                    func.json_extract(cache_session_context.c.payload, f'$.{field}'),
+                                    0
+                                ) + delta
+                            )
                         )
-                        .values(payload=payload_dict)
                     )
+                    result = await session.execute(stmt)
+                    if result.rowcount == 0:
+                        return False
                     await self._refresh_session_ttl(
                         session, cache_session_context, user_id, session_id
                     )
