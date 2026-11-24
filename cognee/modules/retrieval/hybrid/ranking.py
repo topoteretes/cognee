@@ -54,7 +54,7 @@ def rank_chunk_summary_pairs(
 
     ranked.sort(key=lambda item: (-item[0], -item[1], item[2], item[3]))
     for final_score, *_, pair in ranked[:limit]:
-        # Kept on the pair for the recall index (higher is better, comparable only
+        # Kept on the pair for cited recall (higher is better, comparable only
         # within one search); the ranking above never reads it.
         pair["score"] = final_score
     return [pair for *_, pair in ranked[:limit]]

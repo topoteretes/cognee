@@ -132,7 +132,7 @@ def select_facts(edge_hits: list[Any], exclude_ids: set[str], facts_top_k: int) 
         fact = {"id": hit_id, "text": _fact_display_text(text)}
         score = hit_score(hit)
         if score is not None:
-            # The hit's vector distance (lower is closer), for the recall index.
+            # The hit's vector distance (lower is closer), for cited recall.
             fact["score"] = score
         facts.append(fact)
     return facts

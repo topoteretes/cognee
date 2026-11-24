@@ -62,9 +62,9 @@ class RoutingConstraints:
     llm_available: bool = True
     cypher_allowed: bool = True
     scoped_types: frozenset[SearchType] | None = None
-    # Set when the recall asks for an index (result_mode="index"): the types that can
-    # return one. A routed type outside it falls back to the default.
-    index_types: frozenset[SearchType] | None = None
+    # Set when the recall asks for a cited prompt (result_mode="cited"): the types that
+    # can return one. A routed type outside it falls back to the default.
+    cited_types: frozenset[SearchType] | None = None
 
     @classmethod
     def from_config(
@@ -90,7 +90,7 @@ class RoutingConstraints:
             llm_available=llm_available(llm_config),
             cypher_allowed=cypher_queries_allowed(),
             scoped_types=lucky_search_types(node_type, node_name),
-            index_types=INDEX_SEARCH_TYPES if result_mode == "index" else None,
+            cited_types=CITED_SEARCH_TYPES if result_mode == "cited" else None,
         )
 
 
@@ -203,9 +203,9 @@ COMPLETION_ONLY_TYPES: frozenset[SearchType] = frozenset(
 )
 # Run the query text as Cypher, directly or after an LLM writes it.
 CYPHER_TYPES: frozenset[SearchType] = frozenset({SearchType.CYPHER, SearchType.NATURAL_LANGUAGE})
-# The types recall's index mode (result_mode="index") can return as rows: the ones
-# whose retrieval keeps passages, entities and facts apart with their ids.
-INDEX_SEARCH_TYPES: frozenset[SearchType] = frozenset({SearchType.HYBRID_COMPLETION})
+# The types recall's cited mode (result_mode="cited") can tag: the ones whose retrieval
+# keeps passages, entities and facts apart with their ids.
+CITED_SEARCH_TYPES: frozenset[SearchType] = frozenset({SearchType.HYBRID_COMPLETION})
 
 # (rule name, pattern, search type). Shape rules (what the input looks like) come
 # first and win: a quoted string is handled as what it is, even when its text
@@ -338,11 +338,11 @@ def constrain(
             decision.search_type.value,
         )
         decision = replace(decision, search_type=ROUTER_FALLBACK_TYPE, retriever_config=None)
-    if constraints.index_types is not None and decision.search_type not in constraints.index_types:
-        # An index request gets an index whatever its wording routed to: a code or
-        # count question then returns memory rows instead of its own lane's answer.
+    if constraints.cited_types is not None and decision.search_type not in constraints.cited_types:
+        # A cited request gets a cited prompt whatever its wording routed to: a code or
+        # count question then returns tagged memory instead of its own lane's answer.
         logger.debug(
-            "query_router: %s cannot return an index; using fallback",
+            "query_router: %s cannot return a cited prompt; using fallback",
             decision.search_type.value,
         )
         decision = replace(decision, search_type=ROUTER_FALLBACK_TYPE, retriever_config=None)

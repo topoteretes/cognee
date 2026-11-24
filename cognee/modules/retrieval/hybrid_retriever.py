@@ -232,7 +232,7 @@ class HybridRetriever(BaseRetriever):
         """The records named by id, rendered exactly as this retriever's context shows them.
 
         ``ids_by_kind`` maps ``"passage"``, ``"entity"`` and ``"fact"`` to record ids
-        from a recall index. Returns ``{(kind, id): {"body", "conflicts", "item"}}`` for
+        from a cited recall. Returns ``{(kind, id): {"body", "conflicts", "item"}}`` for
         the ids found; a missing id is simply absent. Passages and facts are read by id
         alone. An entity's bullets are ranked against ``query`` as the index call ranked
         them, so this pays one query embedding and one edge search when entities are
@@ -406,8 +406,8 @@ class HybridRetriever(BaseRetriever):
         global_context = await self._build_global_context_section(query, retrieved_objects)
         context = format_hybrid_context(global_context, retrieved_objects)
         grounding = await grounding_block_for(query, context)
-        # The two context sections that have no record id, kept for the recall index
-        # (``result_mode="index"``), which returns them as frame rows. One instance
+        # The two context sections that have no record id, kept for cited recall
+        # (``result_mode="cited"``), which reassembles the prompt around them. One instance
         # serves one search, so the last single-query context is the one returned.
         self.context_frame = {"grounding": grounding, "global_context": global_context}
         return f"{grounding}\n\n{context}" if grounding else context

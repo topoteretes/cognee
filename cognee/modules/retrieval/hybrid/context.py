@@ -87,7 +87,7 @@ def format_passages(chunks: list[Any]) -> str:
 def render_passage(chunk: Any) -> str:
     """One passage as ``## Relevant passages`` shows it, or "" for a chunk without text.
 
-    The recall index and expand render passage bodies here too, so a passage's
+    Cited recall and expand render passage bodies here too, so a passage's
     ``chars`` and ``version`` describe exactly the text this section would show.
     """
     chunk_payload = payload(chunk)

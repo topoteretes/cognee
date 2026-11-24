@@ -6,9 +6,9 @@ def get_capabilities() -> list[str]:
     release adds reach its clients with the release.
     """
     from cognee.infrastructure.session.capture import CAPABILITY, supported
-    from cognee.modules.recall.methods.recall_index import RECALL_INDEX_CAPABILITY
+    from cognee.modules.recall.methods.recall_cited import RECALL_CITED_CAPABILITY
 
-    capabilities = ["session_summary_v1", "context_usage_v1", RECALL_INDEX_CAPABILITY]
+    capabilities = ["session_summary_v1", "context_usage_v1", RECALL_CITED_CAPABILITY]
     if supported():
         capabilities.append(CAPABILITY)
     return capabilities

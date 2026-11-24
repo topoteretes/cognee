@@ -327,7 +327,7 @@ def _entity_from_result(result: Any) -> dict:
     }
     score = hit_score(result)
     if score is not None:
-        # The hit's vector distance (lower is closer), for the recall index; a
+        # The hit's vector distance (lower is closer), for cited recall; a
         # pinned ontology concept carries 0.0.
         entity["score"] = score
     return entity
@@ -336,7 +336,7 @@ def _entity_from_result(result: Any) -> dict:
 def render_entity(entity: dict) -> str:
     """One entity as ``## Relevant entities`` shows it: its heading and edge bullets.
 
-    The recall index and expand render entity bodies here too.
+    Cited recall and expand render entity bodies here too.
     """
     name = display_value(entity.get("name"))
     if not name:

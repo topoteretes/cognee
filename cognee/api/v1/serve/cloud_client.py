@@ -361,11 +361,11 @@ class CloudClient:
         if kwargs.get("code_query") is not None:
             payload["code_query"] = kwargs["code_query"]
         if kwargs.get("result_mode", "full") != "full" or kwargs.get("expand_items"):
-            supported = await self.supports_recall_index()
+            supported = await self.supports_recall_cited()
             if supported is None:
-                raise RuntimeError(self._RECALL_INDEX_UNKNOWN)
+                raise RuntimeError(self._RECALL_CITED_UNKNOWN)
             if not supported:
-                raise RuntimeError(self._RECALL_INDEX_UNSUPPORTED)
+                raise RuntimeError(self._RECALL_CITED_UNSUPPORTED)
         if kwargs.get("result_mode", "full") != "full":
             payload["result_mode"] = kwargs["result_mode"]
         if kwargs.get("expand_items"):
@@ -578,15 +578,15 @@ class CloudClient:
         "still works."
     )
 
-    _RECALL_INDEX_UNSUPPORTED = (
-        "Remote server does not list recall_index_v1 on GET /health: it predates "
-        "result_mode='index' and expand_items, ignores them as unknown body fields and "
+    _RECALL_CITED_UNSUPPORTED = (
+        "Remote server does not list recall_cited_v1 on GET /health: it predates "
+        "result_mode='cited' and expand_items, ignores them as unknown body fields and "
         "would answer an ordinary recall instead. Upgrade the server to use them over serve()."
     )
 
-    _RECALL_INDEX_UNKNOWN = (
+    _RECALL_CITED_UNKNOWN = (
         "Could not read the remote server's capabilities (GET /health), so whether it "
-        "answers result_mode='index' and expand_items is unknown. A server that predates "
+        "answers result_mode='cited' and expand_items is unknown. A server that predates "
         "them would answer an ordinary recall instead, so they are not sent. Make /health "
         "reachable from this client."
     )
@@ -619,19 +619,19 @@ class CloudClient:
         )
         return self._capabilities
 
-    async def supports_recall_index(self) -> bool | None:
-        """Whether the server answers ``result_mode="index"`` and ``expand_items``.
+    async def supports_recall_cited(self) -> bool | None:
+        """Whether the server answers ``result_mode="cited"`` and ``expand_items``.
 
-        Request bodies ignore unknown fields, so an older server answers an index or
+        Request bodies ignore unknown fields, so an older server answers a cited or
         expand call with an ordinary recall: no error, and results the caller did not
         ask for. ``None`` means unknown (``/health`` unreadable).
         """
-        from cognee.modules.recall.methods.recall_index import RECALL_INDEX_CAPABILITY
+        from cognee.modules.recall.methods.recall_cited import RECALL_CITED_CAPABILITY
 
         capabilities = await self._server_capabilities()
         if capabilities is None:
             return None
-        return RECALL_INDEX_CAPABILITY in capabilities
+        return RECALL_CITED_CAPABILITY in capabilities
 
     async def _server_openapi(self) -> dict | None:
         """The server's OpenAPI document, fetched once per client.

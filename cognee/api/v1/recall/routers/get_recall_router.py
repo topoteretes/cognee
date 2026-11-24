@@ -13,7 +13,7 @@ from cognee.api.sse import SSE_MEDIA_TYPE, sse_headers, wants_event_stream
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.api.v1.recall.recall_stream import begin_recall_stream
 from cognee.exceptions import CogneeApiError
-from cognee.modules.recall.types.RecallIndex import ExpandItem
+from cognee.modules.recall.types.RecallCited import ExpandItem
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
@@ -163,23 +163,24 @@ class RecallPayloadDTO(InDTO):
             "stable 'code' and 'param'."
         ),
     )
-    result_mode: Literal["full", "index"] = Field(
+    result_mode: Literal["full", "cited"] = Field(
         default="full",
         description=(
-            "'full' returns results as before. 'index' returns an only_context "
-            "HYBRID_COMPLETION recall of the graph as rows: one short row per passage, "
-            "entity and fact (metadata: record_kind, record_id, rank, score, distance, "
-            "chars, version, conflicts, sources) and one full row per prompt part without "
-            "an id. Requires only_context=true and graph-only sources."
+            "'full' returns results as before. 'cited' returns the only_context "
+            "HYBRID_COMPLETION prompt with a tag line, "
+            "[mem:<kind>/<dataset_id>/<record_id>@<version>], before every passage, entity "
+            "and fact, and the tagged records (rank, score, distance, chars, version, "
+            "conflicts, sources) in metadata.records. Requires only_context=true and "
+            "graph-only sources."
         ),
     )
-    expand_items: list[ExpandItem] | None = Field(
+    expand_items: list[ExpandItem | str] | None = Field(
         default=None,
         examples=[None],
         description=(
-            "Index rows to return in full (1 to 20), each {dataset_id, record_kind, "
-            "record_id} as the index gave them. Send the index call's query, top_k, "
-            "node_name and retriever_specific_config. Each row's metadata.status is "
+            "Records to read by id later (1 to 20), each a tag as the cited prompt shows it "
+            "or {dataset_id, record_kind, record_id}. Send the cited call's query, top_k, "
+            "node_name and retriever_specific_config. Each result's metadata.status is "
             "'available', 'missing' or 'forbidden'."
         ),
     )
@@ -319,18 +320,19 @@ def get_recall_router() -> APIRouter:
         - **toolsTrigger** (str): When the 'tools' scope runs: 'always', or 'on_empty' to query the
           external database only when every other requested source returned nothing. Defaults to
           'always'.
-        - **resultMode** (str): 'full' (default) or 'index'. 'index' needs onlyContext=true and
-          graph-only sources, runs HYBRID_COMPLETION and returns the prompt as rows: one short
-          row per passage, entity and fact (metadata recordKind, recordId, rank, score,
-          version, chars, conflicts, sources) and one full row per prompt part without an id.
-          A request hybrid would hand to GRAPH_COMPLETION (a typed nodeType,
-          neighborhoodDepth, feedbackInfluence > 0) or a dataset without passages answers 422
-          IndexRequiresHybridError. Servers that support it list "recall_index_v1" in
-          GET /health capabilities.
-        - **expandItems** (Optional[List[dict]]): 1 to 20 index rows to return in full, each
-          {datasetId, recordKind, recordId} (snake_case too) as the index gave them; send the
-          index call's query and settings. Each row's metadata.status is 'available',
-          'missing' or 'forbidden'. Not combined with resultMode='index'.
+        - **resultMode** (str): 'full' (default) or 'cited'. 'cited' needs onlyContext=true and
+          graph-only sources, runs HYBRID_COMPLETION and returns the regular prompt with a tag
+          line, [mem:<kind>/<dataset_id>/<record_id>@<version>], before every passage, entity
+          and fact, and the tagged records (rank, score, distance, chars, version, conflicts,
+          sources) in metadata.records. A request hybrid would hand to GRAPH_COMPLETION (a
+          typed nodeType, neighborhoodDepth, feedbackInfluence > 0) or a dataset without
+          passages answers 422 CitedRequiresHybridError. Servers that support it list
+          "recall_cited_v1" in GET /health capabilities.
+        - **expandItems** (Optional[List[str | dict]]): 1 to 20 records to read by id later,
+          each a tag as the cited prompt shows it or {datasetId, recordKind, recordId}
+          (snake_case too); send the cited call's query and settings. Each result's
+          metadata.status is 'available', 'missing' or 'forbidden'. Not combined with
+          resultMode='cited'.
 
         ## Error Codes
         - **402/403/404/409/422**: Cognee errors (payment required, permission

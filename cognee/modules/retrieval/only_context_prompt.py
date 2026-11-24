@@ -204,8 +204,8 @@ class PromptFrame(NamedTuple):
 class OnlyContextPrompt(tuple):
     """The ``(user_prompt, system_prompt)`` pair, unpacking as before, plus its ``frame``.
 
-    The recall index (``result_mode="index"``) returns the frame's parts as rows of
-    their own; every other caller reads the pair.
+    Cited recall (``result_mode="cited"``) reassembles the prompt around the frame with
+    its records tagged; every other caller reads the pair.
     """
 
     frame: PromptFrame

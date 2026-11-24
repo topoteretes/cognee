@@ -1,15 +1,15 @@
-"""Recall's index mode and expand-by-id.
+"""Recall's cited mode and expand-by-id.
 
-``result_mode="index"`` returns what an ``only_context`` hybrid recall retrieved as rows
-instead of one rendered prompt: one memory row per passage, entity and fact (a short
-``text``, its id, rank, score, version, conflicts and sources) and one frame row per part
-of the prompt that has no id (template halves, session layer, grounding, global context).
-Nothing is dropped: frame rows, expanded bodies and the conflict notes rebuild the
-prompt regular mode returns. ``expand_items`` then returns the full bodies of the rows a
-caller picked. Both render bodies with the retriever's own renderers, so a row's
+``result_mode="cited"`` returns the ``only_context`` prompt a hybrid recall builds, with a
+tag line, ``[mem:<kind>/<dataset_id>/<record_id>@<version>]``, directly before every
+passage, entity and fact, and one ``CitedRecord`` per tag in ``metadata["records"]`` (rank,
+score, length, version, conflicts, sources), so a model can name the memory it used and a
+caller can select records by score. ``expand_items`` reads records by id later, from a tag
+or its fields. Both render bodies with the retriever's own renderers, so a record's
 ``chars`` and ``version`` describe exactly the body expand returns.
 """
 
+import re
 from collections import defaultdict
 from typing import Any
 from uuid import UUID
@@ -24,12 +24,11 @@ from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.models import Data
 from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
-from cognee.modules.recall.methods.normalize_search_payload import search_result_kind
-from cognee.modules.recall.types.RecallIndex import (
-    ExpandItem,
-    IndexRowMetadata,
-    RecordSource,
+from cognee.modules.recall.methods.normalize_search_payload import (
+    normalize_search_payload,
+    search_result_kind,
 )
+from cognee.modules.recall.types.RecallCited import CitedRecord, ExpandItem, RecordSource
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.retrieval.hybrid.context import attached_conflict_texts, render_passage
 from cognee.modules.retrieval.hybrid.entities import render_entity
@@ -42,14 +41,17 @@ from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.exceptions import PermissionDeniedError
 
-# Listed by /health (``get_capabilities``): this server answers result_mode="index" and
+# Listed by /health (``get_capabilities``): this server answers result_mode="cited" and
 # expand_items.
-RECALL_INDEX_CAPABILITY = "recall_index_v1"
-# The issue's preview length (SDK-1099): a row's ``text`` is its title or first line,
-# cut to this many characters.
-INDEX_TEXT_CHARS = 200
+RECALL_CITED_CAPABILITY = "recall_cited_v1"
 # The issue's expand bound (SDK-1099): records per expand call.
 MAX_EXPAND_ITEMS = 20
+
+_UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+_TAG = re.compile(
+    rf"\[mem:(?P<kind>passage|entity|fact)/(?P<dataset>{_UUID})/(?P<record>{_UUID})"
+    r"@(?P<version>[0-9a-f]{32})\]"
+)
 
 
 def record_version(body: str) -> str:
@@ -57,81 +59,109 @@ def record_version(body: str) -> str:
     return compute_content_hash(body)
 
 
-async def build_index_items(payload_: SearchResultPayload) -> list[SearchResultItem]:
-    """One dataset's ``only_context`` hybrid result as index rows, in prompt order.
+def record_tag(record_kind: str, dataset_id: Any, record_id: Any, version: str) -> str:
+    """The tag a cited prompt puts before a record: kind, dataset, id and version."""
+    return f"[mem:{record_kind}/{dataset_id}/{record_id}@{version}]"
 
-    Retrieval that found nothing returns []. Raises ``IndexRequiresHybridError`` when
-    hybrid handed this dataset to another search type (``hybrid_deferral_reason``: the
-    dataset has no chunk collection), and ``IndexTemplateNotSplittableError`` when the
-    retriever's user template cannot be split around the context.
+
+def parse_record_tag(tag: str) -> ExpandItem:
+    """The record a tag names. Raises ``ValueError`` for anything but one whole tag."""
+    match = _TAG.fullmatch(tag.strip())
+    if match is None:
+        raise ValueError(
+            f"not a memory tag: {tag!r}; expected "
+            "[mem:<passage|entity|fact>/<dataset_id>/<record_id>@<version>]"
+        )
+    return ExpandItem(
+        dataset_id=match["dataset"], record_kind=match["kind"], record_id=match["record"]
+    )
+
+
+async def build_cited_item(payload_: SearchResultPayload) -> list[SearchResultItem]:
+    """One dataset's ``only_context`` hybrid result as its cited prompt, or [] when
+    retrieval found nothing.
+
+    The prompt is assembled as ``format_hybrid_context`` and ``build_completion_prompts``
+    assemble regular mode's (the frame comes from ``payload_.context_frame``), with each
+    record's tag line before its body. Raises ``CitedRequiresHybridError`` when hybrid
+    handed this dataset to another search type (``hybrid_deferral_reason``: the dataset
+    has no chunk collection), and ``CitedTemplateNotSplittableError`` when the retriever's
+    user template cannot be split around the context.
     """
     retrieved = payload_.result_object
     if not payload_.user_prompt:
         return []
     if payload_.search_type != SearchType.HYBRID_COMPLETION:
         raise CogneeValidationError(
-            message=f"result_mode='index' needs hybrid retrieval, but dataset "
+            message=f"result_mode='cited' needs hybrid retrieval, but dataset "
             f"'{payload_.dataset_name}' was answered by {payload_.search_type}: it has no "
-            "passages to index (no DocumentChunk_text or DltRow_text collection). Leave it "
+            "passages to cite (no DocumentChunk_text or DltRow_text collection). Leave it "
             "out of datasets, or use result_mode='full'.",
-            name="IndexRequiresHybridError",
+            name="CitedRequiresHybridError",
         )
     frame = payload_.context_frame
     if not isinstance(retrieved, dict) or frame is None:
         # Request-level deferrals are refused before the search runs and the dataset-level
         # one above, so a hybrid only_context payload without its frame is a bug.
         raise CogneeSystemError(
-            message="A hybrid only_context result reached the recall index without its "
+            message="A hybrid only_context result reached the cited recall without its "
             "prompt frame.",
-            name="IndexFrameMissingError",
+            name="CitedFrameMissingError",
         )
     if frame["template_prefix"] is None:
         raise CogneeValidationError(
-            message="result_mode='index' needs a user prompt template that renders the "
+            message="result_mode='cited' needs a user prompt template that renders the "
             "context exactly once; this retriever's template cannot be split around it.",
-            name="IndexTemplateNotSplittableError",
+            name="CitedTemplateNotSplittableError",
         )
 
+    dataset_id = str(payload_.dataset_id)
     chunk_scores = retrieved.get("chunk_scores") or {}
     chunks = retrieved.get("chunks") or []
     entities = retrieved.get("entities") or []
     conflict_texts = attached_conflict_texts(retrieved)
     facts = [
-        fact for fact in retrieved.get("facts") or [] if fact.get("text") not in conflict_texts
+        fact
+        for fact in retrieved.get("facts") or []
+        if fact.get("text") and fact["text"] not in conflict_texts
     ]
-
     created_at = await _created_at_by_data_id(
         [display_value(payload(chunk).get("document_id")) for chunk in chunks]
     )
     entity_sources = await _entity_sources(entities, payload_.dataset_id)
 
-    rows: list[SearchResultItem] = []
+    records: list[CitedRecord] = []
 
-    def frame_row(record_kind: str, text: str) -> None:
-        if text:
-            rows.append(
-                _row(payload_, text, IndexRowMetadata(record_kind=record_kind, chars=len(text)))
+    def cite(record_kind: str, record_id: str, body: str, **fields) -> str:
+        """``body`` behind its tag line, recorded in ``records``."""
+        version = record_version(body)
+        tag = record_tag(record_kind, dataset_id, record_id, version)
+        records.append(
+            CitedRecord(
+                tag=tag,
+                record_kind=record_kind,
+                dataset_id=dataset_id,
+                record_id=record_id,
+                version=version,
+                chars=len(body),
+                **fields,
             )
+        )
+        return f"{tag}\n{body}"
 
-    frame_row("session_history", frame["history"])
-    frame_row("template_prefix", frame["template_prefix"])
-    frame_row("grounding", frame["grounding"])
-    frame_row("global_context", frame["global_context"])
-
+    passages = []
     for rank, chunk in enumerate(chunks, start=1):
         body = render_passage(chunk)
         if not body:
             continue
         chunk_id = result_id(chunk)
         scores = chunk_scores.get(chunk_id, {})
-        rows.append(
-            _memory_row(
-                payload_,
-                record_kind="passage",
-                record_id=chunk_id,
+        passages.append(
+            cite(
+                "passage",
+                chunk_id,
+                body,
                 rank=rank,
-                preview=_first_line(display_value(payload(chunk).get("text")) or body),
-                body=body,
                 score=scores.get("score"),
                 distance=scores.get("distance"),
                 conflicts=list(payload(chunk).get("conflicts", [])),
@@ -139,90 +169,63 @@ async def build_index_items(payload_: SearchResultPayload) -> list[SearchResultI
             )
         )
 
+    entity_blocks = []
     for rank, entity in enumerate(entities, start=1):
         body = render_entity(entity)
         if not body:
             continue
-        rows.append(
-            _memory_row(
-                payload_,
-                record_kind="entity",
-                record_id=entity["id"],
+        entity_blocks.append(
+            cite(
+                "entity",
+                entity["id"],
+                body,
                 rank=rank,
-                preview=_first_line(body).removeprefix("### "),
-                body=body,
                 score=entity.get("score"),
                 conflicts=list(entity.get("conflicts", [])),
                 sources=entity_sources.get(entity["id"], []),
             )
         )
 
-    for rank, fact in enumerate(facts, start=1):
-        rows.append(
-            _memory_row(
-                payload_,
-                record_kind="fact",
-                record_id=fact["id"],
-                rank=rank,
-                preview=fact["text"],
-                body=fact["text"],
-                score=fact.get("score"),
-                conflicts=[],
-                sources=None,
-            )
-        )
+    fact_lines = [
+        cite("fact", fact["id"], f"- {fact['text']}", rank=rank, score=fact.get("score"))
+        for rank, fact in enumerate(facts, start=1)
+    ]
 
-    frame_row("template_suffix", frame["template_suffix"])
-    frame_row("session_guidance", frame["guidance"])
-    return rows
-
-
-def rebuild_user_prompt(rows: list[SearchResultItem], bodies: dict[tuple[str, str], str]) -> str:
-    """The ``only_context`` user prompt one dataset's index rows stand for.
-
-    ``rows`` are one dataset's index rows in the order ``build_index_items`` returns them;
-    ``bodies`` maps ``(record_kind, record_id)`` of each memory row to its full body (an
-    expand row's ``text``). A memory row missing from ``bodies`` uses its own ``text``,
-    which is the whole body when ``chars == len(text)``. The rule is written out in
-    ``cognee.modules.recall.types.RecallIndex``; this is its one implementation.
-    """
-    frame: dict[str, str] = {}
-    sections: dict[str, list[str]] = defaultdict(list)
-    conflicts: set[str] = set()
-    for row in rows:
-        metadata = IndexRowMetadata.model_validate(row.metadata)
-        if metadata.record_id is None:
-            frame[metadata.record_kind] = row.text
-            continue
-        sections[metadata.record_kind].append(
-            bodies.get((metadata.record_kind, metadata.record_id), row.text)
-        )
-        if metadata.record_kind in ("passage", "entity"):
-            conflicts.update(metadata.conflicts)
-
+    # The sections and joiners of ``format_hybrid_context``.
     context = "\n\n".join(
         section
         for section in (
-            frame.get("global_context", ""),
-            _section("## Relevant passages\n", "\n---\n", sections["passage"]),
-            _section("## Relevant entities\n", "\n\n", sections["entity"]),
-            _section("## Related facts\n", "\n", [f"- {fact}" for fact in sections["fact"]]),
-            format_conflicts(conflicts),
+            frame["global_context"],
+            _section("## Relevant passages\n", "\n---\n", passages),
+            _section("## Relevant entities\n", "\n\n", entity_blocks),
+            _section("## Related facts\n", "\n", fact_lines),
+            format_conflicts(conflict_texts),
         )
         if section
     )
-    if frame.get("grounding"):
+    if frame["grounding"]:
         context = f"{frame['grounding']}\n\n{context}"
-    rendered = frame.get("template_prefix", "") + context + frame.get("template_suffix", "")
-    return "\n\n".join(
-        part
-        for part in (frame.get("session_history"), rendered, frame.get("session_guidance"))
-        if part
-    )
+    # The session layer around the rendered template, as ``build_completion_prompts``.
+    rendered = frame["template_prefix"] + context + frame["template_suffix"]
+    text = "\n\n".join(part for part in (frame["history"], rendered, frame["guidance"]) if part)
+
+    (item,) = normalize_search_payload(payload_)
+    return [
+        item.model_copy(
+            update={
+                "text": text,
+                "raw": {"value": text},
+                "metadata": {
+                    **item.metadata,
+                    "records": [record.model_dump(mode="json") for record in records],
+                },
+            }
+        )
+    ]
 
 
-def _section(header: str, joiner: str, bodies: list[str]) -> str:
-    return header + joiner.join(bodies) if bodies else ""
+def _section(header: str, joiner: str, blocks: list[str]) -> str:
+    return header + joiner.join(blocks) if blocks else ""
 
 
 async def expand_records(
@@ -232,13 +235,13 @@ async def expand_records(
     user: Any,
     retriever_kwargs: dict,
 ) -> list[SearchResultItem]:
-    """Full bodies for index rows, one result per requested item, in request order.
+    """Full bodies for cited records, one result per requested item, in request order.
 
     Items are grouped by dataset: read access is checked once per dataset and its stores
     are opened once. A record the dataset no longer holds is ``missing``; a dataset the
     caller cannot read makes its records ``forbidden``. ``retriever_kwargs`` must be the
-    index call's settings (top_k, node_name, retriever_specific_config, ...), so entity
-    bullets come out as the index call ranked them.
+    cited call's settings (top_k, node_name, retriever_specific_config, ...), so entity
+    bullets come out as the cited call ranked them.
     """
     unique_items = list(
         dict.fromkeys((item.dataset_id, item.record_kind, str(item.record_id)) for item in items)
@@ -295,18 +298,22 @@ async def _expanded_rows(
                 dataset_id, dataset_name, record_kind, record_id, "missing"
             )
             continue
-        body = record["body"]
+        # A fact's cited body is its "- " line in Related facts.
+        body = f"- {record['body']}" if record_kind == "fact" else record["body"]
         if record_kind == "passage":
             sources = [_passage_source(record["item"], created_at)]
         elif record_kind == "entity":
             sources = entity_sources.get(record_id, [])
         else:
             sources = None
-        metadata = IndexRowMetadata(
+        version = record_version(body)
+        metadata = CitedRecord(
+            tag=record_tag(record_kind, dataset_id, record_id, version),
             record_kind=record_kind,
+            dataset_id=str(dataset_id),
             record_id=record_id,
+            version=version,
             chars=len(body),
-            version=record_version(body),
             conflicts=record["conflicts"],
             sources=sources,
             status="available",
@@ -325,8 +332,13 @@ async def _expanded_rows(
 def _status_row(
     dataset_id: UUID, dataset_name: str | None, record_kind: str, record_id: str, status: str
 ) -> SearchResultItem:
-    metadata = IndexRowMetadata(
-        record_kind=record_kind, record_id=record_id, chars=0, status=status
+    metadata = CitedRecord(
+        tag=f"[mem:{record_kind}/{dataset_id}/{record_id}]",
+        record_kind=record_kind,
+        dataset_id=str(dataset_id),
+        record_id=record_id,
+        chars=0,
+        status=status,
     )
     return SearchResultItem(
         kind=search_result_kind(SearchType.HYBRID_COMPLETION),
@@ -336,55 +348,6 @@ def _status_row(
         dataset_name=dataset_name,
         metadata=metadata.model_dump(mode="json"),
     )
-
-
-def _memory_row(
-    payload_: SearchResultPayload,
-    *,
-    record_kind: str,
-    record_id: str | None,
-    rank: int,
-    preview: str,
-    body: str,
-    score: float | None,
-    conflicts: list[str],
-    sources: list[RecordSource] | None,
-    distance: float | None = None,
-) -> SearchResultItem:
-    metadata = IndexRowMetadata(
-        record_kind=record_kind,
-        record_id=record_id,
-        rank=rank,
-        score=score,
-        distance=distance,
-        chars=len(body),
-        version=record_version(body),
-        conflicts=conflicts,
-        sources=sources,
-    )
-    return _row(payload_, preview[:INDEX_TEXT_CHARS], metadata, score=score)
-
-
-def _row(
-    payload_: SearchResultPayload,
-    text: str,
-    metadata: IndexRowMetadata,
-    *,
-    score: float | None = None,
-) -> SearchResultItem:
-    return SearchResultItem(
-        kind=search_result_kind(payload_.search_type),
-        search_type=payload_.search_type,
-        text=text,
-        score=score,
-        dataset_id=str(payload_.dataset_id) if payload_.dataset_id else None,
-        dataset_name=payload_.dataset_name,
-        metadata=metadata.model_dump(mode="json"),
-    )
-
-
-def _first_line(text: str) -> str:
-    return next((line.strip() for line in text.splitlines() if line.strip()), "")
 
 
 def _passage_source(chunk: Any, created_at: dict[str, str]) -> RecordSource:

@@ -1,7 +1,7 @@
-"""Index and expand calls over serve() go only to a server that lists recall_index_v1.
+"""Cited and expand calls over serve() go only to a server that lists recall_cited_v1.
 
 Request bodies ignore unknown fields, so a server older than ``resultMode`` and
-``expandItems`` answers an index call with one prose prompt and an expand call with an
+``expandItems`` answers a cited call with an untagged prompt and an expand call with an
 ordinary recall of the query: no error, results the caller did not ask for. The
 client reads the ``capabilities`` the server's ``/health`` lists (cached per client)
 and refuses the request instead. A plain recall never probes.
@@ -13,7 +13,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.api.v1.serve.cloud_client import CloudClient
-from cognee.modules.recall.types.RecallIndex import ExpandItem
+from cognee.modules.recall.types.RecallCited import ExpandItem
 
 
 class _Response:
@@ -75,13 +75,13 @@ def _client(health, status=200):
     return client, server
 
 
-CURRENT = {"status": "ready", "capabilities": ["session_summary_v1", "recall_index_v1"]}
+CURRENT = {"status": "ready", "capabilities": ["session_summary_v1", "recall_cited_v1"]}
 ITEM = ExpandItem(dataset_id=uuid4(), record_kind="passage", record_id=uuid4())
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "kwargs", [{"result_mode": "index", "only_context": True}, {"expand_items": [ITEM]}]
+    "kwargs", [{"result_mode": "cited", "only_context": True}, {"expand_items": [ITEM]}]
 )
 async def test_a_server_that_lists_the_capability_gets_the_fields(kwargs):
     client, server = _client(CURRENT)
@@ -93,7 +93,7 @@ async def test_a_server_that_lists_the_capability_gets_the_fields(kwargs):
     if "expand_items" in kwargs:
         assert body["expand_items"] == [ITEM.model_dump(mode="json")]
     else:
-        assert body["result_mode"] == "index"
+        assert body["result_mode"] == "cited"
 
 
 @pytest.mark.asyncio
@@ -106,11 +106,11 @@ async def test_a_server_that_lists_the_capability_gets_the_fields(kwargs):
     ],
 )
 @pytest.mark.parametrize(
-    "kwargs", [{"result_mode": "index", "only_context": True}, {"expand_items": [ITEM]}]
+    "kwargs", [{"result_mode": "cited", "only_context": True}, {"expand_items": [ITEM]}]
 )
 async def test_an_older_server_is_refused_before_anything_is_sent(health, status, kwargs):
     client, server = _client(health, status)
-    with pytest.raises(RuntimeError, match="does not list recall_index_v1"):
+    with pytest.raises(RuntimeError, match="does not list recall_cited_v1"):
         await client.recall("q", **kwargs)
     assert server.posts == []
 
@@ -121,7 +121,7 @@ async def test_an_unreadable_health_is_refused_and_asked_again(health):
     client, server = _client(health)
     for _ in range(2):
         with pytest.raises(RuntimeError, match="is unknown"):
-            await client.recall("q", result_mode="index", only_context=True)
+            await client.recall("q", result_mode="cited", only_context=True)
     assert server.posts == []
     assert server.health_reads == 2
 
@@ -129,8 +129,8 @@ async def test_an_unreadable_health_is_refused_and_asked_again(health):
 @pytest.mark.asyncio
 async def test_a_degraded_server_still_says_what_it_supports():
     client, server = _client({**CURRENT, "status": "not ready"}, status=503)
-    await client.recall("q", result_mode="index", only_context=True)
-    assert server.posts[-1]["result_mode"] == "index"
+    await client.recall("q", result_mode="cited", only_context=True)
+    assert server.posts[-1]["result_mode"] == "cited"
 
 
 @pytest.mark.asyncio

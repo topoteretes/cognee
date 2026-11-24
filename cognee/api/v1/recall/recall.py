@@ -4,7 +4,7 @@ from contextlib import nullcontext
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from cognee.base_config import get_base_config
@@ -31,7 +31,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.operations import get_current_operation, record_operation
 from cognee.modules.recall.methods.graph_warmup import STATE_BUILD_FAILED, STATE_PARTIAL
-from cognee.modules.recall.types.RecallIndex import ExpandItem
+from cognee.modules.recall.types.RecallCited import ExpandItem
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -477,7 +477,7 @@ async def _recall_user(user):
         ) from error
 
 
-def _validate_index_request(
+def _validate_cited_request(
     *,
     result_mode: str,
     expand_items: list | None,
@@ -488,21 +488,21 @@ def _validate_index_request(
     neighborhood_depth: int | None,
     feedback_influence: float,
 ) -> None:
-    """Refuse index and expand requests recall cannot answer, before any lane runs."""
-    from cognee.api.v1.recall.query_router import INDEX_SEARCH_TYPES
-    from cognee.modules.recall.methods.recall_index import MAX_EXPAND_ITEMS
+    """Refuse cited and expand requests recall cannot answer, before any lane runs."""
+    from cognee.api.v1.recall.query_router import CITED_SEARCH_TYPES
+    from cognee.modules.recall.methods.recall_cited import MAX_EXPAND_ITEMS
     from cognee.modules.search.methods.hybrid_deferral import request_deferral_reason
 
-    if result_mode not in ("full", "index"):
+    if result_mode not in ("full", "cited"):
         raise CogneeValidationError(
-            message=f"Invalid result_mode '{result_mode}'. Valid values: 'full', 'index'.",
+            message=f"Invalid result_mode '{result_mode}'. Valid values: 'full', 'cited'.",
             name="InvalidResultModeError",
         )
     if expand_items is not None:
-        if result_mode == "index":
+        if result_mode == "cited":
             raise CogneeValidationError(
-                message="expand_items expands an index; it cannot be combined with "
-                "result_mode='index'. Send the index call and the expand call separately.",
+                message="expand_items reads cited records by id; it cannot be combined with "
+                "result_mode='cited'. Send the cited call and the expand call separately.",
                 name="InvalidExpandRequestError",
             )
         if not 1 <= len(expand_items) <= MAX_EXPAND_ITEMS:
@@ -511,28 +511,28 @@ def _validate_index_request(
                 name="InvalidExpandItemsError",
             )
         return
-    if result_mode != "index":
+    if result_mode != "cited":
         return
     if not only_context:
         raise CogneeValidationError(
-            message="result_mode='index' requires only_context=True.",
-            name="IndexRequiresOnlyContextError",
+            message="result_mode='cited' requires only_context=True.",
+            name="CitedRequiresOnlyContextError",
         )
-    if query_type is not None and query_type not in INDEX_SEARCH_TYPES:
+    if query_type is not None and query_type not in CITED_SEARCH_TYPES:
         raise CogneeValidationError(
-            message=f"result_mode='index' supports {sorted(t.value for t in INDEX_SEARCH_TYPES)}, "
+            message=f"result_mode='cited' supports {sorted(t.value for t in CITED_SEARCH_TYPES)}, "
             f"not {query_type.value}. Omit query_type to let recall pick one.",
-            name="IndexUnsupportedSearchTypeError",
+            name="CitedUnsupportedSearchTypeError",
         )
     if sources != ["graph"]:
         raise CogneeValidationError(
-            message="result_mode='index' searches the graph only: pass scope=['graph'], or "
+            message="result_mode='cited' searches the graph only: pass scope=['graph'], or "
             f"omit session_id with the default scope (resolved sources: {sources}).",
-            name="IndexRequiresGraphScopeError",
+            name="CitedRequiresGraphScopeError",
         )
-    # The index cuts the hybrid prompt into rows, so a request hybrid would hand to
-    # GRAPH_COMPLETION is refused here; a dataset without chunks is refused per dataset
-    # in build_index_items.
+    # The cited prompt is the hybrid prompt with its records tagged, so a request hybrid
+    # would hand to GRAPH_COMPLETION is refused here; a dataset without chunks is refused
+    # per dataset in build_cited_item.
     deferral_reason = request_deferral_reason(
         {
             "node_type": node_type,
@@ -542,26 +542,32 @@ def _validate_index_request(
     )
     if deferral_reason:
         raise CogneeValidationError(
-            message=f"result_mode='index' needs hybrid retrieval, but {deferral_reason}. "
+            message=f"result_mode='cited' needs hybrid retrieval, but {deferral_reason}. "
             "Drop that option (pass feedback_influence=0 when the deployment sets "
             "DEFAULT_FEEDBACK_INFLUENCE), or use result_mode='full'.",
-            name="IndexRequiresHybridError",
+            name="CitedRequiresHybridError",
         )
 
 
 def _expand_items_as_models(expand_items: list | None) -> list[ExpandItem] | None:
     """``expand_items`` as ``ExpandItem`` models.
 
-    SDK callers send an index row's fields back as dicts (over ``serve()`` the rows are
-    dicts), so each item is validated here, as the HTTP route validates its body.
+    An item is a record's tag as the cited prompt shows it, or its fields as an
+    ``ExpandItem`` or a dict (over ``serve()`` the cited records are dicts), so each is
+    validated here, as the HTTP route validates its body.
     """
+    from cognee.modules.recall.methods.recall_cited import parse_record_tag
+
     if expand_items is None:
         return None
     items = []
     for position, item in enumerate(expand_items):
         try:
-            items.append(ExpandItem.model_validate(item))
-        except ValidationError as error:
+            if isinstance(item, str):
+                items.append(parse_record_tag(item))
+            else:
+                items.append(ExpandItem.model_validate(item))
+        except ValueError as error:
             raise CogneeValidationError(
                 message=f"expand_items[{position}] is not a valid item: {error}",
                 name="InvalidExpandItemsError",
@@ -603,8 +609,8 @@ async def recall(
     tool_connections: list[str] | None = None,
     tools_trigger: str = "always",
     code_query: dict | None = None,
-    result_mode: Literal["full", "index"] = "full",
-    expand_items: list[ExpandItem | dict] | None = None,
+    result_mode: Literal["full", "cited"] = "full",
+    expand_items: list[ExpandItem | dict | str] | None = None,
     user: object | None = None,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
@@ -672,26 +678,25 @@ async def recall(
             dataset without a code graph, or flows on a graph without them
             contribute nothing rather than failing the recall.
         result_mode: ``"full"`` (default) returns the results as they always were.
-            ``"index"`` returns an ``only_context`` HYBRID_COMPLETION recall of the
-            graph alone as rows instead of one prompt: a short row per passage,
-            entity and fact (record id, rank, score, version, length, conflicts,
-            sources) and a full row per part of the prompt that has no id. Requires
-            ``only_context=True`` and graph-only sources; an explicit ``query_type``
-            other than HYBRID_COMPLETION is refused, a routed one falls back to it.
-            A request hybrid would hand to GRAPH_COMPLETION (a typed ``node_type``,
-            ``neighborhood_depth``, ``feedback_influence > 0``) and a searched dataset
-            with no chunk collection raise ``IndexRequiresHybridError``. Row fields
-            and how the rows rebuild the prompt are documented in ``RecallIndex``.
-        expand_items: Index rows to return in full, at most 20, each an ``ExpandItem``
-            or a dict ``{dataset_id, record_kind, record_id}`` (camelCase keys too) with
-            the values the index row carries (``dataset_id`` and
-            ``metadata["record_kind"]`` / ``metadata["record_id"]``); an invalid item
-            raises ``InvalidExpandItemsError``. Pass the index
-            call's query and settings (``top_k``, ``node_name``,
-            ``retriever_specific_config``) so entities come back as the index ranked
-            them. Each row says ``available``, ``missing`` (no longer stored) or
-            ``forbidden`` (dataset not readable) in ``metadata["status"]``. Not
-            combined with ``result_mode="index"``.
+            ``"cited"`` returns the ``only_context`` HYBRID_COMPLETION prompt with a tag
+            line, ``[mem:<kind>/<dataset_id>/<record_id>@<version>]``, before every
+            passage, entity and fact, and the tagged records (rank, score, version,
+            length, conflicts, sources) in ``metadata["records"]``, so the model can name
+            the memory it used. Requires ``only_context=True`` and graph-only sources; an
+            explicit ``query_type`` other than HYBRID_COMPLETION is refused, a routed one
+            falls back to it. A request hybrid would hand to GRAPH_COMPLETION (a typed
+            ``node_type``, ``neighborhood_depth``, ``feedback_influence > 0``) and a
+            searched dataset with no chunk collection raise ``CitedRequiresHybridError``.
+            Record fields are documented in ``RecallCited``.
+        expand_items: Records to read by id later (re-reading a cited memory), at most
+            20, each a tag string as the cited prompt shows it, an ``ExpandItem``, or a
+            dict ``{dataset_id, record_kind, record_id}`` (camelCase keys too); an
+            invalid item raises ``InvalidExpandItemsError``. Pass the cited call's query
+            and settings (``top_k``, ``node_name``, ``retriever_specific_config``) so
+            entities come back as that call ranked them. Each result's
+            ``metadata["status"]`` is ``available``, ``missing`` (no longer stored) or
+            ``forbidden`` (dataset not readable); a changed body has a new ``version``.
+            Not combined with ``result_mode="cited"``.
 
     Returns:
         Search results. When searching session-only, returns a list of
@@ -778,7 +783,7 @@ async def recall(
     # context — so tools must observe every other source's results first.
     if tools_trigger == "on_empty" and "tools" in sources:
         sources = [source for source in sources if source != "tools"] + ["tools"]
-    _validate_index_request(
+    _validate_cited_request(
         result_mode=result_mode,
         expand_items=expand_items,
         only_context=only_context,
@@ -862,7 +867,7 @@ async def recall(
         if expand_items is not None:
             user = await _recall_user(user)
             await set_session_user_context_variable(user)
-            from cognee.modules.recall.methods.recall_index import expand_records
+            from cognee.modules.recall.methods.recall_cited import expand_records
 
             expanded = await expand_records(
                 expand_items,
@@ -1209,10 +1214,10 @@ async def recall(
 
                 tagged = []
                 for r in graph_results:
-                    if result_mode == "index":
-                        from cognee.modules.recall.methods.recall_index import build_index_items
+                    if result_mode == "cited":
+                        from cognee.modules.recall.methods.recall_cited import build_cited_item
 
-                        items: list[SearchResultItem] = await build_index_items(r)
+                        items: list[SearchResultItem] = await build_cited_item(r)
                     else:
                         items = normalize_search_payload(r)
                     tagged.extend(

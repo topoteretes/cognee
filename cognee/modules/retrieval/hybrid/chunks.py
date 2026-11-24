@@ -117,7 +117,7 @@ async def retrieve_hybrid_chunks(
 
 def chunk_scores_by_id(ranked_pairs: list[dict]) -> dict[str, dict]:
     """Per kept chunk: the fused ``score`` it was ranked by (higher is better) and the
-    raw query ``distance`` of its closer hit (lower is better). Read by the recall index."""
+    raw query ``distance`` of its closer hit (lower is better). Read by cited recall."""
     return {
         str(pair["chunk_id"]): {"score": pair.get("score"), "distance": pair_distance(pair)}
         for pair in ranked_pairs

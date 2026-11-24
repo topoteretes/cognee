@@ -286,32 +286,48 @@ source unless you ask for the session by name with `scope`. REST clients that re
 `HYBRID_COMPLETION` default should pass `"searchType": "HYBRID_COMPLETION"`
 explicitly.
 
-### Index and expand
+### Cited recall and expand
 
-`recall(only_context=True, result_mode="index")` returns the hybrid prompt as rows
-instead of one string, so a caller can pick what to read in full (SDK-1099):
+`recall(only_context=True, result_mode="cited")` returns the hybrid prompt regular
+`only_context` returns, with a tag line directly before every passage, entity and fact,
+so the model can name the memory it used and a user can look that memory up (SDK-1099):
 
-- one short row per passage, entity and fact, its `metadata` carrying `record_kind`,
-  `record_id`, `rank`, `score`, `version` (a content hash of the full body), `chars`,
-  `conflicts` and `sources`;
-- one full row per part of the prompt that has no id (session history, the template
-  halves, ontology grounding, global context, session guidance).
+```
+## Relevant passages
+[mem:passage/<dataset_id>/<record_id>@<version>]
+source: notes.md
+The Harbor Lights Festival opens …
 
-`recall(query, expand_items=[...])` then returns up to 20 of those records in full,
-each with `metadata["status"]` `available`, `missing` or `forbidden` (the caller
-cannot read the dataset). Items are `ExpandItem`s or dicts of a row's `dataset_id`,
-`metadata["record_kind"]` and `metadata["record_id"]`; send the index call's query and
-settings so entity bullets rank as they did. The rows and the expanded bodies rebuild
-the `only_context` prompt exactly; the rule is on
-`cognee.modules.recall.types.RecallIndex` and `rebuild_user_prompt` implements it.
+## Related facts
+[mem:fact/<dataset_id>/<record_id>@<version>]
+- Lantern Parade closes Harbor Lights Festival
+```
 
-Index mode runs `HYBRID_COMPLETION` only: an explicit other `query_type` is refused,
-and a routed one falls back to it. A request hybrid would hand to `GRAPH_COMPLETION`
-(a typed `node_type`, `neighborhood_depth`, `feedback_influence > 0`, including a
-deployment's `DEFAULT_FEEDBACK_INFLUENCE`) and a searched dataset without passages (a
-code-only dataset) raise `IndexRequiresHybridError`. Index needs graph-only sources.
-Over `serve()` both are sent only to a server whose `GET /health` lists
-`recall_index_v1`. The CLI and the MCP tools do not expose them.
+- Section headers, the conflict block and the prompt's frame (template, history,
+  grounding, global context, guidance) carry no tag; removing every tag line gives
+  exactly the regular prompt.
+- `metadata["records"]` lists one record per tag, in prompt order: `tag`,
+  `record_kind`, `dataset_id`, `record_id`, `version` (the content hash of the body
+  without its tag), `chars`, `rank`, `score` (comparable within one kind), `distance`
+  (passages, comparable across datasets), `conflicts` and `sources`. A caller fitting a
+  budget drops whole records (each starts at its tag) and picks them by these fields.
+- A tag is about 115 characters, so tagged records cost more of an injection budget than
+  untagged ones.
+
+`recall(query, expand_items=[...])` reads up to 20 records by id later, for example a
+cited memory the user wants to re-read. An item is a tag as the prompt shows it, an
+`ExpandItem` or a `{dataset_id, record_kind, record_id}` dict. Each result's
+`metadata["status"]` is `available`, `missing` or `forbidden` (the caller cannot read the
+dataset); a body that changed since it was cited comes back with a new `version`. Send
+the cited call's query and settings so entity bullets rank as they did.
+
+Cited mode runs `HYBRID_COMPLETION` only: an explicit other `query_type` is refused, and
+a routed one falls back to it. A request hybrid would hand to `GRAPH_COMPLETION` (a typed
+`node_type`, `neighborhood_depth`, `feedback_influence > 0`, including a deployment's
+`DEFAULT_FEEDBACK_INFLUENCE`) and a searched dataset without passages (a code-only
+dataset) raise `CitedRequiresHybridError`. Cited mode needs graph-only sources. Over
+`serve()` both are sent only to a server whose `GET /health` lists `recall_cited_v1`. The
+CLI and the MCP tools do not expose them.
 
 ### Seeing what ran
 

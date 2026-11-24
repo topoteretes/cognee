@@ -1,5 +1,6 @@
-"""Recall's index mode and expand-by-id (SDK-1099)."""
+"""Recall's cited mode and expand-by-id (SDK-1099)."""
 
+import re
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from uuid import uuid4
@@ -8,24 +9,24 @@ import pytest
 
 from cognee.api.v1.health import get_capabilities
 from cognee.api.v1.recall.query_router import (
-    INDEX_SEARCH_TYPES,
+    CITED_SEARCH_TYPES,
     RoutingConstraints,
     route_query,
 )
-from cognee.api.v1.recall.recall import _expand_items_as_models, _validate_index_request
+from cognee.api.v1.recall.recall import _expand_items_as_models, _validate_cited_request
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
 from cognee.modules.data.content_hash import compute_content_hash
 from cognee.modules.engine.models import Entity
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.recall.methods import recall_index
-from cognee.modules.recall.methods.recall_index import (
-    INDEX_TEXT_CHARS,
-    RECALL_INDEX_CAPABILITY,
-    build_index_items,
+from cognee.modules.recall.methods import recall_cited
+from cognee.modules.recall.methods.recall_cited import (
+    RECALL_CITED_CAPABILITY,
+    build_cited_item,
     expand_records,
-    rebuild_user_prompt,
+    parse_record_tag,
+    record_tag,
 )
-from cognee.modules.recall.types.RecallIndex import ExpandItem
+from cognee.modules.recall.types.RecallCited import ExpandItem
 from cognee.modules.retrieval.hybrid.context import format_hybrid_context, render_passage
 from cognee.modules.retrieval.hybrid.entities import render_entity
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
@@ -39,6 +40,7 @@ FACT_ID = str(uuid4())
 CONFLICT_FACT_ID = str(uuid4())
 GONE_ID = str(uuid4())
 OTHER_CHUNK_ID = str(uuid4())
+TAG_LINE = re.compile(r"^\[mem:(passage|entity|fact)/[0-9a-f-]{36}/[0-9a-f-]{36}@[0-9a-f]{32}\]$")
 
 
 def _frame(**overrides) -> dict:
@@ -53,7 +55,7 @@ def _frame(**overrides) -> dict:
     }
 
 
-def _payload(retrieved: dict, **overrides) -> SearchResultPayload:
+def _payload(retrieved, **overrides) -> SearchResultPayload:
     fields = {
         "result_object": retrieved,
         "context": "rendered",
@@ -70,6 +72,7 @@ def _payload(retrieved: dict, **overrides) -> SearchResultPayload:
 
 
 LONG_TEXT = " ".join(["Switching datasets moves saves to the new dataset."] * 10)
+FACT_TEXT = "Pinning keeps recall on the active dataset."
 
 
 def _retrieved() -> dict:
@@ -98,11 +101,24 @@ def _retrieved() -> dict:
             }
         ],
         "facts": [
-            {"id": FACT_ID, "text": "Pinning keeps recall on the active dataset.", "score": 0.4},
-            # Shown in the conflicts block already, so not a fact row (format_facts' rule).
+            {"id": FACT_ID, "text": FACT_TEXT, "score": 0.4},
+            # Shown in the conflicts block already, so not a fact (format_facts' rule).
             {"id": CONFLICT_FACT_ID, "text": "The tenant runs 1.6.9 and 1.6.8.", "score": 0.5},
         ],
     }
+
+
+def _regular_prompt(retrieved: dict, frame: dict) -> str:
+    """The prompt exactly as hybrid and build_completion_prompts assemble it."""
+    context = format_hybrid_context(frame["global_context"], retrieved)
+    if frame["grounding"]:
+        context = f"{frame['grounding']}\n\n{context}"
+    rendered = frame["template_prefix"] + context + frame["template_suffix"]
+    return "\n\n".join(part for part in (frame["history"], rendered, frame["guidance"]) if part)
+
+
+def _without_tags(text: str) -> str:
+    return "\n".join(line for line in text.split("\n") if not TAG_LINE.match(line))
 
 
 @pytest.fixture(autouse=True)
@@ -118,34 +134,48 @@ def _no_relational_reads(monkeypatch):
             for edge_id in edge_ids
         ]
 
-    monkeypatch.setattr(recall_index, "_created_at_by_data_id", created_at)
-    monkeypatch.setattr(recall_index, "get_edge_evidence_records", evidence)
+    monkeypatch.setattr(recall_cited, "_created_at_by_data_id", created_at)
+    monkeypatch.setattr(recall_cited, "get_edge_evidence_records", evidence)
 
 
 @pytest.mark.asyncio
-async def test_index_rows_follow_prompt_order_with_ids_versions_and_sources():
-    rows = await build_index_items(_payload(_retrieved()))
-    kinds = [row.metadata["record_kind"] for row in rows]
-    assert kinds == [
-        "session_history",
-        "template_prefix",
-        "passage",
-        "entity",
-        "fact",
-        "template_suffix",
-        "session_guidance",
-    ]
+async def test_cited_prompt_is_the_regular_prompt_with_a_tag_before_every_record():
+    retrieved = _retrieved()
+    frame = _frame(grounding="## Ontology grounding\n- x", global_context="## Global context\n- y")
 
-    passage, entity, fact = rows[2], rows[3], rows[4]
-    assert len(passage.text) <= INDEX_TEXT_CHARS
-    assert passage.metadata["record_id"] == CHUNK_ID
-    assert passage.metadata["rank"] == 1
-    assert passage.metadata["chars"] == len(LONG_TEXT)
-    assert passage.metadata["version"] == compute_content_hash(LONG_TEXT)
-    assert passage.metadata["score"] == 0.06
-    assert passage.metadata["distance"] == 0.21
-    assert passage.metadata["conflicts"] == ["The tenant runs 1.6.9 and 1.6.8."]
-    assert passage.metadata["sources"] == [
+    (item,) = await build_cited_item(_payload(retrieved, context_frame=frame))
+
+    assert _without_tags(item.text) == _regular_prompt(retrieved, frame)
+    assert item.system_prompt == "system"
+    assert item.raw == {"value": item.text}
+    lines = item.text.split("\n")
+    tags = [line for line in lines if TAG_LINE.match(line)]
+    assert tags == [record["tag"] for record in item.metadata["records"]]
+    # Uniform: each tag line is directly followed by its record's body.
+    for record in item.metadata["records"]:
+        assert f"{record['tag']}\n" in item.text
+    # The frame and the section headers carry no tag.
+    for untagged in ("## Ontology grounding", "## Global context", "## Relevant passages"):
+        (position,) = [i for i, line in enumerate(lines) if line.endswith(untagged)]
+        assert not TAG_LINE.match(lines[position - 1])
+    assert "## Fact conflicts\n- The tenant runs 1.6.9 and 1.6.8." in item.text
+
+
+@pytest.mark.asyncio
+async def test_records_carry_ids_versions_scores_and_sources_in_prompt_order():
+    retrieved = _retrieved()
+    (item,) = await build_cited_item(_payload(retrieved))
+    passage, entity, fact = item.metadata["records"]
+
+    passage_body = render_passage(retrieved["chunks"][0])
+    assert passage["record_kind"] == "passage" and passage["record_id"] == CHUNK_ID
+    assert passage["dataset_id"] == str(DATASET_ID)
+    assert passage["version"] == compute_content_hash(passage_body)
+    assert passage["chars"] == len(passage_body)
+    assert passage["tag"] == record_tag("passage", DATASET_ID, CHUNK_ID, passage["version"])
+    assert (passage["rank"], passage["score"], passage["distance"]) == (1, 0.06, 0.21)
+    assert passage["conflicts"] == ["The tenant runs 1.6.9 and 1.6.8."]
+    assert passage["sources"] == [
         {
             "data_id": DATA_ID,
             "document_name": "notes.md",
@@ -154,36 +184,25 @@ async def test_index_rows_follow_prompt_order_with_ids_versions_and_sources():
         }
     ]
 
-    assert entity.text == "tenant server (software)"
-    assert entity.metadata["conflicts"] == ["The tenant runs 1.6.9 and 1.6.8."]
-    assert entity.metadata["sources"][0]["data_id"] == DATA_ID
+    assert entity["record_id"] == ENTITY_ID
+    assert entity["version"] == compute_content_hash(render_entity(retrieved["entities"][0]))
+    assert entity["sources"][0]["data_id"] == DATA_ID
 
-    # A fact fits its preview: the text is the whole body, so it needs no expand.
-    assert fact.metadata["chars"] == len(fact.text)
-    assert fact.metadata["sources"] is None
-    assert fact.metadata["conflicts"] == []
-    assert all(row.dataset_id == str(DATASET_ID) for row in rows)
-
-
-@pytest.mark.asyncio
-async def test_frame_rows_carry_full_text_and_no_id():
-    rows = await build_index_items(
-        _payload(_retrieved(), context_frame=_frame(grounding="## Ontology grounding\n- x"))
-    )
-    grounding = next(row for row in rows if row.metadata["record_kind"] == "grounding")
-    assert grounding.text == "## Ontology grounding\n- x"
-    assert grounding.metadata["record_id"] is None
-    assert grounding.metadata["version"] is None
+    # A fact's body is its line in Related facts; its sources are not tracked.
+    assert fact["record_id"] == FACT_ID
+    assert fact["version"] == compute_content_hash(f"- {FACT_TEXT}")
+    assert fact["sources"] is None
+    assert f"{fact['tag']}\n- {FACT_TEXT}" in item.text
 
 
 @pytest.mark.asyncio
-async def test_no_prompt_means_no_rows_and_unsplittable_template_is_refused():
-    assert await build_index_items(_payload(_retrieved(), user_prompt=None)) == []
+async def test_no_prompt_means_no_item_and_unsplittable_template_is_refused():
+    assert await build_cited_item(_payload(_retrieved(), user_prompt=None)) == []
     with pytest.raises(CogneeValidationError) as raised:
-        await build_index_items(
+        await build_cited_item(
             _payload(_retrieved(), context_frame=_frame(template_prefix=None, template_suffix=None))
         )
-    assert raised.value.name == "IndexTemplateNotSplittableError"
+    assert raised.value.name == "CitedTemplateNotSplittableError"
 
 
 @pytest.mark.asyncio
@@ -197,35 +216,16 @@ async def test_a_dataset_hybrid_handed_to_graph_completion_is_refused_by_name():
         dataset_name="code_repo",
     )
     with pytest.raises(CogneeValidationError) as raised:
-        await build_index_items(payload_)
-    assert raised.value.name == "IndexRequiresHybridError"
+        await build_cited_item(payload_)
+    assert raised.value.name == "CitedRequiresHybridError"
     assert "'code_repo'" in raised.value.message
 
 
 @pytest.mark.asyncio
 async def test_a_hybrid_payload_without_its_frame_is_an_internal_error():
     with pytest.raises(CogneeSystemError) as raised:
-        await build_index_items(_payload(_retrieved(), context_frame=None))
-    assert raised.value.name == "IndexFrameMissingError"
-
-
-@pytest.mark.asyncio
-async def test_rows_rebuild_the_user_prompt_the_retriever_renders():
-    retrieved = _retrieved()
-    frame = _frame(grounding="## Ontology grounding\n- x", global_context="## Global context\n- y")
-    # The prompt exactly as hybrid and build_completion_prompts assemble it.
-    context = f"{frame['grounding']}\n\n" + format_hybrid_context(
-        frame["global_context"], retrieved
-    )
-    rendered = frame["template_prefix"] + context + frame["template_suffix"]
-    user_prompt = "\n\n".join((frame["history"], rendered, frame["guidance"]))
-
-    rows = await build_index_items(_payload(retrieved, context_frame=frame))
-    bodies = {("passage", CHUNK_ID): render_passage(retrieved["chunks"][0])}
-    bodies[("entity", ENTITY_ID)] = render_entity(retrieved["entities"][0])
-
-    assert rebuild_user_prompt(rows, bodies) == user_prompt
-    assert "## Fact conflicts" in user_prompt
+        await build_cited_item(_payload(_retrieved(), context_frame=None))
+    assert raised.value.name == "CitedFrameMissingError"
 
 
 @pytest.mark.asyncio
@@ -235,10 +235,26 @@ async def test_an_edge_two_shown_entities_share_is_a_source_of_both():
     retrieved["entities"].append(
         {"id": str(uuid4()), "name": "cognee", "type": "software", "edges": [shared_edge]}
     )
-    rows = await build_index_items(_payload(retrieved))
-    entities = [row for row in rows if row.metadata["record_kind"] == "entity"]
+    (item,) = await build_cited_item(_payload(retrieved))
+    entities = [r for r in item.metadata["records"] if r["record_kind"] == "entity"]
     assert len(entities) == 2
-    assert all(row.metadata["sources"][0]["data_id"] == DATA_ID for row in entities)
+    assert all(record["sources"][0]["data_id"] == DATA_ID for record in entities)
+
+
+def test_a_tag_names_the_record_it_was_made_for():
+    version = compute_content_hash("body")
+    tag = record_tag("entity", DATASET_ID, ENTITY_ID, version)
+    assert parse_record_tag(f"  {tag} ") == ExpandItem(
+        dataset_id=DATASET_ID, record_kind="entity", record_id=ENTITY_ID
+    )
+    for malformed in (
+        tag[:-1],
+        tag.replace("entity", "grounding"),
+        f"[mem:entity/{DATASET_ID}/chunk-1@{version}]",
+        f"{tag} trailing",
+    ):
+        with pytest.raises(ValueError):
+            parse_record_tag(malformed)
 
 
 @pytest.mark.asyncio
@@ -263,7 +279,8 @@ async def test_expand_returns_bodies_missing_and_forbidden_in_request_order(monk
                     "body": "full passage body",
                     "conflicts": [],
                     "item": {"id": CHUNK_ID, "document_id": DATA_ID, "document_name": "n.md"},
-                }
+                },
+                ("fact", FACT_ID): {"body": FACT_TEXT, "conflicts": [], "item": {}},
             }
 
     async def retriever_factory(query_type, query_text, **kwargs):
@@ -271,25 +288,36 @@ async def test_expand_returns_bodies_missing_and_forbidden_in_request_order(monk
         assert kwargs["top_k"] == 5
         return FakeRetriever()
 
-    monkeypatch.setattr(recall_index, "_readable_dataset", readable_dataset)
-    monkeypatch.setattr(recall_index, "set_database_global_context_variables", dataset_context)
-    monkeypatch.setattr(recall_index, "get_search_type_retriever_instance", retriever_factory)
+    monkeypatch.setattr(recall_cited, "_readable_dataset", readable_dataset)
+    monkeypatch.setattr(recall_cited, "set_database_global_context_variables", dataset_context)
+    monkeypatch.setattr(recall_cited, "get_search_type_retriever_instance", retriever_factory)
 
     items = [
         ExpandItem(dataset_id=DATASET_ID, record_kind="passage", record_id=CHUNK_ID),
+        ExpandItem(dataset_id=DATASET_ID, record_kind="fact", record_id=FACT_ID),
         ExpandItem(dataset_id=DATASET_ID, record_kind="fact", record_id=GONE_ID),
         ExpandItem(dataset_id=other_dataset, record_kind="passage", record_id=OTHER_CHUNK_ID),
         ExpandItem(dataset_id=DATASET_ID, record_kind="passage", record_id=CHUNK_ID),
     ]
     rows = await expand_records(items, query_text="q", user=object(), retriever_kwargs={"top_k": 5})
 
-    assert [row.metadata["status"] for row in rows] == ["available", "missing", "forbidden"]
+    assert [row.metadata["status"] for row in rows] == [
+        "available",
+        "available",
+        "missing",
+        "forbidden",
+    ]
     assert rows[0].text == "full passage body"
     assert rows[0].metadata["version"] == compute_content_hash("full passage body")
-    assert rows[0].metadata["chars"] == len("full passage body")
-    assert rows[1].text == "" and rows[2].text == ""
+    assert rows[0].metadata["tag"] == record_tag(
+        "passage", DATASET_ID, CHUNK_ID, rows[0].metadata["version"]
+    )
+    # The same body, and so the same version, a cited prompt shows for this fact.
+    assert rows[1].text == f"- {FACT_TEXT}"
+    assert rows[1].metadata["version"] == compute_content_hash(f"- {FACT_TEXT}")
+    assert rows[2].text == "" and rows[3].text == ""
     # One store switch for the readable dataset, with its ids grouped by kind.
-    assert calls == [("q", {"passage": [CHUNK_ID], "fact": [GONE_ID]})]
+    assert calls == [("q", {"passage": [CHUNK_ID], "fact": [FACT_ID, GONE_ID]})]
 
 
 _VALID_REQUEST = {
@@ -307,36 +335,35 @@ _VALID_REQUEST = {
 @pytest.mark.parametrize(
     "kwargs, error_name",
     [
-        ({"result_mode": "rows"}, "InvalidResultModeError"),
-        ({"result_mode": "index", "only_context": False}, "IndexRequiresOnlyContextError"),
+        ({"result_mode": "index"}, "InvalidResultModeError"),
+        ({"result_mode": "cited", "only_context": False}, "CitedRequiresOnlyContextError"),
         (
-            {"result_mode": "index", "query_type": SearchType.CHUNKS},
-            "IndexUnsupportedSearchTypeError",
+            {"result_mode": "cited", "query_type": SearchType.CHUNKS},
+            "CitedUnsupportedSearchTypeError",
         ),
-        ({"result_mode": "index", "sources": ["session", "graph"]}, "IndexRequiresGraphScopeError"),
+        ({"result_mode": "cited", "sources": ["session", "graph"]}, "CitedRequiresGraphScopeError"),
         ({"expand_items": []}, "InvalidExpandItemsError"),
         ({"expand_items": [object()] * 21}, "InvalidExpandItemsError"),
-        ({"expand_items": [object()], "result_mode": "index"}, "InvalidExpandRequestError"),
+        ({"expand_items": [object()], "result_mode": "cited"}, "InvalidExpandRequestError"),
         # Requests hybrid would hand to GRAPH_COMPLETION (request_deferral_reason).
-        ({"result_mode": "index", "node_type": Entity}, "IndexRequiresHybridError"),
-        ({"result_mode": "index", "neighborhood_depth": 2}, "IndexRequiresHybridError"),
+        ({"result_mode": "cited", "node_type": Entity}, "CitedRequiresHybridError"),
+        ({"result_mode": "cited", "neighborhood_depth": 2}, "CitedRequiresHybridError"),
         # Also what a deployment's DEFAULT_FEEDBACK_INFLUENCE > 0 passes by default.
-        ({"result_mode": "index", "feedback_influence": 0.3}, "IndexRequiresHybridError"),
+        ({"result_mode": "cited", "feedback_influence": 0.3}, "CitedRequiresHybridError"),
     ],
 )
-def test_invalid_index_and_expand_requests_are_refused(kwargs, error_name):
-    request = {**_VALID_REQUEST, **kwargs}
+def test_invalid_cited_and_expand_requests_are_refused(kwargs, error_name):
     with pytest.raises(CogneeValidationError) as raised:
-        _validate_index_request(**request)
+        _validate_cited_request(**{**_VALID_REQUEST, **kwargs})
     assert raised.value.name == error_name
 
 
-def test_valid_index_and_expand_requests_pass():
-    _validate_index_request(
-        **{**_VALID_REQUEST, "result_mode": "index", "query_type": SearchType.HYBRID_COMPLETION}
+def test_valid_cited_and_expand_requests_pass():
+    _validate_cited_request(
+        **{**_VALID_REQUEST, "result_mode": "cited", "query_type": SearchType.HYBRID_COMPLETION}
     )
     # Expand runs no hybrid search, so the graph-only options do not refuse it.
-    _validate_index_request(
+    _validate_cited_request(
         **{
             **_VALID_REQUEST,
             "expand_items": [object()] * 20,
@@ -348,11 +375,12 @@ def test_valid_index_and_expand_requests_pass():
     )
 
 
-def test_expand_items_from_index_rows_are_accepted_as_dicts_in_either_spelling():
+def test_expand_items_are_accepted_as_tags_models_and_dicts_in_either_spelling():
     item = ExpandItem(dataset_id=DATASET_ID, record_kind="passage", record_id=CHUNK_ID)
+    tag = record_tag("passage", DATASET_ID, CHUNK_ID, compute_content_hash("body"))
     snake = {"dataset_id": str(DATASET_ID), "record_kind": "passage", "record_id": CHUNK_ID}
     camel = {"datasetId": str(DATASET_ID), "recordKind": "passage", "recordId": CHUNK_ID.upper()}
-    assert _expand_items_as_models([item, snake, camel]) == [item, item, item]
+    assert _expand_items_as_models([tag, item, snake, camel]) == [item] * 4
     assert _expand_items_as_models(None) is None
 
 
@@ -362,6 +390,7 @@ def test_expand_items_from_index_rows_are_accepted_as_dicts_in_either_spelling()
         {"dataset_id": str(DATASET_ID), "record_kind": "template_prefix", "record_id": CHUNK_ID},
         {"dataset_id": str(DATASET_ID), "record_kind": "passage"},
         {"dataset_id": str(DATASET_ID), "record_kind": "passage", "record_id": "chunk-1"},
+        f"[mem:passage/{DATASET_ID}/{CHUNK_ID}]",
     ],
 )
 def test_an_invalid_expand_item_is_refused_with_its_position(bad_item):
@@ -372,39 +401,42 @@ def test_an_invalid_expand_item_is_refused_with_its_position(bad_item):
     assert "expand_items[1]" in raised.value.message
 
 
-def test_index_routes_unsupported_picks_to_the_default():
+def test_cited_routes_unsupported_picks_to_the_default():
     quoted = '"exact phrase"'
     assert route_query(quoted, RoutingConstraints()).search_type is SearchType.CHUNKS_LEXICAL
-    indexed = route_query(quoted, RoutingConstraints(index_types=INDEX_SEARCH_TYPES))
-    assert indexed.search_type is SearchType.HYBRID_COMPLETION
-    assert RoutingConstraints.from_config(None, result_mode="index").index_types == (
-        INDEX_SEARCH_TYPES
+    cited = route_query(quoted, RoutingConstraints(cited_types=CITED_SEARCH_TYPES))
+    assert cited.search_type is SearchType.HYBRID_COMPLETION
+    assert RoutingConstraints.from_config(None, result_mode="cited").cited_types == (
+        CITED_SEARCH_TYPES
     )
-    assert RoutingConstraints.from_config(None).index_types is None
+    assert RoutingConstraints.from_config(None).cited_types is None
 
 
-def test_health_lists_the_recall_index_capability():
-    assert RECALL_INDEX_CAPABILITY == "recall_index_v1"
-    assert RECALL_INDEX_CAPABILITY in get_capabilities()
+def test_health_lists_the_recall_cited_capability():
+    assert RECALL_CITED_CAPABILITY == "recall_cited_v1"
+    assert RECALL_CITED_CAPABILITY in get_capabilities()
 
 
-def test_recall_request_body_accepts_index_and_expand_fields():
+def test_recall_request_body_accepts_cited_and_expand_fields():
     from pydantic import ValidationError
 
     from cognee.api.v1.recall.routers.get_recall_router import RecallPayloadDTO
 
+    tag = record_tag("passage", DATASET_ID, CHUNK_ID, compute_content_hash("body"))
     body = RecallPayloadDTO.model_validate(
         {
             "query": "q",
-            "resultMode": "index",
+            "resultMode": "cited",
             "expandItems": [
                 {"dataset_id": str(DATASET_ID), "record_kind": "passage", "record_id": CHUNK_ID},
                 {"datasetId": str(DATASET_ID), "recordKind": "passage", "recordId": CHUNK_ID},
+                tag,
             ],
         }
     )
-    assert body.result_mode == "index"
+    assert body.result_mode == "cited"
     assert body.expand_items[0] == body.expand_items[1]
     assert body.expand_items[0].dataset_id == DATASET_ID
+    assert body.expand_items[2] == tag
     with pytest.raises(ValidationError):
-        RecallPayloadDTO(query="q", result_mode="rows")
+        RecallPayloadDTO(query="q", result_mode="index")
