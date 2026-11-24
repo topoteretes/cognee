@@ -302,7 +302,7 @@ def test_state_is_versioned_plain_json_and_holds_no_message_ids():
         bot.add(message=msg(GROUP, message_id, f"m{message_id}"))
     bot.add(edited_message=msg(GROUP, 1, "m1 again", edit_date=DATE + 100))
     state = {}
-    run(bot, state, now=T0)
+    run(bot, state, now=T0 + 200)
     assert state == {
         "v": STATE_VERSION,
         "bot_id": "99",
@@ -951,7 +951,57 @@ STATS_KEYS = {
     "failed_bot_mismatch",
     "backlog",
     "gap",
+    "skipped_unselected",
+    "skipped_unsupported_type",
+    "skipped_empty_content",
+    "skipped_unread_update",
+    "privacy_mode",
 }
+# What a message is besides text, written out from the Message object of Bot API 10.5
+# (core.telegram.org/bots/api#message, read 2026-11-24), apart from the source's own list.
+CONTENT_KINDS = (
+    "animation",
+    "audio",
+    "document",
+    "live_photo",
+    "paid_media",
+    "photo",
+    "sticker",
+    "story",
+    "video",
+    "video_note",
+    "voice",
+    "widget",
+    "rich_message",
+    "checklist",
+    "contact",
+    "dice",
+    "game",
+    "poll",
+    "venue",
+    "location",
+    "invoice",
+    "giveaway",
+    "giveaway_winners",
+)
+# The kinds the ``caption`` field names, on the same page.
+CAPTIONED_KINDS = (
+    "animation",
+    "audio",
+    "document",
+    "live_photo",
+    "paid_media",
+    "photo",
+    "video",
+    "voice",
+    "widget",
+)
+SKIP_REASONS = (
+    "skipped_unselected",
+    "skipped_unsupported_type",
+    "skipped_empty_content",
+    "skipped_unread_update",
+)
 
 
 def test_stats_hold_every_key_before_during_and_after_a_run():
@@ -966,7 +1016,90 @@ def test_stats_hold_every_key_before_during_and_after_a_run():
         **dict.fromkeys(STATS_KEYS, 0),
         "scanned": 1,
         "skipped": 1,
+        "skipped_empty_content": 1,
     }
+
+
+def test_every_skip_is_counted_under_one_reason_and_skipped_stays_their_sum():
+    """``skipped`` is the total; the reasons tell a chat outside the selection from a file that
+    is never downloaded, a message that has no text and an update type the source does not
+    read."""
+    bot = FakeBot()
+    # Every reason gets a count of its own, so swapping two labels fails here.
+    bot.add(message=msg(OTHER, 1, "outside the selection"))
+    bot.add(message=msg(OTHER, 2, "outside the selection too"))
+    # No content: a service message, and a text that is blank.
+    bot.add(message=msg(GROUP, 2, None, new_chat_members=[BOB]))
+    bot.add(message=msg(GROUP, 3, " \n "))
+    # Content the source does not read: every kind but text, without a caption.
+    for message_id, kind in enumerate(CONTENT_KINDS, start=10):
+        bot.add(message=msg(GROUP, message_id, None, **{kind: {"id": kind}}))
+    bot.add(message=msg(GROUP, 50, None, photo=[{"file_id": "p"}], caption="read"))
+    bot.add(edited_message=msg(GROUP, 51, None, voice={"file_id": "v"}))
+    bot.add(poll_answer={"poll_id": "p", "option_ids": [0]})
+    stats = new_stats()
+    rows = run(bot, {}, chats=[GROUP["id"]], stats=stats, staging=FakeStaging())
+    assert [row["id"] for row in rows] == ["-100:50"]
+    assert {key: stats[key] for key in SKIP_REASONS} == {
+        "skipped_unselected": 2,
+        "skipped_empty_content": 2,
+        "skipped_unsupported_type": len(CONTENT_KINDS) + 1,
+        "skipped_unread_update": 1,
+    }
+    assert stats["skipped"] == sum(stats[key] for key in SKIP_REASONS) == 29
+
+
+@pytest.mark.parametrize("kind", CAPTIONED_KINDS)
+def test_a_caption_is_read_under_the_kind_it_belongs_to(kind):
+    """Every kind the ``caption`` field names is labelled, so a paid photo's caption does not
+    read as a plain text message."""
+    row = message_to_row(msg(GROUP, 1, None, caption="the plan", **{kind: {"id": kind}}))
+    assert row["content"].endswith(f"[{kind}] the plan")
+
+
+def test_a_gif_is_labelled_as_an_animation_although_telegram_also_sets_document():
+    """Telegram sets ``document`` on every animation too, for older clients."""
+    gif = msg(
+        GROUP, 1, None, caption="funny", animation={"file_id": "a"}, document={"file_id": "a"}
+    )
+    assert message_to_row(gif)["content"].endswith("[animation] funny")
+
+
+def test_classifying_a_message_reads_what_it_is_and_what_it_says():
+    """A blank caption is no text: the photo is skipped as unread, never stored as ``[photo]``.
+    A content field present with an empty value is still that kind. An empty ``text`` does not
+    hide a caption. A field this source does not list yet is taken for no content."""
+    bot = FakeBot()
+    bot.add(message=msg(GROUP, 1, None, photo=[{"file_id": "p"}], caption=" \n "))
+    bot.add(message=msg(GROUP, 2, None, photo=[]))
+    bot.add(message=msg(GROUP, 3, "", photo=[{"file_id": "p"}], caption="read"))
+    bot.add(message=msg(GROUP, 4, None, hologram={"id": "h"}))
+    stats = new_stats()
+    rows = run(bot, {}, chats=[GROUP["id"]], stats=stats, staging=FakeStaging())
+    assert [(row["id"], row["content"].splitlines()[-1]) for row in rows] == [
+        ("-100:3", "[photo] read")
+    ]
+    assert stats["skipped_unsupported_type"] == 2
+    assert stats["skipped_empty_content"] == 1
+
+
+def test_an_update_type_the_source_does_not_read_is_not_counted_as_an_unread_file():
+    """An update outside ``allowed_updates`` (one asked for before the list changed) carries no
+    file, so a card must not read it as a dropped photo or voice message."""
+    bot = FakeBot()
+    bot.add(poll_answer={"poll_id": "p", "option_ids": [0]})
+    stats = new_stats()
+    run(bot, {}, stats=stats)
+    assert stats["skipped_unsupported_type"] == 0
+    assert stats["skipped_unread_update"] == stats["skipped"] == 1
+
+
+def test_a_private_message_under_the_default_selection_counts_as_unselected():
+    bot = FakeBot()
+    bot.add(message=msg(PRIVATE, 1, "hi bot"))
+    stats = new_stats()
+    assert run(bot, {}, stats=stats) == []
+    assert stats["skipped_unselected"] == stats["skipped"] == 1
 
 
 @pytest.mark.parametrize(
@@ -1046,14 +1179,316 @@ def test_other_provider_failures_are_counted_and_raised(bot, error):
     assert stats["failed_unavailable"] == 0
 
 
+def _run_and_catch(bot, state, stats):
+    """One run; the source error it raised, or ``None``. The checks after it read the state and
+    the stats first, so a red run shows what the malformed update did to them."""
+    try:
+        run(bot, state, stats=stats)
+    except module.TelegramSourceError as error:
+        return error
+    return None
+
+
+@pytest.mark.parametrize("update_id", [float("nan"), 1000.0, "1000", True, None])
+def test_an_update_id_that_is_not_an_integer_fails_the_run_and_keeps_the_cursor(update_id):
+    """An update_id that is not an integer is Telegram's defect: the run raises with
+    failed_provider, nothing is emitted, the cursor stays and the next run asks for the same
+    page."""
+    bot = FakeBot()
+    update = {"message": msg(GROUP, 1, "a")}
+    if update_id is not None:
+        update["update_id"] = update_id
+    bot.updates.append(update)
+    state = {"v": STATE_VERSION}
+    stats = new_stats()
+    error = _run_and_catch(bot, state, stats)
+    assert "last_update_id" not in state and "last_update_seen_at" not in state
+    _run_and_catch(bot, state, new_stats())
+    assert bot.get_updates_calls()[-1].get("offset") is None, "the next run reads the same page"
+    assert [key for key, value in stats.items() if value] == ["failed", "failed_provider"]
+    assert isinstance(error, module.TelegramAPIError) and "update_id" in str(error)
+
+
+@pytest.mark.parametrize("field", ["date", "edit_date"])
+@pytest.mark.parametrize("value", [True, float("nan"), 1.5, "1700000000", 10**20])
+@pytest.mark.parametrize("kind", ["message", "edited_message", "my_chat_member"])
+def test_a_date_that_is_not_a_storable_timestamp_fails_the_run_and_keeps_the_cursor(
+    field, value, kind
+):
+    """A date or edit_date that is not an integer the platform can turn into a time is
+    Telegram's defect: the run raises with failed_provider and the saved cursor and clock stay
+    as they were."""
+    bot = FakeBot()
+    # A membership update that is not a removal: it needs no stored rows.
+    item = removed(GROUP, "member") if kind == "my_chat_member" else msg(GROUP, 1, "a")
+    item[field] = value
+    bot.add_with_id(1000, **{kind: item})
+    state = {"v": STATE_VERSION, "last_update_id": 999, "last_update_seen_at": T0}
+    stats = new_stats()
+    error = _run_and_catch(bot, state, stats)
+    assert state["last_update_id"] == 999 and state["last_update_seen_at"] == T0
+    assert [key for key, value in stats.items() if value] == ["failed", "failed_provider"]
+    assert isinstance(error, module.TelegramAPIError) and field in str(error)
+    assert len(bot.updates) == 1, "nothing was confirmed"
+    # The next run asks for the same page again.
+    _run_and_catch(bot, state, new_stats())
+    assert bot.get_updates_calls()[-1]["offset"] == 1000
+
+
+def test_an_update_without_a_date_is_still_read():
+    """A missing date is what the source already handles (no Date line, the run's clock), so the
+    check refuses only a date that is present and not a timestamp."""
+    bot = FakeBot()
+    message = msg(GROUP, 1, "a")
+    del message["date"]
+    bot.add_with_id(1000, message=message)
+    state = {"v": STATE_VERSION}
+    assert ids(run(bot, state)) == ["-100:1"]
+    assert state["last_update_id"] == 1000
+
+
+class _PageBot(FakeBot):
+    """Answers getUpdates with the page as given, whatever its shape."""
+
+    def __init__(self, page):
+        super().__init__()
+        self.page = page
+
+    def call(self, method, params=None, *, check_active=None, budget=None):
+        if method == "getUpdates":
+            self.calls.append((method, params or {}))
+            return self.page
+        return super().call(method, params, check_active=check_active, budget=budget)
+
+
+def _rows_until_error(bot, state, stats, chats=None):
+    """The rows a run emitted before it raised, and the source error it raised."""
+    rows = []
+    sync = sync_rows(
+        bot,
+        state,
+        stats,
+        selection=_selection(chats, False),
+        resource_name=NAME,
+        staged_ids=FakeStaging().read,
+        now=T0 + 60,
+    )
+    try:
+        # extend keeps the rows taken before the generator raised.
+        rows.extend(sync)
+    except module.TelegramSourceError as error:
+        return rows, error
+    return rows, None
+
+
+def _assert_refused_with_cursor_kept(state, stats, error, cursor=999):
+    assert state.get("last_update_id") == cursor
+    assert [key for key, value in stats.items() if value] == ["failed", "failed_provider"]
+    assert isinstance(error, module.TelegramAPIError)
+
+
+@pytest.mark.parametrize(
+    ("kind", "field"),
+    [
+        ("message", "date"),
+        ("message", "edit_date"),
+        ("edited_message", "date"),
+        ("edited_message", "edit_date"),
+        ("my_chat_member", "date"),
+    ],
+)
+def test_a_null_date_is_read_as_a_missing_one(kind, field):
+    """A date or edit_date of null is read as missing: the update is read, its row
+    emitted and the cursor moves."""
+    bot = FakeBot()
+    item = removed(GROUP, "member") if kind == "my_chat_member" else msg(GROUP, 1, "a")
+    item[field] = None
+    bot.add_with_id(1000, **{kind: item})
+    state = {"v": STATE_VERSION, "last_update_id": 999, "last_update_seen_at": T0}
+    stats = new_stats()
+    rows, error = _rows_until_error(bot, state, stats)
+    assert error is None and stats["failed"] == 0
+    assert [row["id"] for row in rows] == ([] if kind == "my_chat_member" else ["-100:1"])
+    assert state["last_update_id"] == 1000
+
+
+@pytest.mark.parametrize(
+    "page",
+    [[None], [7], ["abc"], {"update_id": 1000}, 7],
+    ids=["none", "int", "str", "dict-page", "int-page"],
+)
+def test_a_page_that_is_not_a_list_of_updates_fails_as_a_provider_defect(page):
+    """getUpdates must answer a list of update objects; anything else is Telegram's defect,
+    counted failed_provider with the cursor kept."""
+    bot = _PageBot(page)
+    state = {"v": STATE_VERSION, "last_update_id": 999, "last_update_seen_at": T0}
+    stats = new_stats()
+    rows, error = _rows_until_error(bot, state, stats)
+    assert rows == []
+    _assert_refused_with_cursor_kept(state, stats, error)
+
+
+@pytest.mark.parametrize("message", ["abc", "date", [1, 2]], ids=["str", "str-date", "list"])
+def test_an_update_whose_message_is_not_an_object_fails_as_a_provider_defect(message):
+    """An update whose message is not an object is Telegram's defect, counted
+    failed_provider with the cursor kept."""
+    bot = FakeBot()
+    bot.updates.append({"update_id": 1000, "message": message})
+    state = {"v": STATE_VERSION, "last_update_id": 999, "last_update_seen_at": T0}
+    stats = new_stats()
+    rows, error = _rows_until_error(bot, state, stats)
+    assert rows == []
+    _assert_refused_with_cursor_kept(state, stats, error)
+
+
+@pytest.mark.parametrize("bad_first", [False, True], ids=["good-then-bad", "bad-then-good"])
+def test_a_page_with_one_malformed_update_among_good_ones_is_refused_whole(bad_first):
+    """One malformed update refuses the whole page, wherever it sits: no row is emitted
+    and the cursor stays."""
+    bot = FakeBot()
+    good = {"message": msg(GROUP, 1, "a")}
+    bad = {"message": msg(GROUP, 2, "b", date=float("nan"))}
+    first, second = (bad, good) if bad_first else (good, bad)
+    bot.add_with_id(1000, **first)
+    bot.add_with_id(1001, **second)
+    state = {"v": STATE_VERSION, "last_update_id": 999, "last_update_seen_at": T0}
+    stats = new_stats()
+    rows, error = _rows_until_error(bot, state, stats)
+    assert rows == []
+    _assert_refused_with_cursor_kept(state, stats, error)
+
+
+@pytest.mark.parametrize("ids_", [(1001, 1000), (1000, 1000)], ids=["falling", "equal"])
+def test_a_page_whose_update_ids_do_not_rise_is_refused(ids_):
+    """Update ids in a page rise strictly; a page where they fall or repeat is refused as
+    failed_provider with the cursor kept."""
+    bot = FakeBot()
+    bot.add_with_id(ids_[0], message=msg(GROUP, 1, "a"))
+    bot.add_with_id(ids_[1], message=msg(GROUP, 2, "b"))
+    state = {"v": STATE_VERSION, "last_update_id": 999, "last_update_seen_at": T0}
+    stats = new_stats()
+    rows, error = _rows_until_error(bot, state, stats)
+    assert rows == []
+    _assert_refused_with_cursor_kept(state, stats, error)
+
+
+@pytest.mark.parametrize("first_id", [500, 999], ids=["far-below", "already-read"])
+def test_a_page_below_the_offset_the_run_sent_is_refused(first_id):
+    """With an offset, Telegram answers only ids at or above it, so a page starting below it is
+    a broken answer: refused as failed_provider, and the cursor never moves back."""
+    bot = _PageBot([{"update_id": first_id, "message": msg(GROUP, 1, "a")}])
+    state = {"v": STATE_VERSION, "last_update_id": 999, "last_update_seen_at": T0}
+    stats = new_stats()
+    rows, error = _rows_until_error(bot, state, stats)
+    assert bot.get_updates_calls()[-1]["offset"] == 1000
+    assert rows == []
+    _assert_refused_with_cursor_kept(state, stats, error)
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"v": STATE_VERSION},
+        {"v": STATE_VERSION, "last_update_id": 999, "last_update_seen_at": T0 - 7 * 24 * 3600},
+    ],
+    ids=["fresh", "after-a-quiet-week"],
+)
+@pytest.mark.parametrize("update_id", [5, 1])
+def test_without_an_offset_a_page_of_lower_ids_is_read(state, update_id):
+    """With no offset sent (a first run, or after six quiet days when ids may restart lower)
+    any rising positive ids are read, 1 included, and the cursor follows them."""
+    state = dict(state)
+    bot = _PageBot([{"update_id": update_id, "message": msg(GROUP, 1, "a")}])
+    stats = new_stats()
+    rows, error = _rows_until_error(bot, state, stats)
+    assert bot.get_updates_calls()[-1].get("offset") is None
+    assert error is None and [row["id"] for row in rows] == ["-100:1"]
+    assert state["last_update_id"] == update_id
+
+
+@pytest.mark.parametrize("update_id", [0, -5])
+def test_an_update_id_that_is_not_positive_is_refused(update_id):
+    """Update ids are positive; 0 or below is refused as failed_provider and never
+    becomes the cursor."""
+    bot = FakeBot()
+    bot.add_with_id(update_id, message=msg(GROUP, 1, "a"))
+    state = {"v": STATE_VERSION}
+    stats = new_stats()
+    rows, error = _rows_until_error(bot, state, stats)
+    assert rows == []
+    _assert_refused_with_cursor_kept(state, stats, error, cursor=None)
+
+
+@pytest.mark.parametrize("date", [T0 + 10 * 365 * 24 * 3600, -1], ids=["future", "negative"])
+def test_the_saved_clock_never_runs_past_the_run_or_before_1970(date):
+    """last_update_seen_at is at most the run's own time, so a date in the future does not
+    hold the quiet-week and gap checks off; a date before 1970 is not kept as the clock either
+    and the run's time is used, as for a missing date."""
+    bot = FakeBot()
+    bot.add_with_id(1000, message=msg(GROUP, 1, "a", date=date))
+    state = {"v": STATE_VERSION}
+    run(bot, state)
+    assert state["last_update_seen_at"] == T0 + 60
+
+
+def test_a_date_of_0_is_read_as_missing_and_a_negative_one_is_rendered():
+    """A date of 0 is read as missing (no time on the Date line, the run's clock); a
+    negative one the platform converts is read and rendered; one it cannot convert is
+    refused as failed_provider."""
+    bot = FakeBot()
+    bot.add_with_id(1000, message=msg(GROUP, 1, "zero", date=0))
+    bot.add_with_id(1001, message=msg(GROUP, 2, "negative", date=-1))
+    state = {"v": STATE_VERSION}
+    rows = {row["id"]: row for row in run(bot, state)}
+    assert "Date: \n" in rows["-100:1"]["content"]
+    assert "Date: 1969-12-31 23:59 UTC" in rows["-100:2"]["content"]
+
+    refused = FakeBot()
+    refused.add_with_id(1000, message=msg(GROUP, 1, "far", date=-(10**20)))
+    state, stats = {"v": STATE_VERSION}, new_stats()
+    rows, error = _rows_until_error(refused, state, stats)
+    assert rows == []
+    _assert_refused_with_cursor_kept(state, stats, error, cursor=None)
+
+
 def test_a_sync_state_from_another_bot_is_refused_typed_and_counted():
-    bot = FakeBot(bot_id=222)
+    # Privacy mode on: privacy_mode describes the bot that owns the state, so the stranger's
+    # setting is never reported.
+    bot = FakeBot(bot_id=222, can_read_all=False)
     state = {"bot_id": "111"}
     stats = new_stats()
     with pytest.raises(TelegramBotMismatchError, match="belongs to another bot"):
         run(bot, state, stats=stats)
     assert stats["failed"] == 1 and stats["failed_bot_mismatch"] == 1
+    assert stats["privacy_mode"] == 0
     assert bot.get_updates_calls() == [], "the other bot never read (or confirmed) anything"
+
+
+def test_privacy_mode_is_0_on_a_run_whose_getme_was_rate_limited():
+    """The rule a host applies: privacy_mode is read only from a run with failed == 0. Here a
+    privacy-on bot's getMe got a 429, so the 0 means unknown and must not replace a stored 1."""
+    bot = FakeBot(can_read_all=False)
+    bot.errors["getMe"] = [TelegramRateLimitError("flood", retry_after=3600)]
+    stats = new_stats()
+    run(bot, {}, stats=stats)
+    assert stats["failed"] == 1 and stats["failed_rate_limit"] == 1
+    assert stats["privacy_mode"] == 0
+
+
+class _BotWithoutPrivacyField(FakeBot):
+    def call(self, method, params=None, *, check_active=None, budget=None):
+        answer = super().call(method, params, check_active=check_active, budget=budget)
+        if method == "getMe":
+            answer = {
+                key: value for key, value in answer.items() if key != "can_read_all_group_messages"
+            }
+        return answer
+
+
+def test_a_getme_that_does_not_state_privacy_mode_reports_0():
+    stats = new_stats()
+    run(_BotWithoutPrivacyField(), {}, stats=stats)
+    assert stats["failed"] == 0 and stats["privacy_mode"] == 0
 
 
 def test_logs_carry_counts_only(monkeypatch):
@@ -1078,8 +1513,19 @@ def test_logs_carry_counts_only(monkeypatch):
 def test_privacy_mode_gets_a_warning(monkeypatch):
     recorder = RecordingLogger()
     monkeypatch.setattr(module, "logger", recorder)
-    run(FakeBot(can_read_all=False), {})
+    stats = new_stats()
+    run(FakeBot(can_read_all=False), {}, stats=stats)
     assert any("privacy mode is on" in line for line in recorder.lines)
+    assert stats["privacy_mode"] == 1
+
+
+def test_privacy_mode_is_0_when_the_bot_reads_every_group_message(monkeypatch):
+    recorder = RecordingLogger()
+    monkeypatch.setattr(module, "logger", recorder)
+    stats = new_stats()
+    run(FakeBot(can_read_all=True), {}, stats=stats)
+    assert stats["privacy_mode"] == 0
+    assert not any("privacy mode" in line for line in recorder.lines)
 
 
 # --------------------------------------------------------------------- possible loss (gap)

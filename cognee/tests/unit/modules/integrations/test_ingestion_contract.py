@@ -223,6 +223,21 @@ def test_telegram_service_is_built_from_a_bot_token_sent_only_in_the_path():
     assert "not-a-bot-token" not in str(info.value)
 
 
+def test_telegram_privacy_mode_and_skip_reasons_reach_the_host_as_counts():
+    """The host keeps only int counts, so a bool ``privacy_mode`` would never reach a card."""
+    from cognee.tasks.ingestion.connectors import telegram_source
+    from cognee.tests.unit.tasks.connectors.fake_telegram import GROUP, OTHER, FakeBot, msg
+
+    bot = FakeBot(can_read_all=False)
+    bot.add(message=msg(GROUP, 1, "a"))
+    bot.add(message=msg(OTHER, 1, "b"))
+    resource = telegram_source(resource_name="telegram_111", service=bot, chats=[GROUP["id"]])
+    list(resource)
+    counts = ingestion.source_counts(resource)
+    assert counts["privacy_mode"] == 1
+    assert counts["skipped"] == counts["skipped_unselected"] == 1
+
+
 @pytest.mark.asyncio
 async def test_a_telegram_failure_the_source_counted_is_counted_once(monkeypatch):
     """F15: the source counts a raised failure under its reason key, and the host used to add
