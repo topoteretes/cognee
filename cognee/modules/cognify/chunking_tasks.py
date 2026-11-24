@@ -24,12 +24,17 @@ def resolve_chunks_per_batch(chunks_per_batch: int | None = None) -> int:
     return configured if configured is not None else DEFAULT_CHUNKS_PER_BATCH
 
 
-def build_chunking_tasks(chunker, max_chunk_size: int) -> tuple[Task, Task]:
+def build_chunking_tasks(
+    chunker, max_chunk_size: int, temporal_hints: bool = True
+) -> tuple[Task, Task]:
     """(classify, chunk): classify raw Data items into Documents, then cut their chunks.
 
     ``max_chunk_size`` is the resolved token budget (``resolve_chunk_size``).
     Returned as a pair so a route can put its own task between them (the
     GLiNER route sketches its schema from the classified documents).
+    ``temporal_hints`` is off for the indexing pipeline: the hints only feed
+    graph extraction, which the indexing run never reaches, and they do not
+    change the chunk text, so both runs still cut the same chunk ids.
     """
     return (
         Task(classify_documents, needs_llm=False),
@@ -37,6 +42,7 @@ def build_chunking_tasks(chunker, max_chunk_size: int) -> tuple[Task, Task]:
             extract_chunks_from_documents,
             max_chunk_size=max_chunk_size,
             chunker=chunker,
+            temporal_hints=temporal_hints,
             needs_llm=False,
         ),
     )

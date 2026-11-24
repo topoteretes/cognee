@@ -300,13 +300,14 @@ async def test_gateway_routes_transcription_to_native_client(method):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("framework", ["instructor", "baml"])
-async def test_gateway_keeps_legacy_client_for_opt_in_frameworks(framework):
+async def test_gateway_keeps_legacy_client_for_the_instructor_framework():
+    # BAML is routed to the native client too (test_instructor_optional.py): only the
+    # instructor framework builds the legacy client, which needs the optional package.
     gateway, native_factory, legacy_factory = _gateway_and_factories()
     legacy_client = MagicMock()
     legacy_client.create_transcript = AsyncMock(return_value="legacy")
     native = MagicMock(name="get_native_client")
-    config = SimpleNamespace(structured_output_framework=framework)
+    config = SimpleNamespace(structured_output_framework="instructor")
 
     with (
         patch.object(gateway, "get_llm_config", return_value=config),

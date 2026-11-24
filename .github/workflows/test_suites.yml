@@ -241,8 +241,9 @@ jobs:
       # aws/neptune/langchain/dlt: the CI-image copy of the unit suite (deleted
       # -- it was the slowest of eight identical copies, behind a 3-minute image
       # pull) was the only leg with these, and four test files importorskip on
-      # them. Resolved from the existing lock on 3.10.
-      extra-dependencies: 'postgres aws neptune langchain dlt'
+      # them. Resolved from the existing lock on 3.10. evernote: the Evernote client test
+      # that maps the real Thrift error classes importorskips on it.
+      extra-dependencies: 'postgres aws neptune langchain dlt evernote'
     secrets: inherit
 
   different-os-tests-extended:

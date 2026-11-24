@@ -41,6 +41,58 @@ CONTENT_TYPE_FORMATS = {
     "application/ld+json": "json-ld",
 }
 
+# Upload filename extension -> rdflib parser name. This table is the single
+# list of accepted upload extensions: the 400 message, the router docs and the
+# frontend picker (UploadOntologyModal.tsx ``accept``) all mirror it.
+EXTENSION_FORMATS = {
+    ".owl": "xml",
+    ".rdf": "xml",
+    ".xml": "xml",
+    ".ttl": "turtle",
+    ".n3": "n3",
+    ".jsonld": "json-ld",
+    ".nt": "nt",
+    ".nq": "nquads",
+    ".trig": "trig",
+}
+
+
+def normalize_content_type(content_type: str | None) -> str | None:
+    """Strip parameters (e.g. ``; charset=utf-8``) and lowercase a MIME type."""
+    if not content_type:
+        return None
+    return str(content_type).split(";", maxsplit=1)[0].strip().lower()
+
+
+def detect_rdf_format(filename: str | None, content_type: str | None) -> str | None:
+    """Return the rdflib parser name implied by ``filename`` or ``content_type``.
+
+    The extension wins when it is in ``EXTENSION_FORMATS`` (``.owl``, ``.ttl``, ...);
+    otherwise the MIME type decides (``text/turtle``, ``application/ld+json``, ...).
+    Returns ``None`` when neither identifies a supported RDF serialization.
+    """
+    if filename:
+        extension = os.path.splitext(str(filename))[1].lower()
+        if extension in EXTENSION_FORMATS:
+            return EXTENSION_FORMATS[extension]
+
+    normalized_content_type = normalize_content_type(content_type)
+    if normalized_content_type:
+        return CONTENT_TYPE_FORMATS.get(normalized_content_type)
+
+    return None
+
+
+def supported_rdf_extensions() -> list[str]:
+    """File extensions (with leading dot) accepted for ontology uploads."""
+    return list(EXTENSION_FORMATS)
+
+
+def supported_rdf_content_types() -> list[str]:
+    """MIME types accepted for ontology uploads whose filename has no known extension."""
+    return sorted(CONTENT_TYPE_FORMATS)
+
+
 # Predicates the OWL-RL closure asserts reflexively for every term it touches.
 REFLEXIVE_CLOSURE_PREDICATES = (
     RDFS.subClassOf,
@@ -220,15 +272,20 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
         )
 
     def _get_content_type_format(self, file_obj: IO) -> str | None:
-        content_type = getattr(file_obj, "content_type", None)
+        content_type = normalize_content_type(getattr(file_obj, "content_type", None))
         if not content_type:
             return None
 
-        content_type = str(content_type).split(";", maxsplit=1)[0].strip().lower()
         return CONTENT_TYPE_FORMATS.get(content_type)
 
     def _get_candidate_formats(self, file_obj: IO) -> list[str]:
         formats = []
+
+        # A stored upload (``OntologyFile``) carries the format detected at upload
+        # time; it is tried before anything re-derived from the name or MIME type.
+        stored_format = getattr(file_obj, "rdf_format", None)
+        if stored_format:
+            formats.append(stored_format)
 
         filename = getattr(file_obj, "filename", None) or getattr(file_obj, "name", None)
         if filename:

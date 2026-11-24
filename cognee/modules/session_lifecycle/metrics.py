@@ -536,25 +536,71 @@ _session_record_write_failed = False
 
 
 async def list_sessions_for_dataset(dataset_id: UUIDType) -> list[tuple[UUIDType, str]]:
-    """Return (user_id, session_id) pairs for sessions attributed to the dataset.
+    """Return (user_id, session_id) pairs for sessions attributed to the dataset."""
+    return await list_sessions_for_datasets([dataset_id])
 
-    Attribution is best-effort by design: ``dataset_id`` is backfilled on the
-    session row (heartbeats and remember() both fill it when they know the
-    dataset), and the per-dataset default session embeds the dataset id in its
-    session_id (``{default_session_id}_{dataset_id}``). Match on either, so
-    rows written before dataset threading existed are still found through
-    their session_id suffix.
+
+# The session id SessionManager uses when none is given; with a known dataset
+# it is ``f"{DEFAULT_SESSION_ID}_{dataset_id}"``.
+DEFAULT_SESSION_ID = "default_session"
+
+# Datasets per query, each adding two bound parameters: under every backend's
+# bind-parameter cap.
+_DATASETS_PER_QUERY = 100
+
+
+async def list_sessions_for_datasets(
+    dataset_ids: Sequence[UUIDType],
+) -> list[tuple[UUIDType, str]]:
+    """Return (user_id, session_id) pairs for sessions attributed to any of the datasets.
+
+    A session is attributed by the ``dataset_id`` on its row (heartbeats and
+    remember() both fill it when they know the dataset). A row written before
+    dataset threading has none; it counts only when its session_id is
+    exactly the dataset's default session (``default_session_{dataset_id}``).
+    Any other session_id is the client's choice and never attributes a
+    session, so nobody's session is deleted for ending in a dataset's id.
+    """
+    dataset_ids = list(dict.fromkeys(dataset_ids))
+    if not dataset_ids:
+        return []
+    engine = get_relational_engine()
+    pairs: dict[tuple[UUIDType, str], None] = {}
+    async with engine.get_async_session() as session:
+        for start in range(0, len(dataset_ids), _DATASETS_PER_QUERY):
+            chunk = dataset_ids[start : start + _DATASETS_PER_QUERY]
+            rows = (
+                await session.execute(
+                    select(SessionRecord.user_id, SessionRecord.session_id).where(
+                        or_(
+                            SessionRecord.dataset_id.in_(chunk),
+                            and_(
+                                SessionRecord.dataset_id.is_(None),
+                                SessionRecord.session_id.in_(
+                                    [f"{DEFAULT_SESSION_ID}_{dataset_id}" for dataset_id in chunk]
+                                ),
+                            ),
+                        )
+                    )
+                )
+            ).all()
+            pairs.update(((row.user_id, row.session_id), None) for row in rows)
+    return list(pairs)
+
+
+async def list_sessions_for_user(user_id: UUIDType) -> list[tuple[UUIDType, str]]:
+    """Return (user_id, session_id) pairs for every session the user owns.
+
+    Ownership is the ``user_id`` on the session row, nothing wider: a child
+    agent's sessions are the agent's own, and a dataset grant reaches a
+    session only through ``list_sessions_for_dataset``.
     """
     engine = get_relational_engine()
-    suffix = f"_{dataset_id}"
     async with engine.get_async_session() as session:
         rows = (
             await session.execute(
                 select(SessionRecord.user_id, SessionRecord.session_id).where(
-                    or_(
-                        SessionRecord.dataset_id == dataset_id,
-                        SessionRecord.session_id.endswith(suffix),
-                    )
+                    SessionRecord.user_id == user_id
                 )
             )
         ).all()

@@ -18,7 +18,6 @@ retryable.
 
 import asyncio
 
-import litellm
 from tenacity import retry_if_exception, stop_after_attempt, stop_after_delay
 
 from cognee.infrastructure.llm.exceptions import (
@@ -69,6 +68,10 @@ def is_quota_or_billing_error(error: BaseException) -> bool:
 
 
 def should_retry_llm_exception(error: BaseException) -> bool:
+    # Imported here, not at module scope: this module is on the ``import cognee``
+    # path and litellm (with the OpenAI SDK behind it) is half of that import.
+    import litellm
+
     non_retryable: tuple[type[BaseException], ...] = (
         asyncio.CancelledError,
         LLMQuotaExceededError,

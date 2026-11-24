@@ -44,9 +44,11 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | Script | Demonstrates |
 |---|---|
 | [`review_conflicts.py`](guides/review_conflicts.py) | Review dated source facts, print stored conflicts and fact status marks |
+| [`resolve_conflicts.py`](guides/resolve_conflicts.py) | Settle a conflict review cannot decide with `list_conflicts` / `resolve_conflict`, and compare recall before and after |
 | [`sessions.py`](guides/sessions.py) | Session-scoped memory via `session_id` |
 | [`session_node_sets.py`](guides/session_node_sets.py) | Per-project session memory: pin a `node_set` on a session, bridge it with `improve()`, recall with `node_name` |
 | [`session_distillation.py`](guides/session_distillation.py) | Distilling a session into durable preferences |
+| [`session_project_memory.py`](guides/session_project_memory.py) | Evidence-backed project guidance, structured summaries and opt-in usage tracking |
 | [`global_context_index.py`](guides/global_context_index.py) | Building the index with `improve(build_global_context_index=True)` and updating it incrementally |
 | [`global_context_index_recall.py`](guides/global_context_index_recall.py) | What `include_global_context_index` adds to `GRAPH_COMPLETION` retrieval |
 | [`importance_weight.py`](guides/importance_weight.py) | Boosting specific memories in retrieval ranking |
@@ -54,6 +56,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 ### Retrieval
 | Script | Demonstrates |
 |---|---|
+| [`hybrid_decomposition.py`](guides/hybrid_decomposition.py) | Context-primed hybrid decomposition for multi-part questions, with a configurable planning prompt |
 | [`truth_subspace_reranking.py`](guides/truth_subspace_reranking.py) | Teaching retrieval a preference — truth-weighted reranking on/off |
 | [`temporal_recall.py`](guides/temporal_recall.py) | Time-bounded queries with `SearchType.TEMPORAL` |
 | [`references_example.py`](guides/references_example.py) | `include_references` — answers with evidence |
@@ -68,6 +71,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`gliner_demo_llm_free_cognify.py`](guides/gliner_demo_llm_free_cognify.py) | LLM-free graph + summaries with `extractor="gliner_demo"` (needs `cognee[gliner]`) |
 | [`custom_data_models.py`](guides/custom_data_models.py) | Custom `DataPoint` subclasses and edges |
 | [`custom_prompts.py`](guides/custom_prompts.py) | Overriding the extraction prompt |
+| [`custom_chunker.py`](guides/custom_chunker.py) | Your own chunker as the deployment default (`register_chunker`, `DEFAULT_CHUNKER`), with `update()` still replacing only the edited chunks |
 | [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
 | [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Grounding extraction in an OWL ontology |
 | [`entity_deduplication.py`](guides/entity_deduplication.py) | Merging duplicate entities (dry-run, then real) |
@@ -82,9 +86,14 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
 | [`code_graph_example.py`](guides/code_graph_example.py) | Code-graph pipeline + `SearchType.CODE` |
 | [`gmail.py`](guides/gmail.py) | Ingest Gmail with the bundled SDK connector, incremental sync and delete propagation (needs `cognee[gmail]`) |
+| [`dropbox.py`](guides/dropbox.py) | Sync one Dropbox folder by its folder id with the bundled SDK connector (no extra) |
+| [`evernote.py`](guides/evernote.py) | Sync an Evernote account's notes with the bundled SDK connector, from a token you already hold; a note trashed or deleted at Evernote is forgotten on the next sync (needs `cognee[evernote]`) |
+| [`telegram.py`](guides/telegram.py) | Ingest the messages a Telegram bot sees with the bundled SDK connector, incremental sync and forget when the bot leaves a chat (needs a bot token) |
 | [`google_drive.py`](guides/google_drive.py) | Ingest a Drive folder with the bundled SDK connector (needs `cognee[google-drive]`) |
 | [`google_calendar.py`](guides/google_calendar.py) | Ingest a Google Calendar with the bundled SDK connector, incremental sync through Google's sync token (needs `cognee[google-calendar]`) |
+| [`slack.py`](guides/slack.py) | Ingest a Slack channel with the bundled SDK connector: a thread is one document and the messages without replies of one day are one document, a new message re-renders only its thread or day, and a deleted message is forgotten when the next sync walks the whole channel |
 | [`obsidian.py`](guides/obsidian.py) | Ingest a local Obsidian vault with the bundled SDK connector: an edited note replaces its old version and a deleted note is forgotten on the next sync |
+| [`vercel.py`](guides/vercel.py) | Ingest one Vercel project's deployments with the bundled SDK connector and ask which deploy failed and why; a deployment deleted at Vercel is forgotten on the next sync (needs a Vercel token) |
 | [`presort_downloads.py`](guides/presort_downloads.py) | Presorting a messy folder before ingestion: `remember(dry_run="presort")`, then ingest the report |
 
 ### Visualization

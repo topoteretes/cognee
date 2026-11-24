@@ -280,6 +280,52 @@ def test_preserves_inherited_fields_in_cyclic_models():
     assert DATAPOINT_INFRA_FIELDS.isdisjoint(nested_b_model.model_fields)
 
 
+def test_cyclic_models_never_hand_the_llm_a_raw_datapoint():
+    """The cycle breaker registers a class as its own stand-in while its fields are
+    converted; a field that reaches it again (A -> B -> A, or a self-reference) must
+    still end up on the prompt model, or the LLM is handed DataPoint infrastructure."""
+
+    class NodeA(DataPoint):
+        label: str
+        other: "NodeB | None" = None
+
+    class NodeB(DataPoint):
+        label: str
+        other: NodeA | None = None
+
+    NodeA.model_rebuild()
+
+    class Person(DataPoint):
+        name: str
+        # The whole annotation as a string: on Python 3.10 a string inside the
+        # generic (list["Person"]) is left unevaluated on the field.
+        knows: "list[Person]" = []
+
+    Person.model_rebuild()
+
+    simplified_a = datapoint_model_to_basemodel(NodeA)
+    simplified_b = next(
+        arg
+        for arg in get_args(simplified_a.model_fields["other"].annotation)
+        if arg is not type(None)
+    )
+    back_to_a = next(
+        arg
+        for arg in get_args(simplified_b.model_fields["other"].annotation)
+        if arg is not type(None)
+    )
+    assert back_to_a is simplified_a
+
+    simplified_person = datapoint_model_to_basemodel(Person)
+    assert get_args(simplified_person.model_fields["knows"].annotation)[0] is simplified_person
+    for schema in (simplified_a.model_json_schema(), simplified_person.model_json_schema()):
+        assert "DataPoint" not in schema.get("$defs", {})
+        assert "MetaData" not in schema.get("$defs", {})
+    assert_dump_has_no_infra(
+        simplified_person(name="Ann", knows=[{"name": "Bob", "knows": []}]).model_dump()
+    )
+
+
 def test_from_identity_field_renders_as_string():
     class Role(DataPoint):
         name: str
@@ -331,7 +377,7 @@ def test_from_identity_target_with_extra_required_field_raises():
         datapoint_model_to_basemodel(Person)
 
 
-def test_from_identity_schema_round_trip_drops_the_marker():
+def test_from_identity_schema_round_trip_keeps_the_marker():
     class Role(DataPoint):
         name: str
         metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
@@ -343,7 +389,8 @@ def test_from_identity_schema_round_trip_drops_the_marker():
 
     schema = graph_model_to_graph_schema(Person)
     regenerated = graph_schema_to_graph_model(schema)
-    assert _identity_field_types(regenerated) == {}
+    assert list(_identity_field_types(regenerated)) == ["is_a"]
+    assert _identity_field_types(regenerated)["is_a"].__name__ == "Role"
 
 
 def _named_person():
@@ -475,7 +522,7 @@ def test_edge_endpoint_may_have_extra_required_fields():
     assert "friends_with" in simplified.model_fields
 
 
-def test_edge_schema_round_trip_drops_edge_fields():
+def test_edge_schema_round_trip_keeps_edge_fields():
     Person = _named_person()
 
     class PeopleGraph(DataPoint):
@@ -483,7 +530,10 @@ def test_edge_schema_round_trip_drops_edge_fields():
         friends_with: list[Edge[Person, Person]]
 
     regenerated = graph_schema_to_graph_model(graph_model_to_graph_schema(PeopleGraph))
-    assert _edge_field_types(regenerated) == {}
+    source, target, _ = _edge_field_types(regenerated)["friends_with"]
+    assert source is target
+    assert source.__name__ == "Person"
+    assert source is get_args(regenerated.model_fields["people"].annotation)[0]
 
 
 class ModuleLevelPerson(DataPoint):

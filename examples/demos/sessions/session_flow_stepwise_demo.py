@@ -32,7 +32,8 @@ Flow traced:
     (D)   recall(question, fresh session)  the distilled lessons are now permanent
     (E)   visualize_graph                  distilled nodes shown with a gold ring
 
-Requires a configured LLM provider (see CLAUDE.md). Wording of answers/lessons varies by model.
+Requires a configured LLM provider (see docs/runtime-configuration.md).
+Wording of answers and lessons varies by model.
 """
 
 import asyncio
@@ -66,7 +67,7 @@ except ImportError:
 if os.environ.get("DEMO_USE_OLLAMA") != "1" and os.environ.get("LLM_API_KEY"):
     os.environ["OPENAI_API_KEY"] = os.environ["LLM_API_KEY"]
 
-# Pin a gpt-4o-family model for the OpenAI path. cognee's current default (openai/gpt-5.6-luna)
+# Pin a gpt-4o-family model for the OpenAI path. cognee's current default (openai/gpt-6-luna)
 # forces instructor's json_schema_mode, which calls response_model.model_json_schema() and
 # therefore breaks on cognee's str-returning paths (preflight + recall answer generation):
 #   AttributeError: type object 'str' has no attribute 'model_json_schema'

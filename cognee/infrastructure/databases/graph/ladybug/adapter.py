@@ -36,9 +36,12 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_attach_inputs,
 )
 from cognee.infrastructure.databases.provenance.source_refs import (
+    data_source_ref_key_selector,
     get_dataset_id_from_source_ref_key,
     get_pipeline_run_id_from_source_run_ref,
     get_source_ref_key_from_source_run_ref,
+    make_chunk_source_ref_key_prefix,
+    make_source_ref_key,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.files.storage import get_file_storage
@@ -183,7 +186,9 @@ SET r.updated_at = TIMESTAMP(edge.updated_at),
 
 
 DEFAULT_KUZU_BUFFER_POOL_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
-DEFAULT_KUZU_MAX_DB_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
+# 128 GiB, the power of 2 nearest 100 GB (Ladybug rejects any other value). It is
+# address-space accounting, not an allocation, so a large cap costs nothing.
+DEFAULT_KUZU_MAX_DB_SIZE = 1 << 37
 
 # Graph provenance (COG-5522 Part 1). These four fields live in declared scalar
 # STRING columns on both Node and EDGE — never inside the JSON `properties` blob
@@ -435,8 +440,8 @@ class LadybugAdapter(GraphDBInterface):
             Maximum size of the Kuzu buffer pool in bytes.
         kuzu_max_db_size:
             Maximum on-disk database size in bytes. Configurable via the
-            ``KUZU_MAX_DB_SIZE`` env var (see ``GraphConfig``); some users
-            need this above the default 4 GB for large graphs.
+            ``KUZU_MAX_DB_SIZE`` env var (see ``GraphConfig``); must be a
+            power of 2. Defaults to 128 GiB.
         subprocess_mode:
             When True, the adapter runs in subprocess-proxy mode: the
             native ladybug.Database/Connection live in a dedicated worker
@@ -708,17 +713,22 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to initialize Ladybug database: {e}")
             raise
 
+    def needs_push_to_s3(self) -> bool:
+        """Whether writes live in a local copy of an S3 database until ``push_to_s3``."""
+        return os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file")
+
     async def push_to_s3(self) -> None:
-        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file"):
-            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+        if not self.needs_push_to_s3():
+            return
+        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
-            s3_file_storage = S3FileStorage("")
+        s3_file_storage = S3FileStorage("")
 
-            if self.connection:
-                async with self.LADYBUG_ASYNC_LOCK:
-                    self.connection.execute("CHECKPOINT;")
+        if self.connection:
+            async with self.LADYBUG_ASYNC_LOCK:
+                self.connection.execute("CHECKPOINT;")
 
-            s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
+        s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
 
     async def pull_from_s3(self) -> None:
         from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
@@ -1201,6 +1211,8 @@ class LadybugAdapter(GraphDBInterface):
         nodes: list[DataPoint],
         source_ref_key: str | dict[str, str] | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """
         Add multiple nodes to the graph in a batch operation.
@@ -1222,6 +1234,7 @@ class LadybugAdapter(GraphDBInterface):
               non-graph-provenance writes.
             - pipeline_run_id (Optional[str]): Run id recorded alongside the provenance
               stamp, so the write is rollbackable by run. Ignored when source_ref_key is None.
+            - replace (bool): Ignored: every write stores the incoming properties.
         """
         if not nodes:
             return
@@ -1763,6 +1776,61 @@ class LadybugAdapter(GraphDBInterface):
                 for key in _decode_refs(row[3])
                 if str(get_dataset_id_from_source_ref_key(key)) == dataset_id
             ]
+            if owned:
+                edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
+                result[edge] = owned
+        return result
+
+    @staticmethod
+    def _data_source_ref_tokens(dataset_id: str, data_id: str) -> dict[str, str]:
+        """What one dataset document's keys look like inside a stored ref list: its
+        whole v1 key, and the start of any of its v2 chunk keys (a key always
+        follows a ``|``)."""
+        dataset, data = UUID(str(dataset_id)), UUID(str(data_id))
+        return {
+            "document_token": _provenance_token(make_source_ref_key(dataset, data)),
+            "chunk_token": f"|{make_chunk_source_ref_key_prefix(dataset, data)}",
+        }
+
+    async def find_node_source_refs_by_data(
+        self, dataset_id: str, data_id: str
+    ) -> dict[str, list[str]]:
+        """The source refs one dataset document owns on nodes. The engine picks the
+        nodes that carry one, so only those reach Python."""
+        rows = await self.query(
+            """
+            MATCH (n:Node)
+            WHERE coalesce(n.source_ref_keys, '|') CONTAINS $document_token
+               OR coalesce(n.source_ref_keys, '|') CONTAINS $chunk_token
+            RETURN n.id, n.source_ref_keys
+            """,
+            self._data_source_ref_tokens(dataset_id, data_id),
+        )
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            owned = select(_decode_refs(row[1]))
+            if owned:
+                result[row[0]] = owned
+        return result
+
+    async def find_edge_source_refs_by_data(
+        self, dataset_id: str, data_id: str
+    ) -> dict[EdgeIdentity, list[str]]:
+        """The source refs one dataset document owns on edges; see the node lookup."""
+        rows = await self.query(
+            """
+            MATCH (a:Node)-[r:EDGE]->(b:Node)
+            WHERE coalesce(r.source_ref_keys, '|') CONTAINS $document_token
+               OR coalesce(r.source_ref_keys, '|') CONTAINS $chunk_token
+            RETURN a.id, b.id, r.relationship_name, r.source_ref_keys
+            """,
+            self._data_source_ref_tokens(dataset_id, data_id),
+        )
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
+        result: dict[EdgeIdentity, list[str]] = {}
+        for row in rows:
+            owned = select(_decode_refs(row[3]))
             if owned:
                 edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
                 result[edge] = owned
@@ -3092,13 +3160,14 @@ class LadybugAdapter(GraphDBInterface):
         `edge_types` (matching the Neo4j/Postgres backends); `edge_types=None` or
         `[]` disables the filter.
 
-        Performance note: the `edge_types` branch enumerates every path up to
-        `depth` (Kuzu cannot filter a variable-length relationship binding in
-        Cypher — see #3585) and post-filters in Python, so its cost grows
-        combinatorially with node degree × depth on dense graphs. It is intended
-        for shallow, targeted neighborhoods; a future refactor could push per-hop
-        type filtering into Cypher via a fixed-length UNION to return distinct
-        neighbors instead of walks.
+        Performance note: at `depth=1` the edge types are filtered in Cypher, so
+        edges of other types never reach Python. Deeper, the `edge_types` branch
+        enumerates every path up to `depth` (Kuzu cannot filter a variable-length
+        relationship binding in Cypher — see #3585) and post-filters in Python, so
+        its cost grows combinatorially with node degree × depth on dense graphs. It
+        is intended for shallow, targeted neighborhoods; a future refactor could
+        push per-hop type filtering into Cypher via a fixed-length UNION to return
+        distinct neighbors instead of walks.
         """
         import time
 
@@ -3113,9 +3182,22 @@ class LadybugAdapter(GraphDBInterface):
             # Kuzu's `r` from `-[r*1..N]-` is a RECURSIVE_REL, not a LIST, so the
             # engine rejects `ALL(rel IN r WHERE ...)` with a binder error (and an
             # internal assertion when combined with a parameter reference). When
-            # edge_types is set, fetch paths unfiltered and discard neighbors whose
-            # every path crosses a disallowed edge type (#3585).
-            if edge_types:
+            # edge_types is set and depth > 1, fetch paths unfiltered and discard
+            # neighbors whose every path crosses a disallowed edge type (#3585).
+            if edge_types and depth == 1:
+                # One hop binds a single relationship, which Cypher can filter: a
+                # node with many edges of other types (an ontology class and its
+                # members' is_a edges) is not walked in Python.
+                neighbor_query = """
+                MATCH (seed:Node)-[r]-(neighbor:Node)
+                WHERE seed.id IN $node_ids AND r.relationship_name IN $edge_types
+                RETURN DISTINCT neighbor.id
+                """
+                neighbor_rows = await self.query(
+                    neighbor_query, {"node_ids": node_ids, "edge_types": list(edge_types)}
+                )
+                neighbor_ids = [row[0] for row in neighbor_rows if row[0]]
+            elif edge_types:
                 path_query = f"""
                 MATCH (seed:Node)-[r*1..{depth}]-(neighbor:Node)
                 WHERE seed.id IN $node_ids
@@ -3313,7 +3395,9 @@ class LadybugAdapter(GraphDBInterface):
 
         return nodes, edges
 
-    async def get_filtered_graph_data(self, attribute_filters: list[dict[str, list[str | int]]]):
+    async def get_filtered_graph_data(
+        self, attribute_filters: list[dict[str, list[str | int]]], *, include_edges: bool = True
+    ):
         """
         Get filtered nodes and relationships based on attributes.
 
@@ -3371,9 +3455,12 @@ class LadybugAdapter(GraphDBInterface):
         WHERE {where_clause.replace("n.", "n1.")} AND {where_clause.replace("n.", "n2.")}
         RETURN n1.id, n2.id, r.relationship_name, r.properties
         """
-        nodes, edges = await asyncio.gather(
-            self.query(nodes_query, params), self.query(edges_query, params)
-        )
+        if include_edges:
+            nodes, edges = await asyncio.gather(
+                self.query(nodes_query, params), self.query(edges_query, params)
+            )
+        else:
+            nodes, edges = await self.query(nodes_query, params), []
         formatted_nodes = []
         for n in nodes:
             if n[0]:

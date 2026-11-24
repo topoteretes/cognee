@@ -1,7 +1,13 @@
 import importlib
+import os
+import shutil
+import subprocess
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
+
+from cognee.modules.operations.origin import operation_origin_scope
 
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
 
@@ -46,6 +52,137 @@ async def test_remote_refused_when_http_disabled(monkeypatch, tmp_path):
         await resolve_module.resolve_repo_source("https://github.com/org/repo", clones_dir=tmp_path)
 
     assert "ALLOW_HTTP_REQUESTS" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    ["https://github.com/org/repo", "git@github.com:org/repo.git", "ssh://git@github.com/org/repo"],
+)
+@pytest.mark.parametrize("setting", [None, "", "false", "flase"])
+async def test_api_default_refuses_remote_repos_before_git_including_cached_clones(
+    monkeypatch, tmp_path, url, setting
+):
+    if setting is None:
+        monkeypatch.delenv("ALLOW_HTTP_REQUESTS", raising=False)
+    else:
+        monkeypatch.setenv("ALLOW_HTTP_REQUESTS", setting)
+    existing = resolve_module.clone_dir(url, clones_dir=tmp_path)
+    (existing / ".git").mkdir(parents=True)
+    run_git = AsyncMock()
+    monkeypatch.setattr(resolve_module, "_run_git", run_git)
+
+    with (
+        operation_origin_scope("api"),
+        pytest.raises(
+            resolve_module.CodeRepositoryError, match="ALLOW_HTTP_REQUESTS=true"
+        ) as error,
+    ):
+        await resolve_module.resolve_repo_source(url, clones_dir=tmp_path)
+
+    assert error.value.status_code == 403
+    # The SSRF error's text is forwarded as-is, not re-wrapped with its class name.
+    assert error.value.message.startswith("Outbound HTTP requests are disabled")
+    run_git.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_explicit_opt_in_allows_api_repo_cloning(monkeypatch, tmp_path):
+    monkeypatch.setenv("ALLOW_HTTP_REQUESTS", "true")
+    run_git = AsyncMock(return_value=(0, ""))
+    monkeypatch.setattr(resolve_module, "_run_git", run_git)
+    with operation_origin_scope("api"):
+        resolved = await resolve_module.resolve_repo_source(
+            "https://8.8.8.8/org/repo.git", clones_dir=tmp_path
+        )
+
+    assert resolved.parent == tmp_path
+    assert run_git.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_clone_of_an_internal_address_is_a_403(monkeypatch, tmp_path):
+    """A clone the SSRF check refuses is the caller's request being refused, not a 500."""
+    monkeypatch.setenv("ALLOW_HTTP_REQUESTS", "true")
+    run_git = AsyncMock()
+    monkeypatch.setattr(resolve_module, "_run_git", run_git)
+
+    with pytest.raises(resolve_module.CodeRepositoryError, match="Refusing to clone") as error:
+        await resolve_module.resolve_repo_source(
+            "https://127.0.0.1/org/repo.git", clones_dir=tmp_path
+        )
+
+    assert error.value.status_code == 403
+    run_git.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_every_git_command_runs_with_lfs_downloads_off(monkeypatch):
+    """Git LFS is disabled for every git command."""
+    calls = []
+
+    class _Process:
+        returncode = 0
+
+        async def communicate(self):
+            return b"", b""
+
+    async def create_subprocess_exec(*args, **kwargs):
+        calls.append((args, kwargs["env"]))
+        return _Process()
+
+    monkeypatch.setattr(resolve_module.shutil, "which", lambda _name: "/usr/bin/git")
+    monkeypatch.setattr(resolve_module.asyncio, "create_subprocess_exec", create_subprocess_exec)
+
+    await resolve_module._run_git(["reset", "--hard", "FETCH_HEAD"])
+    await resolve_module._run_git(["pull", "--ff-only"], env={"GIT_CONFIG_COUNT": "1"})
+
+    for args, env in calls:
+        assert args[0] == "/usr/bin/git"
+        # Global -c options come before the subcommand, so they apply to it.
+        assert args[1:7] == (
+            "-c",
+            "filter.lfs.smudge=",
+            "-c",
+            "filter.lfs.process=",
+            "-c",
+            "filter.lfs.required=false",
+        )
+        assert env["GIT_LFS_SKIP_SMUDGE"] == "1"
+    assert calls[1][1]["GIT_CONFIG_COUNT"] == "1"  # the caller's env still applies
+
+
+@pytest.mark.parametrize(
+    "url,origin",
+    [
+        ("https://gitlab.example.com:8443/org/repo.git", "https://gitlab.example.com:8443"),
+        ("https://github.com/org/repo.git", "https://github.com"),
+        ("https://[2001:db8::1]:8443/org/repo.git", "https://[2001:db8::1]:8443"),
+        ("https://[::1]/org/repo.git", "https://[::1]"),
+    ],
+)
+def test_credentials_header_is_scoped_to_the_repository_origin(url, origin):
+    env = resolve_module._credential_env("tok", url)
+
+    assert env["GIT_CONFIG_KEY_0"] == f"http.{origin}/.extraHeader"
+    assert env["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@pytest.mark.parametrize(
+    "url", ["https://gitlab.example.com:8443/org/repo.git", "https://[2001:db8::1]:8443/o/r.git"]
+)
+def test_git_applies_the_scoped_header_to_the_repository_url(url):
+    env = {**os.environ, **resolve_module._credential_env("tok", url)}
+    result = subprocess.run(
+        ["git", "config", "--get-urlmatch", "http.extraHeader", url],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,  # exit 1: no config entry matches the URL
+    )
+
+    assert result.stdout.strip() == env["GIT_CONFIG_VALUE_0"]
 
 
 @pytest.mark.asyncio

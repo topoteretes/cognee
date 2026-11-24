@@ -107,7 +107,7 @@ def _is_reviewable_entity(node: dict) -> bool:
 def _to_conflict_record(node_id, properties: dict) -> dict:
     """A stored FactConflict as plain property dict, with its list fields read back."""
     record = {**properties, "id": str(node_id)}
-    for name in ("values", "sources"):
+    for name in ("values", "sources", "rejected_fact_ids", "rejected_fact_texts"):
         record[name] = [str(value) for value in read_list_property(properties, name)]
         record.pop(f"{name}_json", None)
     return record

@@ -31,6 +31,11 @@ class DataItem:
     # legitimately be just a URL or an existing path, and reading it as one
     # would fetch or read something the caller never asked to ingest.
     literal_text: bool = False
+    # When True, ``data`` (a str) is a file path cognee produced itself, a
+    # document of a repository it cloned from an admitted URL, so the
+    # server-path gate (ACCEPT_LOCAL_FILE_PATH) does not apply: the caller
+    # named a URL, never this path. Only ``resolve_data_directories`` sets it.
+    cognee_path: bool = False
 
 
 def parse_labels(labels: str | None) -> list[str | None] | None:

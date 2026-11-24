@@ -298,8 +298,12 @@ class ExtractAgentContextStage(BaseStage):
     Delegates to ``agent_context_extraction.extract_pending_agent_context`` per
     session, sharing the watermark mid-session extraction uses.
     ``min_new_traces=1`` flushes whatever is still unprocessed before
-    distillation. Fail-open per session: one failing session never blocks the
-    others; the stage reports ``errored`` when any session failed.
+    distillation. With ``DISTILLATION_MODE=coding`` it delegates to
+    ``coding_unit_extraction.extract_coding_unit_context`` instead: the whole
+    pending unit of work, once, with tool inputs and the final answer. That
+    path needs no per-turn feedback analysis, so ``AUTO_FEEDBACK`` does not gate
+    it. Fail-open per session: one failing session never blocks the others;
+    the stage reports ``errored`` when any session failed.
     """
 
     name = "extract_agent_context"
@@ -311,7 +315,7 @@ class ExtractAgentContextStage(BaseStage):
         session_manager = get_session_manager()
         if not session_manager.is_available:
             return REASON_SESSION_MANAGER_UNAVAILABLE
-        if not session_manager.is_auto_feedback_enabled():
+        if not inputs.config.coding_distillation and not session_manager.is_auto_feedback_enabled():
             return REASON_AUTO_FEEDBACK_DISABLED
         if not llm_available():
             return REASON_NO_LLM_CONFIGURED
@@ -320,6 +324,9 @@ class ExtractAgentContextStage(BaseStage):
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
         from cognee.infrastructure.session.agent_context_extraction import (
             extract_pending_agent_context,
+        )
+        from cognee.infrastructure.session.coding_unit_extraction import (
+            extract_coding_unit_context,
         )
         from cognee.infrastructure.session.get_session_manager import get_session_manager
 
@@ -330,12 +337,21 @@ class ExtractAgentContextStage(BaseStage):
         last_error: BaseException | None = None
         for session_id in inputs.session_ids:
             try:
-                ids = await extract_pending_agent_context(
-                    session_manager=session_manager,
-                    user_id=user_id,
-                    session_id=session_id,
-                    min_new_traces=1,
-                )
+                if inputs.config.coding_distillation:
+                    ids = await extract_coding_unit_context(
+                        session_manager=session_manager,
+                        user_id=user_id,
+                        session_id=session_id,
+                        dataset=inputs.dataset,
+                    )
+                else:
+                    ids = await extract_pending_agent_context(
+                        session_manager=session_manager,
+                        user_id=user_id,
+                        session_id=session_id,
+                        min_new_traces=1,
+                        automatic=False,
+                    )
                 touched += len(ids)
             except Exception as e:
                 failed += 1
@@ -372,8 +388,11 @@ class DistillSessionsStage(BaseStage):
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
         from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
         from cognee.modules.session_distillation import distill_session
+        from cognee.modules.session_distillation.summary import publish_session_summary
 
         distilled = 0
+        summaries = 0
+        summaries_failed = 0
         completed = 0
         failed = 0
         uncurated = 0
@@ -417,13 +436,42 @@ class DistillSessionsStage(BaseStage):
                     e,
                     exc_info=True,
                 )
+            # The summary is independent of distillation: its failure is counted
+            # on its own, never as a failed distillation.
+            try:
+                summaries += int(
+                    await publish_session_summary(
+                        session_id, dataset=inputs.dataset_id, user=inputs.user
+                    )
+                )
+            except LLMPaymentRequiredError as e:
+                summaries_failed += 1
+                last_error = e
+                logger.warning(
+                    "improve: LLM budget exhausted summarizing session '%s'; "
+                    "skipping the remaining sessions: %s",
+                    session_id,
+                    e,
+                )
+                break
+            except Exception as e:
+                summaries_failed += 1
+                last_error = e
+                logger.warning(
+                    "improve: session summary failed for '%s' (non-fatal): %s",
+                    session_id,
+                    e,
+                    exc_info=True,
+                )
         counts = {
             "documents": distilled,
+            "summaries": summaries,
+            "summaries_failed": summaries_failed,
             "sessions_completed": completed,
             "sessions_failed": failed,
             "entries_uncurated": uncurated,
         }
-        if failed:
+        if failed or summaries_failed:
             return StageResult.errored(self.name, last_error, **counts)
         return StageResult.completed(self.name, **counts)
 

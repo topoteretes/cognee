@@ -41,6 +41,7 @@ def _isolated_db():
     create_relational_engine.cache_clear()
 
     async def _run():
+        import cognee.modules.integrations.models
         import cognee.modules.users.models
         from cognee.infrastructure.databases.relational import get_relational_engine
 
@@ -306,6 +307,88 @@ async def test_an_agent_working_in_another_tenant_keeps_its_key_and_its_access_t
     assert await _count(UserTenant, user_id=agent_id, tenant_id=seed["other_tenant_id"]) == 1
     assert await _count(UserRole, user_id=agent_id, role_id=role_id) == 1
     assert await _count(PrincipalCapability, principal_id=agent_id) == 1
+
+
+def test_the_deletion_names_a_table_and_columns_the_policy_model_has():
+    """The deletion refers to the policy table by name so that it never registers the model."""
+    import cognee.modules.integrations.models as integration_models
+    from cognee.modules.agents.delete_sync_policies import _SYNC_POLICIES
+
+    model_table = integration_models.IntegrationSyncPolicy.__table__
+
+    assert _SYNC_POLICIES.name == model_table.name
+    assert {c.name for c in _SYNC_POLICIES.c} <= set(model_table.c.keys())
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_user_deletes_the_sync_policies_of_them_and_their_agents():
+    """SQLite does not enforce the cascade, so the policy rows go explicitly (SDK-1434)."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.integrations.sync_policy.models import IntegrationSyncPolicy
+    from cognee.modules.users.methods import delete_user, get_user
+
+    seed = await _seed()
+    agent_id, _ = await _agent_with_access("agent", seed["member_id"], seed["dataset_id"])
+
+    def _policy(principal_id, **extra):
+        return IntegrationSyncPolicy(
+            principal_id=principal_id,
+            interval_minutes=60,
+            weekdays=[0],
+            timezone="UTC",
+            **extra,
+        )
+
+    async with get_relational_engine().get_async_session() as session:
+        session.add_all(
+            [
+                _policy(seed["member_id"]),
+                _policy(agent_id),
+                # The tenant's default, paused by the user who is about to be deleted.
+                _policy(seed["tenant_id"], paused=True, paused_by=seed["member_id"]),
+            ]
+        )
+        await session.commit()
+
+    await delete_user((await get_user(seed["member_id"])).email)
+
+    assert await _count(IntegrationSyncPolicy, principal_id=seed["member_id"]) == 0
+    assert await _count(IntegrationSyncPolicy, principal_id=agent_id) == 0
+    assert await _count(IntegrationSyncPolicy, principal_id=seed["tenant_id"]) == 1
+    assert await _count(IntegrationSyncPolicy, principal_id=seed["tenant_id"], paused=True) == 1
+    assert await _count(IntegrationSyncPolicy, paused_by=seed["member_id"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_agents_of_a_user_deletes_their_policies_and_not_the_users():
+    """The user's own policies are the caller's to delete, not the agents' deletion's (SDK-1434)."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.agents.delete_agents_of_user import delete_agents_of_user
+    from cognee.modules.integrations.sync_policy.models import IntegrationSyncPolicy
+
+    seed = await _seed()
+    agent_id, _ = await _agent_with_access("agent", seed["member_id"], seed["dataset_id"])
+
+    async with get_relational_engine().get_async_session() as session:
+        session.add_all(
+            [
+                IntegrationSyncPolicy(
+                    principal_id=principal_id,
+                    interval_minutes=60,
+                    weekdays=[0],
+                    timezone="UTC",
+                )
+                for principal_id in (seed["member_id"], agent_id)
+            ]
+        )
+        await session.commit()
+
+    async with get_relational_engine().get_async_session() as session:
+        await delete_agents_of_user(session, seed["member_id"])
+        await session.commit()
+
+    assert await _count(IntegrationSyncPolicy, principal_id=seed["member_id"]) == 1
+    assert await _count(IntegrationSyncPolicy, principal_id=agent_id) == 0
 
 
 @pytest.mark.asyncio

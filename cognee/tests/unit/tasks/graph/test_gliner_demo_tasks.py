@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types import AudioDocument, ImageDocument, TextDocument
 from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
@@ -647,6 +648,7 @@ async def test_schema_is_prepared_once_per_document():
             documents,
             schema=GlinerSchema(),
             max_chunk_size=512,
+            chunker=TextChunker,
         )
 
     assert result is documents
@@ -676,7 +678,7 @@ async def test_schema_sketch_is_bounded_while_reading_document():
         ) as make_sketch,
     ):
         await tasks_module.prepare_gliner_schema(
-            [document], schema=GlinerSchema(), max_chunk_size=512
+            [document], schema=GlinerSchema(), max_chunk_size=512, chunker=TextChunker
         )
 
     assert make_sketch.call_count == len(parts)
@@ -694,7 +696,9 @@ async def test_explicit_schema_is_attached_without_reading_or_probing():
         name="people.txt", raw_data_location="people.txt", external_metadata=None
     )
     with patch.object(tasks_module, "get_extractor", side_effect=AssertionError):
-        await tasks_module.prepare_gliner_schema([document], schema=schema, max_chunk_size=512)
+        await tasks_module.prepare_gliner_schema(
+            [document], schema=schema, max_chunk_size=512, chunker=TextChunker
+        )
     assert document._gliner_schema is schema
     assert "_gliner_schema" not in document.model_dump()
 
@@ -711,7 +715,7 @@ async def test_schema_preparation_rejects_raw_media(document_class, mime_type):
 
     with pytest.raises(ValueError, match="requires stored text"):
         await tasks_module.prepare_gliner_schema(
-            [document], schema=GlinerSchema({"person": ""}), max_chunk_size=512
+            [document], schema=GlinerSchema({"person": ""}), max_chunk_size=512, chunker=TextChunker
         )
 
 
@@ -777,7 +781,7 @@ async def test_get_gliner_demo_tasks_shape():
 
 
 @pytest.mark.asyncio
-async def test_get_gliner_demo_tasks_appends_provenance_after_storage():
+async def test_get_gliner_demo_tasks_ledger_is_never_a_task():
     with patch.object(tasks_module, "require_gliner2"):
         tasks = await get_gliner_demo_tasks(
             ["person"],
@@ -785,10 +789,10 @@ async def test_get_gliner_demo_tasks_appends_provenance_after_storage():
             chunk_size=512,
         )
 
-    assert [task.executable.__name__ for task in tasks][-2:] == [
-        "add_data_points",
-        "record_provenance",
-    ]
+    names = [task.executable.__name__ for task in tasks]
+    assert names[-1] == "add_data_points"
+    # The ledger is written by add_data_points itself, never as a task.
+    assert "record_provenance" not in names
 
 
 @pytest.mark.asyncio

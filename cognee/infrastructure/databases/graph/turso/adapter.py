@@ -227,13 +227,16 @@ class TursoAdapter(GraphDBInterface):
         nodes: list[tuple[str, dict]] | list[DataPoint],
         source_ref_key: str | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """Add multiple nodes via batch upsert.
 
         ``source_ref_key`` / ``pipeline_run_id`` are the graph-provenance stamp the
         storage path always passes; Turso does not fold provenance into the graph
         (it uses the relational-ledger delete path), so they are accepted and
-        ignored — the same contract as any non-graph-provenance backend.
+        ignored — the same contract as any non-graph-provenance backend. ``replace``
+        is ignored too: every write stores the incoming properties.
         """
         if not nodes:
             return
@@ -609,10 +612,10 @@ class TursoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_filtered_graph_data(
-        self, attribute_filters: list[dict[str, list[str | int]]]
+        self, attribute_filters: list[dict[str, list[str | int]]], *, include_edges: bool = True
     ) -> tuple[list[tuple[str, dict]], list[tuple[str, str, str, dict]]]:
         """Retrieve nodes matching attribute filters, plus edges between them."""
-        if not attribute_filters:
+        if not attribute_filters and include_edges:
             return await self.get_graph_data()
 
         where_parts = []
@@ -630,10 +633,10 @@ class TursoAdapter(GraphDBInterface):
                 where_parts.append(f"n.{attr} IN ({ph})")
                 params.update(fp)
 
-        if not where_parts:
+        if not where_parts and include_edges:
             return await self.get_graph_data()
 
-        where_clause = " AND ".join(where_parts)
+        where_clause = " AND ".join(where_parts) or "1 = 1"
 
         async with self._session() as session:
             node_result = await session.execute(
@@ -655,6 +658,9 @@ class TursoAdapter(GraphDBInterface):
                 if row[3]:
                     data.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
                 nodes.append((row[0], data))
+
+            if not include_edges:
+                return nodes, []
 
             fn_subquery, fn_params = _id_subquery("fn", node_ids)
             edge_result = await session.execute(
