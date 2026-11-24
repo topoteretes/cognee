@@ -22,11 +22,7 @@ logger = get_logger("extract_content_graph")
 
 
 def _graph_extraction_reasoning_effort(llm_config: LLMConfig) -> str | None:
-    """``GRAPH_EXTRACTION_REASONING_EFFORT`` if every model the call can reach accepts it.
-
-    The content-policy fallback reuses the call's kwargs, so it is checked too when
-    configured (no adapter uses it without both its model and key).
-    """
+    """The setting, if the model and the fallback model (same kwargs) accept it."""
     effort = llm_config.graph_extraction_reasoning_effort
     if not effort:
         return None
@@ -42,7 +38,7 @@ def _graph_extraction_reasoning_effort(llm_config: LLMConfig) -> str | None:
 
 @lru_cache
 def _warn_reasoning_effort_skipped(models: tuple[str, ...]) -> None:
-    """Warn once per model set, not once per chunk."""
+    """Once per model set, not per chunk."""
     logger.warning(
         "GRAPH_EXTRACTION_REASONING_EFFORT is set, but %s does not accept reasoning_effort; "
         "sending none.",
@@ -62,10 +58,8 @@ async def extract_content_graph(
     ``temporal_hints`` are rendered into the default graph prompt's
     TEMPORAL_NORMALIZATION_HINTS block (see ``engine/utils/temporal_hints.py``).
     A ``custom_prompt`` is sent verbatim and receives no hints.
-    ``GRAPH_EXTRACTION_REASONING_EFFORT``, when set, is sent as ``reasoning_effort``
-    on this call only, and only when the model (and the fallback model, if set) is one
-    litellm lists as accepting it; otherwise a warning is logged once and nothing is
-    sent. A ``reasoning_effort`` kwarg overrides it.
+    ``GRAPH_EXTRACTION_REASONING_EFFORT`` is sent as ``reasoning_effort`` on this call
+    only; a ``reasoning_effort`` kwarg wins.
     """
     llm_config = get_llm_config()
     reasoning_effort = _graph_extraction_reasoning_effort(llm_config)

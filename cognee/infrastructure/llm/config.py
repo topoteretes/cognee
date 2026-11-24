@@ -166,11 +166,7 @@ class LLMConfig(BaseSettings):
     image_transcription_prompt_path: str = "transcribe_image_prompt.txt"
     image_transcription_max_completion_tokens: int = 1024
     image_transcription_reasoning_effort: str = "low"
-    # Reasoning effort for graph extraction only (the cognify call that writes the graph),
-    # so answers keep the model's default. Empty sends none and the model uses its default.
-    # Sent only when the model (and FALLBACK_MODEL, if set) accepts reasoning_effort per
-    # litellm; otherwise a warning is logged once and nothing is sent. Values are the
-    # OpenAI SDK's ReasoningEffort.
+    # Reasoning effort for graph extraction only; empty sends none. Values are the OpenAI SDK's.
     graph_extraction_reasoning_effort: Literal[
         "", "none", "minimal", "low", "medium", "high", "xhigh", "max"
     ] = ""

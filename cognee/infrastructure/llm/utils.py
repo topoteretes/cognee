@@ -143,13 +143,10 @@ def get_model_max_completion_tokens(model_name: str) -> int | None:
 def supports_reasoning_effort(model_name: str) -> bool:
     """Whether litellm accepts ``reasoning_effort`` for ``model_name``.
 
-    Models it does not list reject the parameter. This is not the estimator's
-    ``_is_reasoning_model``: that one asks which models bill hidden reasoning tokens
-    by default (gpt-5, gpt-6, o-series), while models such as Claude accept
-    ``reasoning_effort`` but do not reason unless asked.
+    Not the estimator's ``_is_reasoning_model`` (models that reason by default):
+    Claude, for one, accepts it but reasons only when asked.
     """
-    # Imported here for the same reason as in get_model_max_completion_tokens.
-    import litellm
+    import litellm  # Lazy, as in get_model_max_completion_tokens.
 
     return litellm.supports_reasoning(model=model_name)
 
