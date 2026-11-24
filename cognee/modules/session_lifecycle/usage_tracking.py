@@ -62,6 +62,7 @@ def _estimate_tokens(text: str) -> int:
 # against the official pricing pages September 2026.
 _PRICING_PER_M_TOKENS = {
     # OpenAI — https://developers.openai.com/api/docs/pricing
+    "gpt-6-luna": (0.10, 0.50),  # verified November 2026
     "gpt-5.6-astra": (10.00, 50.00),
     "gpt-5.6-sol": (4.00, 20.00),
     "gpt-5.6-terra": (2.00, 12.00),

@@ -1,6 +1,6 @@
 import asyncio
 import warnings
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -10,6 +10,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingCo
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import resolve_chunk_size
 from cognee.infrastructure.llm.config import LLMConfig
+from cognee.modules.chunking.chunker_registry import resolve_chunker
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.chunking_tasks import build_chunking_tasks, resolve_chunks_per_batch
 from cognee.modules.cognify.config import (
@@ -137,8 +138,8 @@ def raise_if_cognify_errored(result) -> None:
 async def cognify(
     datasets: str | list[str] | list[UUID] | None = None,
     user: User = None,
-    graph_model: BaseModel = KnowledgeGraph,
-    chunker=TextChunker,
+    graph_model: type[BaseModel] | dict[str, Any] | None = KnowledgeGraph,
+    chunker=None,
     chunk_size: int | None = None,
     chunks_per_batch: int | None = None,
     config: Config = None,
@@ -217,11 +218,16 @@ async def cognify(
             - None: Process all datasets for the user
         user: User context for authentication and data access. Uses default if None.
         graph_model: Pydantic model defining the knowledge graph structure.
-                    Defaults to KnowledgeGraph for general-purpose processing.
+                    Defaults to KnowledgeGraph for general-purpose processing (None too).
+                    Also accepts the model as a JSON schema dict, the form
+                    ``POST /cognify`` takes and ``graph_model_to_graph_schema``
+                    produces; it is built into a class before anything runs, and a
+                    schema that cannot be built raises a ``CogneeValidationError``.
         chunker: Text chunking strategy (TextChunker, LangchainChunker).
                 - TextChunker: Paragraph-based chunking (default, most reliable)
                 - LangchainChunker: Recursive character splitting with overlap
-                Determines how documents are segmented for processing.
+                Determines how documents are segmented for processing. None uses the
+                chunker DEFAULT_CHUNKER names (TextChunker when unset).
         ontology_file_path: Optional path, or comma-separated paths, to the ontology
                     used for both extraction schema planning and graph integration.
         chunk_size: Maximum tokens per chunk. Auto-calculated based on LLM if None.
@@ -377,6 +383,14 @@ async def cognify(
         )
     drop_deprecated_temporal_cognify(kwargs)
 
+    # Imported here: graph_model_utils -> llm_graph_model -> cognee.tasks.graph, which
+    # imports back into this package at module load.
+    from cognee.shared.graph_model_utils import resolve_graph_model
+
+    # A schema dict becomes a class here, before any check or run. The caller's own
+    # form is kept in graph_model: a remote instance is sent what the caller gave.
+    graph_model_class = resolve_graph_model(graph_model)
+
     cognify_config = get_cognify_config()
     # The extractor decision is made once, here, before any branch. Branches
     # that cannot honour it raise below instead of silently running something
@@ -397,10 +411,10 @@ async def cognify(
             raise ValueError(
                 f"Invalid chunk_attachment {chunk_attachment!r}; expected 'direct', 'all', or None."
             )
-        if not (isinstance(graph_model, type) and issubclass(graph_model, DataPoint)):
+        if not issubclass(graph_model_class, DataPoint):
             raise ValueError(
                 "chunk_attachment requires a custom DataPoint graph_model; "
-                f"{getattr(graph_model, '__name__', graph_model)!r} is not a DataPoint subclass."
+                f"{graph_model_class.__name__!r} is not a DataPoint subclass."
             )
 
     # Route to remote instance if connected via serve()
@@ -453,6 +467,8 @@ async def cognify(
             graph_model=graph_model,
         )
 
+    chunker = resolve_chunker(chunker)
+
     # After the argument checks and the remote route: a cognify that raises above,
     # or runs remotely, must not install anything locally. Awaited, so the pipeline
     # below never starts before the GLiNER runtime is importable.
@@ -492,7 +508,7 @@ async def cognify(
             return await estimate_cognify_dry_run(
                 datasets,
                 user=user,
-                graph_model=graph_model,
+                graph_model=graph_model_class,
                 chunker=chunker,
                 chunk_size=await resolve_chunk_size(chunk_size),
                 custom_prompt=custom_prompt,
@@ -500,7 +516,7 @@ async def cognify(
             )
 
         if resolved_extractor == GLINER_DEMO_EXTRACTOR:
-            if graph_model is not KnowledgeGraph:
+            if graph_model_class is not KnowledgeGraph:
                 raise ValueError(
                     "extractor='gliner_demo' builds the generic KnowledgeGraph; "
                     "a custom graph_model is only supported by the 'llm' extractor."
@@ -527,7 +543,7 @@ async def cognify(
         else:
             tasks = await get_default_tasks(
                 user=user,
-                graph_model=graph_model,
+                graph_model=graph_model_class,
                 chunker=chunker,
                 chunk_size=chunk_size,
                 config=config,
@@ -679,7 +695,7 @@ async def cognify(
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
-    chunker=TextChunker,
+    chunker=None,
     chunk_size: int | None = None,
     config: Config = None,
     custom_prompt: str | None = None,
@@ -689,6 +705,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     early_chunk_indexing: bool | None = None,
     **kwargs,
 ) -> list[Task]:
+    chunker = resolve_chunker(chunker)
     cognify_config = get_cognify_config()
     summary_method = summary_method or cognify_config.summary_method
     if early_chunk_indexing is None:
@@ -739,7 +756,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
 
 async def get_indexing_tasks(
-    chunker=TextChunker,
+    chunker=None,
     chunk_size: int | None = None,
     chunks_per_batch: int | None = None,
 ) -> list[Task]:
@@ -753,6 +770,7 @@ async def get_indexing_tasks(
     temporal hints are left out: nothing here reads them, and the cognify run
     computes its own when it re-chunks.
     """
+    chunker = resolve_chunker(chunker)
     return [
         *build_chunking_tasks(chunker, await resolve_chunk_size(chunk_size), temporal_hints=False),
         # LOAD: chunk and document nodes to the graph, chunk text to the vector

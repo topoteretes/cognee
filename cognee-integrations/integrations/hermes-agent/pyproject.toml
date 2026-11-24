@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cognee-integration-hermes-agent"
+version = "1.4.3"
+description = "Cognee memory provider plugin for Hermes Agent. After installing, run `hermes memory setup cognee`; Cognee Cloud needs nothing else, local mode runs cognee from a private environment the plugin installs on request."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    {name = "Cognee team"}
+]
+# No cognee here, on purpose: Hermes resolves every plugin into one shared
+# environment, where cognee's pins conflict with Hermes extras and refuse the
+# install outright — Cloud users included, who never import it. An extra or a
+# dependency group would not help: Hermes's lock resolves those too. Remote
+# mode is plain HTTP; local mode runs its server from a private venv the plugin
+# builds on request (runtime_env.py, LOCAL_COGNEE_REQUIREMENT in config.py).
+dependencies = []
+
+# The group Hermes' memory-provider loader actually scans
+# (plugins/memory ENTRY_POINTS_GROUP): with this, a plain pip install activates
+# the provider via `register(ctx)` even before cognee-hermes-install runs.
+# 1.0.0–1.2.0 declared only the generic group below, which the memory loader
+# never reads (issue #382).
+[project.entry-points."hermes_agent.memory_providers"]
+cognee = "cognee_integration_hermes"
+
+# Hermes' generic plugin system; kept so existing `plugins.enabled` entries
+# keep resolving.
+[project.entry-points."hermes_agent.plugins"]
+cognee = "cognee_integration_hermes"
+
+[project.scripts]
+# Copies the installed package into $HERMES_HOME/plugins/cognee, which gets the
+# directory-scan discovery path plus the plugin-root cli.py/plugin.yaml
+# (dashboard config panel, `hermes cognee` subcommands). See installer.py.
+cognee-hermes-install = "cognee_integration_hermes.installer:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cognee_integration_hermes*"]
+
+[tool.setuptools.package-data]
+# The plugin-root files (plugin.yaml, cli.py shim, after-install.md, and
+# plugin_init.py — installed as the plugin root's __init__.py) that the
+# installer lays down next to the package. Kept byte-identical to the repo-root
+# canonical copies by tests/test_installer.py.
+cognee_integration_hermes = ["_plugin_root/*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.3",
+    "ruff>=0.14.6",
+]
+
+[tool.uv]
+# Its own [tool.uv] on purpose: uv reads resolver settings from the nearest
+# pyproject.toml that has this table, which would otherwise be the cognee
+# repository root. Same supply-chain window as cognee and cognee-connectors:
+# skip packages less than 2 days old.
+exclude-newer = "2 days"
+
+[tool.pytest.ini_options]
+# Without a pytest section here, rootdir resolution walks up to
+# cognee-integrations/pyproject.toml and this suite adopts its `asyncio_mode = "auto"` — an
+# option pytest-asyncio owns and hermes does not install, so every run, local
+# and CI alike, printed a PytestConfigWarning about it.
+testpaths = ["tests"]
+
+# A hung run is the failure mode this suite was reported for (SDK-454), and a
+# hang has no natural bound: a socket that never answers or a child that is
+# never reaped just sits there until CI's 6h default gives up. The slowest
+# honest test here is the exit-watcher's ~2s poll, so 60s only ever fires on a
+# genuine hang — and fires as a named, stack-dumping failure instead of silence.
+timeout = 60

@@ -99,6 +99,9 @@ SAMPLE_ARGUMENTS = {
     # GlinerWorkerModelMismatchError: the model required vs the one the worker serves.
     "expected": "sample-org/required-model",
     "served": "sample-org/served-model",
+    # PgvectorVersionError: the server's pgvector version vs the minimum the adapter needs.
+    "installed": "0.6.2",
+    "required": "0.7.0",
     "value": 1,
 }
 
