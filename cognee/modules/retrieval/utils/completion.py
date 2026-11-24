@@ -32,7 +32,7 @@ def build_completion_prompts(
     The system prompt is the retriever's task template, nothing else. The user prompt is
     the session history, then the rendered question and context, then the guidance block
     last; empty layers are skipped. The order is measured, not chosen by taste: see
-    "Completion prompt layout" in CLAUDE.md before moving anything.
+    "Completion prompt layout" in docs/retrieval-internals.md before moving anything.
 
     Pure and side-effect free. ``generate_completion`` builds its prompts here, and so
     does the ``only_context`` preview, so a caller asking what the LLM *would* receive

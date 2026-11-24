@@ -15,6 +15,13 @@ session cache and logs are **not** covered by this layer; they rely on the
 backend's encryption at rest as before. Files Cognee did not copy (an `s3://`
 object or a local path referenced in place) are not touched either.
 
+When encryption is enabled, `get_file_storage()` and `open_data_file()` apply
+`EncryptedFileStorage` to local and S3 storage at or below the configured data
+root, including a data root set by the current `dataset` context. Database
+engines open their files in `SYSTEM_ROOT_DIRECTORY` directly, outside this wrapper,
+so the system, cache and log roots are never wrapped: sealing them would corrupt
+the databases, not protect them. Each encrypted write generates a fresh data key.
+
 ## Turning it on
 
 ```bash
@@ -50,10 +57,10 @@ rather than storing anything unsealed.
 ## What changes, and what does not
 
 - `remember()`, `add()`, `update()` and the loaders store sealed objects.
-  Reading them back (`cognify`, `recall` citations, `GET
-  /datasets/{id}/data/{id}/raw`, cloud sync) goes through the same storage layer
-  and sees plaintext. Content hashes and sizes in the `data` table are of the
-  plaintext, exactly as before.
+  Reads for `cognify`, `recall` citations and cloud sync see plaintext through
+  the same storage layer. `GET /api/v1/datasets/{dataset_id}/data/{data_id}/raw`
+  streams encrypted files through the decrypting reader. Content hashes and
+  sizes in the `data` table are of the plaintext, exactly as before.
 - Files written **before** the switch was turned on stay readable. The reader
   recognises a sealed file by its header and passes anything else through. Such a
   file is sealed the next time it is written (for example when `update()`
@@ -64,8 +71,6 @@ rather than storing anything unsealed.
   permissions, `0600`) for as long as the loader runs, then removed. This is the
   one point at which plaintext exists outside process memory; put the system
   temp directory on an encrypted volume if that matters to you.
-- The system root (embedded databases), cache root and logs are never wrapped;
-  wrapping them would corrupt the database engines, not protect them.
 
 ## Format
 

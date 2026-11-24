@@ -504,3 +504,18 @@ def test_a_node_set_conflict_is_a_named_409_on_both_routes(http_client, post):
 
     assert response.status_code == 409
     assert "[SessionNodeSetConflictError]" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_the_global_handler_gives_a_node_set_conflict_a_stable_code():
+    """A client tells this permanent 409 from a retryable one by ``code``."""
+    import json
+
+    from cognee.api.client import exception_handler
+
+    response = await exception_handler(
+        None, SessionNodeSetConflictError(("project-a",), ["project-b"])
+    )
+
+    assert response.status_code == 409
+    assert json.loads(response.body)["code"] == "session_node_set_conflict"

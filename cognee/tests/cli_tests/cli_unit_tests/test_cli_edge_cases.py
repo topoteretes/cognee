@@ -316,51 +316,34 @@ class TestCognifyCommandEdgeCases:
 
         mock_cognee.cognify.assert_not_awaited()
 
-    @patch("cognee.cli.commands.cognify_command.asyncio.run")
-    def test_cognify_langchain_chunker_import_error(self, mock_asyncio_run):
-        """Test cognify command when LangchainChunker import fails"""
-        # Mock the cognee module
+    def test_cognify_langchain_chunker_import_error(self):
+        """A chunker the user asked for that cannot be imported fails the command.
+
+        Falling back would cut with DEFAULT_CHUNKER, which may be any registered chunker.
+        """
         mock_cognee = MagicMock()
         mock_cognee.cognify = AsyncMock()
-
-        def mock_import_func(name, fromlist=None, *args, **kwargs):
-            if name == "cognee":
-                return mock_cognee
-            elif (
-                name == "cognee.modules.chunking.LangchainChunker"
-                and fromlist
-                and "LangchainChunker" in fromlist
-            ):
-                raise ImportError("LangchainChunker not available")
-            elif (
-                name == "cognee.modules.chunking.TextChunker"
-                and fromlist
-                and "TextChunker" in fromlist
-            ):
-                module = MagicMock()
-                module.TextChunker = MagicMock()
-                return module
-            return MagicMock()
+        args = argparse.Namespace(
+            datasets=None,
+            chunk_size=None,
+            ontology_file=None,
+            chunker="LangchainChunker",
+            background=False,
+            verbose=False,
+        )
+        missing_langchain = {
+            "cognee": mock_cognee,
+            "cognee.modules.chunking.LangchainChunker": None,
+        }
 
         with (
-            patch("builtins.__import__", side_effect=mock_import_func),
-            patch.dict(sys.modules, {"cognee": mock_cognee}),
+            patch.dict(sys.modules, missing_langchain),
+            patch("cognee.cli.user_resolution.resolve_cli_user", AsyncMock()),
+            pytest.raises(CliCommandException, match="cognee\\[langchain\\]"),
         ):
-            command = CognifyCommand()
-            args = argparse.Namespace(
-                datasets=None,
-                chunk_size=None,
-                ontology_file=None,
-                chunker="LangchainChunker",
-                background=False,
-                verbose=True,
-            )
+            CognifyCommand().execute(args)
 
-            # Should fall back to TextChunker and show warning
-            command.execute(args)
-
-        mock_asyncio_run.assert_called_once()
-        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        mock_cognee.cognify.assert_not_awaited()
 
     @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)

@@ -6,6 +6,13 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 VALID_RATINGS = {"helpful", "harmful"}
 MAX_CONTEXT_CONTENT_CHARS = 280
 
+
+def clip_text(text: str, limit: int) -> str:
+    """``text`` on one line, cut to ``limit`` characters with a trailing ``…``."""
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 # One threshold, declared once here with the models it gates: a candidate must
 # clear it to be stored, and a stored entry must clear it to be served,
 # distilled, or folded into preferences. The harmful-rating rule differs by
@@ -245,6 +252,10 @@ class AgentCandidateContextUpdate(CandidateContextUpdate):
     """A proposed new agent-profile session-context lesson (tool/workflow guidance)."""
 
     context_profile: Literal["agent"] = ContextProfile.AGENT.value
+    # No max_length: one long support string would fail the whole batch's validation.
+    # The applier clips both when it stores the entry.
+    reason: str = Field(default="", description="Why this project fact matters.")
+    evidence: str = Field(default="", description="Supporting trace observation.")
     section: str = Field(
         description=(
             "One of tool_rules, workflow_state, success_patterns, failure_lessons, or "
@@ -374,6 +385,48 @@ class AgentContextExtraction(BaseModel):
         return normalized
 
 
+class CodingCandidateLesson(BaseModel):
+    """One lesson of a coding extraction with the turn it was learned in (SDK-1335)."""
+
+    turn: int = Field(
+        description=(
+            "The number of the turn the lesson was learned in, as the TRACES and FINAL "
+            "MESSAGE sections number them (1-based)."
+        ),
+    )
+    lesson: AgentCandidateContextUpdateVariant
+
+
+class CodingAgentContextExtraction(BaseModel):
+    """LLM output of the coding extraction: agent lessons, each tied to its turn.
+
+    A separate model so the default extraction's schema (``AgentContextExtraction``)
+    does not change with the mode.
+    """
+
+    lessons: list[CodingCandidateLesson] = Field(
+        default_factory=list,
+        description=(
+            "Reusable agent/tool lessons drawn from the traces, each with the number of "
+            "the turn it comes from."
+        ),
+    )
+
+    @field_validator("lessons", mode="before")
+    @classmethod
+    def normalize_lessons(cls, value):
+        if not isinstance(value, list):
+            return []
+        normalized = []
+        for item in value:
+            if isinstance(item, dict) and isinstance(item.get("lesson"), dict):
+                item = dict(item)
+                (lesson,) = AgentContextExtraction.normalize_lessons([item["lesson"]])
+                item["lesson"] = lesson
+            normalized.append(item)
+        return normalized
+
+
 class SessionContextEntry(BaseModel):
     """A stored active session-context lesson, tagged by profile (qa or agent)."""
 
@@ -386,10 +439,16 @@ class SessionContextEntry(BaseModel):
     created_at: str
     source_feedback_ids: list[str] = Field(default_factory=list)
     source_trace_ids: list[str] = Field(default_factory=list)
+    # The Q&A rows (turns) a coding lesson was learned in; the distillation judges
+    # the lesson against those turns' requests and answers.
+    source_qa_ids: list[str] = Field(default_factory=list)
     helpful_count: int = 0
     harmful_count: int = 0
     priority: int = 0
     last_served_at: str | None = None
+    reason: str = ""
+    evidence: str = ""
+    expired_at: str | None = None
     embedding: list[float] | None = None
     kind: Literal["context"] = "context"
 
@@ -461,7 +520,7 @@ class SessionContextEntry(BaseModel):
             raise ValueError("count must be >= 0")
         return v
 
-    @field_validator("source_feedback_ids", "source_trace_ids")
+    @field_validator("source_feedback_ids", "source_trace_ids", "source_qa_ids")
     @classmethod
     def source_id_lists_only_strings(cls, v: list[str]) -> list[str]:
         if not isinstance(v, list):

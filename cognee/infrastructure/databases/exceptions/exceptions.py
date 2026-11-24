@@ -355,3 +355,27 @@ class Neo4jMultiDatabaseSupportError(CogneeConfigurationError):
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)
+
+
+class PostgresGraphLayoutError(CogneeConfigurationError):
+    """A Postgres graph still keeps its source refs in the array columns of an earlier release."""
+
+    def __init__(
+        self,
+        name: str = "PostgresGraphLayoutError",
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ):
+        super().__init__(
+            message=(
+                "This Postgres graph is stored in an earlier layout: its source refs are in "
+                "the source_ref_keys columns of graph_node and graph_edge, which this "
+                "release of cognee neither reads nor writes."
+            ),
+            name=name,
+            status_code=status_code,
+            remediation=(
+                "Run cognee's migrations (cognee.run_migrations() or cognee-cli upgrade). "
+                "If an older migration raised this, upgrade to cognee 1.6.8 first, then to "
+                "the current release."
+            ),
+        )

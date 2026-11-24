@@ -227,13 +227,16 @@ class TursoAdapter(GraphDBInterface):
         nodes: list[tuple[str, dict]] | list[DataPoint],
         source_ref_key: str | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """Add multiple nodes via batch upsert.
 
         ``source_ref_key`` / ``pipeline_run_id`` are the graph-provenance stamp the
         storage path always passes; Turso does not fold provenance into the graph
         (it uses the relational-ledger delete path), so they are accepted and
-        ignored — the same contract as any non-graph-provenance backend.
+        ignored — the same contract as any non-graph-provenance backend. ``replace``
+        is ignored too: every write stores the incoming properties.
         """
         if not nodes:
             return

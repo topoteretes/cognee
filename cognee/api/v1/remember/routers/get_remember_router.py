@@ -562,11 +562,11 @@ def get_remember_router() -> APIRouter:
 
         from cognee.api.v1.ontologies.ontologies import OntologyService
         from cognee.api.v1.remember import remember as cognee_remember
-        from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 
-        # Validate graph_model before the generic try/except so failures
-        # surface as a clear 400 instead of being swallowed into a 409.
-        graph_model_parsed = None
+        # Only the form field's JSON text is parsed here. remember() checks the schema
+        # before storing anything and raises a CogneeValidationError (400) for a bad one,
+        # which the handler below re-raises to the app-level handler.
+        graph_model_schema = None
         if graph_model:
             try:
                 graph_model_schema = json.loads(graph_model)
@@ -575,17 +575,6 @@ def get_remember_router() -> APIRouter:
                     status_code=400,
                     detail=f"graph_model is not valid JSON: {parse_err}",
                 )
-            try:
-                graph_model_parsed = graph_schema_to_graph_model(graph_model_schema)
-            except Exception as parse_err:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"graph_model could not be converted to a graph model schema: {parse_err}. "
-                        "Expected the same dict format as the cognify endpoint, "
-                        "including a top-level 'title' key."
-                    ),
-                ) from parse_err
 
         try:
             config_to_use = None
@@ -630,7 +619,7 @@ def get_remember_router() -> APIRouter:
                 # for any other content_type, including None.
                 **({"index_vectors": bool(index_vectors)} if content_type == "code" else {}),
                 **({"config": config_to_use} if config_to_use else {}),
-                **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
+                **({"graph_model": graph_model_schema} if graph_model else {}),
                 # HTTP contract: an errored blocking run is reported as the 409
                 # body below, not as an exception.
                 raise_on_error=False,
@@ -697,6 +686,11 @@ def get_remember_router() -> APIRouter:
         )
         skill_improvement: dict | None = None
 
+        client_event_id: UUID | None = Field(
+            default=None,
+            description="Stable capture event ID for QA/trace retries. Requires capture_idempotency_v1.",
+        )
+
     @router.post(
         "/entry",
         summary="Remember a session entry (QA, trace, feedback) into the session cache",
@@ -728,8 +722,25 @@ def get_remember_router() -> APIRouter:
         - **skill_improvement** (Optional[dict]): Skill improvement details forwarded to
           remember when recording a skill run.
 
+        - **client_event_id** (Optional[UUID]): Stable event UUID for QA/trace capture retries.
+          Requires a SQL cache, an existing writable dataset, and a session bound to that dataset.
+          Use different IDs for separate events, even if their payloads are identical.
+          Cannot be combined with skill_improvement.
+
         ## Response
-        The returned ``RememberResult`` includes ``entry_type`` and
+        With client_event_id, returns a stable receipt containing ``status=session_stored``,
+        resolved ``dataset_name``, ``dataset_id``, ``session_ids``, ``entry_type``, ``entry_id``,
+        ``client_event_id`` and ``payload_hash``. It has no pipeline_run_id, items_processed or
+        elapsed_seconds. Authenticated retries return their own original receipt even after
+        dataset/session deletion; receipts attest to past acceptance, not current existence.
+        Reusing an event ID with different content returns HTTP 409 / capture_payload_conflict.
+        A node_set different from the one pinned on the session returns HTTP 409 /
+        session_node_set_conflict; start a new session for a different node_set.
+        HTTP 400 codes include capture_session_dataset_mismatch, capture_invalid_entry and
+        capture_skill_improvement_unsupported. A temporarily unavailable binding/cache returns 503.
+        Admission requires write permission (403); unknown dataset names return 404 without creation.
+
+        Without client_event_id, the returned ``RememberResult`` includes ``entry_type`` and
         ``entry_id`` — the ``qa_id``/``trace_id`` returned by the cache
         (or the ``qa_id`` a feedback was attached to). Use this to chain
         feedback to a freshly stored QA.
@@ -747,6 +758,42 @@ def get_remember_router() -> APIRouter:
         from cognee.api.v1.remember import remember as cognee_remember
 
         try:
+            if payload.client_event_id is not None:
+                from cognee.infrastructure.databases.cache.sql.capture import CaptureConflictError
+                from cognee.infrastructure.session.capture import (
+                    CaptureRequestError,
+                    remember_capture,
+                )
+
+                if payload.skill_improvement is not None:
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": "skill_improvement is not supported for idempotent capture",
+                            "code": "capture_skill_improvement_unsupported",
+                        },
+                    )
+                try:
+                    return await remember_capture(
+                        entry=payload.entry,
+                        client_event_id=payload.client_event_id,
+                        dataset_name=payload.dataset_name,
+                        dataset_id=payload.dataset_id,
+                        session_id=payload.session_id,
+                        user=user,
+                    )
+                except CaptureRequestError as error:
+                    return JSONResponse(
+                        status_code=400, content={"error": str(error), "code": error.code}
+                    )
+                except CaptureConflictError:
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "error": "client_event_id already belongs to another payload",
+                            "code": "capture_payload_conflict",
+                        },
+                    )
             result = await cognee_remember(
                 payload.entry,
                 dataset_name=payload.dataset_name,

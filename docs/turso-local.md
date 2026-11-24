@@ -15,9 +15,10 @@ The four layers are independent: any one of them can be Turso while the others s
 The session cache mirrors the `sqlite` backend exactly (a `cache.db` next to the relational
 database, same tables and upserts) and only swaps the driver; it is not switched automatically
 with `DB_PROVIDER`, so set `CACHE_BACKEND=turso` explicitly, as with `postgres`.
-All three share `cognee/infrastructure/databases/turso/`: the SQLAlchemy dialect
-(`sqlite+cognee_turso://`), the `TURSO_*` settings, the transaction/retry policy and the
-file-cleanup rule.
+All four use the shared `TURSO_*` settings, transaction and retry policy, and
+file-cleanup rule in `cognee/infrastructure/databases/turso/`. The relational DB,
+graph store, and session cache use the `sqlite+cognee_turso://` SQLAlchemy dialect.
+The vector store uses synchronous `pyturso` connections directly.
 
 ## Versions
 

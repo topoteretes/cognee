@@ -97,6 +97,7 @@ async def index_session_qa(
     qa_id: str,
     question: str,
     answer: str,
+    strict: bool = False,
 ) -> None:
     """Index one cached QA turn for vector-engine-backed session recall. Fail-open."""
     text = qa_vector_text(question, answer)
@@ -113,6 +114,8 @@ async def index_session_qa(
         )
         await index_data_points([point])
     except Exception as error:
+        if strict:
+            raise
         logger.warning("Session QA vector indexing failed open: %s", error, exc_info=True)
 
 

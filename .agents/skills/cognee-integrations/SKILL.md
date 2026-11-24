@@ -18,7 +18,7 @@ Default is OpenAI (`LLM_API_KEY` is all you need). To switch, set
 
 - **Azure OpenAI**: `LLM_PROVIDER=azure`, `LLM_MODEL=azure/gpt-4o-mini`, endpoint + api version required.
 - **Gemini** (no extra needed): `LLM_PROVIDER=gemini`, `LLM_MODEL=gemini/gemini-2.0-flash-exp`.
-- **Anthropic** (`cognee[anthropic]`): `LLM_PROVIDER=anthropic`, model e.g. `claude-3-5-sonnet-20241022`.
+- **Anthropic** (`cognee[anthropic]`): `LLM_PROVIDER=anthropic`, model e.g. `claude-sonnet-5-5`.
 - **Ollama, local** (`cognee[ollama]`): `LLM_PROVIDER=ollama`, `LLM_ENDPOINT=http://localhost:11434/v1`, and set the embedding block + `HUGGINGFACE_TOKENIZER` too.
 - **Custom / OpenRouter / vLLM**: `LLM_PROVIDER=custom` with the provider's OpenAI-compatible endpoint.
 - **AWS Bedrock** (`cognee[aws]`): `LLM_PROVIDER=bedrock` + AWS credentials/region.
