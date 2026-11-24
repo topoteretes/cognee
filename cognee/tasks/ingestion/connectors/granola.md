@@ -6,9 +6,11 @@ host reaches through `_PROVIDERS["granola"]`.
 
 Ported from the Cognee Cloud pod source (cloud-backend CLO-504,
 `cognee-saas-pod/modules/integrations/sources/granola.py` at aa05be08, shipped in Cloud
-v1.6.8-001 and v1.6.9). The row id, the rendered text, the node set, the state keys and the
-bounds are the pod's, unchanged, so the pod can switch to this source without re-extracting a
-note. What changed is listed under "Changes from the Cloud pod source".
+v1.6.8-001 and v1.6.9). The row id, the rendered text, the node set and the bounds are the
+pod's. The table names are not: the pod names its tables `granola_notes_<digest>`, the
+`_PROVIDERS` prefix here is `granola`, so a host that moves from the pod source to this one
+syncs every connection once more from the start. What changed is listed under "Changes from
+the Cloud pod source".
 
 ## Requirements
 
@@ -52,7 +54,7 @@ Arguments, all keywords:
 | Argument | Default | Meaning |
 |---|---|---|
 | `scope` | required | `all` (every note the key sees, unfiled ones included), a folder id (every folder below it included) or a space id. Anything else is a `ValueError` at construction |
-| `resource_name` | required | the staging table and the sync state, one per connection and scope. Two keys or two users must never share one: the dlt pipeline is named from the dataset name and this name only, so a shared name shares the state and one sync tombstones the other's notes (Cloud: `granola_notes_<identity>_<scope>`) |
+| `resource_name` | required | the staging table and the sync state, one per connection and scope. Two keys or two users must never share one: the dlt pipeline is named from the dataset name and this name only, so a shared name shares the state and one sync tombstones the other's notes. The state remembers its `scope`: another scope on the same name is a `ValueError` before any request |
 | `api_key` | none | builds the client when `service` is omitted; never read from the environment |
 | `service` | none | a pre-built client (`build_granola_service(api_key)`); it must accept `get(path, params, *, check_active, time_left)` and call `check_active` before each attempt |
 | `key_revision` | none | any string that changes when the key is replaced; a change starts the walk over |
@@ -94,12 +96,13 @@ Each note is one row in the table named `resource_name`:
 
 ### Frozen names
 
-These are the Cloud pod's and must not change: a change re-extracts every note on the tenant's
-LLM key. Row id = note id; the render above; node set `granola:<scope>`; state keys
+These freeze with the first SDK release: a change re-extracts every note on the user's LLM
+key. Row id = note id; the render above; node set `granola:<scope>`; state keys `scope`,
 `watermark`, `cursor`, `pending`, `next_cursor`, `cycle_start`, `note_failures`,
-`key_revision`, and since this port `known`, `reconciled_at`, `reconcile_cursor`,
-`reconcile_seen`, `reconcile_candidates`, `reconcile_new` and `include_transcript`; the stats
-keys below; the `_PROVIDERS` prefix `granola`.
+`key_revision`, `known`, `reconciled_at`, `reconcile_cursor`, `reconcile_seen`,
+`reconcile_candidates`, `reconcile_new` and `include_transcript`; the `_PROVIDERS` prefix
+`granola`. The stats keys below are read by hosts: a key may be added, never renamed or
+removed.
 
 ## How sync and forget-on-delete work
 
@@ -126,8 +129,9 @@ key). A candidate whose membership cannot place it (a deeper folder, no membersh
 answer) is kept even when the scope's narrow listing does not show it, and counted in
 `reconcile_unconfirmed`: that absence would rest on Granola's `created_at` filter alone. A note
 that reads and is still in the scope stays in `known`. A note-level failure of the read (a 403
-while the account still lists, another 4xx, a malformed answer) keeps the note in `known` and
-the reconcile goes on, so one note can never stall it; the next reconcile asks again. The
+while the account still lists, another 4xx, a malformed answer, or a 5xx or timeout while
+Granola answers the cheapest listing) keeps the note in `known` and the reconcile goes on, so
+one note can never stall it; the next reconcile asks again. The
 listing is carried across runs (`reconcile_cursor`, `reconcile_seen`), so a budget cut
 resumes it, and an expired reconcile cursor restarts it from the first page once. The
 candidates are carried too (`reconcile_candidates`): a 401, a 429, an account-level 403, an
@@ -178,7 +182,8 @@ and the next run resumes. The reason is in the stats: 401 is `failed_auth`, 429 
 no answer, twice) is `failed_unavailable`, a spent bound is `failed_budget`, and a listing
 Granola refuses (another 4xx) or answers malformed (a page of no documented shape, a repeated
 cursor, an id of no known shape) is `failed_listing`. A 403 on one note is that note's only
-when the cheapest listing still answers; otherwise it stops the run and no note is charged.
+when the cheapest listing still answers; when that listing answers 401, 403 or 429, the run
+stops for that reason and no note is charged.
 What `check_active` raises stops the run as it is.
 
 ### Stats
@@ -188,9 +193,9 @@ What `check_active` raises stops the run as it is.
 | Key | Meaning |
 |---|---|
 | `scanned` | rows emitted, tombstones included |
-| `skipped` | notes left for a retry by id, or read and found outside the scope |
+| `skipped` | notes left for a retry by id, read and found outside the scope, or kept by the reconcile after a note-level failure |
 | `deleted` | tombstones emitted |
-| `failed` | failed notes plus one when the run stopped early |
+| `failed` | notes the walk failed to read (a retry by id included) plus one when the run stopped early |
 | `skipped_unavailable` | notes given up after their retries (an edit retries them) |
 | `failed_auth`, `failed_rate_limit`, `failed_unavailable`, `failed_budget`, `failed_listing` | 1 when the run stopped for that reason |
 | `failed_access` | 1 when the account is refused (a 403 on every request), or a complete reconcile listing was empty while notes are known |
@@ -202,17 +207,18 @@ What `check_active` raises stops the run as it is.
 ## Limits
 
 All bounds are the Cloud pod's (CLO-504); changing one is a decision. The run bounds drop
-nothing: a run that reaches one stops with `failed_budget` and the next run continues. Two
+nothing: a run that reaches one stops with `failed_budget` and the next run continues. Three
 bounds drop data, and are counted: a transcript over a cap leaves the note in memory with its
 summary and without that transcript (`transcript_too_large`); a note whose bare answer is over
 8 MiB, like any note that fails 3 times on its own, is given up (`skipped_unavailable`) until
-an edit lists it again.
+an edit lists it again; and while 500 notes already wait for a retry, a note that fails on its
+own is given up at its first failure (`skipped_unavailable`), also until an edit.
 
 | Bound | Value | Source |
 |---|---|---|
 | requests a run | 200 | CLO-504 |
 | run deadline | 240 s | CLO-504 (inside the pod's 900 s lock wait) |
-| rows a run | 200 | CLO-504 |
+| rows a run, tombstones included | 200 | CLO-504 |
 | pacing | 0.25 s between requests | Granola: 5 requests a second sustained, burst 25 in 5 s, per user or workspace |
 | response body | 8 MiB | CLO-504; an inline transcript answer over it is read page by page, a bare note over it fails the note |
 | transcript | 2,000,000 characters | CLO-504; a longer transcript is left out and the summary imported |
@@ -302,6 +308,23 @@ Each with its test in `cognee/tests/unit/tasks/connectors/test_granola_source.py
   `test_urllib3_debug_lines_about_granola_never_name_a_note`.
 - A refused or malformed listing is `failed_listing`:
   `test_a_listing_granola_answers_malformed_stops_with_failed_listing`.
+- A reconcile note that keeps answering 5xx while Granola otherwise answers is kept and the
+  reconcile finishes; during an outage the run still stops:
+  `test_a_candidate_that_keeps_failing_with_a_5xx_is_kept_and_the_reconcile_finishes`,
+  `test_a_new_note_that_keeps_failing_with_a_5xx_waits_for_the_next_reconcile`,
+  `test_a_candidate_5xx_during_an_outage_still_stops_the_run_and_keeps_the_queue`.
+- The state remembers its scope, so two scopes on one `resource_name` cannot tombstone each
+  other's notes: `test_a_state_written_for_another_scope_is_refused`.
+- Scope and note ids are ASCII with a lowercase prefix:
+  `test_scope_ids_are_ascii_with_a_lowercase_prefix`.
+- A repeated cursor on a note's own narrow listing is charged to that note:
+  `test_a_retried_note_whose_scope_listing_repeats_a_cursor_is_charged`.
+- `max_rows` bounds the reconcile's tombstones too: `test_max_rows_bounds_the_reconcile_tombstones_too`.
+- A note's 403 while the key is revoked stops with `failed_auth`:
+  `test_a_note_403_while_the_key_is_revoked_stops_with_failed_auth_and_charges_nothing`.
+- `transcript_too_large` counts imported notes only:
+  `test_a_transcript_over_the_cap_counts_only_a_note_that_is_imported`.
+- The streamed read is tested over a real socket: `test_the_streamed_read_over_a_real_socket`.
 
 ## For the Cloud ticket: counters Cloud drops
 

@@ -152,19 +152,37 @@ def test_an_unreadable_body_is_no_errors_context(monkeypatch):
     assert raised.value.__context__ is None
 
 
-def test_urllib3_debug_lines_about_granola_never_name_a_note(monkeypatch, caplog):
-    """urllib3 logs every request line at DEBUG, path and all; a real socket proves the
-    client's filter drops them."""
+@pytest.fixture
+def local_granola(monkeypatch):
+    """A real HTTP server on 127.0.0.1 in place of Granola: ``routes`` maps a query string to
+    ``(status, headers, body chunks)``; any other request answers ``{"id": NOTE}``. The body
+    goes over a real socket, so the client's ``stream=True`` read is what is tested."""
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+    routes: dict[str, tuple[int, dict, list[bytes]]] = {}
+
     class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
         def do_GET(self):
-            body = json.dumps({"id": NOTE}).encode()
-            self.send_response(200)
-            self.send_header("Content-Length", str(len(body)))
+            query = self.path.partition("?")[2]
+            status, headers, chunks = routes.get(
+                query, (200, {}, [json.dumps({"id": NOTE}).encode()])
+            )
+            self.send_response(status)
+            chunked = len(chunks) > 1
+            for name, value in headers.items():
+                self.send_header(name, value)
+            if chunked:
+                self.send_header("Transfer-Encoding", "chunked")
+            else:
+                self.send_header("Content-Length", str(len(chunks[0]) if chunks else 0))
             self.end_headers()
-            self.wfile.write(body)
+            for chunk in chunks:
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk) if chunked else chunk)
+            if chunked:
+                self.wfile.write(b"0\r\n\r\n")
 
         def log_message(self, *_args):
             pass
@@ -173,13 +191,41 @@ def test_urllib3_debug_lines_about_granola_never_name_a_note(monkeypatch, caplog
     threading.Thread(target=server.serve_forever, daemon=True).start()
     monkeypatch.setattr(granola, "API_BASE", f"http://127.0.0.1:{server.server_port}")
     monkeypatch.setenv("NO_PROXY", "127.0.0.1")
-    try:
-        with caplog.at_level(logging.DEBUG, logger="urllib3"):
-            assert client().get(f"/v1/notes/{NOTE}") == {"id": NOTE}
-    finally:
-        server.shutdown()
-        server.server_close()
+    yield routes
+    server.shutdown()
+    server.server_close()
+
+
+def test_urllib3_debug_lines_about_granola_never_name_a_note(local_granola, caplog):
+    """urllib3 logs every request line at DEBUG, path and all; a real socket proves the
+    client's filter drops them."""
+    with caplog.at_level(logging.DEBUG, logger="urllib3"):
+        assert client().get(f"/v1/notes/{NOTE}") == {"id": NOTE}
     assert NOTE not in caplog.text and KEY not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "query,answer_,status,retry_after,error",
+    [
+        ("big=1", (200, {}, [b"x" * 100] * 20), None, 0, granola.GranolaTooLargeError),
+        ("moved=1", (302, {"Location": "http://127.0.0.1:1/"}, [b""]), 302, 0, GranolaError),
+        ("busy=1", (429, {"Retry-After": "7"}, [b"{}"]), 429, 7, GranolaError),
+        ("huge=1", (413, {}, [b"{}"]), 413, 0, GranolaError),
+        ("down=1", (500, {}, [b"{}"]), 500, 0, GranolaError),
+    ],
+)
+def test_the_streamed_read_over_a_real_socket(
+    local_granola, monkeypatch, query, answer_, status, retry_after, error
+):
+    """The faked transport hands back bodies already read; these go through ``iter_content``:
+    a chunked body over the cap, a redirect not followed, ``Retry-After``, a 413 and a 5xx."""
+    monkeypatch.setattr(granola, "MAX_BODY", 500)
+    local_granola[query] = answer_
+    with pytest.raises(error) as raised:
+        client().get("/v1/notes", dict([query.split("=")]))
+    assert type(raised.value) is error and raised.value.status == status
+    assert raised.value.retry_after == retry_after
+    assert KEY not in str(raised.value) and "127.0.0.1" not in str(raised.value)
 
 
 def test_a_5xx_is_tried_once_more_at_once_and_then_raised(monkeypatch):
@@ -285,7 +331,7 @@ def test_no_error_or_log_line_carries_the_key_a_note_id_or_a_url(monkeypatch, ca
 def test_the_repr_hides_the_key():
     assert KEY not in repr(build_granola_service(KEY))
     assert repr(build_granola_service(KEY)) == "GranolaClient(api_key=<redacted>)"
-    assert KEY not in repr(granola._BearerAuth(KEY))
+    assert KEY not in repr(granola.dlt_utils.BearerAuth(KEY))
 
 
 @pytest.mark.parametrize("key", ["", "grn with space", "grn_é", None, 42])

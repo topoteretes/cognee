@@ -7,9 +7,10 @@ included), ``space_id``, ``updated_after`` and ``created_after`` / ``created_bef
 transcripts are disabled) or through the paged transcript endpoint (403 while disabled). Its
 ``folder_membership`` names its own folder and that folder's parent only. A deletion seen by a
 workspace-wide key keeps the note listed with ``deleted_at``; any other deletion removes it.
+Only a note with a generated summary is listed; ``add(summarized=False)`` makes one without.
 ``refuse_account`` answers every request 403 (subscription inactive, IP allowlist); notes in
-``refused_notes`` answer their reads 403; notes in ``no_membership`` are read without
-``folder_membership`` or ``space_membership``.
+``refused_notes`` answer their reads 403, notes in ``unavailable_notes`` 500; notes in
+``no_membership`` are read without ``folder_membership`` or ``space_membership``.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -35,6 +36,7 @@ class FakeGranola:
         self.transcripts_disabled = False
         self.refuse_account = False
         self.refused_notes: set[str] = set()
+        self.unavailable_notes: set[str] = set()
         self.no_membership: set[str] = set()
         self.inline_limit: int | None = None
         self.transcript_page = 2
@@ -60,6 +62,7 @@ class FakeGranola:
         title: str | None = None,
         summary: str | None = None,
         transcript: list[dict] | None = None,
+        summarized: bool = True,
     ) -> str:
         self.tick()
         nid = note_id(n)
@@ -69,7 +72,7 @@ class FakeGranola:
             "created_at": self.clock.isoformat(),
             "updated_at": self.clock.isoformat(),
             "deleted_at": None,
-            "summary_markdown": summary or f"Summary of meeting {n}",
+            "summary_markdown": (summary or f"Summary of meeting {n}") if summarized else None,
             "private_notes_text": f"PRIVATE scratch of meeting {n}",
             "web_url": f"https://notes.granola.ai/d/{nid}",
             "folder": folder,
@@ -150,7 +153,7 @@ class FakeGranola:
             datetime.fromisoformat(after)
         ):
             return False
-        return note["id"] not in self.listing_hidden
+        return note["summary_markdown"] is not None and note["id"] not in self.listing_hidden
 
     def _chain(self, folder: str | None) -> list[str]:
         """The folder and every ancestor of it."""
@@ -191,6 +194,8 @@ class FakeGranola:
             raise GranolaError("missing", 404)
         if nid in self.refused_notes:
             raise GranolaError("forbidden", 403)
+        if nid in self.unavailable_notes:
+            raise GranolaError("down", 500)
         answer = {
             key: note[key]
             for key in (

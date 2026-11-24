@@ -31,10 +31,12 @@ from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, with_retries
 logger = get_logger("granola_connector")
 
 API_BASE = "https://public-api.granola.ai"
-_RESOURCE = re.compile(r"^(fol|spa)_[a-zA-Z0-9]{14}$", re.IGNORECASE)
-_NOTE = re.compile(r"^not_[a-zA-Z0-9]{14}$", re.IGNORECASE)
+# ASCII only and a lowercase prefix: under re.IGNORECASE ``[a-z]`` also matches look-alikes
+# (U+017F, U+212A), and ``FOL_x`` would name a second node set for the folder ``fol_x``.
+_RESOURCE = re.compile(r"(fol|spa)_[A-Za-z0-9]{14}")
+_NOTE = re.compile(r"not_[A-Za-z0-9]{14}")
 # Every path the client may request; all are built here, never from a provider URL or cursor.
-_PATH = re.compile(r"/v1/notes(?:/not_[a-zA-Z0-9]{14}(?:/transcript)?)?", re.IGNORECASE)
+_PATH = re.compile(r"/v1/notes(?:/not_[A-Za-z0-9]{14}(?:/transcript)?)?")
 # The bounds below are the Cloud pod's (CLO-504, shipped in v1.6.8-001); changing one is a
 # decision, not a tuning.
 MAX_BODY = 8 * 1024 * 1024
@@ -74,7 +76,6 @@ _WALK_KEYS = (
     "next_cursor",
     "cycle_start",
     "note_failures",
-    "retry_notes",
     "reconcile_cursor",
     "reconcile_seen",
     "reconcile_candidates",
@@ -132,24 +133,6 @@ def validate_scope(scope: Any) -> None:
         raise ValueError("Invalid Granola folder or space ID")
 
 
-class _BearerAuth:
-    """``Authorization: Bearer`` as a requests auth object.
-
-    A header passed in ``headers`` is replaced by a ``~/.netrc`` entry for the host, because
-    requests consults netrc when no ``auth`` is given; an auth object turns that off.
-    """
-
-    def __init__(self, api_key: str):
-        self._api_key = api_key
-
-    def __call__(self, request: Any) -> Any:
-        request.headers["Authorization"] = f"Bearer {self._api_key}"
-        return request
-
-    def __repr__(self) -> str:
-        return "_BearerAuth(<redacted>)"
-
-
 class _HideGranolaPaths(logging.Filter):
     """Drops urllib3's DEBUG lines about Granola's host: the request line names the path, and
     with it a note id."""
@@ -174,12 +157,7 @@ class GranolaClient:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ):
-        # requests names the value of a header it rejects, so every key it would reject is
-        # refused here, without echoing it.
-        key = api_key if isinstance(api_key, str) else ""
-        if not key or not key.isascii() or not key.isprintable() or any(c.isspace() for c in key):
-            raise ValueError("The Granola API key is empty or has an invalid format")
-        self._api_key = key
+        self._api_key = dlt_utils.bearer_token(api_key, "Granola API key")
         self._sleep = sleep
         self._clock = clock
         self._last_request_at: float | None = None
@@ -222,7 +200,7 @@ class GranolaClient:
 
         if not isinstance(path, str) or not _PATH.fullmatch(path):
             raise ValueError("Invalid Granola API path")
-        auth = _BearerAuth(self._api_key)
+        auth = dlt_utils.BearerAuth(self._api_key)
 
         def remaining() -> float:
             return math.inf if time_left is None else time_left()
@@ -495,20 +473,35 @@ def _is_unavailable(error: GranolaError) -> bool:
     )
 
 
+def _probe(api: Any) -> GranolaError | None:
+    """The error of a one-note listing, the cheapest request there is; ``None`` when Granola
+    answers it. A spent bound is raised as it is."""
+    try:
+        api.get("/v1/notes", {"page_size": 1})
+    except GranolaBudgetError:
+        raise
+    except GranolaError as error:
+        return error
+    return None
+
+
 def _api_answers(api: Any) -> bool:
-    """Whether Granola answers a one-note listing, the cheapest request there is.
+    """Whether Granola answers the probe listing.
 
     Tells a note that keeps failing with a 5xx or a timeout apart from an outage: only the
     first may be charged to the note, or an outage would use up the retries of every note it
     meets.
     """
-    try:
-        api.get("/v1/notes", {"page_size": 1})
-    except GranolaBudgetError:
-        raise
-    except GranolaError:
-        return False
-    return True
+    return _probe(api) is None
+
+
+def _raise_if_account_refused(api: Any) -> None:
+    """After a note's 403: raise the probe's error when the key itself is refused (403 for an
+    inactive subscription, an IP allowlist or a suspended account; 401 revoked; 429), so the
+    run stops for the account and no note is charged."""
+    error = _probe(api)
+    if error is not None and error.status in {401, 403, 429}:
+        raise error
 
 
 def _membership(note: dict, scope: str) -> bool | None:
@@ -572,7 +565,8 @@ def _listed_in_scope(api: Any, note: dict, scope: str) -> bool:
         if next_cursor is None:
             return False
         if next_cursor in cursors:
-            raise GranolaListingError("Granola repeated a notes cursor")
+            # This listing exists for one note: its failure is the note's, charged to it.
+            raise GranolaNoteError("Granola repeated a notes cursor")
         cursors.add(next_cursor)
         params["cursor"] = next_cursor
 
@@ -584,30 +578,20 @@ def _in_scope(api: Any, note: dict, scope: str) -> bool:
     return _listed_in_scope(api, note, scope) if member is None else member
 
 
-def _account_refused(api: Any) -> bool:
-    """Whether a 403 belongs to the account (subscription inactive, IP allowlist, account
-    suspended): then the cheapest listing is refused too, and no note is to blame."""
-    try:
-        api.get("/v1/notes", {"page_size": 1})
-    except GranolaBudgetError:
-        raise
-    except GranolaError as error:
-        return error.status == 403
-    return False
-
-
-def _read_note(api: Any, note_id: str, include_transcript: bool, stats: dict) -> dict:
+def _read_note(api: Any, note_id: str, include_transcript: bool) -> dict:
     note = _get_note(api, note_id, include_transcript)
     if note.get("id") != note_id:
         raise GranolaNoteError("Granola returned a different note")
-    if note.pop(_TOO_LARGE, False):
-        stats["transcript_too_large"] += 1
     return note
 
 
-def _row(note: dict, scope: str) -> dict:
+def _row(note: dict, scope: str, stats: dict) -> dict:
+    """The row of a note read by id; ``transcript_too_large`` counts a note imported without
+    its transcript, once per row."""
     if note.get("deleted_at"):
         return {"id": note["id"], "_deleted": True}
+    if note.pop(_TOO_LARGE, False):
+        stats["transcript_too_large"] += 1
     return _render(note, scope)
 
 
@@ -760,6 +744,7 @@ def _reconcile(
         state["reconcile_new"] = sorted(listed - known)
     candidates = state["reconcile_candidates"]
     while candidates:
+        room()
         note_id = candidates[0]
         try:
             gone = _confirmed_gone(api, note_id, scope, stats)
@@ -779,7 +764,7 @@ def _reconcile(
         room()
         note_id = new[0]
         try:
-            note: dict | None = _read_note(api, note_id, include_transcript, stats)
+            note: dict | None = _read_note(api, note_id, include_transcript)
         except GranolaError as error:
             if not _kept_on_note_error(api, error):
                 raise
@@ -787,7 +772,7 @@ def _reconcile(
             stats["skipped"] += 1
         new.pop(0)
         if note is not None and not note.get("deleted_at"):
-            yield take(_render(note, scope))
+            yield take(_row(note, scope, stats))
     del state["reconcile_candidates"]
     del state["reconcile_new"]
     state["reconciled_at"] = now.isoformat()
@@ -817,11 +802,12 @@ def _confirmed_gone(api: Any, note_id: str, scope: str, stats: dict) -> bool:
 
 
 def _kept_on_note_error(api: Any, error: GranolaError) -> bool:
-    """Whether a reconcile read failed for its note alone, so the note stays as it is. A 403
-    the account gets on every request is not one."""
-    if error.status == 403 and _account_refused(api):
-        return False
-    return _is_note_error(error)
+    """Whether a reconcile read failed for its note alone, so the note stays as it is and the
+    reconcile goes on: a note's own error, or a 5xx or timeout while Granola otherwise answers
+    (the walk's rule). A refused account or an outage stops the run instead."""
+    if error.status == 403:
+        _raise_if_account_refused(api)
+    return _is_note_error(error) or (_is_unavailable(error) and _api_answers(api))
 
 
 def _list_scope(api: Any, scope: str, state: dict) -> set[str]:
@@ -908,6 +894,11 @@ def _iter_rows(
 ) -> Iterator[dict]:
     """Yield the changed rows of one scope. Pure of dlt, so tests drive it with a dict."""
     validate_scope(scope)
+    # One state belongs to one scope: another scope's reconcile would tombstone its notes. A
+    # state written before the key existed takes the scope it is synced with.
+    if state.get("scope", scope) != scope:
+        raise ValueError("This resource_name already holds another Granola scope's sync")
+    state["scope"] = scope
     stats.clear()
     stats.update(new_stats())
     now = now or datetime.now(timezone.utc)
@@ -934,7 +925,6 @@ def _iter_rows(
         for key in _LISTING_KEYS:
             state.pop(key, None)
     state["include_transcript"] = include_transcript
-    state.pop("retry_notes", None)  # superseded by direct retries of note_failures
     # A pending page stores identifiers only, never meeting content or secrets. The high
     # watermark advances whenever a walk completes; a note that failed is retried by id at the
     # start of the next cycle instead of holding it back.
@@ -951,8 +941,8 @@ def _iter_rows(
         A note's own error always may. A 5xx or timeout may while Granola otherwise answers;
         it is then kept for retries without using up any attempt.
         """
-        if error.status == 403 and _account_refused(api):
-            return False  # the account, not the note: stop with failed_access
+        if error.status == 403:
+            _raise_if_account_refused(api)  # the account, not the note: stop the run
         if _is_note_error(error):
             return True
         return _is_unavailable(error) and (answered or _api_answers(api))
@@ -973,17 +963,16 @@ def _iter_rows(
         if new_cycle:
             unavailable = 0
             for note_id, failure in sorted((state.get("note_failures") or {}).items()):
-                if emitted >= max_rows:
-                    raise GranolaBudgetError("Granola row budget exhausted")
+                room()
                 try:
-                    note = _read_note(api, note_id, include_transcript, stats)
+                    note = _read_note(api, note_id, include_transcript)
                     # A retry by id bypasses the listing, so it asks whether the note is still
                     # in the scope, by the same rule as a reconcile candidate.
                     in_scope = bool(note.get("deleted_at")) or _in_scope(api, note, scope)
-                    row = _row(note, scope) if in_scope else None
+                    row = _row(note, scope, stats) if in_scope else None
                 except GranolaError as error:
-                    if error.status == 403 and _account_refused(api):
-                        raise
+                    if error.status == 403:
+                        _raise_if_account_refused(api)
                     if _is_note_error(error):
                         stats["skipped"] += 1
                         _record_failure(state, stats, note_id, failure.get("stamp"))
@@ -1041,16 +1030,15 @@ def _iter_rows(
                 state["pending"] = pending = listed
                 state["next_cursor"] = next_cursor
             while pending:
-                if emitted >= max_rows:
-                    raise GranolaBudgetError("Granola row budget exhausted")
+                room()
                 item = pending[0]
                 note_id = item["id"]
                 try:
                     if item["deleted"]:
                         row = {"id": note_id, "_deleted": True}
                     else:
-                        note = _read_note(api, note_id, include_transcript, stats)
-                        row = _row(note, scope)
+                        note = _read_note(api, note_id, include_transcript)
+                        row = _row(note, scope, stats)
                 except GranolaError as error:
                     # Never poison a page with one unreadable note: a 4xx, an invalid shape,
                     # the size cap, or a 5xx/timeout while Granola otherwise answers. The note
@@ -1127,7 +1115,8 @@ def granola_source(
             (``fol_...``, child folders included) or a space id (``spa_...``).
         resource_name: Stable name of this connection and scope, required: it names the
             staging table and scopes the sync state, so two keys or two users must never share
-            one (Cloud names it from the owner, the account and the scope).
+            one (Cloud names it from the owner, the account and the scope). The state remembers
+            its scope: another scope on the same name is a ``ValueError``.
         api_key: A Granola API key (``grn_...``), sent as ``Authorization: Bearer``. Used to
             build the client when ``service`` is omitted. Never read from the environment.
         key_revision: Any string that changes when the key is replaced. A change starts the
