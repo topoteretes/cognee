@@ -262,6 +262,32 @@ def _is_gone(exc: Exception) -> bool:
     return isinstance(exc, NotionAPIError) and exc.status_code in (403, 404)
 
 
+def _listing_page(response: dict, path: str) -> tuple[list[dict], str | None]:
+    """One page of a listing as ``(results, next_cursor)``; ``next_cursor`` is None on the last.
+
+    A field the answer lacks is never read as "nothing more here": a missing ``results`` list or
+    ``has_more`` flag would end the walk early and tombstone every page synced from below it.
+    """
+    results = response.get("results")
+    has_more = response.get("has_more")
+    if not isinstance(results, list) or not isinstance(has_more, bool):
+        raise NotionAPIError(0, f"Notion answered {path} without a results list and has_more.")
+    if not has_more:
+        return results, None
+    cursor = response.get("next_cursor")
+    if not cursor:
+        raise NotionAPIError(0, "Notion reported more results without a next_cursor.")
+    return results, cursor
+
+
+def _database_data_sources(database: dict, database_id: str) -> list[dict]:
+    """The data sources of a database answer; a missing list is not a database without rows."""
+    data_sources = database.get("data_sources")
+    if not isinstance(data_sources, list):
+        raise NotionAPIError(0, f"Notion answered database {database_id} without data_sources.")
+    return data_sources
+
+
 @overload
 def _list_block_children(
     client: _NotionClient, block_id: str, *, block_type: None = None
@@ -312,12 +338,10 @@ def _list_block_children(
                 )
                 return None
             raise
-        children.extend(response.get("results", []))
-        cursor = response.get("next_cursor")
-        if not response.get("has_more"):
+        results, cursor = _listing_page(response, f"blocks/{block_id}/children")
+        children.extend(results)
+        if cursor is None:
             return children
-        if not cursor:
-            raise NotionAPIError(0, "Notion reported more results without a next_cursor.")
 
 
 def _query_data_source(client: _NotionClient, data_source_id: str):
@@ -332,7 +356,8 @@ def _query_data_source(client: _NotionClient, data_source_id: str):
         if cursor:
             body["start_cursor"] = cursor
         response = client.request("POST", f"data_sources/{data_source_id}/query", json_body=body)
-        yield from response.get("results", [])
+        results, cursor = _listing_page(response, f"data_sources/{data_source_id}/query")
+        yield from results
         # Notion stops a query at 10,000 rows with has_more false and this
         # status; the rows past the cut would otherwise be tombstoned.
         if (response.get("request_status") or {}).get("type") == "incomplete":
@@ -341,11 +366,8 @@ def _query_data_source(client: _NotionClient, data_source_id: str):
                 f"Notion returned an incomplete result for data source {data_source_id} "
                 "(over 10,000 rows); aborting instead of forgetting the rest.",
             )
-        cursor = response.get("next_cursor")
-        if not response.get("has_more"):
+        if cursor is None:
             return
-        if not cursor:
-            raise NotionAPIError(0, "Notion reported more results without a next_cursor.")
 
 
 # ---------------------------------------------------------------------------
@@ -423,7 +445,7 @@ def _resolve_roots(
             database_root = _WalkItem(
                 "database", root_id, root_id, name=_rich_text(database.get("title"))
             )
-            for data_source in database.get("data_sources") or []:
+            for data_source in _database_data_sources(database, root_id):
                 roots.append(
                     _WalkItem(
                         "data_source",
@@ -555,7 +577,7 @@ def _iter_rows(
                 logger.warning("Notion: database %s is gone, skipping: %s", item.id, exc)
                 continue
             ancestors = _ancestors_of(item, _rich_text(database.get("title")))
-            for data_source in database.get("data_sources") or []:
+            for data_source in _database_data_sources(database, item.id):
                 queue.append(
                     _WalkItem(
                         "data_source",
