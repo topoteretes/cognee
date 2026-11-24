@@ -10,6 +10,7 @@ would read as "the run completed only these".
 
 import asyncio
 import json
+from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -43,6 +44,10 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunErrored,
 )
+from cognee.modules.pipelines.tasks.task import Task
+
+# The module: its package exports the function of the same name.
+run_custom_pipeline_module = import_module("cognee.modules.run_custom_pipeline.run_custom_pipeline")
 
 PIPELINE = "cognify_pipeline"
 
@@ -910,30 +915,100 @@ async def _needs_llm_at_the_connection_check(monkeypatch, tasks, **kwargs):
 
 
 @pytest.mark.asyncio
-async def test_a_run_an_executor_may_take_does_not_test_the_llm_connection(monkeypatch):
-    """Its items may run in other processes, so the process that owns the run
-    does not test the LLM connection for them: with an executor registered, and
-    with one given to the call."""
-    assert (
-        await _needs_llm_at_the_connection_check(
-            monkeypatch, _PortableResolver(), data_item_executor=_RecordingExecutor()
+async def test_an_executor_does_not_change_whether_the_llm_connection_is_tested(monkeypatch):
+    """The process that owns a run tests the LLM connection before any item
+    leaves it, so a wrong key ends the run there and not in every worker. With an
+    executor registered, or given to the call, the run is told about the LLM as
+    its caller said, like a run with none."""
+    for said in (True, False):
+        assert (
+            await _needs_llm_at_the_connection_check(
+                monkeypatch, _PortableResolver(), needs_llm=said
+            )
+            is said
         )
-        is False
-    )
+        assert (
+            await _needs_llm_at_the_connection_check(
+                monkeypatch,
+                _PortableResolver(),
+                needs_llm=said,
+                data_item_executor=_RecordingExecutor(),
+            )
+            is said
+        )
 
     set_data_item_executor(_RecordingExecutor())
-    assert await _needs_llm_at_the_connection_check(monkeypatch, _PortableResolver()) is False
+    for said in (True, False):
+        assert (
+            await _needs_llm_at_the_connection_check(
+                monkeypatch, _PortableResolver(), needs_llm=said
+            )
+            is said
+        )
+
+
+async def _step(items):
+    return items
+
+
+def _factory_of(built):
+    async def factory(*, user):
+        return built
+
+    return factory
+
+
+class _ResolverThatSaysNothingOfTheLlm:
+    def __call__(self, item):
+        return []
+
+
+class _ResolverWithNoLlmTask(_ResolverThatSaysNothingOfTheLlm):
+    needs_llm = False
 
 
 @pytest.mark.asyncio
-async def test_a_run_that_stays_in_its_process_tests_the_llm_connection_as_before(monkeypatch):
-    """With no executor, or with tasks no other process could rebuild, the run
-    is told about the LLM as its caller said."""
-    assert await _needs_llm_at_the_connection_check(monkeypatch, _PortableResolver()) is True
-    assert (
-        await _needs_llm_at_the_connection_check(monkeypatch, _PortableResolver(), needs_llm=False)
-        is False
-    )
+async def test_registered_tasks_say_whether_any_of_them_calls_the_llm(monkeypatch):
+    """One list for every item says so by its tasks. A resolver picks a list per
+    item, so it says so itself, and one that does not is taken to call it."""
+    monkeypatch.setattr(task_resolvers, "_factories", {})
+    user = SimpleNamespace(id=uuid4())
 
-    set_data_item_executor(_RecordingExecutor())
-    assert await _needs_llm_at_the_connection_check(monkeypatch, lambda _item: []) is True
+    for name, built, calls_the_llm in [
+        ("no_llm_task", [Task(_step, needs_llm=False), Task(_step, needs_llm=False)], False),
+        ("one_llm_task", [Task(_step, needs_llm=False), Task(_step)], True),
+        ("resolver", _ResolverThatSaysNothingOfTheLlm(), True),
+        ("resolver_that_says_so", _ResolverWithNoLlmTask(), False),
+    ]:
+        register_task_resolver_factory(name, _factory_of(built))
+        assert (await registered_tasks(name, user)).needs_llm is calls_the_llm, name
+
+
+@pytest.mark.asyncio
+async def test_a_custom_pipeline_tells_its_run_what_its_registered_tasks_say_of_the_llm(
+    monkeypatch,
+):
+    """``run_pipeline`` reads it off a task list itself. Registered tasks carry
+    it, so a registered pipeline with no LLM task is not held up by the LLM
+    connection test where no key is set, like the same tasks given as a list."""
+    monkeypatch.setattr(task_resolvers, "_factories", {})
+    user = SimpleNamespace(id=uuid4())
+    told = []
+
+    async def run(pipeline, **params):
+        told.append(params["needs_llm"])
+
+    monkeypatch.setattr(
+        run_custom_pipeline_module, "get_pipeline_executor", lambda run_in_background: run
+    )
+    register_task_resolver_factory("no_llm_task", _factory_of([Task(_step, needs_llm=False)]))
+    register_task_resolver_factory("one_llm_task", _factory_of([Task(_step)]))
+
+    for tasks in (
+        await registered_tasks("no_llm_task", user),
+        await registered_tasks("one_llm_task", user),
+        _ResolverThatSaysNothingOfTheLlm(),
+    ):
+        await run_custom_pipeline_module.run_custom_pipeline(tasks=tasks, data=["a"], user=user)
+
+    assert told == [False, True, True]

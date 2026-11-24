@@ -88,4 +88,6 @@ async def run_custom_pipeline(
         pipeline_name=pipeline_name,
         data_cache=data_cache,
         skip_connection_test=skip_connection_test,
+        # run_pipeline reads it off a task list itself; registered tasks carry it.
+        needs_llm=getattr(custom_tasks, "needs_llm", True),
     )

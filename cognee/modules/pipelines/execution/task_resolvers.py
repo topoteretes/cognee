@@ -24,7 +24,7 @@ it before it runs a shard (cognee's own are registered by ``import cognee``).
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.pipelines.tasks.task import Task, pipeline_needs_llm
 from cognee.modules.users.models import User
 
 TaskResolver = Callable[[Any], list[Task]]
@@ -49,8 +49,13 @@ def portable_item_check(task_resolver: Any) -> Callable[[Any], bool]:
     return getattr(task_resolver, "portable_item", lambda _data_item: True)
 
 
-async def build_task_resolver(name: str, args: dict[str, Any], user: User) -> TaskResolver:
-    """Build the task lists registered as ``name`` from their arguments."""
+async def _build(name: str, args: dict[str, Any], user: User) -> tuple[TaskResolver, bool]:
+    """``(the task lists registered as name, whether any of their tasks calls the LLM)``.
+
+    One list for every item says so by its tasks (``Task.needs_llm``). A resolver
+    picks a list per item, so it says so itself (its ``needs_llm``); one that
+    does not is taken to call it.
+    """
     if name not in _factories:
         raise KeyError(
             f"No task resolver factory named {name!r} is registered in this process. "
@@ -58,17 +63,25 @@ async def build_task_resolver(name: str, args: dict[str, Any], user: User) -> Ta
         )
     built = await _factories[name](user=user, **args)
     if callable(built):
-        return built
-    return lambda _data_item: built
+        return built, getattr(built, "needs_llm", True)
+    return (lambda _data_item: built), pipeline_needs_llm(built)
+
+
+async def build_task_resolver(name: str, args: dict[str, Any], user: User) -> TaskResolver:
+    """Build the task lists registered as ``name`` from their arguments."""
+    resolve, _needs_llm = await _build(name, args, user)
+    return resolve
 
 
 class RegisteredTasks:
     """The task lists registered as ``name``, built with ``args``: a task
-    resolver that says how another process rebuilds it (``portable``)."""
+    resolver that says how another process rebuilds it (``portable``) and
+    whether a run of it needs the LLM connection (``needs_llm``)."""
 
-    def __init__(self, name: str, args: dict[str, Any], resolve: TaskResolver):
+    def __init__(self, name: str, args: dict[str, Any], resolve: TaskResolver, needs_llm: bool):
         self.portable = (name, args)
         self.portable_item = portable_item_check(resolve)
+        self.needs_llm = needs_llm
         self._resolve = resolve
 
     def __call__(self, data_item: Any) -> list[Task]:
@@ -82,4 +95,5 @@ async def registered_tasks(name: str, user: User, **args: Any) -> RegisteredTask
     A run given a plain task list always stays in its own process: nothing says
     how another process would get the same list.
     """
-    return RegisteredTasks(name, args, await build_task_resolver(name, args, user))
+    resolve, needs_llm = await _build(name, args, user)
+    return RegisteredTasks(name, args, resolve, needs_llm)

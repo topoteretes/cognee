@@ -27,7 +27,7 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods.get_selected_dataset_data import get_selected_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.exceptions import AfterRunHookError
-from cognee.modules.pipelines.execution import DataItemExecutor, get_data_item_executor
+from cognee.modules.pipelines.execution import DataItemExecutor
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
@@ -119,9 +119,8 @@ async def run_pipeline(
     probed). For a task list it is derived from the tasks themselves — the
     union of ``Task.needs_llm`` — and the ``needs_llm`` parameter applies only
     when ``tasks`` is a resolver, whose caller must pass the union over every
-    list the resolver can return. A run a data item executor may take (one is
-    registered or passed, and ``tasks`` says how another process rebuilds them)
-    does not probe the LLM at all.
+    list the resolver can return (registered tasks know theirs:
+    ``RegisteredTasks.needs_llm``).
 
     ``after_run_completed`` is awaited after each dataset's run completes, and
     ``after_items_ran`` also when items in the run failed, both inside that dataset's
@@ -139,13 +138,6 @@ async def run_pipeline(
     if not callable(tasks):
         validate_pipeline_tasks(tasks)
         needs_llm = pipeline_needs_llm(tasks)
-    elif (
-        getattr(tasks, "portable", None) is not None
-        and (data_item_executor or get_data_item_executor()) is not None
-    ):
-        # Its items may run in other processes: this one does not test the LLM
-        # connection for them.
-        needs_llm = False
     await setup_and_check_environment(
         vector_db_config,
         graph_db_config,
