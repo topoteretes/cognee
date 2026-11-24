@@ -1099,7 +1099,7 @@ def _is_agent_scoping_enabled() -> bool:
 def _agent_scoped_default_dataset() -> str:
     """Return the default dataset for the current MCP request.
 
-    With agent scoping enabled (default), reads clientInfo.name from the
+    With agent scoping enabled (default), reads client_info.name from the
     active request context and returns '{sanitized}_memory' (e.g.
     'cursor_vscode_memory'). Falls back to 'main_dataset' when:
       - agent scoping is disabled via COGNEE_MCP_AGENT_SCOPED=false, or
@@ -1112,14 +1112,19 @@ def _agent_scoped_default_dataset() -> str:
     if not _is_agent_scoping_enabled():
         return "main_dataset"
 
-    from mcp.server.lowlevel.server import request_ctx
+    # FastMCP 4 / MCP SDK 2.x dropped mcp.server.lowlevel.server.request_ctx;
+    # get_context() is the supported accessor for the active request. mcp 2.x
+    # also renamed the wire field clientInfo -> client_info. get_context() and
+    # Context.session both raise RuntimeError outside a request (LookupError
+    # kept for defensiveness), which is the "no client identity" fallback.
+    from fastmcp.server.dependencies import get_context
 
     try:
-        ctx = request_ctx.get()
+        ctx = get_context()
         params = getattr(ctx.session, "client_params", None)
-        if params and params.clientInfo and params.clientInfo.name:
-            return f"{_sanitize_client_name(params.clientInfo.name)}_memory"
-    except LookupError:
+        if params and params.client_info and params.client_info.name:
+            return f"{_sanitize_client_name(params.client_info.name)}_memory"
+    except (LookupError, RuntimeError):
         pass
     return "main_dataset"
 
