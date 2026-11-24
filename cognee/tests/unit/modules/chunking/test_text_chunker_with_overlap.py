@@ -237,6 +237,42 @@ async def test_single_chunk_no_dangling_overlap(make_text_generator, make_contro
 
 
 @pytest.mark.asyncio
+async def test_oversized_item_does_not_retain_previous_overlap(make_text_generator):
+    """An oversized incoming item should not retain previous chunk overlap."""
+    document = Document(
+        id=uuid4(),
+        name="test_document",
+        raw_data_location="/test/path",
+        external_metadata=None,
+        mime_type="text/plain",
+    )
+
+    chunk_data = [
+        {"text": "first", "chunk_size": 10, "cut_type": "sentence", "chunk_id": uuid4()},
+        {"text": "second", "chunk_size": 10, "cut_type": "sentence", "chunk_id": uuid4()},
+        {"text": "oversized", "chunk_size": 25, "cut_type": "sentence", "chunk_id": uuid4()},
+        {"text": "final", "chunk_size": 5, "cut_type": "sentence", "chunk_id": uuid4()},
+    ]
+
+    def get_chunk_data(text):
+        return chunk_data
+
+    chunker = TextChunkerWithOverlap(
+        document,
+        make_text_generator("dummy"),
+        max_chunk_size=20,
+        chunk_overlap_ratio=0.7,
+        get_chunk_data=get_chunk_data,
+    )
+
+    chunks = [chunk async for chunk in chunker.read()]
+
+    assert [chunk.chunk_size for chunk in chunks] == [20, 25, 5]
+    assert "oversized" in chunks[1].text
+    assert "second" not in chunks[1].text
+
+
+@pytest.mark.asyncio
 async def test_paragraph_chunking_with_overlap(make_text_generator):
     """Test that chunk_by_paragraph integration produces 25% overlap between chunks."""
 
