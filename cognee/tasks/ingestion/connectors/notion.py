@@ -135,6 +135,13 @@ class NotionAPIError(Exception):
         self.api_message = api_message
 
 
+class NotionResponseError(NotionAPIError):
+    """A 200 answer that cannot be read as what it should carry, so it has no HTTP status."""
+
+    def __init__(self, message: str):
+        super().__init__(0, message)
+
+
 class _RetryableStatusError(NotionAPIError):
     """A 429 or 5xx answer, retried by the client and raised as it is on the last attempt."""
 
@@ -216,7 +223,7 @@ class _NotionClient:
         except ValueError:
             body = None
         if not isinstance(body, dict):
-            raise NotionAPIError(0, f"Notion answered {path} without a JSON object.")
+            raise NotionResponseError(f"Notion answered {path} without a JSON object.")
         return body
 
     def get_self(self) -> dict:
@@ -276,17 +283,17 @@ def _listing_page(response: dict, path: str) -> tuple[list[dict], str | None]:
     """
     results = response.get("results")
     if not isinstance(results, list):
-        raise NotionAPIError(0, f"Notion answered {path} without a results list.")
+        raise NotionResponseError(f"Notion answered {path} without a results list.")
     if not all(isinstance(result, dict) for result in results):
-        raise NotionAPIError(0, f"Notion answered {path} with a result that is not an object.")
+        raise NotionResponseError(f"Notion answered {path} with a result that is not an object.")
     has_more = response.get("has_more")
     if not isinstance(has_more, bool):
-        raise NotionAPIError(0, f"Notion answered {path} without a has_more flag.")
+        raise NotionResponseError(f"Notion answered {path} without a has_more flag.")
     if not has_more:
         return results, None
     cursor = response.get("next_cursor")
     if not cursor:
-        raise NotionAPIError(0, "Notion reported more results without a next_cursor.")
+        raise NotionResponseError("Notion reported more results without a next_cursor.")
     return results, cursor
 
 
@@ -300,8 +307,8 @@ def _check_blocks(blocks: list[dict], path: str) -> None:
         if not isinstance(block.get("type"), str) or not isinstance(
             block.get("has_children"), bool
         ):
-            raise NotionAPIError(
-                0, f"Notion answered {path} with a block lacking type or has_children."
+            raise NotionResponseError(
+                f"Notion answered {path} with a block lacking type or has_children."
             )
 
 
@@ -309,7 +316,7 @@ def _database_data_sources(database: dict, database_id: str) -> list[dict]:
     """The data sources of a database answer; a missing list is not a database without rows."""
     data_sources = database.get("data_sources")
     if not isinstance(data_sources, list):
-        raise NotionAPIError(0, f"Notion answered database {database_id} without data_sources.")
+        raise NotionResponseError(f"Notion answered database {database_id} without data_sources.")
     return data_sources
 
 
@@ -388,8 +395,7 @@ def _query_data_source(client: _NotionClient, data_source_id: str):
         # Notion stops a query at 10,000 rows with has_more false and this
         # status; the rows past the cut would otherwise be tombstoned.
         if (response.get("request_status") or {}).get("type") == "incomplete":
-            raise NotionAPIError(
-                0,
+            raise NotionResponseError(
                 f"Notion returned an incomplete result for data source {data_source_id} "
                 "(over 10,000 rows); aborting instead of forgetting the rest.",
             )
@@ -463,12 +469,16 @@ def _resolve_roots(
                 raise
             try:
                 database = client.get_database(root_id)
-            except NotionAPIError:
+            except NotionAPIError as database_exc:
+                # Only "not there for this integration" means the root is not a database
+                # either; any other answer is the real reason and is not relabelled.
+                if not _is_gone(database_exc):
+                    raise
                 raise NotionAPIError(
                     exc.status_code,
                     f"Notion root {root_id!r} is not a page, data source, or database "
                     "this integration can access.",
-                ) from exc
+                ) from database_exc
             database_root = _WalkItem(
                 "database", root_id, root_id, name=_rich_text(database.get("title"))
             )
@@ -542,7 +552,9 @@ def _withheld_deletions(
             if ancestors is None:
                 ambiguous = previous.get("root_id") in incomplete_roots
             else:
-                ambiguous = any(a["id"] in incomplete_pages | withheld for a in ancestors)
+                ambiguous = any(
+                    a["id"] in incomplete_pages or a["id"] in withheld for a in ancestors
+                )
             if ambiguous:
                 withheld.add(page_id)
                 grew = True

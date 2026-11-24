@@ -15,6 +15,8 @@ import pytest
 from cognee.tasks.ingestion.connectors import notion as notion_module
 from cognee.tasks.ingestion.connectors.notion import (
     NotionAPIError,
+    NotionResponseError,
+    _is_gone,
     _iter_rows,
     _NotionClient,
     _resolve_workspace_id,
@@ -465,7 +467,7 @@ def test_an_incomplete_data_source_query_aborts_without_tombstones():
     previous = {ROOT_PAGE_ID: {}, CHILD_PAGE_ID: {}, ROW_PAGE_ID: {}}
     state: dict = {}
     rows = []
-    with pytest.raises(NotionAPIError, match="incomplete"):
+    with pytest.raises(NotionResponseError, match="incomplete"):
         rows.extend(
             _iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, state, {})
         )
@@ -489,7 +491,7 @@ def _resync_aborts(fake, answer_for, message, *, roots=([ROOT_PAGE_ID], [])):
 
     fake.handler = handler
     rows, new_state = [], {}
-    with pytest.raises(NotionAPIError, match=message):
+    with pytest.raises(NotionResponseError, match=message):
         rows.extend(_iter_rows(_client(fake), *roots, WORKSPACE_ID, previous, new_state, {}))
     assert not any(row.get("_deleted") for row in rows)
     assert new_state == {}
@@ -598,6 +600,13 @@ def test_a_database_without_its_data_sources_aborts_without_tombstones(database,
     _resync_aborts(_tree_with_database(), answer_for, "without data_sources", roots=roots)
 
 
+def test_a_response_error_has_no_http_status_and_is_not_read_as_gone():
+    error = NotionResponseError("Notion answered x without a results list.")
+    assert isinstance(error, NotionAPIError)
+    assert error.status_code == 0
+    assert not _is_gone(error)
+
+
 def test_a_wiki_data_source_in_query_results_is_walked_as_a_data_source():
     """A wiki's query returns its child data sources next to its pages."""
     fake = _tree_with_database()
@@ -684,6 +693,28 @@ def test_explicit_root_gone_raises():
     client = _client(fake)
     with pytest.raises(NotionAPIError):
         list(_iter_rows(client, ["missing-root"], [], WORKSPACE_ID, {}, {}, {}))
+
+
+def test_a_root_that_is_neither_data_source_nor_database_names_both_misses():
+    with pytest.raises(NotionAPIError, match="is not a page, data source, or database") as raised:
+        list(_iter_rows(_client(FakeNotion()), [], ["missing-db"], WORKSPACE_ID, {}, {}, {}))
+    assert raised.value.status_code == 404
+    # The cause is the database lookup, the last thing that was tried.
+    assert "databases/missing-db" in str(raised.value.__cause__)
+
+
+def test_a_database_root_failing_for_another_reason_is_not_called_inaccessible():
+    fake = FakeNotion()
+    original = fake.handler
+    fake.handler = lambda request: (
+        httpx.Response(400, json={"code": "validation_error", "message": "bad database"})
+        if request.url.path.endswith("databases/some-db")
+        else original(request)
+    )
+    with pytest.raises(NotionAPIError) as raised:
+        list(_iter_rows(_client(fake), [], ["some-db"], WORKSPACE_ID, {}, {}, {}))
+    assert raised.value.status_code == 400
+    assert "can access" not in str(raised.value)
 
 
 def test_429_is_retried_then_succeeds():
