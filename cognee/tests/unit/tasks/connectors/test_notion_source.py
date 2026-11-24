@@ -473,53 +473,62 @@ def test_an_incomplete_data_source_query_aborts_without_tombstones():
     assert state == {}
 
 
-def _resync_aborts(fake, answer_for):
+def _resync_aborts(fake, answer_for, message, *, roots=([ROOT_PAGE_ID], [])):
     """Sync once, then walk again where ``answer_for(request)`` may replace an answer; the walk
-    must raise before any tombstone is emitted and before state is written."""
+    must raise ``message`` before any tombstone is emitted and before state is written."""
     state: dict = {}
-    list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, state, {}))
+    list(_iter_rows(_client(fake), *roots, WORKSPACE_ID, {}, state, {}))
     previous = dict(state["pages"])
-    original = fake.handler
-    fake.handler = lambda request: answer_for(request) or original(request)
+    original, requests = fake.handler, []
+
+    def handler(request):
+        requests.append(request)
+        # A walk that reads the bad page as "more" asks for the next one for ever.
+        assert len(requests) < 200, "the walk did not stop"
+        return answer_for(request) or original(request)
+
+    fake.handler = handler
     rows, new_state = [], {}
-    with pytest.raises(NotionAPIError, match="without|more results"):
-        rows.extend(
-            _iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, new_state, {})
-        )
+    with pytest.raises(NotionAPIError, match=message):
+        rows.extend(_iter_rows(_client(fake), *roots, WORKSPACE_ID, previous, new_state, {}))
     assert not any(row.get("_deleted") for row in rows)
     assert new_state == {}
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        {"has_more": False},
-        {"results": None},
-        {"results": {}},
-        {"results": []},
-        {"results": [], "next_cursor": "c"},
-        {"results": [], "has_more": "false"},
-    ],
-)
-@pytest.mark.parametrize(
-    "listing", [f"blocks/{ROOT_PAGE_ID}/children", f"data_sources/{DATA_SOURCE_ID}/query"]
-)
-def test_a_listing_missing_a_field_it_must_carry_aborts_without_tombstones(listing, body):
-    """A missing ``results`` or ``has_more`` is not an empty or last page: reading it as one
-    would end the walk and tombstone every page synced from below it."""
+_BLOCKS = f"blocks/{ROOT_PAGE_ID}/children"
+_QUERY = f"data_sources/{DATA_SOURCE_ID}/query"
+_NO_RESULTS = "without a results list"
+_NO_HAS_MORE = "without a has_more flag"
+# A page whose answer cannot be read as a page of results, and the error that says why.
+_BAD_PAGES = [
+    ({"has_more": False}, _NO_RESULTS),
+    ({"results": None}, _NO_RESULTS),
+    ({"results": {}}, _NO_RESULTS),
+    ({"results": [None], "has_more": False}, "not an object"),
+    ({"results": []}, _NO_HAS_MORE),
+    ({"results": [], "next_cursor": "c"}, _NO_HAS_MORE),
+    # Truthy, so only the type check stops it from reading as "more pages".
+    ({"results": [], "has_more": "false", "next_cursor": "c"}, _NO_HAS_MORE),
+    ({"results": [], "has_more": True}, "more results without a next_cursor"),
+]
+
+
+@pytest.mark.parametrize(("body", "message"), _BAD_PAGES)
+@pytest.mark.parametrize("listing", [_BLOCKS, _QUERY])
+def test_a_listing_page_that_cannot_be_read_aborts_without_tombstones(listing, body, message):
+    """A missing field is not an empty or last page: reading it as one would end the walk and
+    tombstone every page synced from below it."""
 
     def answer_for(request):
         if request.url.path.endswith(listing):
             return httpx.Response(200, json={"object": "list", **body})
 
-    _resync_aborts(_tree_with_database(), answer_for)
+    _resync_aborts(_tree_with_database(), answer_for, message)
 
 
-@pytest.mark.parametrize("body", [{"has_more": False}, {"results": None}, {"results": []}])
-@pytest.mark.parametrize(
-    "listing", [f"blocks/{ROOT_PAGE_ID}/children", f"data_sources/{DATA_SOURCE_ID}/query"]
-)
-def test_a_later_page_missing_a_field_it_must_carry_aborts_without_tombstones(listing, body):
+@pytest.mark.parametrize(("body", "message"), _BAD_PAGES)
+@pytest.mark.parametrize("listing", [_BLOCKS, _QUERY])
+def test_a_later_page_that_cannot_be_read_aborts_without_tombstones(listing, body, message):
     """The page that is cut short is the second one: the first is complete and well formed."""
 
     def answer_for(request):
@@ -534,11 +543,51 @@ def test_a_later_page_missing_a_field_it_must_carry_aborts_without_tombstones(li
             200, json={"object": "list", "results": [], "has_more": True, "next_cursor": "c2"}
         )
 
-    _resync_aborts(_tree_with_database(), answer_for)
+    _resync_aborts(_tree_with_database(), answer_for, message)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"[]", b'"x"', b"1", b"null", b"not json"],
+    ids=["list", "str", "int", "null", "raw"],
+)
+@pytest.mark.parametrize("listing", [_BLOCKS, _QUERY])
+def test_an_answer_that_is_not_a_json_object_aborts_without_tombstones(listing, content):
+    def answer_for(request):
+        if request.url.path.endswith(listing):
+            return httpx.Response(200, content=content)
+
+    _resync_aborts(_tree_with_database(), answer_for, "without a JSON object")
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"id": "b", "has_children": False},
+        {"id": "b", "type": "toggle"},
+        {"id": "b", "type": "toggle", "has_children": "false"},
+        {"id": "b", "type": None, "has_children": False},
+    ],
+    ids=["no-type", "no-has_children", "has_children-not-bool", "type-null"],
+)
+def test_a_block_missing_its_type_or_has_children_aborts_without_tombstones(block):
+    """Without ``has_children`` a toggle's nested page is never listed, and without ``type`` a
+    child page is not recognised: both would be tombstoned."""
+
+    def answer_for(request):
+        if request.url.path.endswith(_BLOCKS):
+            return httpx.Response(
+                200, json={"object": "list", "results": [block], "has_more": False}
+            )
+
+    _resync_aborts(_tree_with_database(), answer_for, "block lacking type or has_children")
 
 
 @pytest.mark.parametrize("database", [{"object": "database"}, {"data_sources": None}])
-def test_a_database_without_its_data_sources_aborts_without_tombstones(database):
+@pytest.mark.parametrize(
+    "roots", [([ROOT_PAGE_ID], []), ([], [DB_BLOCK_ID])], ids=["child database", "root database"]
+)
+def test_a_database_without_its_data_sources_aborts_without_tombstones(database, roots):
     """A database answers at least one data source; a missing list is not a database without
     rows, which would tombstone every row synced from it."""
 
@@ -546,7 +595,7 @@ def test_a_database_without_its_data_sources_aborts_without_tombstones(database)
         if request.url.path.endswith(f"databases/{DB_BLOCK_ID}"):
             return httpx.Response(200, json=database)
 
-    _resync_aborts(_tree_with_database(), answer_for)
+    _resync_aborts(_tree_with_database(), answer_for, "without data_sources", roots=roots)
 
 
 def test_a_wiki_data_source_in_query_results_is_walked_as_a_data_source():
@@ -895,11 +944,13 @@ def test_table_cells_with_pipes_and_newlines_keep_the_table_shape():
         {
             "id": "r1",
             "type": "table_row",
+            "has_children": False,
             "table_row": {"cells": [[{"plain_text": "a|b"}], [{"plain_text": "x"}]]},
         },
         {
             "id": "r2",
             "type": "table_row",
+            "has_children": False,
             "table_row": {"cells": [[{"plain_text": "line1\nline2"}], [{"plain_text": "y"}]]},
         },
     ]

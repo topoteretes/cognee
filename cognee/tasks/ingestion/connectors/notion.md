@@ -82,7 +82,8 @@ item is gone and is tombstoned; the same error on one of your explicit roots abo
 instead, since that is a configuration problem, not a deletion. A failure while listing a
 readable page's blocks or querying a data source also aborts the sync, because it does not prove
 anything below it is gone. So does an answer that omits what it must carry (a listing's
-`results` or `has_more`, a database's `data_sources`): a missing field is never read as empty.
+`results` or `has_more`, a block's `type` or `has_children`, a database's `data_sources`) or that
+is not a JSON object: a missing field is never read as empty.
 
 Moving a page between two of your selected roots, or changing the roots so that another one
 reaches it, changes its `cognee_node_set` (part of the row's identity), so it is re-ingested once

@@ -211,7 +211,13 @@ class _NotionClient:
                 code=error.get("code"),
                 api_message=error.get("message"),
             )
-        return response.json()
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            raise NotionAPIError(0, f"Notion answered {path} without a JSON object.")
+        return body
 
     def get_self(self) -> dict:
         return self.request("GET", "users/me")
@@ -269,15 +275,34 @@ def _listing_page(response: dict, path: str) -> tuple[list[dict], str | None]:
     ``has_more`` flag would end the walk early and tombstone every page synced from below it.
     """
     results = response.get("results")
+    if not isinstance(results, list):
+        raise NotionAPIError(0, f"Notion answered {path} without a results list.")
+    if not all(isinstance(result, dict) for result in results):
+        raise NotionAPIError(0, f"Notion answered {path} with a result that is not an object.")
     has_more = response.get("has_more")
-    if not isinstance(results, list) or not isinstance(has_more, bool):
-        raise NotionAPIError(0, f"Notion answered {path} without a results list and has_more.")
+    if not isinstance(has_more, bool):
+        raise NotionAPIError(0, f"Notion answered {path} without a has_more flag.")
     if not has_more:
         return results, None
     cursor = response.get("next_cursor")
     if not cursor:
         raise NotionAPIError(0, "Notion reported more results without a next_cursor.")
     return results, cursor
+
+
+def _check_blocks(blocks: list[dict], path: str) -> None:
+    """A block names its type and says whether it has children, or the walk cannot tell.
+
+    Without ``has_children`` its nested pages are never listed, and without ``type`` a child
+    page or database is not recognised; both would be tombstoned as gone.
+    """
+    for block in blocks:
+        if not isinstance(block.get("type"), str) or not isinstance(
+            block.get("has_children"), bool
+        ):
+            raise NotionAPIError(
+                0, f"Notion answered {path} with a block lacking type or has_children."
+            )
 
 
 def _database_data_sources(database: dict, database_id: str) -> list[dict]:
@@ -338,7 +363,9 @@ def _list_block_children(
                 )
                 return None
             raise
-        results, cursor = _listing_page(response, f"blocks/{block_id}/children")
+        path = f"blocks/{block_id}/children"
+        results, cursor = _listing_page(response, path)
+        _check_blocks(results, path)
         children.extend(results)
         if cursor is None:
             return children
@@ -885,9 +912,7 @@ def _collect_nested_children(
 
 def _render_block(client: _NotionClient, block: dict) -> str:
     """Render one block's own text, without its children."""
-    block_type = block.get("type")
-    if not block_type:
-        return ""
+    block_type = block["type"]
     if block_type == "child_page":
         return f"[Page: {(block.get('child_page') or {}).get('title', '')}]"
     if block_type == "child_database":
