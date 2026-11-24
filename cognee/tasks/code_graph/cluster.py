@@ -30,10 +30,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
-from cognee.infrastructure.databases.graph.graph_db_interface import (
-    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-)
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.config import DEFAULT_CODE_GRAPH_BATCH_SIZE
 from cognee.tasks.code_graph.enola import (
     ParsedSnapshot,
     parse_enola_snapshot,
@@ -539,7 +537,7 @@ def _cluster_run(dataset_id: UUID, run_id: Any) -> _ClusterRun:
 
 async def load_dataset_cluster(
     ctx: Optional["PipelineContext"],
-    batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    batch_size: int = DEFAULT_CODE_GRAPH_BATCH_SIZE,
 ) -> bool:
     """Load the whole cluster of the dataset a CODE_REPO item belongs to.
 
@@ -591,7 +589,7 @@ async def load_dataset_cluster(
 async def _load_cluster_members(
     snapshot: DatasetCodeSnapshot,
     ctx: "PipelineContext",
-    batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    batch_size: int = DEFAULT_CODE_GRAPH_BATCH_SIZE,
 ) -> None:
     """Load every member of a cluster snapshot, one at a time, each under its own Data row.
 

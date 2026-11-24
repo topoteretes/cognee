@@ -5,9 +5,6 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from cognee.infrastructure.databases.graph.graph_db_interface import (
-    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-)
 from cognee.infrastructure.databases.vector.compact_vector_store import compact_vector_store
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.engine import DataPoint
@@ -51,6 +48,7 @@ from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
 from cognee.tasks.code_graph.code_files import get_code_file_tasks
 from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
 from cognee.tasks.code_graph.config import (
+    DEFAULT_CODE_GRAPH_BATCH_SIZE,
     CodeGraphConfig,
     requests_codegraph_options,
     validate_codegraph_config,
@@ -394,7 +392,7 @@ async def cognify(
     drop_deprecated_temporal_cognify(kwargs)
 
     codegraph = validate_codegraph_config(codegraph_config)
-    code_graph_batch_size = codegraph.get("batch_size", DEFAULT_GRAPH_STREAM_BATCH_SIZE)
+    code_graph_batch_size = codegraph.get("batch_size", DEFAULT_CODE_GRAPH_BATCH_SIZE)
     cognify_config = get_cognify_config()
     # The extractor decision is made once, here, before any branch. Branches
     # that cannot honour it raise below instead of silently running something

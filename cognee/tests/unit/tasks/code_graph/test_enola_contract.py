@@ -37,7 +37,7 @@ from cognee.tasks.code_graph.models import (
     ExternalDependency,
 )
 from cognee.tests.utils.code_graph_load import extracted_points, load_with_node_writes_mocked
-from cognee.tests.utils.graph_stream import stream_through_get_graph_data
+from cognee.tests.utils.graph_lookups import lookups_through_get_graph_data
 
 enola_module = importlib.import_module("cognee.tasks.code_graph.enola")
 graph_engine_module = importlib.import_module(
@@ -193,7 +193,7 @@ async def test_add_code_graph_edges_stamps_receipt_projection(tmp_path, monkeypa
     _write_snapshot(tmp_path, TWO_FACTS)
     engine = AsyncMock()
     engine.get_graph_data.return_value = ([], [])
-    stream_through_get_graph_data(engine)
+    lookups_through_get_graph_data(engine)
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
     monkeypatch.setattr(
         code_retriever_module, "invalidate_code_graph_snapshot_cache", lambda **kwargs: None

@@ -29,7 +29,7 @@ from cognee.tasks.code_graph.extract_code_graph import (
 )
 from cognee.tasks.code_graph.models import CodeRepository
 from cognee.tests.utils.code_graph_load import extracted_points, load_with_node_writes_mocked
-from cognee.tests.utils.graph_stream import stream_through_get_graph_data
+from cognee.tests.utils.graph_lookups import lookups_through_get_graph_data
 
 cluster_module = importlib.import_module("cognee.tasks.code_graph.cluster")
 extract_module = importlib.import_module("cognee.tasks.code_graph.extract_code_graph")
@@ -105,7 +105,7 @@ def _write_snapshot(
 def _mock_engine(monkeypatch, nodes=(), edges=()):
     engine = AsyncMock()
     engine.get_graph_data.return_value = (list(nodes), list(edges))
-    stream_through_get_graph_data(engine)
+    lookups_through_get_graph_data(engine)
     engine.get_node.return_value = None
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
     monkeypatch.setattr(extract_module, "_invalidate_code_graph_snapshot", lambda ctx=None: None)
@@ -374,7 +374,7 @@ async def test_member_known_ids_do_not_depend_on_the_read_page_size(
     chunk = ("chunk-1", {"type": "DocumentChunk", "text": "x" * 10_000})
     engine = _mock_engine(monkeypatch, nodes=[chunk, *ui_nodes])
 
-    monkeypatch.setattr(extract_module, "DEFAULT_GRAPH_STREAM_BATCH_SIZE", page_size)
+    monkeypatch.setattr(extract_module, "DEFAULT_CODE_GRAPH_BATCH_SIZE", page_size)
     await _load_member(snapshot_dir, "golf", tmp_path)
 
     written = _written_edges(engine)

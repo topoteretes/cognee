@@ -5,12 +5,9 @@ import importlib
 
 import pytest
 
-from cognee.infrastructure.databases.graph.graph_db_interface import (
-    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-)
 from cognee.tasks.code_graph.code_files import get_code_file_tasks
 from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
-from cognee.tasks.code_graph.config import validate_codegraph_config
+from cognee.tasks.code_graph.config import DEFAULT_CODE_GRAPH_BATCH_SIZE, validate_codegraph_config
 
 
 def test_none_is_an_empty_config():
@@ -50,9 +47,7 @@ def test_a_batch_size_below_one_is_rejected(value):
 @pytest.mark.parametrize("get_tasks", [get_code_file_tasks, get_code_repo_tasks])
 def test_routes_default_to_the_default_batch_size(get_tasks):
     (task,) = get_tasks()
-    assert task.default_params["kwargs"]["code_graph_batch_size"] == (
-        DEFAULT_GRAPH_STREAM_BATCH_SIZE
-    )
+    assert task.default_params["kwargs"]["code_graph_batch_size"] == (DEFAULT_CODE_GRAPH_BATCH_SIZE)
     assert task.needs_llm is False
 
 
@@ -91,7 +86,7 @@ def test_only_a_non_default_batch_size_requests_options():
 
     assert requests_codegraph_options(None) is False
     assert requests_codegraph_options({}) is False
-    assert requests_codegraph_options({"batch_size": DEFAULT_GRAPH_STREAM_BATCH_SIZE}) is False
+    assert requests_codegraph_options({"batch_size": DEFAULT_CODE_GRAPH_BATCH_SIZE}) is False
     assert requests_codegraph_options({"batch_size": 1}) is True
 
 

@@ -15,11 +15,9 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from cognee.infrastructure.databases.graph.graph_db_interface import (
-    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-)
 from cognee.modules.pipelines.tasks.task import Task, task_summary
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.config import DEFAULT_CODE_GRAPH_BATCH_SIZE
 from cognee.tasks.ingestion.dlt_utils import metadata_source
 
 if TYPE_CHECKING:
@@ -97,7 +95,7 @@ def _stage_code_file(data_item, staging_root, content: str) -> Path:
 async def extract_code_files_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
-    code_graph_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    code_graph_batch_size: int = DEFAULT_CODE_GRAPH_BATCH_SIZE,
 ) -> list:
     """Cognify CODE-route adapter: run the enola pipeline on stored code files.
 
@@ -138,7 +136,7 @@ async def extract_code_files_graph(
     return data_documents
 
 
-def get_code_file_tasks(batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE) -> list[Task]:
+def get_code_file_tasks(batch_size: int = DEFAULT_CODE_GRAPH_BATCH_SIZE) -> list[Task]:
     """The cognify CODE-route task list: one adapter task, no LLM stages.
 
     ``batch_size`` is the code graph's (see ``load_code_graph``).

@@ -1,8 +1,8 @@
 """The typed edges are resolved and written in batches, never held all at once.
 
 ``iter_code_graph_edges`` yields each edge as it resolves; add_code_graph_edges
-writes the new ones ``batch_size`` at a time and records each batch in the
-rollback ledger right after its write. The batch size changes neither which
+takes them ``batch_size`` at a time, writes those the graph does not have yet,
+and records each written batch in the rollback ledger right after its write. The batch size changes neither which
 edges are written nor what the sweep removes.
 """
 
@@ -22,7 +22,7 @@ from cognee.tasks.code_graph.extract_code_graph import (
     iter_code_graph_edges,
 )
 from cognee.tests.utils.code_graph_load import load_with_node_writes_mocked
-from cognee.tests.utils.graph_stream import stream_through_get_graph_data
+from cognee.tests.utils.graph_lookups import lookups_through_get_graph_data
 
 graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
@@ -61,7 +61,7 @@ def _write_snapshot(tmp_path):
 def _mock_engine(monkeypatch, nodes=(), edges=()):
     engine = AsyncMock()
     engine.get_graph_data.return_value = (list(nodes), list(edges))
-    stream_through_get_graph_data(engine)
+    lookups_through_get_graph_data(engine)
     engine.get_node.return_value = None
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
     monkeypatch.setattr(
@@ -153,7 +153,8 @@ async def test_edges_already_in_the_graph_are_not_written_and_stale_ones_are_swe
 
     written = [key for batch in _written(engine) for key in batch]
     assert present not in written
-    assert [len(batch) for batch in _written(engine)] == [5, 5, 1]
+    # Of each 5 resolved edges the new ones: the first 5 hold the present one.
+    assert [len(batch) for batch in _written(engine)] == [4, 5, 2]
     deleted = [
         (edge.source_id, edge.target_id, edge.relationship_name)
         for call in engine.delete_edge_triples.await_args_list

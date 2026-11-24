@@ -29,19 +29,22 @@ EdgeData = tuple[
 Node = tuple[str, NodeData]  # (node_id, properties)
 
 
-# Page size of ``stream_graph_data``. It bounds one page, never what is read.
-DEFAULT_GRAPH_STREAM_BATCH_SIZE = 2000
-
 _warned_degree_fallbacks: set[type] = set()
-_warned_graph_stream_fallbacks: set[type] = set()
 _warned_neighborhood_fallbacks: set[type] = set()
 _warned_graph_counts_fallbacks: set[type] = set()
+_warned_lookup_fallbacks: set[tuple[type, str]] = set()
 
 
-def validate_graph_stream_batch_size(batch_size: int) -> None:
-    """Reject a page size that cannot make progress, before anything is read."""
-    if batch_size < 1:
-        raise ValueError("batch_size must be >= 1")
+def _warn_lookup_fallback(adapter: Any, method: str) -> None:
+    """Warn once per adapter type that ``method`` reads the whole graph."""
+    key = (type(adapter), method)
+    if key not in _warned_lookup_fallbacks:
+        _warned_lookup_fallbacks.add(key)
+        logger.warning(
+            "%s has no native %s; falling back to a full graph read. This is O(graph) in memory.",
+            key[0].__name__,
+            method,
+        )
 
 
 def timestamp_overlaps(node: dict, start: int | None, end: int | None) -> bool:
@@ -649,52 +652,39 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError
 
-    async def stream_graph_data(
-        self, batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE
-    ) -> AsyncIterator[tuple[list[Node], list[EdgeData]]]:
-        """What ``get_graph_data`` returns, in pages, so a caller can drop each page.
+    async def get_node_ids_by_property(
+        self, node_types: list[str], property_name: str, values: list[Any]
+    ) -> list[str]:
+        """Ids of the nodes of one of ``node_types`` whose ``property_name`` is one of ``values``.
 
-        **Same data.** Every yielded ``nodes`` list concatenated, and every
-        yielded ``edges`` list concatenated, equal ``get_graph_data()`` as
-        multisets: the same tuple shapes, ids and property post-processing. No
-        nodes means no edges. Each node and each edge is yielded once; order
-        within a phase is not part of the contract.
-
-        **Nodes first.** Every node page ``(nodes, [])`` comes before any edge
-        page ``([], edges)``, so a caller can filter edges by the node ids it
-        has already seen.
-
-        **Pages.** A node page holds at most ``batch_size`` nodes. An edge page
-        holds the outgoing edges of at most ``batch_size`` source nodes, or at
-        most ``batch_size`` edges where an adapter pages edges on their own key;
-        so one hub's edges can make a page larger than ``batch_size``.
-
-        **Consistency.** There is no snapshot across pages: a row written or
-        deleted while the stream is read may or may not appear. A caller that
-        compares against the graph as it was must drain the stream before it
-        writes.
-
-        ``batch_size`` must be positive; it is checked before anything is read.
-
-        Deliberately NOT abstract, like ``get_top_degree_node_ids``: a community
-        adapter keeps working. The default calls ``get_graph_data`` and slices
-        it, so it is O(graph) in memory; overriding adapters read one page per
-        query.
+        Not abstract: the default filters ``get_graph_data``, so it is O(graph)
+        in memory; overriding adapters filter in the database.
         """
-        validate_graph_stream_batch_size(batch_size)
-        adapter_type = type(self)
-        if adapter_type not in _warned_graph_stream_fallbacks:
-            _warned_graph_stream_fallbacks.add(adapter_type)
-            logger.warning(
-                "%s has no native stream_graph_data; falling back to a full graph read "
-                "sliced into pages. This is O(graph) in memory.",
-                adapter_type.__name__,
-            )
-        nodes, edges = await self.get_graph_data()
-        for start in range(0, len(nodes), batch_size):
-            yield nodes[start : start + batch_size], []
-        for start in range(0, len(edges), batch_size):
-            yield [], edges[start : start + batch_size]
+        _warn_lookup_fallback(self, "get_node_ids_by_property")
+        wanted_types, wanted_values = set(node_types), set(values)
+        nodes, _ = await self.get_graph_data()
+        return [
+            str(node_id)
+            for node_id, properties in nodes
+            if properties.get("type") in wanted_types
+            and properties.get(property_name) in wanted_values
+        ]
+
+    async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
+        """``(source_id, target_id, relationship_name)`` of every edge leaving ``source_ids``.
+
+        Ids that are not in the graph have no edges. Not abstract: the default
+        filters ``get_graph_data``, so it is O(graph) in memory; overriding
+        adapters look the sources up by index.
+        """
+        _warn_lookup_fallback(self, "get_outgoing_edge_keys")
+        sources = {str(source_id) for source_id in source_ids}
+        _, edges = await self.get_graph_data()
+        return [
+            (str(source), str(target), relationship)
+            for source, target, relationship, _properties in edges
+            if str(source) in sources
+        ]
 
     async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
         """Ids of up to ``top_k`` well-connected nodes, to seed a graph view.

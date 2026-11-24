@@ -13,13 +13,11 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 
 from pydantic import ValidationError
 
-from cognee.infrastructure.databases.graph.graph_db_interface import (
-    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-)
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.config import DEFAULT_CODE_GRAPH_BATCH_SIZE
 from cognee.tasks.code_graph.enola import (
     EnolaSnapshot,
     ParsedSnapshot,
@@ -835,7 +833,7 @@ async def extract_code_graph(
     repo_scope: str | None = None,
     node_set: list[str] | None = None,
     snapshot: ParsedSnapshot | None = None,
-    batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    batch_size: int = DEFAULT_CODE_GRAPH_BATCH_SIZE,
 ) -> AsyncIterator[list[DataPoint] | _SnapshotEnd]:
     """Run enola on repo_path (or reuse an existing snapshot) and stream its DataPoints.
 
@@ -1011,72 +1009,10 @@ def _invalidate_code_graph_snapshot(ctx: Optional["PipelineContext"] = None) -> 
         invalidate_code_graph_snapshot_cache(dataset_id=dataset_id)
 
 
-# The node properties the code graph steps read off the pre-write graph: the
-# sweep and detag match a node by type and repo (name for CodeRepository), the
-# detag reads tags and NodeSet names. fact_hash is kept in existing_hashes.
-_RETAINED_NODE_PROPERTIES = ("type", "name", "repo", "belongs_to_set")
-
-
-class _CodeGraphState:
-    """The pre-write graph, cut down to what the code graph load reads.
-
-    - ``existing_hashes``: ``{node_id: fact_hash}`` of every node, for the
-      node delta.
-    - ``existing_node_ids``: every node id, for a cluster member's
-      ``known_ids`` (an edge's other endpoint may be any node).
-    - ``existing_nodes``: ``(node_id, properties)`` of code-graph and NodeSet
-      nodes only, with ``_RETAINED_NODE_PROPERTIES`` only, for the sweep and
-      detag.
-    - ``existing_edge_keys``: ``(source, target, relationship)`` of edges whose
-      source is a code-graph node. Every use starts there: the typed-edge diff
-      (edges between code nodes), the stale-edge sweep (both endpoints are
-      current code nodes) and the ``belongs_to_set`` detag (from a code node).
-    """
-
-    def __init__(self) -> None:
-        self.existing_hashes: dict[str, Any] = {}
-        self.existing_node_ids: set[str] = set()
-        self.existing_nodes: list[tuple[str, dict]] = []
-        self.existing_edge_keys: set[tuple[str, str, str]] = set()
-
-
-async def _read_code_graph_state(graph_engine) -> _CodeGraphState:
-    """Read the graph a page at a time, keeping only what the code graph load reads.
-
-    Pages are ``DEFAULT_GRAPH_STREAM_BATCH_SIZE`` rows.
-
-    The stream is drained completely before the caller writes anything: the
-    node delta, edge diff and sweep compare against the graph as it was, and
-    the stream has no snapshot across pages, so a page read after a write
-    could see rows this load wrote.
-    """
-    code_types = _code_graph_node_types()
-    retained_types = code_types | {NodeSet.__name__}
-    code_node_ids: set[str] = set()
-    state = _CodeGraphState()
-    async for nodes, edges in graph_engine.stream_graph_data(
-        batch_size=DEFAULT_GRAPH_STREAM_BATCH_SIZE
-    ):
-        for node_id, properties in nodes:
-            node_id = str(node_id)
-            state.existing_node_ids.add(node_id)
-            if not isinstance(properties, dict):
-                continue
-            state.existing_hashes[node_id] = properties.get("fact_hash")
-            node_type = properties.get("type")
-            if node_type not in retained_types:
-                continue
-            if node_type in code_types:
-                code_node_ids.add(node_id)
-            retained = {
-                key: properties[key] for key in _RETAINED_NODE_PROPERTIES if key in properties
-            }
-            state.existing_nodes.append((node_id, retained))
-        for source, target, relationship, _properties in edges:
-            source = str(source)
-            if source in code_node_ids:
-                state.existing_edge_keys.add((source, str(target), relationship))
-    return state
+# Source ids per get_outgoing_edge_keys call when the sweep reads a whole
+# repository's edges: one call reads the edge index once however many ids it
+# gets, and this caps the reply (the Ladybug adapter's own lookup cap).
+_EDGE_LOOKUP_CHUNK_SIZE = 20000
 
 
 _DELTA_SAMPLE_LIMIT = 20
@@ -1088,10 +1024,17 @@ def _delta_samples(names: list[str]) -> list[str]:
 
 @dataclass
 class _CodeGraphLoad:
-    """One load's state across its batches: the graph as read before the first
-    write, and the node delta the batches add up to."""
+    """One load's state across its batches.
 
-    graph_state: _CodeGraphState
+    Each node batch looks its own ids up just before it is written, so these
+    are its nodes as they were before this load touched them, for the detag:
+    - ``existing_ids``: the ids of this load's nodes that the graph held.
+    - ``existing_tags``: the ``belongs_to_set`` names those nodes carried.
+    The rest is the node delta the batches add up to.
+    """
+
+    existing_ids: set[str] = field(default_factory=set)
+    existing_tags: set[str] = field(default_factory=set)
     nodes_added: int = 0
     nodes_updated: int = 0
     nodes_unchanged: int = 0
@@ -1109,22 +1052,20 @@ async def load_code_graph(
     node_set: list[str] | None = None,
     snapshot: ParsedSnapshot | None = None,
     graph_only: bool = True,
-    batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    batch_size: int = DEFAULT_CODE_GRAPH_BATCH_SIZE,
 ) -> Any:
     """Load one repository's code graph: the one driver of the code graph steps.
 
     ``extract_code_graph`` streams the snapshot's DataPoints ``batch_size`` at
     a time; each batch is stored by ``add_code_graph_data_points``, and the
     ``_SnapshotEnd`` after the last one runs ``add_code_graph_edges`` once.
-    Before the first write the graph is read once, and every step compares
-    against that read: nothing this load writes can show up in it. An unchanged
-    snapshot yields nothing, so nothing is read or written. A larger
-    ``batch_size`` holds more of the snapshot at once and makes fewer writes.
+    The graph is never read whole: each step looks up only the ids it handles
+    (see ``_CodeGraphLoad``). An unchanged snapshot yields nothing, so nothing
+    is read or written. A larger ``batch_size`` holds more of the snapshot at
+    once and makes fewer writes and lookups.
 
     Returns ``data`` unchanged, so it can stand as a pipeline task.
     """
-    from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
-
     if batch_size < 1:
         raise ValueError("batch_size must be >= 1")
 
@@ -1140,18 +1081,35 @@ async def load_code_graph(
         batch_size=batch_size,
     ):
         if load is None:
-            graph_engine = await get_graph_engine()
-            load = _CodeGraphLoad(graph_state=await _read_code_graph_state(graph_engine))
+            load = _CodeGraphLoad()
         if isinstance(item, _SnapshotEnd):
-            # The fact hashes are read by the node delta only: none is alive
-            # through the edge step.
-            load.graph_state.existing_hashes.clear()
             await add_code_graph_edges(
                 item, load, ctx=ctx, node_set=node_set, batch_size=batch_size
             )
         else:
             await add_code_graph_data_points(item, load, ctx=ctx, graph_only=graph_only)
     return data
+
+
+async def _stored_nodes(node_ids: list[str]) -> dict[str, Any]:
+    """``{id: node}`` of those of ``node_ids`` the graph holds, by one lookup on the id index."""
+    from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+
+    graph_engine = await get_graph_engine()
+    nodes = await graph_engine.get_nodes(node_ids)
+    found = ((_read_repo_node_property(node, "id"), node) for node in nodes)
+    return {str(node_id): node for node_id, node in found if node_id is not None}
+
+
+def _remember_existing(load: "_CodeGraphLoad", stored: dict[str, Any]) -> None:
+    """Keep the ids of a batch's stored nodes and the tag names they carry, for the detag."""
+    load.existing_ids.update(stored)
+    for node in stored.values():
+        tags = _read_repo_node_property(node, "belongs_to_set")
+        if isinstance(tags, str):
+            tags = json.loads(tags)
+        if isinstance(tags, list):
+            load.existing_tags.update(tag for tag in tags if isinstance(tag, str))
 
 
 async def add_code_graph_data_points(
@@ -1162,11 +1120,13 @@ async def add_code_graph_data_points(
 ) -> None:
     """Store one batch of code graph nodes: only the new and the changed ones.
 
-    Delta writes against the graph ``load`` read before the first batch: a
-    fact whose fact_hash is new or changed is stored, an unchanged one is not
+    Delta writes against the batch's own ids, looked up just before it is
+    written (no earlier batch writes them: a load yields each node id once):
+    a fact whose fact_hash is new or changed is stored, an unchanged one is not
     touched. Repository nodes are always rewritten (they carry the snapshot
     stamp) and are not counted as content changes. The counts and samples add
-    up in ``load`` for the stamp the edge step writes.
+    up in ``load`` for the stamp the edge step writes, and the nodes found
+    there for the detag (see ``_CodeGraphLoad``).
 
     The storage rollback ledger requires a persisted data item id: the full
     context is passed when one is available, otherwise the nodes are stored
@@ -1176,7 +1136,8 @@ async def add_code_graph_data_points(
     """
     from cognee.tasks.storage.add_data_points import add_data_points
 
-    existing_hashes = load.graph_state.existing_hashes
+    stored = await _stored_nodes([str(getattr(point, "id", point)) for point in data_points])
+    _remember_existing(load, stored)
     to_write: list[DataPoint] = []
     added: list[str] = []
     updated: list[str] = []
@@ -1186,10 +1147,13 @@ async def add_code_graph_data_points(
             continue
         point_id = str(getattr(point, "id", point))
         fact_hash = getattr(point, "fact_hash", None)
-        if point_id not in existing_hashes:
+        if point_id not in stored:
             to_write.append(point)
             added.append(str(getattr(point, "name", point_id)))
-        elif fact_hash is None or existing_hashes[point_id] != fact_hash:
+        elif (
+            fact_hash is None
+            or _read_repo_node_property(stored[point_id], "fact_hash") != fact_hash
+        ):
             to_write.append(point)
             updated.append(str(getattr(point, "name", point_id)))
         else:
@@ -1214,7 +1178,7 @@ async def add_code_graph_edges(
     load: "_CodeGraphLoad",
     ctx: Optional["PipelineContext"] = None,
     node_set: list[str] | None = None,
-    batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    batch_size: int = DEFAULT_CODE_GRAPH_BATCH_SIZE,
 ) -> None:
     """Insert typed relation edges (calls/imports/...) once every node batch is stored.
 
@@ -1240,8 +1204,6 @@ async def add_code_graph_edges(
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 
     repo_scope = end.repo_scope
-    graph_state = load.graph_state
-    existing_edge_keys = graph_state.existing_edge_keys
     logger.info(
         "Code graph node delta: %d added, %d updated, %d unchanged.",
         load.nodes_added,
@@ -1260,11 +1222,9 @@ async def add_code_graph_edges(
         else:
             edges = iter_code_graph_edges(scan, end.source.iter_facts(), edge_keys)
 
-        scope_ids: set[str] = set()
-        known_ids: set[str] = set()
+        scope_ids: set[str] | None = None
         if repo_scope is not None:
             scope_ids = scan.scoped_node_ids(repo_scope)
-            known_ids = scope_ids | graph_state.existing_node_ids
 
         # Register the edges added by this run in the relational rollback
         # ledger (when a pipeline context with a persisted data item is
@@ -1298,8 +1258,14 @@ async def add_code_graph_edges(
                     pipeline_run_id=ledger_ctx.pipeline_run_id,
                 )
 
-        # Delta writes: only edges the graph does not already have, written a
-        # batch at a time as they resolve.
+        async def write_new(candidates: list[tuple]) -> int:
+            new = await _new_edges(graph_engine, candidates, scope_ids)
+            if new:
+                await write(new)
+            return len(new)
+
+        # Delta writes: of each batch_size edges as they resolve, only those
+        # the graph does not already have.
         batch: list[tuple] = []
         new_count = 0
         while True:
@@ -1310,21 +1276,14 @@ async def add_code_graph_edges(
                 break
             key = (str(edge[0]), str(edge[1]), edge[2])
             edge_keys.add(key)
-            if repo_scope is not None and not (
-                (key[0] in scope_ids or key[1] in scope_ids)
-                and key[0] in known_ids
-                and key[1] in known_ids
-            ):
-                continue
-            if key in existing_edge_keys:
+            if scope_ids is not None and key[0] not in scope_ids and key[1] not in scope_ids:
                 continue
             batch.append(edge)
-            new_count += 1
             if len(batch) == batch_size:
-                await write(batch)
+                new_count += await write_new(batch)
                 batch = []
         if batch:
-            await write(batch)
+            new_count += await write_new(batch)
         logger.info("Resolved %d code graph edge(s), skipped %d.", len(edge_keys), skipped)
         logger.info(
             "Code graph edge delta: %d new, %d already present.",
@@ -1335,22 +1294,18 @@ async def add_code_graph_edges(
         # Insert-then-sweep: with the current snapshot fully merged, remove
         # what previous ingestions derived that this snapshot no longer does.
         # Runs even with zero edges — a shrunken repo still needs its sweep.
+        stale_edges, tag_targets = await _read_current_edges(
+            graph_engine, scan, edge_keys, load.existing_ids
+        )
         nodes_removed, edges_removed, samples_removed = await _sweep_stale_code_graph(
-            graph_engine, scan, edge_keys, graph_state.existing_nodes, existing_edge_keys
+            graph_engine, scan, stale_edges
         )
 
         # Retag: strip node_set names this repo carried before but not anymore.
-        # A no-op (zero graph calls) when node_set is unchanged, including the
-        # untagged case, so the per-file CODE route and an untagged repository
+        # No graph call when node_set is unchanged, including the untagged
+        # case, so the per-file CODE route and an untagged repository
         # (node_set=None) never pay for this.
-        detagged = await _detag_stale_code_graph(
-            graph_engine,
-            scan,
-            graph_state.existing_nodes,
-            existing_edge_keys,
-            node_set,
-            repo_scope=repo_scope,
-        )
+        detagged = await _detag_stale_code_graph(graph_engine, load, tag_targets, node_set)
 
         delta = {
             "nodes_added": load.nodes_added,
@@ -1384,91 +1339,128 @@ async def add_code_graph_edges(
         _invalidate_code_graph_snapshot(ctx)
 
 
+async def _new_edges(
+    graph_engine, candidates: list[tuple], scope_ids: set[str] | None
+) -> list[tuple]:
+    """The candidate edges to write: those the graph does not have yet.
+
+    Looked up by the candidates' source ids, after the node writes: those add
+    only part_of and belongs_to_set edges, a name no enola relation has, so the
+    answer is the one the graph gave before them. A cluster member
+    (``scope_ids``) also leaves an edge whose other endpoint is not in the
+    graph to the member that holds that endpoint; this load writes no node
+    outside ``scope_ids``.
+    """
+    keys = [(str(edge[0]), str(edge[1]), edge[2]) for edge in candidates]
+    known: set[str] = set()
+    if scope_ids is not None:
+        outside = {endpoint for key in keys for endpoint in key[:2] if endpoint not in scope_ids}
+        known = scope_ids | set(await _stored_nodes(sorted(outside)) if outside else ())
+    present = set(await graph_engine.get_outgoing_edge_keys(sorted({key[0] for key in keys})))
+    return [
+        edge
+        for edge, key in zip(candidates, keys)
+        if key not in present and (scope_ids is None or (key[0] in known and key[1] in known))
+    ]
+
+
+async def _read_current_edges(
+    graph_engine,
+    scan: _SnapshotScan,
+    current_edge_keys: set[tuple[str, str, str]],
+    existing_ids: set[str],
+) -> tuple[set[tuple[str, str, str]], set[str]]:
+    """The edges leaving the snapshot's nodes, read once after the writes.
+
+    Returns the stale edges for the sweep: between two current code nodes,
+    not derived by this snapshot, and not a node's part_of edge to its
+    repository (add_data_points writes that one from the part_of field). And
+    the targets of the belongs_to_set edges of ``existing_ids``, for the detag.
+    Every edge this load wrote is current or a current tag's, so reading after
+    the writes finds what reading before them would.
+    """
+    current_ids = scan.node_repos
+    source_ids = sorted(current_ids)
+    stale: set[tuple[str, str, str]] = set()
+    tag_targets: set[str] = set()
+    for start in range(0, len(source_ids), _EDGE_LOOKUP_CHUNK_SIZE):
+        chunk = source_ids[start : start + _EDGE_LOOKUP_CHUNK_SIZE]
+        for key in await graph_engine.get_outgoing_edge_keys(chunk):
+            source, target, relationship = key
+            if relationship == "belongs_to_set" and source in existing_ids:
+                tag_targets.add(target)
+            if (
+                target in current_ids
+                and key not in current_edge_keys
+                and not (relationship == "part_of" and current_ids[source] == target)
+            ):
+                stale.add(key)
+    return stale, tag_targets
+
+
 def _code_graph_node_types() -> set:
     """Every graph node type this pipeline produces, CodeRepository included."""
     return {model.__name__ for model in KIND_TO_MODEL.values()} | {CodeRepository.__name__}
 
 
-def _is_repo_code_node(properties: Any, snapshot_repos: set, code_types: set) -> bool:
-    """Whether a stored node's properties are a code-graph node of one of these repos.
-
-    Shared by the stale-node sweep and the stale node_set detag, so both agree
-    on exactly which nodes belong to a snapshot's repos.
-    """
-    if not isinstance(properties, dict):
-        return False
-    node_type = properties.get("type")
-    if node_type not in code_types:
-        return False
-    # Repository nodes carry their repo in name; entities in the repo field.
-    repo = properties.get("name") if node_type == "CodeRepository" else properties.get("repo")
-    return repo in snapshot_repos
+async def _node_names(node_ids: list[str]) -> list[str]:
+    """Each node's name, or its id when it has none, for the delta samples."""
+    names = []
+    for start in range(0, len(node_ids), _SWEEP_CHUNK_SIZE):
+        chunk = node_ids[start : start + _SWEEP_CHUNK_SIZE]
+        stored = await _stored_nodes(chunk)
+        for node_id in chunk:
+            names.append(str(_read_repo_node_property(stored.get(node_id), "name") or node_id))
+    return names
 
 
 async def _sweep_stale_code_graph(
     graph_engine,
     scan: _SnapshotScan,
-    current_edge_keys: set[tuple[str, str, str]],
-    existing_nodes: list[tuple],
-    existing_edge_keys: set,
+    stale_edges: set[tuple[str, str, str]],
 ) -> tuple[int, int, list[str]]:
     """Remove code graph nodes/edges no longer derivable from the snapshot.
 
-    existing_nodes/existing_edge_keys are the pre-write graph state (the same
-    read the node-delta computation used). Only nodes of code-graph types
-    belonging to repos covered by this snapshot are considered; other
-    datasets' content and other repos in the same graph are untouched. Edges
-    are swept only between surviving code nodes, so edges to non-code nodes
-    (e.g. belongs_to_set -> NodeSet) always survive. Returns
+    The stale nodes are the code-graph nodes of the repos covered by this
+    snapshot (found in the database: a repository node by name, any other by
+    its repo field) that the snapshot no longer derives; other datasets'
+    content and other repos in the same graph are untouched. ``stale_edges``
+    come from ``_read_current_edges``. Returns
     (nodes_removed, edges_removed, removed_name_samples).
     """
     from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
 
-    snapshot_repos = scan.repos
-    current_ids = scan.node_repos
-
-    code_types = _code_graph_node_types()
-    stale_node_ids = []
-    stale_node_names = []
-    for node_id, properties in existing_nodes:
-        node_id = str(node_id)
-        if node_id in current_ids:
-            continue
-        if not _is_repo_code_node(properties, snapshot_repos, code_types):
-            continue
-        stale_node_ids.append(node_id)
-        stale_node_names.append(str(properties.get("name") or node_id))
+    repos = sorted(scan.repos)
+    fact_types = sorted(_code_graph_node_types() - {CodeRepository.__name__})
+    stored_ids = await graph_engine.get_node_ids_by_property(fact_types, "repo", repos)
+    stored_ids += await graph_engine.get_node_ids_by_property(
+        [CodeRepository.__name__], "name", repos
+    )
+    stale_node_ids = sorted({node_id for node_id in stored_ids if node_id not in scan.node_repos})
+    stale_node_names = await _node_names(stale_node_ids)
 
     if stale_node_ids:
         for start in range(0, len(stale_node_ids), _SWEEP_CHUNK_SIZE):
             await graph_engine.delete_nodes(stale_node_ids[start : start + _SWEEP_CHUNK_SIZE])
         logger.info("Swept %d stale code graph node(s).", len(stale_node_ids))
 
-    # Structural containment edges are written by add_data_points from the
-    # DataPoint part_of field: each node's to its repository node.
-    stale_edges = [
+    edges = [
         EdgeIdentity(source_id=source, target_id=target, relationship_name=relationship)
-        for source, target, relationship in existing_edge_keys
-        if source in current_ids
-        and target in current_ids
-        and (source, target, relationship) not in current_edge_keys
-        and not (relationship == "part_of" and current_ids[source] == target)
+        for source, target, relationship in sorted(stale_edges)
     ]
-    if stale_edges:
-        for start in range(0, len(stale_edges), _SWEEP_CHUNK_SIZE):
-            await graph_engine.delete_edge_triples(stale_edges[start : start + _SWEEP_CHUNK_SIZE])
-        logger.info("Swept %d stale code graph edge(s).", len(stale_edges))
+    if edges:
+        for start in range(0, len(edges), _SWEEP_CHUNK_SIZE):
+            await graph_engine.delete_edge_triples(edges[start : start + _SWEEP_CHUNK_SIZE])
+        logger.info("Swept %d stale code graph edge(s).", len(edges))
 
-    return len(stale_node_ids), len(stale_edges), _delta_samples(stale_node_names)
+    return len(stale_node_ids), len(edges), _delta_samples(stale_node_names)
 
 
 async def _detag_stale_code_graph(
     graph_engine,
-    scan: _SnapshotScan,
-    existing_nodes: list[tuple],
-    existing_edge_keys: set,
+    load: _CodeGraphLoad,
+    tag_targets: set[str],
     node_set: list[str] | None,
-    repo_scope: str | None = None,
 ) -> list[str]:
     """Strip node_set tags this repo's surviving code nodes carry but should not.
 
@@ -1477,54 +1469,34 @@ async def _detag_stale_code_graph(
     A node rewrite never removes edges, so stale edges are deleted on every
     backend; the property is only stale on Neo4j, whose rewrite unions it.
 
+    The nodes are this load's nodes the graph held before it wrote them, with
+    the tags they carried then (``load``), and ``tag_targets`` the targets of
+    their belongs_to_set edges. For one member of a multi-repo snapshot those
+    are that member's nodes only: the other members carry their own rows'
+    tags, which are not stale just because they differ from this row's.
+
     Edges are stale by NodeSet id, the property by exact name: a respelling
     ("Team-A" -> "team-a") keeps the shared edge but drops the old spelling.
-
-    With repo_scope (one member of a multi-repo snapshot) only that member's
-    nodes are considered: the other members carry their own rows' tags, which
-    are not stale just because they differ from this row's.
     """
     from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
 
-    if repo_scope is not None:
-        snapshot_repos = {repo_scope}
-        current_ids = scan.scoped_node_ids(repo_scope)
-    else:
-        snapshot_repos = scan.repos
-        current_ids = scan.node_repos
-    code_types = _code_graph_node_types()
-
-    code_node_ids = [
-        str(node_id)
-        for node_id, properties in existing_nodes
-        if str(node_id) in current_ids
-        and _is_repo_code_node(properties, snapshot_repos, code_types)
-    ]
+    code_node_ids = sorted(load.existing_ids)
     if not code_node_ids:
         return []
-    code_node_id_set = set(code_node_ids)
 
-    nodeset_names = {
-        str(node_id): properties.get("name")
-        for node_id, properties in existing_nodes
-        if isinstance(properties, dict) and properties.get("type") == "NodeSet"
-    }
-    property_names: set = set()
-    for node_id, properties in existing_nodes:
-        if str(node_id) in code_node_id_set and isinstance(properties, dict):
-            tags = properties.get("belongs_to_set")
-            if isinstance(tags, list):
-                property_names.update(tag for tag in tags if isinstance(tag, str))
-    edge_names = {
-        nodeset_names[target]
-        for source, target, relationship in existing_edge_keys or ()
-        if relationship == "belongs_to_set"
-        and source in code_node_id_set
-        and isinstance(nodeset_names.get(target), str)
-    }
-
+    property_names = load.existing_tags
     current = set(node_set or [])
     current_ids_by_name = {NodeSet.id_for(name) for name in current}
+    # Only a target that is not a current tag can be stale: name those alone.
+    current_targets = {str(tag_id) for tag_id in current_ids_by_name}
+    stale_targets = sorted(tag_targets - current_targets)
+    targets = await _stored_nodes(stale_targets) if stale_targets else {}
+    edge_names = {
+        _read_repo_node_property(node, "name")
+        for node in targets.values()
+        if _read_repo_node_property(node, "type") == NodeSet.__name__
+        and isinstance(_read_repo_node_property(node, "name"), str)
+    }
     stale_edge_names = sorted(
         name
         for name in edge_names | property_names

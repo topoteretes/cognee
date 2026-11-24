@@ -23,7 +23,7 @@ from cognee.tasks.code_graph.extract_code_graph import (
     map_facts_to_data_points,
 )
 from cognee.tasks.code_graph.models import CodeRepository
-from cognee.tests.utils.graph_stream import stream_through_get_graph_data
+from cognee.tests.utils.graph_lookups import lookups_through_get_graph_data
 
 graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
@@ -59,7 +59,7 @@ def _write_snapshot(tmp_path, facts=FACTS):
 def _mock_engine(monkeypatch, stored_repo=None):
     engine = AsyncMock()
     engine.get_graph_data.return_value = ([], [])
-    stream_through_get_graph_data(engine)
+    lookups_through_get_graph_data(engine)
     engine.get_node.return_value = stored_repo
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
     monkeypatch.setattr(
@@ -144,11 +144,16 @@ async def test_an_unchanged_snapshot_streams_nothing_and_the_load_writes_nothing
 
 
 @pytest.mark.asyncio
-async def test_the_graph_is_read_once_and_the_edge_step_runs_once_after_the_last_batch(
+async def test_each_batch_is_looked_up_before_its_write_and_the_edge_step_runs_once_at_the_end(
     tmp_path, monkeypatch
 ):
     engine = _mock_engine(monkeypatch)
     events = []
+    original_get_nodes = engine.get_nodes
+
+    async def get_nodes(node_ids):
+        events.append(("lookup", len(node_ids)))
+        return await original_get_nodes(node_ids)
 
     async def write(points, **kwargs):
         events.append(("write", len(points)))
@@ -159,18 +164,12 @@ async def test_the_graph_is_read_once_and_the_edge_step_runs_once_after_the_last
     async def add_nodes(nodes):
         events.append(("stamp", [node.name for node in nodes]))
 
-    async def read(stream_engine):
-        events.append(("read", len(events)))
-        return await original_read(stream_engine)
-
     async def edge_step(end, load, **kwargs):
-        # The node delta is done: no fact hash is held through the edge step.
-        events.append(("hashes at the edge step", len(load.graph_state.existing_hashes)))
+        events.append(("edge step", None))
         return await original_edge_step(end, load, **kwargs)
 
-    original_read = extract_module._read_code_graph_state
     original_edge_step = extract_module.add_code_graph_edges
-    monkeypatch.setattr(extract_module, "_read_code_graph_state", read)
+    engine.get_nodes = get_nodes
     monkeypatch.setattr(extract_module, "add_code_graph_edges", edge_step)
     monkeypatch.setattr(storage_module, "add_data_points", write)
     engine.add_edges.side_effect = add_edges
@@ -182,12 +181,15 @@ async def test_the_graph_is_read_once_and_the_edge_step_runs_once_after_the_last
         batch_size=2,
     )
 
+    # Each batch looks up only its own ids, just before writing them.
     assert events == [
-        ("read", 0),
+        ("lookup", 2),
         ("write", 2),
+        ("lookup", 2),
         ("write", 2),
+        ("lookup", 2),
         ("write", 2),
-        ("hashes at the edge step", 0),
+        ("edge step", None),
         ("edges", 2),
         ("edges", 2),
         ("edges", 1),

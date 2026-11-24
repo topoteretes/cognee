@@ -5,7 +5,7 @@ import json
 import os
 import tempfile
 import threading
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
@@ -22,10 +22,8 @@ import cognee_db_workers
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.graph.graph_db_interface import (
-    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
     GraphDBInterface,
     temporal_anchors_from_rows,
-    validate_graph_stream_batch_size,
 )
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
@@ -159,29 +157,6 @@ _EDGE_LOOKUP_QUERY = """
 UNWIND $source_ids AS node_id
 MATCH (from:Node {id: node_id})-[r:EDGE]->(to:Node)
 RETURN from.id, to.id, r.relationship_name, r.properties
-"""
-
-# stream_graph_data pages: nodes by keyset on the primary key, then source ids
-# the same way, whose outgoing edges come from _EDGE_LOOKUP_QUERY. Keyset on
-# the three edge columns would sort the whole edge table on every page.
-_STREAM_NODE_PAGE_QUERY = """
-MATCH (n:Node)
-WHERE n.id > $last_id
-RETURN n.id AS id, {
-    name: n.name,
-    type: n.type,
-    properties: n.properties
-} AS props
-ORDER BY id
-LIMIT $batch_size
-"""
-
-_STREAM_SOURCE_ID_PAGE_QUERY = """
-MATCH (n:Node)
-WHERE n.id > $last_id
-RETURN n.id AS id
-ORDER BY id
-LIMIT $batch_size
 """
 
 _EDGE_CREATE_QUERY = """
@@ -328,49 +303,6 @@ def _encode_provenance_row(row: dict) -> dict:
     return encoded
 
 
-def _format_graph_nodes(rows: list) -> list[tuple[str, dict[str, Any]]]:
-    """``(id, {name, type, properties})`` rows as get_graph_data nodes.
-
-    The ``properties`` JSON blob is merged into the dict; rows without an id
-    are skipped. Shared by get_graph_data and stream_graph_data.
-    """
-    formatted_nodes = []
-    for n in rows:
-        if n[0]:
-            node_id = str(n[0])
-            props = n[1]
-            if props.get("properties"):
-                try:
-                    additional_props = json.loads(props["properties"])
-                    props.update(additional_props)
-                    del props["properties"]
-                except json.JSONDecodeError:
-                    logger.warning(f"Failed to parse properties JSON for node {node_id}")
-            formatted_nodes.append((node_id, props))
-    return formatted_nodes
-
-
-def _format_graph_edges(rows: list) -> list[tuple[str, str, str, dict[str, Any]]]:
-    """``(source, target, relationship_name, properties)`` rows as get_graph_data edges.
-
-    Shared by get_graph_data and stream_graph_data.
-    """
-    formatted_edges = []
-    for e in rows:
-        if e and len(e) >= 3:
-            source_id = str(e[0])
-            target_id = str(e[1])
-            rel_type = str(e[2])
-            props = {}
-            if len(e) > 3 and e[3]:
-                try:
-                    props = json.loads(e[3])
-                except (json.JSONDecodeError, TypeError):
-                    logger.warning(f"Failed to parse edge properties for {source_id}->{target_id}")
-            formatted_edges.append((source_id, target_id, rel_type, props))
-    return formatted_edges
-
-
 def _parse_properties_blob(raw: Any) -> dict[str, Any]:
     """Decode a node/edge JSON ``properties`` blob, tolerating empty/invalid input.
 
@@ -397,6 +329,20 @@ def _json_string(value: Any) -> str:
         return ""
     text = str(value)
     return text[1:-1] if len(text) >= 2 and text[0] == text[-1] == '"' else text
+
+
+def _decoded_json_text(value: Any) -> str | None:
+    """A json_extract result as text: a string unescaped, a number or boolean as
+    its JSON text, None for a JSON null or a missing property."""
+    if value is None or value == "":
+        return None
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if decoded is None:
+        return None
+    return decoded if isinstance(decoded, str) else str(value)
 
 
 class LadybugAdapter(GraphDBInterface):
@@ -2434,9 +2380,11 @@ class LadybugAdapter(GraphDBInterface):
             - List[Dict[str, Any]]: A list of dictionaries containing properties of each
               retrieved node.
         """
+        # Each id through the primary key: a filter over the table (WHERE n.id IN
+        # $node_ids) reads every node per call, whatever the list's size.
         query_str = """
-        MATCH (n:Node)
-        WHERE n.id IN $node_ids
+        UNWIND $node_ids AS node_id
+        MATCH (n:Node {id: node_id})
         RETURN {
             id: n.id,
             name: n.name,
@@ -2445,11 +2393,57 @@ class LadybugAdapter(GraphDBInterface):
         }
         """
         try:
-            results = await self.query(query_str, {"node_ids": node_ids})
+            # Each node once, as the IN filter returned it.
+            unique_ids = list(dict.fromkeys(node_ids))
+            results = await self.query(query_str, {"node_ids": unique_ids})
             return [self._parse_node(row[0]) for row in results if row[0]]
         except Exception:
             logger.exception("Failed to get nodes")
             return []
+
+    async def get_node_ids_by_property(
+        self, node_types: list[str], property_name: str, values: list[Any]
+    ) -> list[str]:
+        """Ids of typed nodes whose property is one of ``values``.
+
+        Only the id and that property cross the worker pipe; the values are
+        matched here, since a string parameter would be read as JSON.
+        """
+        if not node_types or not values:
+            return []
+        if not property_name.isidentifier():
+            raise ValueError(f"Invalid property name: {property_name!r}")
+        column = property_name in ("name", "type")
+        field = (
+            f"n.{property_name}"
+            if column
+            else f"CAST(json_extract(n.properties, '$.{property_name}') AS STRING)"
+        )
+        rows = await self.query(
+            f"MATCH (n:Node) WHERE n.type IN $types RETURN n.id, {field}",
+            {"types": list(node_types)},
+        )
+        wanted = {str(value) for value in values}
+        return [
+            str(row[0])
+            for row in rows
+            if (row[1] if column else _decoded_json_text(row[1])) in wanted
+        ]
+
+    async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
+        """Keys of the edges leaving ``source_ids``, in statements of
+        _EDGE_LOOKUP_IDS_PER_STATEMENT sources (see ``_existing_edges``)."""
+        ids = [str(source_id) for source_id in source_ids]
+        keys: list[tuple[str, str, str]] = []
+        for start in range(0, len(ids), _EDGE_LOOKUP_IDS_PER_STATEMENT):
+            rows = await self.query(
+                "UNWIND $source_ids AS node_id "
+                "MATCH (from:Node {id: node_id})-[r:EDGE]->(to:Node) "
+                "RETURN from.id, to.id, r.relationship_name",
+                {"source_ids": ids[start : start + _EDGE_LOOKUP_IDS_PER_STATEMENT]},
+            )
+            keys.extend((str(row[0]), str(row[1]), str(row[2])) for row in rows)
+        return keys
 
     def _rows_to_dicts(self, rows: list, column_names: list[str]) -> list[dict[str, Any]]:
         """Convert query result rows to a list of dicts keyed by column names."""
@@ -3098,7 +3092,19 @@ class LadybugAdapter(GraphDBInterface):
             }
             """
             nodes = await self.query(nodes_query)
-            formatted_nodes = _format_graph_nodes(nodes)
+            formatted_nodes = []
+            for n in nodes:
+                if n[0]:
+                    node_id = str(n[0])
+                    props = n[1]
+                    if props.get("properties"):
+                        try:
+                            additional_props = json.loads(props["properties"])
+                            props.update(additional_props)
+                            del props["properties"]
+                        except json.JSONDecodeError:
+                            logger.warning(f"Failed to parse properties JSON for node {node_id}")
+                    formatted_nodes.append((node_id, props))
             if not formatted_nodes:
                 logger.warning("No nodes found in the database")
                 return [], []
@@ -3108,7 +3114,21 @@ class LadybugAdapter(GraphDBInterface):
             RETURN n.id, m.id, r.relationship_name, r.properties
             """
             edges = await self.query(edges_query)
-            formatted_edges = _format_graph_edges(edges)
+            formatted_edges = []
+            for e in edges:
+                if e and len(e) >= 3:
+                    source_id = str(e[0])
+                    target_id = str(e[1])
+                    rel_type = str(e[2])
+                    props = {}
+                    if len(e) > 3 and e[3]:
+                        try:
+                            props = json.loads(e[3])
+                        except (json.JSONDecodeError, TypeError):
+                            logger.warning(
+                                f"Failed to parse edge properties for {source_id}->{target_id}"
+                            )
+                    formatted_edges.append((source_id, target_id, rel_type, props))
 
             retrieval_time = time.time() - start_time
             logger.info(
@@ -3118,53 +3138,6 @@ class LadybugAdapter(GraphDBInterface):
         except Exception as e:
             logger.error(f"Failed to get graph data: {e}")
             raise
-
-    async def stream_graph_data(
-        self, batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE
-    ) -> AsyncIterator[
-        tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]
-    ]:
-        """``get_graph_data`` in pages; see ``GraphDBInterface.stream_graph_data``.
-
-        Nodes are paged by keyset on the primary key ``id``. Edges are paged by
-        source node: a keyset page of source ids, then their outgoing edges
-        through ``_EDGE_LOOKUP_QUERY``, so a hub's edges arrive in one page.
-        Every page is its own ``self.query`` call, so subprocess and remote
-        modes need nothing extra and no connection is held between pages.
-        """
-        validate_graph_stream_batch_size(batch_size)
-
-        # "" sorts before every id, and get_graph_data skips empty ids too.
-        last_id = ""
-        any_nodes = False
-        while True:
-            rows = await self.query(
-                _STREAM_NODE_PAGE_QUERY, {"last_id": last_id, "batch_size": batch_size}
-            )
-            if not rows:
-                break
-            last_id = rows[-1][0]
-            nodes = _format_graph_nodes(rows)
-            if nodes:
-                any_nodes = True
-                yield nodes, []
-        if not any_nodes:
-            return
-
-        last_id = ""
-        while True:
-            rows = await self.query(
-                _STREAM_SOURCE_ID_PAGE_QUERY, {"last_id": last_id, "batch_size": batch_size}
-            )
-            if not rows:
-                break
-            source_ids = [row[0] for row in rows]
-            last_id = source_ids[-1]
-            edges = _format_graph_edges(
-                await self.query(_EDGE_LOOKUP_QUERY, {"source_ids": source_ids})
-            )
-            if edges:
-                yield [], edges
 
     async def get_neighborhood(
         self,
