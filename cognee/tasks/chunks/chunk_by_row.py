@@ -5,29 +5,27 @@ from uuid import NAMESPACE_OID, uuid5
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 
 
-def _get_pair_size(pair_text: str) -> int:
+def _get_pair_size(pair_text: str, tokenizer) -> int:
     """
     Calculate the size of a given text in terms of tokens.
 
-    If an embedding engine's tokenizer is available, count the tokens for the provided word.
-    If the tokenizer is not available, assume the word counts as one token.
+    Counts the pair's tokens with the embedding engine's tokenizer, or counts it as
+    three tokens when the engine has no tokenizer.
 
     Parameters:
     -----------
 
         - pair_text (str): The key:value pair text for which the token size is to be calculated.
+        - tokenizer: The embedding engine's tokenizer, or None.
 
     Returns:
     --------
 
-        - int: The number of tokens representing the text, typically an integer, depending
-          on the tokenizer's output.
+        - int: The number of tokens representing the text.
     """
-    embedding_engine = get_embedding_engine()
-    if embedding_engine.tokenizer:
-        return embedding_engine.tokenizer.count_tokens(pair_text)
-    else:
-        return 3
+    if tokenizer:
+        return tokenizer.count_tokens(pair_text)
+    return 3
 
 
 def chunk_by_row(
@@ -50,6 +48,9 @@ def chunk_by_row(
         - max_chunk_size: The maximum allowed size for each chunk, in terms of tokens or
           words.
     """
+    # Resolved once per call, not once per pair: the engine comes from the current
+    # dataset's context, which cannot change mid-document (see chunk_by_sentence).
+    tokenizer = get_embedding_engine().tokenizer
     current_chunk_list = []
     chunk_index = 0
     current_chunk_size = 0
@@ -59,7 +60,7 @@ def chunk_by_row(
         pairs_text = line.split(", ")
 
         for pair_text in pairs_text:
-            pair_size = _get_pair_size(pair_text)
+            pair_size = _get_pair_size(pair_text, tokenizer)
             if current_chunk_size > 0 and (current_chunk_size + pair_size > max_chunk_size):
                 # Yield current cut chunk
                 current_chunk = ", ".join(current_chunk_list)

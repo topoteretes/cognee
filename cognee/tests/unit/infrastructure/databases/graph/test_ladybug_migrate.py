@@ -62,6 +62,12 @@ def test_read_ladybug_storage_version_0_18_code(tmp_path):
     assert read_ladybug_storage_version(str(tmp_path)) == "0.18.2"
 
 
+def test_read_ladybug_storage_version_0_22_code(tmp_path):
+    # 0.22.3 writes storage code 49 (read from a store the published wheel wrote).
+    _write_catalog_kz(str(tmp_path), 49, magic=b"LBUG")
+    assert read_ladybug_storage_version(str(tmp_path)) == "0.22.3"
+
+
 def test_read_ladybug_storage_version_unknown_code_raises(tmp_path):
     # Anything outside the known table — e.g., a code emitted by a newer
     # ladybug release that hasn't been added yet.

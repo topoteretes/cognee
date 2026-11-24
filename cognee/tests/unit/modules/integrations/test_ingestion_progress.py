@@ -185,6 +185,30 @@ async def test_failure_reason_is_safe_and_original_error_is_preserved(progress, 
 
 
 @pytest.mark.asyncio
+async def test_a_refused_sync_stamps_the_connection_degraded(progress, monkeypatch):
+    """SDK-832: ALLOW_HTTP_REQUESTS=false refuses the sync at track_sync's entry,
+    before the body that would otherwise record the result runs."""
+    from cognee.modules.integrations import sync_progress
+    from cognee.modules.integrations.outbound import OutboundHttpDisabledError
+
+    @asynccontextmanager
+    async def refused(*args, **kwargs):
+        raise OutboundHttpDisabledError("gmail")
+        yield
+
+    monkeypatch.setattr(sync_progress, "track_sync", refused)
+    body = AsyncMock()
+
+    with pytest.raises(OutboundHttpDisabledError):
+        await ingestion.run_sync("gmail", CREDENTIAL, body)
+
+    body.assert_not_awaited()
+    assert progress.record.await_args.kwargs["status"] == "degraded"
+    assert progress.record.await_args.kwargs["counts"]["failed"] == 1
+    assert not ingestion.sync_is_running("gmail", "account")
+
+
+@pytest.mark.asyncio
 async def test_duplicate_keeps_existing_run_and_cancellation_releases_guard(progress):
     entered = asyncio.Event()
 

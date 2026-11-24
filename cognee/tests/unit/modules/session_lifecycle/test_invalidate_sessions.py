@@ -514,6 +514,55 @@ async def test_list_unattributed_sessions_returns_null_dataset_id_rows():
 
 
 @pytest.mark.asyncio
+async def test_list_sessions_for_datasets_never_attributes_by_a_session_name_suffix():
+    """A row counts by its dataset_id; a legacy row without one only as the dataset's exact
+    default session. A client-chosen name ending in the dataset id attributes nothing."""
+    from datetime import datetime, timezone
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.session_lifecycle.metrics import list_sessions_for_datasets
+    from cognee.modules.session_lifecycle.models import SessionRecord
+
+    now = datetime.now(timezone.utc)
+    owner, other = uuid4(), uuid4()
+    dataset_id, elsewhere = uuid4(), uuid4()
+    rows = [
+        ("chat", owner, dataset_id),  # attributed by its row
+        (f"default_session_{dataset_id}", owner, None),  # legacy default session
+        (f"notes_{dataset_id}", other, None),  # a client name ending in the id
+        (f"default_session_{dataset_id}", other, elsewhere),  # attributed elsewhere
+    ]
+
+    engine = get_relational_engine()
+    async with engine.engine.begin() as conn:
+        await conn.run_sync(SessionRecord.metadata.create_all)
+    async with engine.get_async_session() as session:
+        for session_id, user_id, row_dataset in rows:
+            session.add(
+                SessionRecord(
+                    session_id=session_id,
+                    user_id=user_id,
+                    dataset_id=row_dataset,
+                    status="running",
+                    started_at=now,
+                    last_activity_at=now,
+                )
+            )
+        await session.commit()
+
+    try:
+        listed = set(await list_sessions_for_datasets([dataset_id]))
+        assert listed == {(owner, "chat"), (owner, f"default_session_{dataset_id}")}
+    finally:
+        async with engine.get_async_session() as session:
+            for session_id, user_id, _ in rows:
+                row = await session.get(SessionRecord, (session_id, user_id))
+                if row:
+                    await session.delete(row)
+            await session.commit()
+
+
+@pytest.mark.asyncio
 async def test_cleanup_bounds_parallel_sessions_and_finishes_them_before_strict_failure(
     monkeypatch,
 ):

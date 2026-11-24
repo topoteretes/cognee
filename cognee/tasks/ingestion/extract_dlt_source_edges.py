@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Optional
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.dlt_schema_graph import emit_dlt_schema_graph
 from cognee.tasks.ingestion.dlt_utils import load_dlt_manifest
@@ -24,6 +25,8 @@ def _get_source_document(data_point: DataPoint):
 async def extract_dlt_source_edges(
     data_points: list[DataPoint],
     ctx: Optional["PipelineContext"] = None,
+    ontology_resolver: BaseOntologyResolver | None = None,
+    authoritative_sources: dict[str, str | None] | None = None,
 ) -> list[DataPoint]:
     """Create graph edges and schema nodes from a DLT source manifest.
 
@@ -39,20 +42,25 @@ async def extract_dlt_source_edges(
     target row is not written yet. Cross-batch state lives in
     ``ctx.extras``: the rows written so far, a doc's schema nodes are emitted
     (and vector-embedded) only for the first batch that carries its rows, and
-    each unique ColumnValue node is persisted and embedded once. ``ctx`` is per data
-    item, and one manifest data item IS one source — that equality is what
+    each unique ColumnValue and SchemaColumn node is persisted and embedded once,
+    and each ``has_value`` edge is written once.
+    ``ctx`` is per data item, and one manifest data item IS one source — that equality is what
     makes ctx.extras the correct scope. If manifests ever stop being
     one-item-per-source, this state needs a new home.
     """
     if ctx is not None:
         emitted_schema_docs = ctx.extras.setdefault("dlt_emitted_schema_docs", set())
         emitted_value_node_ids = ctx.extras.setdefault("dlt_emitted_value_node_ids", set())
+        emitted_column_node_ids = ctx.extras.setdefault("dlt_emitted_column_node_ids", set())
+        emitted_has_value_edges = ctx.extras.setdefault("dlt_emitted_has_value_edges", set())
         written_row_ids = ctx.extras.setdefault("dlt_written_row_ids", set())
     else:
         # Direct invocation (unit tests, custom pipelines) without a pipeline
         # context: fresh per-call sets — batching dedup only.
         emitted_schema_docs = set()
         emitted_value_node_ids = set()
+        emitted_column_node_ids = set()
+        emitted_has_value_edges = set()
         written_row_ids = set()
     # Group row chunks in this batch by their source document.
     source_docs = {}  # doc_id -> document
@@ -136,6 +144,10 @@ async def extract_dlt_source_edges(
         row_records,
         ctx,
         emitted_value_node_ids=emitted_value_node_ids,
+        emitted_column_node_ids=emitted_column_node_ids,
+        emitted_has_value_edges=emitted_has_value_edges,
+        ontology_resolver=ontology_resolver,
+        authoritative_sources=authoritative_sources,
     )
 
     emitted_schema_docs.update(newly_emitted_doc_ids)

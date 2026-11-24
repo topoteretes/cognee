@@ -317,6 +317,21 @@ def _dump_base64_reply(**usage):
     ).model_dump()
 
 
+def _serializer_warnings(caught) -> list:
+    """The pydantic serializer warnings among ``caught``.
+
+    Only those are under test. Anything else raised in the block, such as a warning
+    another library emits once per process on its first use, depends on which tests
+    ran before this one and must not count.
+    """
+    return [
+        warning
+        for warning in caught
+        if issubclass(warning.category, UserWarning)
+        and str(warning.message).startswith("Pydantic serializer warnings:")
+    ]
+
+
 def test_the_real_base64_warning_is_ignored_and_other_problems_are_not():
     from pydantic import VERSION as PYDANTIC_VERSION
     from pydantic import BaseModel
@@ -333,12 +348,16 @@ def test_the_real_base64_warning_is_ignored_and_other_problems_are_not():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         _dump_base64_reply()
-        assert len(caught) == 1, "pydantic no longer warns here; the filter can go"
+        assert len(_serializer_warnings(caught)) == 1, (
+            "pydantic no longer warns here; the filter can go"
+        )
         caught.clear()
 
         mod._ignore_base64_serializer_warning()
         _dump_base64_reply()
-        assert caught == [], "pydantic reworded the warning; update the pattern"
+        assert _serializer_warnings(caught) == [], (
+            "pydantic reworded the warning; update the pattern"
+        )
 
         # Another problem in the same dump, another model's list[float] holding a str,
         # and a str that is in another field: all still shown.
@@ -350,7 +369,7 @@ def test_the_real_base64_warning_is_ignored_and_other_problems_are_not():
             # A base64-looking string in another field. Before 2.12 no field is named.
             Scores.model_construct(values="AAAA").model_dump()
             expected += 1
-        assert len(caught) == expected
+        assert len(_serializer_warnings(caught)) == expected
 
 
 @pytest.mark.skipif(sys.version_info < (3, 14), reason="context-aware warnings came in 3.14")

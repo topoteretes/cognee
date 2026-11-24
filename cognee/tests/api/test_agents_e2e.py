@@ -764,7 +764,10 @@ class TestAgentFullLifecycle:
             json={"agent_session_name": agent_a_name},
         )
         assert unreg_a.status_code == 200
-        assert unreg_a.json()["activeAgents"] == 1
+        # activeAgents counts the caller's own connections: agent A has none left.
+        # B's connection still keeps the process-wide (watchdog) counter at 1.
+        assert unreg_a.json()["activeAgents"] == 0
+        assert agent_mode._active_count == 1
 
         # -- Step 9: Active connections should show B but not A --
         conn_after = client.get("/api/v1/agents/connections", headers=headers)

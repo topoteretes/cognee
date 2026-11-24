@@ -95,8 +95,13 @@ async def persist_context_summaries(
         )
 
 
-async def remove_document_index(dataset_id: UUID | str, data_ids: list[UUID | str]) -> None:
+async def remove_document_index(dataset_id: UUID | str, data_ids: list[UUID | str]) -> bool:
     """Drop the deleted documents' buckets and the dataset's root, by their derived ids.
+
+    Returns whether the dataset had an index: any of those nodes existed. Once
+    they are gone nothing in the graph tells a dataset whose index the
+    deletion emptied from one that was never indexed, and only the former gets
+    its root written again (``rebuild_document_index_root``).
 
     Explicit, not by provenance: the index nodes carry the dataset-level
     sentinel ref of the build (``ensure_global_context_storage_context``), and
@@ -105,18 +110,22 @@ async def remove_document_index(dataset_id: UUID | str, data_ids: list[UUID | st
     like the routing rows', so this works on every graph the same way. The root
     goes too: it is computed from every document, so it would keep naming
     entities and documents the dataset no longer has, and ownership cannot
-    express that (shared output survives to its last owner). The next index
-    build writes everything anew. Takes a list so a sweep that deletes many
+    express that (shared output survives to its last owner). The caller then
+    writes a ``from_entities`` root again from the documents that remain
+    (``rebuild_document_index_root``); the next index build writes the rest
+    anew. Takes a list so a sweep that deletes many
     documents removes them in one graph call and one vector delete, with the
     root once. Runs in the dataset's database context, like the document
     delete it follows.
     """
     dataset_key = str(dataset_id)
-    await delete_context_index_nodes(
-        await get_unified_engine(),
-        [str(create_document_bucket_id(dataset_key, str(data_id))) for data_id in data_ids]
-        + [str(create_root_summary_id(dataset_key))],
-    )
+    node_ids = [
+        str(create_document_bucket_id(dataset_key, str(data_id))) for data_id in data_ids
+    ] + [str(create_root_summary_id(dataset_key))]
+    unified_engine = await get_unified_engine()
+    had_index = bool(await unified_engine.graph.get_nodes(node_ids))
+    await delete_context_index_nodes(unified_engine, node_ids)
+    return had_index
 
 
 def _context_index_source_ref(ctx: PipelineContext | None) -> tuple[str | None, str | None]:

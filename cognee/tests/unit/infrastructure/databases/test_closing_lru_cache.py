@@ -25,6 +25,17 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _frozen_heap():
+    """Keep the tests' gc.collect() calls cheap. A full collection scans every live
+    object, and in a CI shard the earlier tests leave over a million: the 100-cycle
+    test then spent minutes collecting. Frozen objects are skipped, so each collection
+    scans only what the test itself created."""
+    gc.freeze()
+    yield
+    gc.unfreeze()
+
+
 class _Closeable:
     """Stub with a sync close() that records calls."""
 

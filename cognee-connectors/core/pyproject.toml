@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cognee-connectors-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "The contract every cognee connector implements: OAuth2 descriptors, webhook verification, DLT conventions and the registry hosts load connectors through."
 readme = "README.md"
 requires-python = ">=3.10,<3.15"

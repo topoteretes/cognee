@@ -16,9 +16,9 @@ description: >-
   unchanged. Stop if the prompt names no target.
 - The workflow validates the target against the ten-file allowlist and owns Git operations
   and the final diff check. Do not create commits or branches or perform Git writes.
-- Ground behavior and benefits in repository code or tests. Use `CLAUDE.md` and `AGENTS.md`
-  for context, verifying behavioral claims in code. Other docstrings and selection notes
-  are not evidence.
+- Use `AGENTS.md` for project rules and follow its links to relevant topic guides for context.
+  Ground behavior and benefits in repository code or tests. Other docstrings and selection
+  notes are not evidence.
 - Published product docs in `topoteretes/cognee-docs` and at docs.cognee.ai are unavailable
   to these passes. Do not use unseen documentation as evidence.
 <!-- shared-rules:end -->

@@ -3,6 +3,10 @@
 The API checks at startup and periodically. The age threshold is an eligibility
 floor; a local dataset lock and the run's OS ownership marker establish whether
 recovery may proceed. Unverifiable legacy/remote rows are left untouched.
+
+A dataset's status is its newest row. A run that died before a later run of the
+same pipeline on its dataset is closed with a row dated just after its own last
+row, so that closing it afterwards does not replace the later run's status.
 """
 
 import asyncio
@@ -16,7 +20,10 @@ from cognee.infrastructure.locks import get_dataset_lock
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.data.models import Dataset
 from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
-from cognee.modules.pipelines.methods import get_unterminated_pipeline_runs
+from cognee.modules.pipelines.methods import (
+    get_pipeline_run_by_dataset,
+    get_unterminated_pipeline_runs,
+)
 from cognee.modules.pipelines.methods.get_pipeline_run import get_latest_pipeline_run
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
@@ -36,7 +43,10 @@ logger = get_logger("cognify.recovery")
 STALE_RUN_MIN_AGE_SECONDS = int(os.getenv("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS", "3600"))
 if STALE_RUN_MIN_AGE_SECONDS < 0:
     raise ValueError("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS must be nonnegative")
-RECOVERY_POLL_SECONDS = 60
+# How often the API looks again for abandoned runs. A run is not eligible before
+# STALE_RUN_MIN_AGE_SECONDS, so a shorter interval closes one barely sooner,
+# and every look reads the newest row of every run.
+RECOVERY_POLL_SECONDS = 300
 
 # The rollback each pipeline supplies for its own failed runs (the same policy
 # run_tasks applies when a run errors inline). A pipeline without an entry has
@@ -48,6 +58,14 @@ ROLLBACK_HANDLERS = {
     INDEXING_PIPELINE_NAME: cognify_rollback_handler,
 }
 
+# The smallest step a timestamp column holds.
+CLOSING_ROW_OFFSET = timedelta(microseconds=1)
+
+
+def _as_utc(moment: datetime) -> datetime:
+    # SQLite hands a stored time back without its zone; the values are UTC.
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+
 
 def _is_older_than_threshold(created_at) -> bool:
     """Return True if the run started long enough ago to be considered stale.
@@ -57,10 +75,8 @@ def _is_older_than_threshold(created_at) -> bool:
     """
     if created_at is None:
         return True
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_RUN_MIN_AGE_SECONDS)
-    return created_at <= cutoff
+    return _as_utc(created_at) <= cutoff
 
 
 async def recover_stale_pipeline_runs_on_startup() -> None:
@@ -121,7 +137,6 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
                             await rollback_handler(
                                 pipeline_run_id=current.pipeline_run_id,
                                 dataset=dataset,
-                                keep_completed_data=True,
                                 pipeline_name=current.pipeline_name,
                             )
                         await _close_as_abandoned(
@@ -153,6 +168,28 @@ async def pipeline_recovery_service():
             await task
 
 
+async def _closing_time(pipeline_run) -> datetime | None:
+    """The time the ERRORED row of ``pipeline_run`` is dated: ``None`` for now, or
+    just after the run's own newest row when a later run has rows on the dataset.
+
+    A dataset's status is the newest row of the pipeline on it. Dated now, the row
+    closing a run that died before a later run would become that row and report a
+    dataset the later run completed as failed. Dated just after the run's own
+    newest row it is still the newest row of its run, which closes it, and stays
+    older than the later run's.
+    """
+    newest = await get_pipeline_run_by_dataset(pipeline_run.dataset_id, pipeline_run.pipeline_name)
+    if newest is None or newest.pipeline_run_id == pipeline_run.pipeline_run_id:
+        return None
+    closing_time = _as_utc(pipeline_run.created_at) + CLOSING_ROW_OFFSET
+    if closing_time >= _as_utc(newest.created_at):
+        raise RuntimeError(
+            f"Run {pipeline_run.pipeline_run_id} cannot be closed beneath run "
+            f"{newest.pipeline_run_id}: their newest rows are not a microsecond apart."
+        )
+    return closing_time
+
+
 async def _close_as_abandoned(pipeline_run, dataset, session_ids: list[str]) -> None:
     """Write the ERRORED row for ``pipeline_run``, carrying the STARTED row's metadata.
 
@@ -170,6 +207,7 @@ async def _close_as_abandoned(pipeline_run, dataset, session_ids: list[str]) -> 
         origin=getattr(pipeline_run, "origin", None),
         parent_operation_id=getattr(pipeline_run, "parent_operation_id", None),
         session_ids=tuple(session_ids),
+        created_at=await _closing_time(pipeline_run),
     )
 
 

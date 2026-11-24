@@ -1,7 +1,7 @@
 """The Slack connector on the shared contract: ``CONNECTOR``.
 
 Derived from cognee's Slack adapter and OAuth module
-(cognee.modules.integrations.slack.adapter and .oauth, cognee dev, 2026-10-27): the
+(cognee.modules.integrations.slack.adapter and .oauth, cognee dev, 2026-11-12): the
 same ``oauth/v2/authorize`` and ``oauth.v2.access`` endpoints, the same bot scopes,
 and the fields the adapter reads out of a token response — ``team.id`` as the
 account webhooks route by, ``team.name`` as its label, the granted ``scope`` string,
@@ -10,14 +10,16 @@ provider metadata. Inbound requests are verified with the ``slack_v0`` scheme ov
 ``X-Slack-Signature`` / ``X-Slack-Request-Timestamp`` keyed with
 ``SLACK_SIGNING_SECRET`` (:mod:`cognee_connector_slack.webhooks`).
 
-A tier-1 descriptor: nothing here imports cognee, and the hand-written Slack app
-(slash commands, "Remember this", App Home, the history import) stays in
+A tier-1 descriptor: nothing here imports cognee. The Slack app itself (``@cognee``
+mentions, the "Remember this" and "Forget this" shortcuts, App Home, the channel sync
+and Sign in with Slack, the ``slack_member`` provider) stays in
 :mod:`cognee_connector_slack.cognee_host`. Two things that adapter does are outside
 what a descriptor can say. An Enterprise Grid org-level install, whose token
-response carries ``enterprise.id`` and no ``team``, is identified by the adapter's
-fallback, not by ``account_id_path``. And Slack names an event's type inside the
-body (``event.type``), not in a header, so ``app_uninstalled`` / ``tokens_revoked``
-are handled by the host's Events API handler rather than ``webhook_revoke_events``.
+response carries ``enterprise.id`` and no ``team``, is not supported here: the
+descriptor reads ``team.id`` only, and the adapter's ``enterprise.id`` fallback is the
+host's. And Slack names an event's type inside the body (``event.type``), not in a
+header, so ``app_uninstalled`` / ``tokens_revoked`` are handled by the host's Events
+API handler rather than ``webhook_revoke_events``.
 """
 
 from cognee_connector_slack.settings import slack_settings
@@ -30,10 +32,14 @@ AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
 ACCESS_URL = "https://slack.com/api/oauth.v2.access"
 
 # History is fetched only for explicitly selected channels. Metadata scopes
-# also let imports verify both bot and connecting-user membership. Existing
-# installations must re-authorize to grant these additional scopes.
+# also let a sync verify both bot and connecting-user membership; users:read renders
+# message authors by name; app_mentions:read and im:history receive ``@cognee`` in
+# channels and DMs; chat:write answers it with ``chat.postMessage`` or ``chat.postEphemeral``; commands is what
+# message shortcuts (Remember this, Forget this) need. The same list as
+# ``cognee_host.oauth._BOT_SCOPES``, which the cognee server's install flow sends.
 BOT_SCOPES = (
-    "commands,chat:write,im:write,channels:read,channels:history,groups:read,groups:history"
+    "app_mentions:read,chat:write,commands,im:history,channels:read,"
+    "channels:history,groups:read,groups:history,users:read"
 )
 
 DESCRIPTOR = ConnectorDescriptor(
@@ -62,8 +68,8 @@ DESCRIPTOR = ConnectorDescriptor(
     signature_timestamp_header="x-slack-request-timestamp",
     # An Events API envelope names the workspace and carries a per-delivery id;
     # Slack retries a delivery up to three times, so ``event_id`` is what to
-    # dedupe on. Slash commands and interactive payloads are form-encoded and
-    # go through the host's own routes, never through ``handle_webhook``.
+    # dedupe on. Interactive payloads are form-encoded and go through the host's
+    # own ``/interactive`` route, never through ``handle_webhook``.
     webhook_account_id_path="team_id",
     webhook_delivery_id_path="event_id",
 )
