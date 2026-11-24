@@ -668,3 +668,69 @@ async def test_each_chunk_extraction_call_sees_only_its_own_chunk_id(mock_integr
 
     assert seen == {chunk.text: chunk.id for chunk in chunks}
     assert current_chunk_id.get() is None
+
+
+def _config_with_effort(effort):
+    from cognee.infrastructure.llm.config import get_llm_config
+
+    config = get_llm_config().model_copy()
+    config.graph_extraction_reasoning_effort = effort
+    return config
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("custom_prompt", [None, "MINE"])
+async def test_graph_extraction_reasoning_effort_is_sent_when_set(custom_prompt):
+    ecg = importlib.import_module(
+        "cognee.infrastructure.llm.extraction.knowledge_graph.extract_content_graph"
+    )
+    llm = AsyncMock(return_value=KnowledgeGraph(nodes=[], edges=[]))
+
+    with (
+        patch.object(ecg, "get_llm_config", return_value=_config_with_effort("low")),
+        patch.object(ecg.LLMGateway, "acreate_structured_output", llm),
+    ):
+        await ecg.extract_content_graph("text", KnowledgeGraph, custom_prompt=custom_prompt)
+
+    assert llm.call_args.kwargs["reasoning_effort"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_graph_extraction_reasoning_effort_unset_sends_nothing():
+    ecg = importlib.import_module(
+        "cognee.infrastructure.llm.extraction.knowledge_graph.extract_content_graph"
+    )
+    llm = AsyncMock(return_value=KnowledgeGraph(nodes=[], edges=[]))
+
+    with (
+        patch.object(ecg, "get_llm_config", return_value=_config_with_effort("")),
+        patch.object(ecg.LLMGateway, "acreate_structured_output", llm),
+    ):
+        await ecg.extract_content_graph("text", KnowledgeGraph)
+
+    assert "reasoning_effort" not in llm.call_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_graph_extraction_reasoning_effort_call_kwarg_wins():
+    ecg = importlib.import_module(
+        "cognee.infrastructure.llm.extraction.knowledge_graph.extract_content_graph"
+    )
+    llm = AsyncMock(return_value=KnowledgeGraph(nodes=[], edges=[]))
+
+    with (
+        patch.object(ecg, "get_llm_config", return_value=_config_with_effort("low")),
+        patch.object(ecg.LLMGateway, "acreate_structured_output", llm),
+    ):
+        await ecg.extract_content_graph("text", KnowledgeGraph, reasoning_effort="high")
+
+    assert llm.call_args.kwargs["reasoning_effort"] == "high"
+
+
+def test_graph_extraction_reasoning_effort_reads_env(monkeypatch):
+    from cognee.infrastructure.llm.config import LLMConfig
+
+    monkeypatch.setenv("GRAPH_EXTRACTION_REASONING_EFFORT", "low")
+    assert LLMConfig().graph_extraction_reasoning_effort == "low"
+    monkeypatch.delenv("GRAPH_EXTRACTION_REASONING_EFFORT")
+    assert LLMConfig().graph_extraction_reasoning_effort == ""

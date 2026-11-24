@@ -27,11 +27,16 @@ async def extract_content_graph(
     ``temporal_hints`` are rendered into the default graph prompt's
     TEMPORAL_NORMALIZATION_HINTS block (see ``engine/utils/temporal_hints.py``).
     A ``custom_prompt`` is sent verbatim and receives no hints.
+    ``GRAPH_EXTRACTION_REASONING_EFFORT``, when set, is sent as ``reasoning_effort``
+    on this call only; a ``reasoning_effort`` kwarg overrides it.
     """
+    llm_config = get_llm_config()
+    if llm_config.graph_extraction_reasoning_effort:
+        kwargs.setdefault("reasoning_effort", llm_config.graph_extraction_reasoning_effort)
+
     if custom_prompt:
         system_prompt = custom_prompt
     else:
-        llm_config = get_llm_config()
         prompt_path = llm_config.graph_prompt_path
 
         # Check if the prompt path is an absolute path or just a filename

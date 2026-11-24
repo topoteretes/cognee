@@ -166,6 +166,9 @@ class LLMConfig(BaseSettings):
     image_transcription_prompt_path: str = "transcribe_image_prompt.txt"
     image_transcription_max_completion_tokens: int = 1024
     image_transcription_reasoning_effort: str = "low"
+    # Reasoning effort for graph extraction only (the cognify call that writes the graph),
+    # so answers keep the model's default. Empty sends none and the model uses its default.
+    graph_extraction_reasoning_effort: str = ""
     llm_rate_limit_enabled: bool = False
     # Default 60 requests per interval; local inference servers get
     # LOCAL_DEFAULT_RATE_LIMIT_REQUESTS instead (see default_local_rate_limit_budget).
