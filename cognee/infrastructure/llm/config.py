@@ -1,6 +1,6 @@
 import json
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -168,7 +168,12 @@ class LLMConfig(BaseSettings):
     image_transcription_reasoning_effort: str = "low"
     # Reasoning effort for graph extraction only (the cognify call that writes the graph),
     # so answers keep the model's default. Empty sends none and the model uses its default.
-    graph_extraction_reasoning_effort: str = ""
+    # Sent only when the model (and FALLBACK_MODEL, if set) accepts reasoning_effort per
+    # litellm; otherwise a warning is logged once and nothing is sent. Values are the
+    # OpenAI SDK's ReasoningEffort.
+    graph_extraction_reasoning_effort: Literal[
+        "", "none", "minimal", "low", "medium", "high", "xhigh", "max"
+    ] = ""
     llm_rate_limit_enabled: bool = False
     # Default 60 requests per interval; local inference servers get
     # LOCAL_DEFAULT_RATE_LIMIT_REQUESTS instead (see default_local_rate_limit_budget).

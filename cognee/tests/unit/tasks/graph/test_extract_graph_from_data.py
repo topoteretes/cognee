@@ -670,13 +670,28 @@ async def test_each_chunk_extraction_call_sees_only_its_own_chunk_id(mock_integr
     assert current_chunk_id.get() is None
 
 
-def _config_with_effort(effort, model="openai/gpt-5-mini"):
+def _config_with_effort(effort, model="openai/gpt-5-mini", fallback_model="", fallback_key=""):
     from cognee.infrastructure.llm.config import get_llm_config
 
     config = get_llm_config().model_copy()
     config.graph_extraction_reasoning_effort = effort
     config.llm_model = model
+    config.fallback_model = fallback_model
+    config.fallback_api_key = fallback_key
     return config
+
+
+async def _sent_kwargs(config):
+    ecg = importlib.import_module(
+        "cognee.infrastructure.llm.extraction.knowledge_graph.extract_content_graph"
+    )
+    llm = AsyncMock(return_value=KnowledgeGraph(nodes=[], edges=[]))
+    with (
+        patch.object(ecg, "get_llm_config", return_value=config),
+        patch.object(ecg.LLMGateway, "acreate_structured_output", llm),
+    ):
+        await ecg.extract_content_graph("text", KnowledgeGraph)
+    return llm.call_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -743,6 +758,46 @@ async def test_graph_extraction_reasoning_effort_skipped_on_non_reasoning_model(
         await ecg.extract_content_graph("text", KnowledgeGraph)
 
     assert "reasoning_effort" not in llm.call_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_graph_extraction_reasoning_effort_skipped_when_fallback_is_not_reasoning():
+    # The content-policy fallback reuses the call's kwargs, so it must accept them too.
+    config = _config_with_effort("low", fallback_model="gpt-4o-mini", fallback_key="k")
+    assert "reasoning_effort" not in await _sent_kwargs(config)
+
+
+@pytest.mark.asyncio
+async def test_graph_extraction_reasoning_effort_sent_when_fallback_is_reasoning():
+    config = _config_with_effort("low", fallback_model="gpt-5-mini", fallback_key="k")
+    assert (await _sent_kwargs(config))["reasoning_effort"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_graph_extraction_reasoning_effort_ignores_fallback_without_key():
+    # The adapters use the fallback only when both its model and key are set.
+    config = _config_with_effort("low", fallback_model="gpt-4o-mini")
+    assert (await _sent_kwargs(config))["reasoning_effort"] == "low"
+
+
+def test_graph_extraction_reasoning_effort_rejects_unknown_value(monkeypatch):
+    from pydantic import ValidationError
+
+    from cognee.infrastructure.llm.config import LLMConfig
+
+    monkeypatch.setenv("GRAPH_EXTRACTION_REASONING_EFFORT", "lwo")
+    with pytest.raises(ValidationError):
+        LLMConfig()
+
+
+@pytest.mark.parametrize(
+    "model, expected",
+    [("openai/gpt-5-mini", True), ("gpt-4o-mini", False), ("claude-3-5-haiku-20241022", False)],
+)
+def test_supports_reasoning_effort(model, expected):
+    from cognee.infrastructure.llm.utils import supports_reasoning_effort
+
+    assert supports_reasoning_effort(model) is expected
 
 
 def test_graph_extraction_reasoning_effort_reads_env(monkeypatch):

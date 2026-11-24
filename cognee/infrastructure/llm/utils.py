@@ -1,5 +1,6 @@
 import asyncio
 import os
+from functools import lru_cache
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
@@ -136,6 +137,21 @@ def get_model_max_completion_tokens(model_name: str) -> int | None:
         logger.debug("Model not found in LiteLLM's model_cost.")
 
     return max_completion_tokens
+
+
+@lru_cache
+def supports_reasoning_effort(model_name: str) -> bool:
+    """Whether litellm accepts ``reasoning_effort`` for ``model_name``.
+
+    Models it does not list reject the parameter. This is not the estimator's
+    ``_is_reasoning_model``: that one asks which models bill hidden reasoning tokens
+    by default (gpt-5, gpt-6, o-series), while models such as Claude accept
+    ``reasoning_effort`` but do not reason unless asked.
+    """
+    # Imported here for the same reason as in get_model_max_completion_tokens.
+    import litellm
+
+    return litellm.supports_reasoning(model=model_name)
 
 
 def get_llm_token_ceiling() -> int:
