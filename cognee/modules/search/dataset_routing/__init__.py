@@ -18,7 +18,6 @@ from .store import (
     DATASET_ROUTE_COLLECTION,
     ensure_default_store,
     get_dataset_route_engine,
-    routing_width_matches,
 )
 
 __all__ = [
@@ -32,6 +31,5 @@ __all__ = [
     "prune_dataset_routes",
     "remove_dataset_routes",
     "route_datasets",
-    "routing_width_matches",
     "sync_dataset_routes",
 ]

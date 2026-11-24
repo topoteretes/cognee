@@ -19,6 +19,8 @@ def validate_raw_vector_points(points: list[dict], vector_size: int) -> dict[str
     twice is written once: the last point wins and the two ``belongs_to_set`` lists are
     unioned, as ``create_data_points`` does with duplicate ids in one batch.
     """
+    if type(vector_size) is not int or vector_size <= 0:
+        raise ValueError("Raw vector size must be a positive integer")
     rows: dict[str, dict] = {}
     for point in points:
         point_id = point.get("id")
@@ -148,6 +150,8 @@ class VectorDBInterface(Protocol):
         collection_name: str,
         points: list[dict],
         payload_schema: Any | None = None,
+        *,
+        vector_size: int | None = None,
     ) -> None:
         """
         Upsert already-computed vectors into the specified collection.
@@ -171,6 +175,8 @@ class VectorDBInterface(Protocol):
         ``<Type>_<field>`` collection ``index_data_points`` writes), so a row read from
         one of those lands in another as it was. Adapters that do not support raw vector
         writes should raise NotImplementedError.
+        An explicit ``vector_size`` validates points and sizes new collections
+        independently of the adapter's cached embedder. Omitted uses its width.
         """
         raise NotImplementedError("upsert_raw_vectors is not implemented for this adapter")
 
@@ -397,6 +403,13 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     # Optional methods that may be implemented by adapters
+    async def list_collections(self) -> list[str]:
+        """All collection names in this adapter's store/schema; never other schemas.
+
+        Required for namespace cleanup. Unsupported discovery raises visibly.
+        """
+        raise NotImplementedError("list_collections is not implemented for this adapter")
+
     async def existing_collections(self, collection_names: list[str]) -> list[str]:
         """
         Return the names in ``collection_names`` that exist, in their given order.

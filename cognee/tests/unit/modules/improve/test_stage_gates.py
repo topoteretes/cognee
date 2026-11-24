@@ -283,6 +283,17 @@ def _patch_global_context_deps(monkeypatch, *, changed, pipeline_returns, shared
     changes_mod = importlib.import_module("cognee.modules.improve.watermarks")
     check = AsyncMock(return_value=changed)
     monkeypatch.setattr(changes_mod, "has_dataset_changed_since_last_improve", check)
+    monkeypatch.setattr(
+        changes_mod,
+        "last_improve_watermark",
+        AsyncMock(return_value=types.SimpleNamespace(stamp={"routing_identity": "routing/A"})),
+    )
+    routing_mod = importlib.import_module("cognee.modules.search.dataset_routing.store")
+    monkeypatch.setattr(
+        routing_mod,
+        "get_dataset_route_embedding",
+        AsyncMock(return_value=types.SimpleNamespace(collection="routing/A")),
+    )
     access_mod = importlib.import_module("cognee.context_global_variables")
     monkeypatch.setattr(access_mod, "backend_access_control_enabled", lambda: not shared_graph)
     pipeline_mod = importlib.import_module("cognee.memify_pipelines.global_context_index")
@@ -340,6 +351,29 @@ async def test_global_context_index_counts_every_dataset_when_the_graph_is_share
 
 
 # --- inputs ----------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("previous_identity", [None, "routing/B"])
+async def test_global_context_model_change_runs_without_graph_writes(
+    monkeypatch, previous_identity
+):
+    from cognee.modules.improve import watermarks
+
+    _, pipeline = _patch_global_context_deps(monkeypatch, changed=False, pipeline_returns={})
+    monkeypatch.setattr(
+        watermarks,
+        "last_improve_watermark",
+        AsyncMock(
+            return_value=types.SimpleNamespace(stamp={"routing_identity": previous_identity})
+        ),
+    )
+    result = await GlobalContextIndexStage().run(_inputs(build_global_context_index=True))
+    pipeline.assert_awaited_once()
+    assert (
+        result.run_info_stamp[watermarks.GLOBAL_CONTEXT_WATERMARK_KEY]["routing_identity"]
+        == "routing/A"
+    )
 
 
 def test_inputs_are_frozen():

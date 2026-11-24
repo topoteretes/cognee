@@ -25,7 +25,7 @@ from cognee.modules.data.methods.get_data_ids_by_dataset import get_data_ids_by_
 from cognee.shared.logging_utils import get_logger
 
 from .index import dataset_route_ids
-from .store import DATASET_ROUTE_COLLECTION, get_dataset_route_engine, routing_width_matches
+from .store import get_dataset_route_embedding, get_dataset_route_engine
 
 logger = get_logger("dataset_routing")
 
@@ -81,29 +81,20 @@ async def route_datasets(
     (or lost it), so routing knows nothing about it: it is left to the search's
     widening pass when another dataset is routed, and searched with every other
     candidate when none is. An
-    adapter that cannot score rows by id, or a routing collection built with
-    another embedding width, leaves every dataset unindexed. So does a
+    adapter that cannot score rows by id leaves every dataset unindexed. So does a
     deployment with no routing collection at all, before the query is
     embedded: a search type that needs no embedding (CODE, lexical, Cypher)
     must not start needing one for a routing step that cannot narrow anything.
-    Any failure on the way to a score, a routing store that cannot be reached,
-    a relational read that fails, a query that cannot be embedded, is a
-    warning and leaves every dataset unindexed too, for the same reason:
-    routing is a narrowing, never the search itself, and before it existed
-    no search depended on the default store.
+    Configuration, embedding and corrupt-collection errors propagate. Only
+    missing collections and optional scoring support leave rows unindexed.
     """
     if top_k < 1:
         raise ValueError("Dataset routing needs top_k >= 1.")
     candidates = tuple(dataset_ids)
-    try:
-        return await _score_candidates(query_text, candidates, top_k, distance_cutoff, tie_margin)
-    except Exception:
-        logger.warning(
-            "Dataset routing is off for this search: the query could not be scored against "
-            "the routing collection. Searching every readable dataset.",
-            exc_info=True,
-        )
+    if not candidates:
+        logger.debug("Dataset routing: no readable candidates")
         return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
+    return await _score_candidates(query_text, candidates, top_k, distance_cutoff, tie_margin)
 
 
 async def _score_candidates(
@@ -114,9 +105,9 @@ async def _score_candidates(
     tie_margin: float,
 ) -> DatasetRoutingDecision:
     engine = await get_dataset_route_engine()
-    if not await engine.has_collection(DATASET_ROUTE_COLLECTION):
-        return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
-    if not await routing_width_matches(engine):
+    embedding = await get_dataset_route_embedding()
+    if not await engine.has_collection(embedding.collection):
+        logger.debug("Dataset routing: active deployment collection missing; candidates unindexed")
         return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
 
     documents = await get_data_ids_by_dataset(list(candidates))
@@ -125,11 +116,9 @@ async def _score_candidates(
         for row_id in dataset_route_ids(dataset_id, documents.get(dataset_id, [])):
             dataset_by_row[row_id] = dataset_id
 
-    query_vector = (await engine.embedding_engine.embed_text([query_text]))[0]
+    query_vector = (await embedding.engine.embed_text([query_text]))[0]
     try:
-        scored = await engine.score_by_ids(
-            DATASET_ROUTE_COLLECTION, list(dataset_by_row), query_vector
-        )
+        scored = await engine.score_by_ids(embedding.collection, list(dataset_by_row), query_vector)
     except CollectionNotFoundError:
         scored = []
     except NotImplementedError:
@@ -137,6 +126,8 @@ async def _score_candidates(
         scored = []
 
     best: dict[UUID, float] = {}
+    if not scored:
+        logger.debug("Dataset routing: no authorized rows scored; candidates unindexed")
     for result in scored:
         dataset_id = dataset_by_row.get(str(result.id))
         if dataset_id is None:

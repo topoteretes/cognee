@@ -56,7 +56,9 @@ def _install_engine(monkeypatch, answers):
     return session
 
 
-@pytest.mark.parametrize("key", [watermarks.REVIEW_WATERMARK_KEY])
+@pytest.mark.parametrize(
+    "key", [watermarks.REVIEW_WATERMARK_KEY, watermarks.GLOBAL_CONTEXT_WATERMARK_KEY]
+)
 @pytest.mark.asyncio
 async def test_stamp_lookup_filters_in_sql_for_sqlite_and_postgres(monkeypatch, key):
     from sqlalchemy.dialects import postgresql, sqlite
@@ -76,7 +78,9 @@ async def test_stamp_lookup_filters_in_sql_for_sqlite_and_postgres(monkeypatch, 
     assert "LIMIT 1" in sqlite_sql and "LIMIT 1" in postgres_sql
 
 
-@pytest.mark.parametrize("key", [watermarks.REVIEW_WATERMARK_KEY])
+@pytest.mark.parametrize(
+    "key", [watermarks.REVIEW_WATERMARK_KEY, watermarks.GLOBAL_CONTEXT_WATERMARK_KEY]
+)
 @pytest.mark.asyncio
 async def test_stamp_survives_long_history_and_excludes_failed_rows(monkeypatch, tmp_path, key):
     import importlib

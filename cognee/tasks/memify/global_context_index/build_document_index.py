@@ -92,7 +92,7 @@ async def build_document_index(
     await persist_context_summaries(changed, ctx)
     # The routing collection mirrors this index and reconciles against the full
     # desired set, not the diff, so a row it is missing is written too. Its rows
-    # copy the vectors just written to this dataset's store.
+    # embed the source text in deployment space, preserving its index payload.
     await sync_dataset_routes(data.dataset_id, list(desired.values()), unified_engine.vector)
     changed_buckets = [summary for summary in changed if not summary.is_root]
     # A root the graph lacked took every surviving bucket's summarized_in edge

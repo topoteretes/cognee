@@ -382,6 +382,44 @@ def test_routing_defaults():
         DatasetRoutingConfig(_env_file=None, tie_margin=-0.1)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("widening", [False, True])
+async def test_selected_dimension_mismatch_propagates_without_retry(lane, widening):
+    from cognee.infrastructure.databases.vector.exceptions.exceptions import (
+        EmbeddingDimensionMismatchError,
+    )
+
+    lane.decision = _narrowed(lane)
+    mismatch = EmbeddingDimensionMismatchError("foreign", "B", 16, "A", 8)
+    lane.responses = [[_payload(lane.readable[1])], mismatch] if widening else [mismatch]
+    with pytest.raises(EmbeddingDimensionMismatchError) as caught:
+        await _search(lane)
+    assert caught.value is mismatch
+    assert len(lane.fan_out_calls) == (2 if widening else 1)
+
+
+def test_dimension_mismatch_is_not_hidden_by_successful_sibling(lane):
+    from cognee.infrastructure.databases.vector.exceptions.exceptions import (
+        EmbeddingDimensionMismatchError,
+    )
+
+    mismatch = EmbeddingDimensionMismatchError("foreign", "B", 16, "A", 8)
+    with pytest.raises(EmbeddingDimensionMismatchError):
+        lane.search_mod._collect_dataset_results(
+            [_payload(lane.readable[0], ["hit"]), mismatch],
+            query_type=SearchType.CHUNKS,
+            query_text="q",
+            only_context=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_explicit_empty_scope_is_never_routed(lane):
+    await _search(lane, dataset_ids=[])
+    assert lane.route_calls == []
+    assert lane.fan_out_calls == [[]]
+
+
 def test_payload_entries_follow_the_normalization_rule():
     dataset = _dataset("a")
     assert _payload(dataset).entries() == []

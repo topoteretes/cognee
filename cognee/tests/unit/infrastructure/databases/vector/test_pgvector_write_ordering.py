@@ -239,6 +239,76 @@ async def test_upsert_raw_vectors_writes_rows_in_row_order():
 
 
 @pytest.mark.asyncio
+async def test_raw_explicit_width_controls_validation_without_cached_embedder(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    log = []
+    adapter = _adapter(log)
+    adapter.has_collection = AsyncMock(return_value=False)
+    adapter.create_collection = AsyncMock()
+    adapter.get_table = AsyncMock(
+        return_value=SimpleNamespace(
+            c=SimpleNamespace(vector=SimpleNamespace(type=SimpleNamespace(dim=2)))
+        )
+    )
+
+    def forbidden():
+        raise AssertionError("explicit width must not use cached embedder")
+
+    monkeypatch.setattr(adapter.embedding_engine, "get_vector_size", forbidden)
+    await adapter.upsert_raw_vectors(
+        "Routing_text",
+        [{"id": uuid4(), "vector": [0.1, 0.2], "payload": {"text": "route"}}],
+        vector_size=2,
+    )
+    adapter.create_collection.assert_awaited_once_with(
+        "Routing_text", payload_schema=None, vector_size=2
+    )
+    assert len(log) == 1
+    from cognee.infrastructure.databases.vector.exceptions import StoredVectorWidthMismatchError
+
+    with pytest.raises(StoredVectorWidthMismatchError):
+        await adapter.upsert_raw_vectors(
+            "Routing_text",
+            [{"id": uuid4(), "vector": [1.0] * 3, "payload": {"text": "wrong width"}}],
+            vector_size=3,
+        )
+    assert len(log) == 1
+
+
+@pytest.mark.asyncio
+async def test_collection_discovery_is_schema_scoped(monkeypatch):
+    from types import SimpleNamespace
+
+    adapter = _adapter([], schema="ds_alpha")
+    schemas = []
+
+    def inspect(_connection):
+        def names(*, schema):
+            schemas.append(schema)
+            return ["Routing_text", "Other_text"]
+
+        return SimpleNamespace(get_table_names=names)
+
+    monkeypatch.setattr(
+        "cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter.inspect", inspect
+    )
+
+    class Connection:
+        async def run_sync(self, function):
+            return function(self)
+
+    @asynccontextmanager
+    async def connect():
+        yield Connection()
+
+    adapter.engine = SimpleNamespace(connect=connect)
+    assert await adapter.list_collections() == ["Routing_text", "Other_text"]
+    assert schemas == ["ds_alpha"]
+
+
+@pytest.mark.asyncio
 async def test_a_schema_pinned_adapter_names_its_own_schema():
     """The table is schema-qualified, so a same-named collection in ``public`` is never
     read or written; the conditions refer to the target by its bare name, as Postgres

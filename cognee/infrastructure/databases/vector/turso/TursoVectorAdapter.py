@@ -21,6 +21,7 @@ retried on ``Write-write conflict``.
 import asyncio
 import json
 import os
+import re
 import threading
 from typing import Any
 from uuid import UUID
@@ -40,7 +41,7 @@ from cognee.infrastructure.engine.utils import parse_id
 from cognee.shared.logging_utils import get_logger
 
 from ..embeddings.EmbeddingGateway import EmbeddingGateway
-from ..exceptions import CollectionNotFoundError
+from ..exceptions import CollectionNotFoundError, StoredVectorWidthMismatchError
 from ..models.ScoredResult import ScoredResult
 from ..pgvector.serialize_data import serialize_data
 from ..vector_db_interface import VectorDBInterface, validate_raw_vector_points
@@ -277,9 +278,13 @@ class TursoVectorAdapter(VectorDBInterface):
             self._known_collections.add(collection_name)
         return exists
 
-    async def create_collection(self, collection_name: str, payload_schema=None):
+    async def create_collection(
+        self, collection_name: str, payload_schema=None, *, vector_size: int | None = None
+    ):
         """Create the table for ``collection_name`` if it does not exist."""
-        vector_size = self.embedding_engine.get_vector_size()
+        if vector_size is None:
+            vector_size = self.embedding_engine.get_vector_size()
+        validate_raw_vector_points([], vector_size)
 
         if not await self.has_collection(collection_name):
             await self._execute(
@@ -313,6 +318,10 @@ class TursoVectorAdapter(VectorDBInterface):
             fetch=True,
         )
         return [row[0] for row in rows or [] if not row[0].startswith(_ENGINE_TABLE_PREFIXES)]
+
+    async def list_collections(self) -> list[str]:
+        """All user tables in this adapter's own store."""
+        return await self.get_table_names()
 
     # ------------------------------------------------------------------ #
     # Writes
@@ -469,7 +478,9 @@ class TursoVectorAdapter(VectorDBInterface):
         self,
         collection_name: str,
         points: list[dict],
-        payload_schema: type[BaseModel] | None = None,
+        payload_schema: Any | None = None,
+        *,
+        vector_size: int | None = None,
     ) -> None:
         """Upsert caller-provided vectors without invoking the embedding engine.
 
@@ -485,7 +496,9 @@ class TursoVectorAdapter(VectorDBInterface):
         if not points:
             return
 
-        vector_size = self.embedding_engine.get_vector_size()
+        explicit_width = vector_size is not None
+        if vector_size is None:
+            vector_size = self.embedding_engine.get_vector_size()
         # Every check runs before the table exists, so a rejected call creates nothing.
         rows: dict[str, dict[str, Any]] = {
             row_id: {
@@ -496,7 +509,22 @@ class TursoVectorAdapter(VectorDBInterface):
         }
 
         if not await self.has_collection(collection_name):
-            await self.create_collection(collection_name, payload_schema=payload_schema)
+            await self.create_collection(
+                collection_name, payload_schema=payload_schema, vector_size=vector_size
+            )
+
+        if explicit_width:
+            # Turso's PRAGMA table_info omits the declared width; sqlite_master
+            # retains it, with whitespace normalized by the parser.
+            schema = await self._execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND lower(name) = lower(?)",
+                [collection_name],
+                fetch=True,
+            )
+            match = re.search(r"\bvector\s+F32_BLOB\s*\(\s*(\d+)\s*\)", schema[0][0], re.IGNORECASE)
+            stored_width = int(match.group(1)) if match else None
+            if stored_width != vector_size:
+                raise StoredVectorWidthMismatchError(collection_name, stored_width, vector_size)
 
         await retry_on_conflict(
             lambda: asyncio.to_thread(self._upsert_rows, collection_name, rows, replace_vector=True)

@@ -32,7 +32,7 @@ IMPROVE_OPERATION_NAME = "improve"
 
 REVIEW_WATERMARK_KEY = "review_conflicts"
 # Renaming it makes every dataset rebuild its index once, e.g. after the index text changes.
-GLOBAL_CONTEXT_WATERMARK_KEY = "global_context_index"
+GLOBAL_CONTEXT_WATERMARK_KEY = "global_context_index_deployment_routing_v2"
 
 
 class StageWatermark(NamedTuple):

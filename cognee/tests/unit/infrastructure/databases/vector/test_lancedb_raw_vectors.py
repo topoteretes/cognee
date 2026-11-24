@@ -121,6 +121,43 @@ async def test_lancedb_upsert_raw_vectors_without_schema_stores_index_rows(tmp_p
     assert list(row.payload) == list(expected)
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_explicit_raw_width_ignores_cached_embedder_and_rejects_corruption(tmp_path):
+    from cognee.infrastructure.databases.vector.exceptions.exceptions import (
+        StoredVectorWidthMismatchError,
+    )
+
+    class UnusableEmbedder:
+        def get_vector_size(self):
+            raise AssertionError("explicit width must not ask cached embedder")
+
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"), api_key=None, embedding_engine=UnusableEmbedder()
+    )
+    row_id = uuid4()
+    point = {
+        "id": row_id,
+        "vector": [1.0, 0.0],
+        "payload": {"id": str(row_id), "text": "two dimensions"},
+    }
+    try:
+        await adapter.upsert_raw_vectors("Raw_text", [point], vector_size=2)
+        assert await adapter.list_collections() == ["Raw_text"]
+        [row] = await adapter.retrieve("Raw_text", [str(row_id)], include_vector=True)
+        assert row.payload["vector"] == [1.0, 0.0]
+        with pytest.raises(StoredVectorWidthMismatchError):
+            await adapter.upsert_raw_vectors(
+                "Raw_text", [{**point, "vector": [1.0] * 3}], vector_size=3
+            )
+        for width in (0, -1, True):
+            with pytest.raises(ValueError):
+                await adapter.upsert_raw_vectors("Rejected_text", [point], vector_size=width)
+        assert await adapter.list_collections() == ["Raw_text"]
+    finally:
+        await adapter.close()
+
+
 class _OldRoutingRow(DataPoint):
     """The routing row shape before it became an index row (cognee 1.6.6)."""
 
@@ -132,7 +169,10 @@ class _OldRoutingRow(DataPoint):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
-async def test_lancedb_upsert_raw_vectors_migrates_a_table_of_an_older_shape(tmp_path):
+@pytest.mark.parametrize("explicit_width", [None, 3])
+async def test_lancedb_upsert_raw_vectors_migrates_a_table_of_an_older_shape(
+    tmp_path, monkeypatch, explicit_width
+):
     """A table created with an older payload shape is rebuilt to the index row shape on
     the first write, keeping its rows, the way ``create_data_points`` does."""
     adapter = LanceDBAdapter(
@@ -160,6 +200,13 @@ async def test_lancedb_upsert_raw_vectors_migrates_a_table_of_an_older_shape(tmp
         payload_schema=_OldRoutingRow,
     )
 
+    if explicit_width is not None:
+
+        def forbidden():
+            raise AssertionError("explicit width must cover payload migration too")
+
+        monkeypatch.setattr(adapter.embedding_engine, "get_vector_size", forbidden)
+
     await adapter.upsert_raw_vectors(
         collection,
         [
@@ -169,6 +216,7 @@ async def test_lancedb_upsert_raw_vectors_migrates_a_table_of_an_older_shape(tmp
                 "payload": {"id": str(new_id), "text": "bucket", "document_id": "doc"},
             }
         ],
+        vector_size=explicit_width,
     )
 
     rows = {

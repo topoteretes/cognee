@@ -52,7 +52,12 @@ from ...relational.sqlalchemy.SqlAlchemyAdapter import (
     SQLAlchemyAdapter,
 )
 from ..embeddings.EmbeddingGateway import EmbeddingGateway
-from ..exceptions import CollectionNotFoundError, PgvectorVersionError, SharedDatabasePruneError
+from ..exceptions import (
+    CollectionNotFoundError,
+    PgvectorVersionError,
+    SharedDatabasePruneError,
+    StoredVectorWidthMismatchError,
+)
 from ..models.ScoredResult import ScoredResult
 from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface, validate_raw_vector_points
@@ -762,14 +767,16 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         (the pinned one, or the connection's default), the same resolution
         ``get_table`` uses.
         """
+        table_names = set(await self.list_collections())
+        return [name for name in collection_names if name in table_names]
+
+    async def list_collections(self) -> list[str]:
+        """List only this adapter's schema, unlike the database-wide reflection helper."""
         schema = self.schema or None
         async with self.engine.connect() as connection:
-            table_names = set(
-                await connection.run_sync(
-                    lambda sync_conn: inspect(sync_conn).get_table_names(schema=schema)
-                )
+            return await connection.run_sync(
+                lambda sync_conn: inspect(sync_conn).get_table_names(schema=schema)
             )
-        return [name for name in collection_names if name in table_names]
 
     async def has_collection(self, collection_name: str) -> bool:
         """
@@ -824,7 +831,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
-    async def create_collection(self, collection_name: str, payload_schema=None):
+    async def create_collection(
+        self, collection_name: str, payload_schema=None, *, vector_size: int | None = None
+    ):
         """Create the pgvector table for `collection_name` if it does not already exist.
 
         With ``PGVECTOR_COLLECTION_PARTITIONS`` above 1 the table is hash-partitioned
@@ -835,7 +844,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         partition's index. The setting only decides how a new collection is created;
         an existing one keeps its layout and is read and written the same either way.
         """
-        vector_size = self.embedding_engine.get_vector_size()
+        if vector_size is None:
+            vector_size = self.embedding_engine.get_vector_size()
+        validate_raw_vector_points([], vector_size)
         # The primary key (``id``) is the partition key, as Postgres requires of a
         # partitioned table's primary key, so ``ON CONFLICT (id)`` works unchanged.
         partition_args = (
@@ -1297,7 +1308,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self,
         collection_name: str,
         points: list[dict],
-        payload_schema: type[BaseModel] | None = None,
+        payload_schema: Any | None = None,
+        *,
+        vector_size: int | None = None,
     ) -> None:
         """Upsert caller-provided vectors without invoking the embedding engine.
 
@@ -1313,7 +1326,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if not points:
             return
 
-        vector_size = self.embedding_engine.get_vector_size()
+        explicit_width = vector_size is not None
+        if vector_size is None:
+            vector_size = self.embedding_engine.get_vector_size()
         # Every check runs before the table exists, so a rejected call creates nothing.
         rows = sorted(
             (
@@ -1328,7 +1343,15 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
 
         if not await self.has_collection(collection_name):
-            await self.create_collection(collection_name, payload_schema=payload_schema)
+            await self.create_collection(
+                collection_name, payload_schema=payload_schema, vector_size=vector_size
+            )
+
+        if explicit_width:
+            table = await self.get_table(collection_name)
+            stored_width = getattr(table.c.vector.type, "dim", None)
+            if stored_width != vector_size:
+                raise StoredVectorWidthMismatchError(collection_name, stored_width, vector_size)
 
         await self._write_rows(collection_name, rows, self._raw_vector_upsert_sql)
 

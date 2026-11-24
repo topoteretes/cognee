@@ -3,6 +3,7 @@
 No database anywhere: the relational lookup and the vector engine are stubbed.
 """
 
+import asyncio
 import types
 from importlib import import_module
 from uuid import UUID, uuid4
@@ -26,6 +27,7 @@ from cognee.tasks.summarization.models import GlobalContextSummary
 index_module = import_module("cognee.modules.search.dataset_routing.index")
 route_module = import_module("cognee.modules.search.dataset_routing.route")
 store_module = import_module("cognee.modules.search.dataset_routing.store")
+ACTIVE_COLLECTION = store_module.dataset_route_collection("deployment/A", 2)
 
 
 async def _route(query, dataset_ids, top_k=1, distance_cutoff=0.8, tie_margin=0.001):
@@ -70,14 +72,17 @@ class FakeEngine:
         return [[0.1, 0.2] for _ in texts]
 
     async def has_collection(self, collection_name):
-        assert collection_name == DATASET_ROUTE_COLLECTION
+        assert collection_name == ACTIVE_COLLECTION
         return self.collection_exists
+
+    async def list_collections(self):
+        return [ACTIVE_COLLECTION]
 
     async def get_stored_vector_size(self):
         return self.stored_width
 
     async def score_by_ids(self, collection_name, data_point_ids, query_vector):
-        assert collection_name == DATASET_ROUTE_COLLECTION
+        assert collection_name == ACTIVE_COLLECTION
         self.scored_ids.extend(data_point_ids)
         if self.score_error is not None:
             raise self.score_error
@@ -88,7 +93,7 @@ class FakeEngine:
         ]
 
     async def retrieve(self, collection_name, data_point_ids):
-        assert collection_name == DATASET_ROUTE_COLLECTION
+        assert collection_name == ACTIVE_COLLECTION
         return [
             ScoredResult(id=UUID(row_id), score=0, payload={"text": self.existing[row_id]})
             for row_id in data_point_ids
@@ -96,15 +101,18 @@ class FakeEngine:
         ]
 
     async def delete_data_points(self, collection_name, data_point_ids):
-        assert collection_name == DATASET_ROUTE_COLLECTION
+        assert collection_name == ACTIVE_COLLECTION
         self.deleted.extend(data_point_ids)
 
     async def create_data_points(self, collection_name, data_points):
-        raise AssertionError("the routing mirror must copy vectors, never embed its rows")
+        raise AssertionError("routing embeds independently of its storage adapter")
 
-    async def upsert_raw_vectors(self, collection_name, points, payload_schema=None):
-        assert collection_name == DATASET_ROUTE_COLLECTION
-        # No schema: the rows are index rows, copied from the dataset's store as stored.
+    async def upsert_raw_vectors(
+        self, collection_name, points, payload_schema=None, *, vector_size=None
+    ):
+        assert collection_name == ACTIVE_COLLECTION
+        assert vector_size == 2
+        # No schema: routing preserves the dataset's stored index payload.
         assert payload_schema is None
         for point in points:
             self.created.append(point["payload"])
@@ -123,8 +131,14 @@ def _patch(monkeypatch, engine, documents, access_control=True):
     async def fake_engine():
         return engine
 
+    async def fake_embedding():
+        return store_module.DatasetRouteEmbedding(
+            ACTIVE_COLLECTION, 2, engine.embedding_engine, asyncio.Semaphore(1)
+        )
+
     for module in (index_module, route_module):
         monkeypatch.setattr(module, "get_dataset_route_engine", fake_engine)
+        monkeypatch.setattr(module, "get_dataset_route_embedding", fake_embedding)
         monkeypatch.setattr(module, "get_data_ids_by_dataset", fake_data_ids)
     monkeypatch.setattr(index_module, "backend_access_control_enabled", lambda: access_control)
 
@@ -142,12 +156,10 @@ class FakeIndexStore:
         return {"id": row_id, "text": f"indexed {row_id}", "belongs_to_set": []}
 
     async def retrieve(self, collection_name, data_point_ids, *, include_vector=False):
-        assert collection_name == "GlobalContextSummary_text" and include_vector is True
+        assert collection_name == "GlobalContextSummary_text" and include_vector is False
         self.retrieved.extend(data_point_ids)
         return [
-            ScoredResult(
-                id=UUID(row_id), score=0, payload={**self.stored_row(row_id), "vector": vector}
-            )
+            ScoredResult(id=UUID(row_id), score=0, payload=self.stored_row(row_id))
             for row_id, vector in self.vectors.items()
             if row_id in data_point_ids
         ]
@@ -282,23 +294,18 @@ async def test_no_routing_collection_means_no_embedding_call(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_an_embedding_failure_warns_and_leaves_every_dataset_searched(monkeypatch, caplog):
+async def test_an_embedding_failure_propagates(monkeypatch):
     a, b = uuid4(), uuid4()
     engine = FakeEngine(embed_error=RuntimeError("provider down"))
     _patch(monkeypatch, engine, {a: [], b: []})
 
-    with caplog.at_level("WARNING", logger="dataset_routing"):
-        decision = await _route("q", [a, b], top_k=1)
-
-    assert decision.unindexed == (a, b) and decision.narrowed is False
+    with pytest.raises(RuntimeError, match="provider down"):
+        await _route("q", [a, b], top_k=1)
     assert engine.scored_ids == []
-    assert "could not be scored" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_an_unreachable_routing_store_warns_and_leaves_every_dataset_searched(
-    monkeypatch, caplog
-):
+async def test_an_unreachable_routing_store_propagates(monkeypatch):
     """Before routing no search touched the default store; a store that cannot be
     read (a database that does not exist on the vector host, a file another
     process holds) must not start failing every unscoped search."""
@@ -311,30 +318,23 @@ async def test_an_unreachable_routing_store_warns_and_leaves_every_dataset_searc
     engine.has_collection = unreachable
     _patch(monkeypatch, engine, {a: [], b: []})
 
-    with caplog.at_level("WARNING", logger="dataset_routing"):
-        decision = await _route("q", [a, b], top_k=1)
-
-    assert decision.unindexed == (a, b) and decision.narrowed is False
+    with pytest.raises(ConnectionError, match="database does not exist"):
+        await _route("q", [a, b], top_k=1)
     assert engine.embedded == []
-    assert "could not be scored" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_a_routing_collection_of_another_width_turns_routing_off(monkeypatch, caplog):
-    """EMBEDDING_MODEL changed without a prune: the search covers every dataset, as before
-    routing, and the store is never asked to compare vectors it cannot."""
+async def test_another_store_width_does_not_disable_active_collection_routing(monkeypatch):
+    """A cached storage adapter's width is irrelevant to deployment-space scoring."""
     a, b = uuid4(), uuid4()
-    engine = FakeEngine(scores={}, stored_width=3)
+    root = dataset_route_ids(b, [])[0]
+    engine = FakeEngine(scores={root: 0.1}, stored_width=3)
     _patch(monkeypatch, engine, {a: [], b: []})
 
-    with caplog.at_level("WARNING", logger="dataset_routing"):
-        decision = await _route("q", [a, b], top_k=1)
-
-    assert decision.routed == ()
-    assert decision.unindexed == (a, b)
-    assert decision.narrowed is False
-    assert engine.embedded == [] and engine.scored_ids == []
-    assert "3-dimensional" in caplog.text and "produces 2" in caplog.text
+    decision = await _route("q", [a, b], top_k=1)
+    assert decision.routed == (b,)
+    assert decision.unindexed == (a,)
+    assert engine.embedded == ["q"]
 
 
 @pytest.mark.asyncio
@@ -444,14 +444,16 @@ async def test_sync_writes_new_and_changed_rows_and_deletes_the_rest(monkeypatch
 
     assert touched == 3
     assert engine.deleted == [UUID(gone_id)]
-    # The rows are the index store's rows as stored, payload and vector alike;
-    # nothing was embedded for them.
+    # Payloads survive unchanged, but source vectors are not copied.
     assert sorted(engine.created, key=lambda row: row["id"]) == sorted(
         [index_store.stored_row(kept_id), index_store.stored_row(changed_id)],
         key=lambda row: row["id"],
     )
-    assert engine.vectors == {kept_id: [1.0, 0.0], changed_id: [0.0, 1.0]}
-    assert engine.embedded == []
+    assert engine.vectors == {kept_id: [0.1, 0.2], changed_id: [0.1, 0.2]}
+    assert engine.embedded == [
+        index_store.stored_row(summary_id)["text"] for summary_id in (kept_id, changed_id)
+    ]
+    assert index_store.vectors[kept_id] == [1.0, 0.0]
     assert sorted(index_store.retrieved) == sorted([kept_id, changed_id])
 
 
@@ -476,14 +478,19 @@ async def test_sync_ignores_rows_whose_ids_recall_cannot_derive(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_sync_writes_nothing_into_a_collection_of_another_width(monkeypatch):
+async def test_sync_embeds_despite_another_store_width(monkeypatch):
     dataset_id, doc = uuid4(), uuid4()
     engine = FakeEngine(existing={}, stored_width=3)
     _patch(monkeypatch, engine, {dataset_id: [doc]})
     root = _summary(dataset_id, create_root_summary_id(str(dataset_id)), "root", is_root=True)
 
-    assert await sync_dataset_routes(str(dataset_id), [root], FakeIndexStore({})) == 0
-    assert engine.created == [] and engine.deleted == []
+    assert (
+        await sync_dataset_routes(
+            str(dataset_id), [root], FakeIndexStore({str(root.id): [1.0, 2.0, 3.0]})
+        )
+        == 1
+    )
+    assert engine.vectors[str(root.id)] == [0.1, 0.2]
 
 
 @pytest.mark.asyncio
@@ -504,14 +511,14 @@ async def test_sync_is_a_no_op_without_backend_access_control(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_sync_fails_loudly_when_the_index_store_has_no_vector_for_a_row(monkeypatch):
-    """The mirror copies, never embeds: an index row without a vector is a broken build."""
+async def test_sync_fails_loudly_when_the_index_store_has_no_payload_for_a_row(monkeypatch):
+    """A missing source payload is a broken build, not an unindexed success."""
     dataset_id = uuid4()
     (root_id,) = dataset_route_ids(dataset_id, [])
     engine = FakeEngine()
     _patch(monkeypatch, engine, {dataset_id: []})
 
-    with pytest.raises(LookupError, match="no vector"):
+    with pytest.raises(LookupError, match="no payload"):
         await sync_dataset_routes(
             str(dataset_id),
             [_summary(dataset_id, UUID(root_id), "root", is_root=True)],
@@ -521,26 +528,27 @@ async def test_sync_fails_loudly_when_the_index_store_has_no_vector_for_a_row(mo
 
 
 @pytest.mark.asyncio
-async def test_sync_on_an_adapter_without_raw_vector_writes_warns_and_moves_on(monkeypatch, caplog):
+async def test_sync_on_an_adapter_without_raw_vector_writes_fails(monkeypatch):
     dataset_id = uuid4()
     (root_id,) = dataset_route_ids(dataset_id, [])
 
     class EngineWithoutRawWrites(FakeEngine):
-        async def upsert_raw_vectors(self, collection_name, points, payload_schema=None):
+        async def upsert_raw_vectors(
+            self, collection_name, points, payload_schema=None, *, vector_size=None
+        ):
             raise NotImplementedError
 
     engine = EngineWithoutRawWrites()
     _patch(monkeypatch, engine, {dataset_id: []})
 
-    with caplog.at_level("WARNING"):
-        touched = await sync_dataset_routes(
+    with pytest.raises(NotImplementedError):
+        await sync_dataset_routes(
             str(dataset_id),
             [_summary(dataset_id, UUID(root_id), "root", is_root=True)],
             FakeIndexStore({root_id: [0.1, 0.2]}),
         )
 
-    assert "cannot write precomputed vectors" in caplog.text
-    assert touched == 0 and engine.created == []
+    assert engine.created == []
 
 
 @pytest.mark.asyncio
@@ -584,12 +592,12 @@ async def test_prune_drops_the_collection_rather_than_emptying_it(monkeypatch):
 
     await prune_dataset_routes()
 
-    assert engine.dropped == [DATASET_ROUTE_COLLECTION]
+    assert engine.dropped == [ACTIVE_COLLECTION]
     assert engine.deleted == []
 
 
 @pytest.mark.asyncio
-async def test_prune_on_an_adapter_that_cannot_drop_warns_and_moves_on(monkeypatch, caplog):
+async def test_prune_on_an_adapter_that_cannot_drop_fails(monkeypatch):
     from cognee.modules.search.dataset_routing import prune_dataset_routes
 
     class EngineWithoutDrop(FakeEngine):
@@ -598,10 +606,8 @@ async def test_prune_on_an_adapter_that_cannot_drop_warns_and_moves_on(monkeypat
 
     _patch(monkeypatch, EngineWithoutDrop(), {})
 
-    with caplog.at_level("WARNING", logger="dataset_routing"):
+    with pytest.raises(NotImplementedError):
         await prune_dataset_routes()
-
-    assert "cannot drop a collection" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -741,9 +747,8 @@ async def test_no_database_is_created_without_access_control_or_outside_pgvector
 
 
 @pytest.mark.asyncio
-async def test_routing_width_check_awaits_the_engines_vector_size():
+async def test_routing_embedding_awaits_unknown_worker_width(monkeypatch):
     """A worker-backed engine's size is awaited, never asked with the blocking call."""
-    from cognee.modules.search.dataset_routing.store import routing_width_matches
 
     class SelfSizingEmbedder:
         async def resolve_vector_size(self):
@@ -752,14 +757,160 @@ async def test_routing_width_check_awaits_the_engines_vector_size():
         def get_vector_size(self):  # would block the event loop on a remote worker
             raise AssertionError("get_vector_size() must not be called from async code")
 
-    class Store:
-        embedding_engine = SelfSizingEmbedder()
+    monkeypatch.setattr(
+        store_module,
+        "resolve_embedding_defaults",
+        lambda *args: ("embedding_worker", "worker/A", None),
+    )
+    monkeypatch.setattr(store_module, "get_embedding_engine", SelfSizingEmbedder)
+    resolved = await store_module.get_dataset_route_embedding()
+    assert resolved.vector_size == 4
+    assert resolved.collection == store_module.dataset_route_collection("worker/A", 4)
 
-        def __init__(self, stored):
-            self.stored = stored
 
-        async def get_stored_vector_size(self):
-            return self.stored
+def test_collection_identity_is_exact_safe_and_width_specific():
+    a = store_module.dataset_route_collection("provider/model with / punctuation", 8)
+    assert len(a.encode()) <= 63
+    assert a != store_module.dataset_route_collection("provider/model with / punctuation", 16)
+    assert a != store_module.dataset_route_collection("Provider/model with / punctuation", 8)
+    assert a == store_module.dataset_route_collection("provider/model with / punctuation", 8)
+    for width in (0, -1, True, 2.5):
+        with pytest.raises(ValueError):
+            store_module.dataset_route_collection("A", width)
 
-    assert await routing_width_matches(Store(4)) is True
-    assert await routing_width_matches(Store(8)) is False
+
+@pytest.mark.asyncio
+async def test_deployment_embedder_ignores_context_and_cached_adapter(monkeypatch):
+    from cognee.context_global_variables import embedding_config, llm_config
+
+    seen = []
+
+    def factory():
+        seen.append((embedding_config.get(), llm_config.get()))
+        return FakeEngine().embedding_engine
+
+    monkeypatch.setattr(store_module, "get_embedding_engine", factory)
+    monkeypatch.setattr(
+        store_module, "resolve_embedding_defaults", lambda *args: ("provider", "A", 2)
+    )
+    embedding_token = embedding_config.set(object())
+    llm_token = llm_config.set(object())
+    try:
+        resolved = await store_module.get_dataset_route_embedding()
+        assert resolved.collection == store_module.dataset_route_collection("A", 2)
+        assert embedding_config.get() is not None and llm_config.get() is not None
+    finally:
+        embedding_config.reset(embedding_token)
+        llm_config.reset(llm_token)
+    assert seen == [(None, None)]
+
+
+class MultiCollectionEngine(FakeEngine):
+    """Routing namespaces plus an unrelated table; actual per-collection row state."""
+
+    def __init__(self, collections):
+        super().__init__()
+        self.collections = collections
+        self.deletions = []
+        self.fail_write = False
+
+    async def list_collections(self):
+        return list(self.collections)
+
+    async def retrieve(self, collection_name, data_point_ids):
+        return [
+            ScoredResult(id=UUID(row_id), score=0, payload=payload)
+            for row_id, payload in self.collections.get(collection_name, {}).items()
+            if row_id in data_point_ids
+        ]
+
+    async def delete_data_points(self, collection_name, data_point_ids):
+        self.deletions.append((collection_name, list(data_point_ids)))
+        for row_id in data_point_ids:
+            self.collections[collection_name].pop(str(row_id), None)
+
+    async def upsert_raw_vectors(
+        self, collection_name, points, payload_schema=None, *, vector_size=None
+    ):
+        if self.fail_write:
+            raise RuntimeError("write failed")
+        self.collections.setdefault(collection_name, {}).update(
+            {str(p["id"]): p["payload"] for p in points}
+        )
+        await super().upsert_raw_vectors(
+            collection_name, points, payload_schema, vector_size=vector_size
+        )
+
+    async def delete_collection(self, collection_name):
+        self.collections.pop(collection_name)
+        self.dropped.append(collection_name)
+
+
+@pytest.mark.asyncio
+async def test_sync_invalidates_other_models_preserves_other_datasets_and_retries(monkeypatch):
+    a, b, doc = uuid4(), uuid4(), uuid4()
+    root, bucket = dataset_route_ids(a, [doc])
+    other = dataset_route_ids(b, [])[0]
+    old = store_module.dataset_route_collection("B", 16)
+    engine = MultiCollectionEngine(
+        {
+            old: {root: {"text": "old"}, other: {"text": "other"}},
+            DATASET_ROUTE_COLLECTION: {bucket: {"text": "legacy"}},
+            "Unrelated": {root: {"text": "keep"}},
+        }
+    )
+    _patch(monkeypatch, engine, {a: [doc]})
+    source = FakeIndexStore({root: [9.0] * 16, bucket: [8.0] * 16})
+    desired = [
+        _summary(a, UUID(row_id), source.stored_row(row_id)["text"]) for row_id in (root, bucket)
+    ]
+    engine.fail_write = True
+    with pytest.raises(RuntimeError, match="write failed"):
+        await sync_dataset_routes(str(a), desired, source)
+    assert set(engine.collections[old]) == {other}
+    assert engine.collections[DATASET_ROUTE_COLLECTION] == {}
+    assert engine.collections["Unrelated"][root]["text"] == "keep"
+    engine.fail_write = False
+    assert await sync_dataset_routes(str(a), desired, source) == 2
+    assert set(engine.collections[ACTIVE_COLLECTION]) == {root, bucket}
+    engine.embedded.clear()
+    source.retrieved.clear()
+    assert await sync_dataset_routes(str(a), desired, source) == 0
+    assert engine.embedded == source.retrieved == []
+    assert source.vectors[root] == [9.0] * 16
+
+    await index_module.remove_dataset_routes(a, [doc])
+    assert engine.collections[ACTIVE_COLLECTION] == {}
+    assert set(engine.collections[old]) == {other}
+    await index_module.prune_dataset_routes()
+    assert set(engine.collections) == {"Unrelated"}
+
+
+@pytest.mark.asyncio
+async def test_case_insensitive_namespace_discovery_and_strict_discovery_failure(monkeypatch):
+    legacy = DATASET_ROUTE_COLLECTION.lower()
+    named = ACTIVE_COLLECTION.upper()
+    engine = MultiCollectionEngine(
+        {legacy: {}, named: {}, "DatasetRoute_text__notes": {}, "Entity_name": {}}
+    )
+    assert await store_module.dataset_route_collections(engine) == [legacy, named]
+    _patch(monkeypatch, engine, {})
+
+    async def unsupported():
+        raise NotImplementedError("discovery unsupported")
+
+    engine.list_collections = unsupported
+    with pytest.raises(NotImplementedError, match="discovery unsupported"):
+        await index_module.remove_dataset_routes(uuid4(), [])
+    with pytest.raises(NotImplementedError, match="discovery unsupported"):
+        await index_module.prune_dataset_routes()
+
+
+@pytest.mark.asyncio
+async def test_corrupt_named_collection_fails_instead_of_fanning_out(monkeypatch):
+    a, b = uuid4(), uuid4()
+    _patch(
+        monkeypatch, FakeEngine(score_error=ValueError("vector width corrupted")), {a: [], b: []}
+    )
+    with pytest.raises(ValueError, match="corrupted"):
+        await _route("q", [a, b])
