@@ -1430,3 +1430,25 @@ def test_a_note_without_a_summary_is_imported_once_granola_writes_one():
     fake.edit(pending, summary_markdown="Summary written later")
     rows, _ = sync(fake, state)
     assert ids(rows) == [pending] and "Summary written later" in rows[0]["content"]
+
+
+def test_another_scope_on_one_resource_name_stops_the_extract_with_a_value_error(tmp_path):
+    """Through dlt the refusal arrives wrapped in PipelineStepFailed, the ValueError its cause."""
+    import dlt
+    from dlt.pipeline.exceptions import PipelineStepFailed
+
+    fake = account(1)
+    pipeline = dlt.pipeline("granola_scope", dataset_name="d", pipelines_dir=str(tmp_path))
+    pipeline.extract(granola_source(scope=A, resource_name="shared", service=fake))
+
+    with pytest.raises(PipelineStepFailed) as raised:
+        pipeline.extract(granola_source(scope=B, resource_name="shared", service=fake))
+
+    causes = []
+    error: BaseException | None = raised.value
+    while error is not None:
+        causes.append(error)
+        error = error.__cause__ or error.__context__
+    assert any(
+        isinstance(cause, ValueError) and "another Granola scope" in str(cause) for cause in causes
+    )

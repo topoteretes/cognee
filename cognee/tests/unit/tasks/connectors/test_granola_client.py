@@ -77,6 +77,14 @@ def test_the_key_goes_out_as_a_bearer_header_to_the_fixed_origin(monkeypatch):
     assert kwargs["allow_redirects"] is False and kwargs["stream"] is True
 
 
+def test_a_key_pasted_with_surrounding_whitespace_is_sent_stripped(monkeypatch):
+    wire = Transport(monkeypatch, answer(200, {"notes": [], "hasMore": False}))
+
+    GranolaClient(f" {KEY}\n", sleep=lambda _seconds: None).get("/v1/notes")
+
+    assert wire.sent[0][0].headers["Authorization"] == f"Bearer {KEY}"
+
+
 def test_a_netrc_entry_for_the_host_never_replaces_the_bearer_key(monkeypatch, tmp_path):
     """requests reads ~/.netrc when no auth object is given and overwrites an Authorization
     header with it; the client passes an auth object, so the key is what goes out."""

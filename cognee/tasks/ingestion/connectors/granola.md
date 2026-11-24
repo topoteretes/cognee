@@ -54,8 +54,8 @@ Arguments, all keywords:
 | Argument | Default | Meaning |
 |---|---|---|
 | `scope` | required | `all` (every note the key sees, unfiled ones included), a folder id (every folder below it included) or a space id. Anything else is a `ValueError` at construction |
-| `resource_name` | required | the staging table and the sync state, one per connection and scope. Two keys or two users must never share one: the dlt pipeline is named from the dataset name and this name only, so a shared name shares the state and one sync tombstones the other's notes. The state remembers its `scope`: another scope on the same name is a `ValueError` before any request |
-| `api_key` | none | builds the client when `service` is omitted; never read from the environment |
+| `resource_name` | required | the staging table and the sync state, one per connection and scope. Two keys or two users must never share one: the dlt pipeline is named from the dataset name and this name only, so a shared name shares the state and one sync tombstones the other's notes. The state remembers its `scope`: another scope on the same name stops the extract before any request, with a `ValueError` as the cause (dlt raises it wrapped in `PipelineStepFailed`) |
+| `api_key` | none | builds the client when `service` is omitted; surrounding whitespace is stripped; never read from the environment |
 | `service` | none | a pre-built client (`build_granola_service(api_key)`); it must accept `get(path, params, *, check_active, time_left)` and call `check_active` before each attempt |
 | `key_revision` | none | any string that changes when the key is replaced; a change starts the walk over |
 | `include_transcript` | `True` | `False` never asks Granola for a transcript and renders the note without its `Transcript:` block. A change from the previous sync lists the whole scope again, so every synced note is rendered again with or without its transcript |

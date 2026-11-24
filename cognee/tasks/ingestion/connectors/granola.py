@@ -1116,9 +1116,11 @@ def granola_source(
         resource_name: Stable name of this connection and scope, required: it names the
             staging table and scopes the sync state, so two keys or two users must never share
             one (Cloud names it from the owner, the account and the scope). The state remembers
-            its scope: another scope on the same name is a ``ValueError``.
+            its scope: another scope on the same name stops the extract before any request,
+            with a ``ValueError`` as the cause (dlt wraps it in ``PipelineStepFailed``).
         api_key: A Granola API key (``grn_...``), sent as ``Authorization: Bearer``. Used to
-            build the client when ``service`` is omitted. Never read from the environment.
+            build the client when ``service`` is omitted; surrounding whitespace is stripped.
+            Never read from the environment.
         key_revision: Any string that changes when the key is replaced. A change starts the
             walk over (a new key may see older notes) and deletes nothing by itself.
         include_transcript: Render each meeting's transcript (default). ``False`` never asks
