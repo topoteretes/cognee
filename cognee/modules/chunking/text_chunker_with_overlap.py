@@ -60,19 +60,24 @@ class TextChunkerWithOverlap(Chunker):
         self._accumulated_chunk_data.append(chunk_data)
         self._accumulated_size += chunk_data["chunk_size"]
 
-    def _clear_accumulation(self):
-        """Reset accumulation, keeping overlap chunk_data based on chunk_overlap_ratio."""
+    def _clear_accumulation(self, next_chunk_size=0):
+        """Reset accumulation, keeping overlap that fits alongside the next chunk."""
         if self.chunk_overlap == 0:
             self._accumulated_chunk_data = []
             self._accumulated_size = 0
             return
 
-        # Keep chunk_data from the end that fit in overlap
+        available_overlap = min(
+            self.chunk_overlap,
+            max(0, self.max_chunk_size - next_chunk_size),
+        )
+
+        # Keep chunk_data from the end that fit in the available overlap.
         overlap_chunk_data = []
         overlap_size = 0
 
         for chunk_data in reversed(self._accumulated_chunk_data):
-            if overlap_size + chunk_data["chunk_size"] <= self.chunk_overlap:
+            if overlap_size + chunk_data["chunk_size"] <= available_overlap:
                 overlap_chunk_data.insert(0, chunk_data)
                 overlap_size += chunk_data["chunk_size"]
             else:
@@ -115,7 +120,7 @@ class TextChunkerWithOverlap(Chunker):
         """Emit a chunk when accumulation overflows."""
         if len(self._accumulated_chunk_data) > 0:
             chunk = self._create_chunk_from_accumulation()
-            self._clear_accumulation()
+            self._clear_accumulation(chunk_data["chunk_size"])
             self._accumulate_chunk_data(chunk_data)
         else:
             # Handle single chunk_data exceeding max_chunk_size
