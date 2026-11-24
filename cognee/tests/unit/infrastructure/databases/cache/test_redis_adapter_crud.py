@@ -371,6 +371,23 @@ async def test_append_agent_trace_step_sets_trace_ttl_when_enabled(adapter, redi
 
 
 @pytest.mark.asyncio
+async def test_get_agent_trace_session_range_returns_those_positions(adapter):
+    """start/end read the trace steps at those session positions, end exclusive."""
+    for index in range(5):
+        await adapter.append_agent_trace_step(
+            "u1",
+            "s1",
+            trace_id=f"t{index}",
+            origin_function="plan_trip",
+            status="success",
+            session_feedback=f"step {index}.",
+        )
+
+    entries = await adapter.get_agent_trace_session("u1", "s1", start=1, end=3)
+    assert [entry.trace_id for entry in entries] == ["t1", "t2"]
+
+
+@pytest.mark.asyncio
 async def test_get_agent_trace_feedback_returns_feedback_only(adapter):
     """Trace feedback helper returns ordered feedback strings only."""
     await adapter.append_agent_trace_step(

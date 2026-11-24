@@ -165,3 +165,62 @@ def test_the_hook_is_public_on_the_improve_package():
     ):
         assert name in improve_package.__all__
         assert callable(getattr(improve_package, name))
+
+
+@pytest.mark.asyncio
+async def test_a_user_id_is_looked_up_only_when_a_check_is_registered(monkeypatch):
+    from cognee.modules.improve.admission import auto_improve_skip_reason_for_user_id
+    from cognee.modules.users import methods as user_methods
+
+    looked_up = []
+
+    async def get_user(user_id):
+        looked_up.append(user_id)
+        return SimpleNamespace(id=user_id)
+
+    monkeypatch.setattr(user_methods, "get_user", get_user)
+    user_id = uuid4()
+    context = {"dataset_id": None, "session_id": "chat_1", "session_ids": ["chat_1"]}
+
+    assert await auto_improve_skip_reason_for_user_id(user_id=str(user_id), **context) is None
+    assert looked_up == []
+
+    seen = []
+
+    async def check(*, user, **_context):
+        seen.append(user)
+        return "insufficient_credits"
+
+    register_auto_improve_admission(check)
+    reason = await auto_improve_skip_reason_for_user_id(user_id=str(user_id), **context)
+
+    assert reason == "insufficient_credits"
+    assert looked_up == [user_id]
+    assert [user.id for user in seen] == [user_id]
+
+
+@pytest.mark.parametrize(
+    ("user_id", "lookup_error"),
+    [(str(uuid4()), ConnectionError("relational database unreachable")), ("not-a-uuid", None)],
+)
+@pytest.mark.asyncio
+async def test_a_user_that_cannot_be_loaded_fails_open(monkeypatch, caplog, user_id, lookup_error):
+    from cognee.modules.improve.admission import auto_improve_skip_reason_for_user_id
+    from cognee.modules.users import methods as user_methods
+
+    async def get_user(_user_id):
+        raise lookup_error
+
+    async def check(**_context):
+        return "insufficient_credits"
+
+    monkeypatch.setattr(user_methods, "get_user", get_user)
+    register_auto_improve_admission(check)
+
+    with caplog.at_level("WARNING", logger="improve"):
+        reason = await auto_improve_skip_reason_for_user_id(
+            user_id=user_id, dataset_id=None, session_id="chat_1", session_ids=["chat_1"]
+        )
+
+    assert reason is None
+    assert "allowing the improve" in caplog.text
