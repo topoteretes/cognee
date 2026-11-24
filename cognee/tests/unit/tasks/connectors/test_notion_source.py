@@ -1377,7 +1377,8 @@ def test_unsupported_children_keep_surrounding_text_and_retry_without_page_edit(
         rows = list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, state, {}))
     content = next(row["content"] for row in rows if row["id"] == ROOT_PAGE_ID)
     assert "before\navailable own text\nafter" in content
-    assert state["pages"][ROOT_PAGE_ID]["incomplete_content"] is True
+    # A synced copy is listed while rendering alone, so it never marks the page.
+    assert ("incomplete_content" in state["pages"][ROOT_PAGE_ID]) is (not inside_copy)
     skipped = f"skipping unavailable children of block unsupported (type {block_type})"
     assert sum(skipped in message for message in caplog.messages) == 1
     assert fake.requests.count(("GET", "blocks/unsupported/children")) == 1
@@ -1385,6 +1386,9 @@ def test_unsupported_children_keep_surrounding_text_and_retry_without_page_edit(
     fake.blocks["unsupported"] = [_rich_text_block("recovered", "paragraph", "now available")]
     previous = state["pages"]
     rows = list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, state, {}))
+    if inside_copy:
+        assert rows == []  # rendered again when the page is edited, see notion.md
+        return
     assert len(rows) == 1
     assert "now available" in rows[0]["content"]
     assert "incomplete_content" not in state["pages"][ROOT_PAGE_ID]
@@ -1552,6 +1556,29 @@ def test_a_blocked_page_is_not_rendered_again_until_it_reads_completely():
     rows, state, _ = _sync(_client(fake), state["pages"])
     assert [row["id"] for row in rows] == [ROOT_PAGE_ID]
     assert "incomplete_content" not in state["pages"][ROOT_PAGE_ID]
+
+
+def test_a_page_blocked_only_inside_a_synced_copy_is_not_rendered_again():
+    """Discovery does not expand a synced copy, so the blocked block inside it is first met
+    while rendering. Marking the page then would make the next run's comparison differ from
+    the stored state for as long as the block stays blocked."""
+    fake = _basic_tree()
+    fake.blocks[ROOT_PAGE_ID].append(
+        {
+            "id": "copy",
+            "type": "synced_block",
+            "has_children": True,
+            "synced_block": {"synced_from": {"block_id": "original"}},
+        }
+    )
+    fake.blocks["copy"] = [_rich_text_block("bad", "ai_block", "own text", has_children=True)]
+    client = _unsupported_client(fake)
+    rows, state, _ = _sync(client, {})
+    assert "own text" in next(r["content"] for r in rows if r["id"] == ROOT_PAGE_ID)
+    for _ in range(2):
+        rows, state, stats = _sync(client, state["pages"])
+        assert rows == []
+        assert stats["pages_changed"] == 0
 
 
 def test_a_page_that_turns_incomplete_is_rendered_in_the_same_run():

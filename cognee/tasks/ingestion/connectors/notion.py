@@ -670,6 +670,8 @@ def _iter_rows(
         if _has_unexposed_children(children_cache):
             # Part of what is compared below: a page that turns incomplete (or complete
             # again) is rendered in this run even though Notion's timestamp did not move.
+            # Only what discovery lists counts: a synced copy is listed while rendering
+            # alone, so a marker set from it would differ from the next run's comparison.
             seen["incomplete_content"] = True
             incomplete_pages.add(item.id)
             stats["pages_incomplete"] += 1
@@ -688,9 +690,6 @@ def _iter_rows(
                 NODE_SET_COLUMN: [f"notion:{workspace_id}:{item.root_id}"],
                 STRUCTURE_COLUMN: {"ancestors": list(item.ancestors)},
             }
-            # Rendering lists synced copies too, which discovery does not expand.
-            if _has_unexposed_children(children_cache):
-                seen["incomplete_content"] = True
         else:
             stats["pages_unchanged"] += 1
 

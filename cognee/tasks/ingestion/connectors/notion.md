@@ -180,8 +180,11 @@ after the first page of a listing still abort the sync.
 A page stored without such children is marked in its sync state, not in the stored row or
 its content hash, counted in `pages_incomplete` of `cognee_sync_stats` and logged by ID.
 Every sync lists its blocks again, so a page is rendered again when it turns incomplete or
-complete, not on every sync. Nested text that was ingested before a block turned
-unsupported is dropped in that run: the document holds what the API returns.
+complete, not on every sync. A synced copy is listed only while its page is rendered, so a
+block that is unsupported inside a copy is skipped and logged but does not mark the page: the
+page is rendered again when it is edited, not when that block becomes readable. Nested text that
+was ingested before a block turned unsupported is dropped in that run: the document holds what
+the API returns.
 
 A page that disappears from below an incompletely read page is not proof of a deletion,
 because the stored ancestry names pages and databases, not container blocks. Such a page,
