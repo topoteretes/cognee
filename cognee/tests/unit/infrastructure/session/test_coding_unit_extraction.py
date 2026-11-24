@@ -100,7 +100,11 @@ class FakeSessionManager:
     async def get_agent_trace_count(self, *, user_id, session_id):
         return len(self.traces)
 
-    async def get_agent_trace_session(self, *, user_id, session_id, last_n=None):
+    async def get_agent_trace_session(
+        self, *, user_id, session_id, last_n=None, start=None, end=None
+    ):
+        if start is not None:
+            return list(self.traces[start:end])
         return list(self.traces[-last_n:]) if last_n else list(self.traces)
 
     async def get_session(self, *, user_id, session_id, last_n=None, formatted=False):
@@ -1087,3 +1091,23 @@ async def test_a_failure_candidate_without_an_errored_trace_stays_unlinked(monke
 
     (row,) = manager.lessons()
     assert row["section"] == "failure_lessons" and row["source_trace_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_traces_written_after_the_count_wait_for_the_next_backlog(monkeypatch):
+    # Trace writes take no lock: one landing between the count and the read must not
+    # push the oldest pending trace out of the backlog the watermark then seals.
+    sm = FakeSessionManager(traces=[_trace(f"tool-{i}") for i in range(5)])
+    sm.store.append({"id": TRACE_EXTRACTION_STATE_ID, "kind": "state", "processed_trace_count": 2})
+    read_traces = sm.get_agent_trace_session
+
+    async def append_then_read(**kwargs):
+        sm.traces.append(_trace("late"))
+        return await read_traces(**kwargs)
+
+    sm.get_agent_trace_session = append_then_read
+    monkeypatch.setattr(cue, "settled_traces", lambda traces, turns: list(traces))
+
+    backlog = await cue.load_pending_backlog(sm, "u", "s")
+
+    assert [trace.origin_function for trace in backlog.traces] == ["tool-2", "tool-3", "tool-4"]
