@@ -957,6 +957,45 @@ STATS_KEYS = {
     "skipped_unread_update",
     "privacy_mode",
 }
+# What a message is besides text, written out from the Message object of Bot API 10.5
+# (core.telegram.org/bots/api#message, read 2026-11-24), apart from the source's own list.
+CONTENT_KINDS = (
+    "animation",
+    "audio",
+    "document",
+    "live_photo",
+    "paid_media",
+    "photo",
+    "sticker",
+    "story",
+    "video",
+    "video_note",
+    "voice",
+    "widget",
+    "rich_message",
+    "checklist",
+    "contact",
+    "dice",
+    "game",
+    "poll",
+    "venue",
+    "location",
+    "invoice",
+    "giveaway",
+    "giveaway_winners",
+)
+# The kinds the ``caption`` field names, on the same page.
+CAPTIONED_KINDS = (
+    "animation",
+    "audio",
+    "document",
+    "live_photo",
+    "paid_media",
+    "photo",
+    "video",
+    "voice",
+    "widget",
+)
 SKIP_REASONS = (
     "skipped_unselected",
     "skipped_unsupported_type",
@@ -989,26 +1028,59 @@ def test_every_skip_is_counted_under_one_reason_and_skipped_stays_their_sum():
     # Every reason gets a count of its own, so swapping two labels fails here.
     bot.add(message=msg(OTHER, 1, "outside the selection"))
     bot.add(message=msg(OTHER, 2, "outside the selection too"))
+    # No content: a service message, and a text that is blank.
     bot.add(message=msg(GROUP, 2, None, new_chat_members=[BOB]))
-    bot.add(message=msg(GROUP, 3, None, sticker={"file_id": "s"}))
-    bot.add(message=msg(GROUP, 4, None, video_note={"file_id": "v"}))
-    bot.add(message=msg(GROUP, 5, None, poll={"id": "p", "question": "lunch?"}))
-    bot.add(message=msg(GROUP, 6, None, paid_media={"star_count": 1, "paid_media": []}))
-    for message_id, media in enumerate(module._MEDIA_KINDS, start=10):
-        bot.add(message=msg(GROUP, message_id, None, **{media: {"file_id": media}}))
-    bot.add(message=msg(GROUP, 20, None, photo=[{"file_id": "p"}], caption="read"))
-    bot.add(edited_message=msg(GROUP, 21, None, voice={"file_id": "v"}))
+    bot.add(message=msg(GROUP, 3, " \n "))
+    # Content the source does not read: every kind but text, without a caption.
+    for message_id, kind in enumerate(CONTENT_KINDS, start=10):
+        bot.add(message=msg(GROUP, message_id, None, **{kind: {"id": kind}}))
+    bot.add(message=msg(GROUP, 50, None, photo=[{"file_id": "p"}], caption="read"))
+    bot.add(edited_message=msg(GROUP, 51, None, voice={"file_id": "v"}))
     bot.add(poll_answer={"poll_id": "p", "option_ids": [0]})
     stats = new_stats()
     rows = run(bot, {}, chats=[GROUP["id"]], stats=stats, staging=FakeStaging())
-    assert [row["id"] for row in rows] == ["-100:20"]
+    assert [row["id"] for row in rows] == ["-100:50"]
     assert {key: stats[key] for key in SKIP_REASONS} == {
         "skipped_unselected": 2,
-        "skipped_empty_content": 5,
-        "skipped_unsupported_type": len(module._MEDIA_KINDS) + 1,
+        "skipped_empty_content": 2,
+        "skipped_unsupported_type": len(CONTENT_KINDS) + 1,
         "skipped_unread_update": 1,
     }
-    assert stats["skipped"] == sum(stats[key] for key in SKIP_REASONS) == 15
+    assert stats["skipped"] == sum(stats[key] for key in SKIP_REASONS) == 29
+
+
+@pytest.mark.parametrize("kind", CAPTIONED_KINDS)
+def test_a_caption_is_read_under_the_kind_it_belongs_to(kind):
+    """Every kind the ``caption`` field names is labelled, so a paid photo's caption does not
+    read as a plain text message."""
+    row = message_to_row(msg(GROUP, 1, None, caption="the plan", **{kind: {"id": kind}}))
+    assert row["content"].endswith(f"[{kind}] the plan")
+
+
+def test_a_gif_is_labelled_as_an_animation_although_telegram_also_sets_document():
+    """Telegram sets ``document`` on every animation too, for older clients."""
+    gif = msg(
+        GROUP, 1, None, caption="funny", animation={"file_id": "a"}, document={"file_id": "a"}
+    )
+    assert message_to_row(gif)["content"].endswith("[animation] funny")
+
+
+def test_classifying_a_message_reads_what_it_is_and_what_it_says():
+    """A blank caption is no text: the photo is skipped as unread, never stored as ``[photo]``.
+    A content field present with an empty value is still that kind. An empty ``text`` does not
+    hide a caption. A field this source does not list yet is taken for no content."""
+    bot = FakeBot()
+    bot.add(message=msg(GROUP, 1, None, photo=[{"file_id": "p"}], caption=" \n "))
+    bot.add(message=msg(GROUP, 2, None, photo=[]))
+    bot.add(message=msg(GROUP, 3, "", photo=[{"file_id": "p"}], caption="read"))
+    bot.add(message=msg(GROUP, 4, None, hologram={"id": "h"}))
+    stats = new_stats()
+    rows = run(bot, {}, chats=[GROUP["id"]], stats=stats, staging=FakeStaging())
+    assert [(row["id"], row["content"].splitlines()[-1]) for row in rows] == [
+        ("-100:3", "[photo] read")
+    ]
+    assert stats["skipped_unsupported_type"] == 2
+    assert stats["skipped_empty_content"] == 1
 
 
 def test_an_update_type_the_source_does_not_read_is_not_counted_as_an_unread_file():

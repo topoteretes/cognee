@@ -144,8 +144,11 @@ A channel post's author is the channel.
 A forwarded message is credited to its original author on `Forwarded from:`, while `From:` stays
 the forwarder. A quoted reply is cut at 200 characters (display only: the quoted message is its
 own document). No numeric user id and no phone number is rendered; a sender without a name or
-handle is `unknown`. A media message is its caption, prefixed with the kind (`[photo] ...`);
-files are never downloaded. Service messages (joins, pins) and media without a caption are no
+handle is `unknown`. A media message is its caption, prefixed with the kind as Telegram names it
+(`[photo] ...`, `[paid_media] ...`; a GIF is `[animation]`, though Telegram also marks it a
+document); files are never downloaded. Service messages (joins, pins) and every other kind of
+message without text or a caption (a sticker, a poll, a location, a photo whose caption is
+blank) are no
 document.
 
 The rendering is deterministic, so an unchanged message keeps its content hash. Telegram never
@@ -259,8 +262,8 @@ exit:
 | `deleted` | tombstones emitted |
 | `skipped` | message updates, and updates of a type the connector does not read, that became no row; always the sum of the four keys below. A `my_chat_member` update is never counted |
 | `skipped_unselected` | messages of a chat outside the selection. With `chats=None` that includes every private chat unless `include_private=True` |
-| `skipped_unsupported_type` | a photo, video, document, audio file, voice message or animation without a caption (files are never downloaded) |
-| `skipped_empty_content` | any other message without text: a service message (a join, a pin, a group upgrade announcement), and every other kind of media without a caption (a sticker, a video note, paid media, a story), a poll |
+| `skipped_unsupported_type` | content the connector does not read, as Drive uses the key: a message whose kind is anything but text (a file, a sticker, a video note, a poll, a checklist, a contact, a location, a game, a giveaway: every content field of the Bot API `Message`) and has no caption. Files are never downloaded |
+| `skipped_empty_content` | a message with no content: a service message (a join, a pin, a group upgrade announcement, a forum topic event) or a text that is blank. A content kind Telegram adds after Bot API 10.5 counts here until the connector lists it |
 | `skipped_unread_update` | an update of a type the connector does not ask for, which Telegram can still deliver for a while after the list of asked types changed |
 | `privacy_mode` | 1 when `getMe` says privacy mode is on, so in groups the bot sees only commands and replies to it. It means something only on a run with `failed` 0: a run that fails before or at `getMe`, or with `failed_bot_mismatch`, leaves it 0, so a host keeps the value of the last run with `failed` 0. It is 1 only when `can_read_all_group_messages` is JSON `false`: a missing field, `null`, `0` or `"false"` give 0. A host that adds up several Telegram sources (`add_source_counts`) gets the number of sources in privacy mode |
 | `backlog` | 1 when the run read a full page: more updates may be waiting |

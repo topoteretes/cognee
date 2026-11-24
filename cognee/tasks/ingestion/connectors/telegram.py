@@ -128,7 +128,36 @@ _EDIT_KEYS = ("edited_message", "edited_channel_post")
 _REMOVED_STATUSES = {"left", "kicked"}
 # A restricted member with ``is_member`` false is out of the chat too.
 _RESTRICTED = "restricted"
-_MEDIA_KINDS = ("photo", "video", "document", "audio", "voice", "animation")
+# What a message is besides text: the Message fields of Bot API 10.5 that say so
+# (core.telegram.org/bots/api#message, read 2026-11-24). Of all of it only a caption is read,
+# labelled with the first kind listed here that the message carries: ``animation`` comes before
+# ``document``, which Telegram sets on every animation too. A kind Telegram adds later counts as
+# a message without content until it is listed here.
+_CONTENT_KINDS = (
+    "animation",
+    "audio",
+    "document",
+    "live_photo",
+    "paid_media",
+    "photo",
+    "sticker",
+    "story",
+    "video",
+    "video_note",
+    "voice",
+    "widget",
+    "rich_message",
+    "checklist",
+    "contact",
+    "dice",
+    "game",
+    "poll",
+    "venue",
+    "location",
+    "invoice",
+    "giveaway",
+    "giveaway_winners",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -194,8 +223,9 @@ def new_stats() -> dict[str, int]:
     ``scanned`` message rows emitted, ``deleted`` tombstones emitted, ``skipped`` message and
     unread updates that became no row (a ``my_chat_member`` update is never counted), always the
     sum of ``skipped_unselected`` (a chat outside the selection, private chats included unless
-    ``include_private``), ``skipped_unsupported_type`` (a photo, video, document, audio, voice or
-    animation without a caption), ``skipped_empty_content`` (any other message without text) and
+    ``include_private``), ``skipped_unsupported_type`` (content this source does not read: a
+    file, a sticker, a poll, a location and every other kind but text, unless it has a caption),
+    ``skipped_empty_content`` (a message with no content: a service message, a blank text) and
     ``skipped_unread_update`` (an update type this source does not read), ``backlog`` 1 when the
     run read a full page, ``gap`` update ids that may have expired at Telegram before this run
     (see :func:`count_gap`), ``privacy_mode`` 1 when ``getMe`` said the bot sees only commands
@@ -521,14 +551,20 @@ def _message_url(chat: dict, message_id: int) -> str | None:
     return None
 
 
+def _content_kind(message: dict) -> str | None:
+    """The kind of content a message carries besides text, named as its Bot API field."""
+    return next((kind for kind in _CONTENT_KINDS if message.get(kind) is not None), None)
+
+
 def _message_text(message: dict) -> str:
-    """Text of a message, or the caption of a media message (with its media type)."""
+    """Text of a message, or its caption labelled with the kind it is on; empty when neither
+    says anything, so a blank caption never becomes a document of its label alone."""
     if message.get("text"):
         return message["text"]
     caption = message.get("caption")
-    if not caption:
+    if not caption or not caption.strip():
         return ""
-    kind = next((media for media in _MEDIA_KINDS if message.get(media)), None)
+    kind = _content_kind(message)
     return f"[{kind}] {caption}" if kind else caption
 
 
@@ -559,7 +595,7 @@ def message_to_row(message: dict, root_chat_id: int | None = None) -> dict[str, 
     """
     text = _message_text(message)
     if not text.strip():
-        return None  # service messages (joins, pins, ...) and media without a caption
+        return None  # service messages (joins, pins, ...) and any content without a caption
 
     # Every Bot API message has a chat with an id and a message_id.
     chat = message["chat"]
@@ -1054,10 +1090,10 @@ def plan_page(
         if kind in _EDIT_KEYS and (key in rows or key in stored.by_chat().get(str(chat_id), ())):
             # The old text must not stay in memory.
             rows[key] = deleted_row(key)
-        elif any(message.get(media) for media in _MEDIA_KINDS):
-            skip("skipped_unsupported_type")  # files are never downloaded, only captions read
+        elif _content_kind(message):
+            skip("skipped_unsupported_type")  # content cognee does not read, a caption aside
         else:
-            skip("skipped_empty_content")  # a service message, a sticker, a poll
+            skip("skipped_empty_content")  # a service message, or a blank text
 
     live = sum(1 for row in rows.values() if not row["_deleted"])
     stats["scanned"] += live
