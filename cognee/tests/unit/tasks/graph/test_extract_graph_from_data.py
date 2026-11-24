@@ -687,7 +687,7 @@ async def _sent_kwargs(config):
     )
     llm = AsyncMock(return_value=KnowledgeGraph(nodes=[], edges=[]))
     with (
-        patch.object(ecg, "get_llm_config", return_value=config),
+        patch.object(ecg, "get_llm_context_config", return_value=config),
         patch.object(ecg.LLMGateway, "acreate_structured_output", llm),
     ):
         await ecg.extract_content_graph("text", KnowledgeGraph)
@@ -703,7 +703,7 @@ async def test_graph_extraction_reasoning_effort_is_sent_when_set(custom_prompt)
     llm = AsyncMock(return_value=KnowledgeGraph(nodes=[], edges=[]))
 
     with (
-        patch.object(ecg, "get_llm_config", return_value=_config_with_effort("low")),
+        patch.object(ecg, "get_llm_context_config", return_value=_config_with_effort("low")),
         patch.object(ecg.LLMGateway, "acreate_structured_output", llm),
     ):
         await ecg.extract_content_graph("text", KnowledgeGraph, custom_prompt=custom_prompt)
@@ -719,7 +719,7 @@ async def test_graph_extraction_reasoning_effort_unset_sends_nothing():
     llm = AsyncMock(return_value=KnowledgeGraph(nodes=[], edges=[]))
 
     with (
-        patch.object(ecg, "get_llm_config", return_value=_config_with_effort("")),
+        patch.object(ecg, "get_llm_context_config", return_value=_config_with_effort("")),
         patch.object(ecg.LLMGateway, "acreate_structured_output", llm),
     ):
         await ecg.extract_content_graph("text", KnowledgeGraph)
@@ -735,7 +735,7 @@ async def test_graph_extraction_reasoning_effort_call_kwarg_wins():
     llm = AsyncMock(return_value=KnowledgeGraph(nodes=[], edges=[]))
 
     with (
-        patch.object(ecg, "get_llm_config", return_value=_config_with_effort("low")),
+        patch.object(ecg, "get_llm_context_config", return_value=_config_with_effort("low")),
         patch.object(ecg.LLMGateway, "acreate_structured_output", llm),
     ):
         await ecg.extract_content_graph("text", KnowledgeGraph, reasoning_effort="high")
@@ -752,7 +752,7 @@ async def test_graph_extraction_reasoning_effort_skipped_on_non_reasoning_model(
     config = _config_with_effort("low", model="openai/gpt-4o-mini")
 
     with (
-        patch.object(ecg, "get_llm_config", return_value=config),
+        patch.object(ecg, "get_llm_context_config", return_value=config),
         patch.object(ecg.LLMGateway, "acreate_structured_output", llm),
     ):
         await ecg.extract_content_graph("text", KnowledgeGraph)
@@ -778,6 +778,38 @@ async def test_graph_extraction_reasoning_effort_ignores_fallback_without_key():
     # The adapters use the fallback only when both its model and key are set.
     config = _config_with_effort("low", fallback_model="gpt-4o-mini")
     assert (await _sent_kwargs(config))["reasoning_effort"] == "low"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "base_model, extraction_model, sent",
+    [("openai/gpt-5-mini", "openai/gpt-4o-mini", False), ("gpt-4o-mini", "gpt-5-mini", True)],
+)
+async def test_graph_extraction_reasoning_effort_checks_extraction_stage_model(
+    base_model, extraction_model, sent
+):
+    # Cognify extracts inside pipeline_stage("extraction"), which routes to LLM_EXTRACTION_MODEL.
+    from cognee.context_global_variables import llm_config as llm_config_ctx
+    from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
+
+    ecg = importlib.import_module(
+        "cognee.infrastructure.llm.extraction.knowledge_graph.extract_content_graph"
+    )
+    config = _config_with_effort("low", model=base_model)
+    config.llm_extraction_model = extraction_model
+    llm = AsyncMock(return_value=KnowledgeGraph(nodes=[], edges=[]))
+
+    token = llm_config_ctx.set(config)
+    try:
+        with (
+            pipeline_stage("extraction"),
+            patch.object(ecg.LLMGateway, "acreate_structured_output", llm),
+        ):
+            await ecg.extract_content_graph("text", KnowledgeGraph)
+    finally:
+        llm_config_ctx.reset(token)
+
+    assert ("reasoning_effort" in llm.call_args.kwargs) is sent
 
 
 def test_graph_extraction_reasoning_effort_rejects_unknown_value(monkeypatch):

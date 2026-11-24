@@ -8,6 +8,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm.config import (
     LLMConfig,
     get_llm_config,
+    get_llm_context_config,
 )
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
@@ -61,14 +62,15 @@ async def extract_content_graph(
     ``GRAPH_EXTRACTION_REASONING_EFFORT`` is sent as ``reasoning_effort`` on this call
     only; a ``reasoning_effort`` kwarg wins.
     """
-    llm_config = get_llm_config()
-    reasoning_effort = _graph_extraction_reasoning_effort(llm_config)
+    # The context config, as the client uses: it carries LLM_EXTRACTION_MODEL in cognify.
+    reasoning_effort = _graph_extraction_reasoning_effort(get_llm_context_config())
     if reasoning_effort:
         kwargs.setdefault("reasoning_effort", reasoning_effort)
 
     if custom_prompt:
         system_prompt = custom_prompt
     else:
+        llm_config = get_llm_config()
         prompt_path = llm_config.graph_prompt_path
 
         # Check if the prompt path is an absolute path or just a filename
