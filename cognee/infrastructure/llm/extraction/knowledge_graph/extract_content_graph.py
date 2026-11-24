@@ -1,6 +1,8 @@
 import os
+from functools import lru_cache
 from typing import Any
 
+import litellm
 from pydantic import BaseModel
 
 from cognee.infrastructure.engine import DataPoint
@@ -13,6 +15,22 @@ from cognee.shared.llm_graph_model import (
     content_graph_to_data_point,
     datapoint_model_to_basemodel,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("extract_content_graph")
+
+
+@lru_cache
+def _model_supports_reasoning(model: str) -> bool:
+    """Whether litellm lists ``model`` as a reasoning model; warns once per model if not."""
+    supported = litellm.supports_reasoning(model=model)
+    if not supported:
+        logger.warning(
+            "GRAPH_EXTRACTION_REASONING_EFFORT is set, but %s is not a reasoning model; "
+            "sending no reasoning_effort.",
+            model,
+        )
+    return supported
 
 
 async def extract_content_graph(
@@ -28,10 +46,13 @@ async def extract_content_graph(
     TEMPORAL_NORMALIZATION_HINTS block (see ``engine/utils/temporal_hints.py``).
     A ``custom_prompt`` is sent verbatim and receives no hints.
     ``GRAPH_EXTRACTION_REASONING_EFFORT``, when set, is sent as ``reasoning_effort``
-    on this call only; a ``reasoning_effort`` kwarg overrides it.
+    on this call only, and only to models litellm lists as reasoning models (others
+    reject the parameter); a ``reasoning_effort`` kwarg overrides it.
     """
     llm_config = get_llm_config()
-    if llm_config.graph_extraction_reasoning_effort:
+    if llm_config.graph_extraction_reasoning_effort and _model_supports_reasoning(
+        llm_config.llm_model
+    ):
         kwargs.setdefault("reasoning_effort", llm_config.graph_extraction_reasoning_effort)
 
     if custom_prompt:

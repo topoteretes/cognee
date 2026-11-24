@@ -670,11 +670,12 @@ async def test_each_chunk_extraction_call_sees_only_its_own_chunk_id(mock_integr
     assert current_chunk_id.get() is None
 
 
-def _config_with_effort(effort):
+def _config_with_effort(effort, model="openai/gpt-5-mini"):
     from cognee.infrastructure.llm.config import get_llm_config
 
     config = get_llm_config().model_copy()
     config.graph_extraction_reasoning_effort = effort
+    config.llm_model = model
     return config
 
 
@@ -725,6 +726,23 @@ async def test_graph_extraction_reasoning_effort_call_kwarg_wins():
         await ecg.extract_content_graph("text", KnowledgeGraph, reasoning_effort="high")
 
     assert llm.call_args.kwargs["reasoning_effort"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_graph_extraction_reasoning_effort_skipped_on_non_reasoning_model():
+    ecg = importlib.import_module(
+        "cognee.infrastructure.llm.extraction.knowledge_graph.extract_content_graph"
+    )
+    llm = AsyncMock(return_value=KnowledgeGraph(nodes=[], edges=[]))
+    config = _config_with_effort("low", model="openai/gpt-4o-mini")
+
+    with (
+        patch.object(ecg, "get_llm_config", return_value=config),
+        patch.object(ecg.LLMGateway, "acreate_structured_output", llm),
+    ):
+        await ecg.extract_content_graph("text", KnowledgeGraph)
+
+    assert "reasoning_effort" not in llm.call_args.kwargs
 
 
 def test_graph_extraction_reasoning_effort_reads_env(monkeypatch):
