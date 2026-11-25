@@ -19,7 +19,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.stored_file_claims import holding_stored_files
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules import ingestion
-from cognee.modules.data.methods.get_existing_data_ids import DATA_ID_BATCH_SIZE
+from cognee.modules.data.methods.get_existing_data_ids import id_batches
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.DataItemStatus import (
@@ -325,14 +325,13 @@ async def find_pinned_data(data: list[Any], dataset_id: UUID) -> dict[UUID, Data
     # through ix_data_dataset_id once per batch.
     by_id: dict[UUID, Data] = {}
     async with get_relational_engine().get_async_session() as session:
-        for start in range(0, len(pins), DATA_ID_BATCH_SIZE):
-            statement = select(Data).filter(Data.id.in_(pins[start : start + DATA_ID_BATCH_SIZE]))
+        for batch in id_batches(pins):
+            statement = select(Data).filter(Data.id.in_(batch))
             by_id.update({row.id: row for row in await session.scalars(statement)})
         in_dataset = {pin: row for pin, row in by_id.items() if row.dataset_id == dataset_id}
 
         unresolved = [pin for pin in pins if pin not in in_dataset]
-        for start in range(0, len(unresolved), DATA_ID_BATCH_SIZE):
-            batch = unresolved[start : start + DATA_ID_BATCH_SIZE]
+        for batch in id_batches(unresolved):
             forks = await session.scalars(select(Data).filter(Data.legacy_id.in_(batch)))
             in_dataset.update({row.legacy_id: row for row in forks if row.dataset_id == dataset_id})
     return by_id | in_dataset

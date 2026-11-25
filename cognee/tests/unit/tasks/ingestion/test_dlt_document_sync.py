@@ -235,7 +235,7 @@ async def test_a_sync_with_nothing_new_resolves_nothing(sync):
 
     unchanged = await sync([])
 
-    assert unchanged.ids == []
+    assert unchanged.items == []
     assert unchanged.forgotten == set()
 
 
@@ -343,7 +343,7 @@ async def test_settling_checks_and_records_under_the_dataset_lock(sync, monkeypa
     await sync([_row("a")])
     events: list[str] = []
     sweep, record = resolve._delete_dlt_orphans, resolve.record_committed_document_loads
-    stored = resolve._stored_documents
+    exist = resolve.get_existing_data_ids
 
     @asynccontextmanager
     async def lock(_dataset_id):
@@ -360,11 +360,11 @@ async def test_settling_checks_and_records_under_the_dataset_lock(sync, monkeypa
     monkeypatch.setattr(
         resolve, "record_committed_document_loads", partial(logged, "record", record)
     )
-    monkeypatch.setattr(resolve, "_stored_documents", partial(logged, "read", stored))
+    monkeypatch.setattr(resolve, "get_existing_data_ids", partial(logged, "check", exist))
 
     await sync([_row("a", "v2")])
 
-    assert events[events.index("lock") :] == ["lock", "sweep", "read", "record", "unlock"]
+    assert events[events.index("lock") :] == ["lock", "sweep", "check", "record", "unlock"]
 
 
 @pytest.mark.asyncio
@@ -392,6 +392,67 @@ async def test_two_sources_in_one_add_are_swept_and_recorded_together(sync):
     assert set(sweep["sources"]) == {"notes", "wiki"}
     assert sorted(await sync.names()) == ["t-a", "t-w"]
     assert (await sync.sources(both(None))).items == []
+
+
+@pytest.mark.asyncio
+async def test_a_mismatch_clears_the_pairs_another_sync_recorded(sync):
+    """The first sync's own view no longer holds (an unrelated document was forgotten after
+    it resolved), while the second sync already recorded a load the first one replaced. Only
+    clearing the pairs makes the next sync read the key again; recording nothing would leave
+    the second sync's pair vouching for a version the first one swept."""
+    await sync([_row("a"), _row("b")])
+    before = await sync.stored()
+    first = await sync([_row("a", "v2")], commit=False)
+    second = await sync([_row("a")], commit=False)
+    await sync.commit(second.items)
+    await second.cleanup()
+    await sync.forget("b")
+    await sync.commit(first.items)
+    await first.cleanup()
+
+    await sync([])
+
+    assert await sync.stored() == before
+
+
+@pytest.mark.asyncio
+async def test_a_stale_document_that_survives_the_sweep_costs_one_key_not_the_table(
+    sync, monkeypatch
+):
+    """Without delete permission the sweep forgets nothing. Its loads are still recorded, so
+    the next syncs read the key that has two documents, not every row of the table."""
+    await sync([_row(key) for key in "abc"])
+    await sync([_row("a", "v2")])
+
+    async def no_permission(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(resolve, "_delete_dlt_orphans", no_permission)
+    await sync([_row("a", "v3")])
+
+    again = await sync([])
+
+    assert again.ids == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_new_rows_of_a_table_are_read_by_their_load(sync, monkeypatch):
+    """dlt indexes neither the id nor the load column, so a read by id costs a scan per batch
+    of ids; the rows of a load that cognee has not committed are read by that load."""
+    await sync([_row("a"), _row("b")])
+    reads: list[tuple] = []
+    read = ingest._read_single_table
+
+    async def spy(*args, column_in=None, **kwargs):
+        reads.append(column_in)
+        return await read(*args, column_in=column_in, **kwargs)
+
+    monkeypatch.setattr(ingest, "_read_single_table", spy)
+
+    added = await sync([_row("c")])
+
+    assert added.ids == ["c"]
+    assert [column for column, _ in reads] == ["_dlt_load_id"]
 
 
 @pytest.mark.asyncio

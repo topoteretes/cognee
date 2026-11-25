@@ -3,7 +3,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.methods.get_existing_data_ids import DATA_ID_BATCH_SIZE
+from cognee.modules.data.methods.get_existing_data_ids import id_batches
 from cognee.modules.data.models import Data
 
 
@@ -15,8 +15,7 @@ async def get_dataset_data_by_ids(dataset_id: UUID, data_ids: list[UUID]) -> lis
     """
     rows: list[Data] = []
     async with get_relational_engine().get_async_session() as session:
-        for start in range(0, len(data_ids), DATA_ID_BATCH_SIZE):
-            batch = data_ids[start : start + DATA_ID_BATCH_SIZE]
+        for batch in id_batches(data_ids):
             for row in await session.scalars(select(Data).where(Data.id.in_(batch))):
                 if row.dataset_id == dataset_id:
                     rows.append(row)

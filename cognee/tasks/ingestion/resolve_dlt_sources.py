@@ -21,10 +21,7 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import UUID
 
-from cognee.modules.data.methods.get_existing_data_ids import (
-    DATA_ID_BATCH_SIZE,
-    get_existing_data_ids,
-)
+from cognee.modules.data.methods.get_existing_data_ids import get_existing_data_ids, id_batches
 from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id, get_unique_data_ids
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
@@ -632,6 +629,11 @@ def _dlt_row_identifier(row: DltRowData) -> str:
 
     Includes ``content_hash`` so that unchanged rows keep the same data_id
     across runs (no re-ingest/re-cognify) while edited rows get a fresh one.
+
+    The source is not part of it: rows that agree on table, key value and content share one
+    Data id, whether they are two rows of a table under a caller key that repeats or one row
+    of two sources staging the same table name. The Data row keeps the first source's tag,
+    so the other source reads that row by id on every sync (a cost, not a loss).
     """
     return f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
 
@@ -747,14 +749,13 @@ async def _settle_document_syncs(
 ) -> None:
     """Forget the stale documents of committed syncs, then record their loads.
 
-    A sync's loads are recorded only if its tables now hold what its own view predicts: the
-    documents it saw, less the stale ones, plus its fresh ones. Syncs of one source can
-    resolve before either add commits, and ids derive from content, so another sync's sweep
-    or add may have changed a key this sync read nothing for, or forgotten one it kept.
-    Recording its loads then would hide that key from every later sync, so none are
-    recorded and the next sync reads the tables again. Under the dataset lock, so no
-    other sync's sweep runs between the check and the record.
+    A sync's loads are recorded only while every document it saw is still stored, less the
+    stale ones it forgot; otherwise another sync's sweep took one, and recording would hide
+    its key from later syncs, so the pairs of the sync's tables are cleared instead. A fresh
+    document that is gone needs no check: the next sync reads its key by id. Under the
+    dataset lock, so no other sweep runs between the check and the record.
     """
+    from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.infrastructure.locks import dataset_lock
 
     async with dataset_lock(dataset_id):
@@ -774,19 +775,20 @@ async def _settle_document_syncs(
         for sync in syncs:
             if sync.loads is None:
                 continue
-            (source_tag,) = {source for source, _ in sync.scopes}
-            tables = {table for _, table in sync.scopes}
-            stored = await _stored_documents(dataset_id, source_tag, tables)
-            holds = {data_id for data_ids in stored.values() for data_id in data_ids}
-            if holds != (sync.seen - stale_ids) | sync.fresh_ids:
-                logger.info(
-                    "Not recording the dlt loads of '%s': another sync changed its documents "
-                    "since this one resolved; the next sync reads the tables again.",
-                    source_tag,
-                )
-                await record_committed_document_loads(sync.staged, dataset_id, frozenset())
-            else:
+            relied_on = sync.seen - stale_ids
+            async with get_relational_engine().get_async_session() as session:
+                stored = await get_existing_data_ids(session, list(relied_on), dataset_id)
+            if relied_on <= stored:
                 await record_committed_document_loads(sync.staged, dataset_id, sync.loads)
+                continue
+            (source_tag,) = {source for source, _ in sync.scopes}
+            logger.warning(
+                "Not recording the dlt loads of '%s': %d document(s) its sync relied on are "
+                "gone, so the next sync reads the source's tables again.",
+                source_tag,
+                len(relied_on - stored),
+            )
+            await record_committed_document_loads(sync.staged, dataset_id, frozenset())
 
 
 def _replaced_or_gone(table_keys: dict | None, table: str, key: str | None, read_keys: set) -> bool:
@@ -881,12 +883,9 @@ async def _refresh_row_structure(items: list[DataItem], dataset_id: UUID) -> Non
 
     ids = list(wanted)
     async with get_relational_engine().get_async_session() as session:
-        for start in range(0, len(ids), DATA_ID_BATCH_SIZE):
+        for batch in id_batches(ids):
             rows = await session.execute(
-                select(Data).filter(
-                    Data.id.in_(ids[start : start + DATA_ID_BATCH_SIZE]),
-                    Data.dataset_id == dataset_id,
-                )
+                select(Data).filter(Data.id.in_(batch), Data.dataset_id == dataset_id)
             )
             for data in rows.scalars():
                 if data.system_metadata.get("structure") != wanted[data.id]:

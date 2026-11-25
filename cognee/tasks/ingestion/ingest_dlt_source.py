@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import URL, bindparam, inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -772,6 +773,8 @@ DOCUMENT_ID_COLUMN = "id"
 # Data rows, which would need a write for every re-sent unchanged row, and not on the
 # add's operation row, which does not know the pipeline. A dataset-keyed state table
 # (the one cognee/modules/improve/watermarks.py asks for) would be its lasting home.
+# It is a cache: dropped or unreadable, the next sync reads every staged row once. Change
+# its shape by dropping it; there is no migration to write.
 _DOCUMENT_LOADS_TABLE = "_cognee_document_loads"
 _DLT_LOAD_ID_COLUMN = "_dlt_load_id"
 
@@ -812,8 +815,8 @@ class DocumentRead:
     dlt indexes neither column. The two must not overlap: ``ids`` only of committed loads.
     """
 
-    loads: list
-    ids: list
+    loads: list[str]
+    ids: list[Any]
 
 
 async def read_staged_documents(
@@ -821,10 +824,10 @@ async def read_staged_documents(
 ) -> DltRows:
     """The staged rows each table's ``DocumentRead`` names; ``None`` reads the whole table.
 
-    A batch of values per query (``DATA_ID_BATCH_SIZE``). Each row's ``primary_key_value``
+    A batch of values per query (``id_batches``). Each row's ``primary_key_value``
     comes from ``primary_key``, the caller's key its Data id derives from.
     """
-    from cognee.modules.data.methods.get_existing_data_ids import DATA_ID_BATCH_SIZE
+    from cognee.modules.data.methods.get_existing_data_ids import id_batches
 
     rows: list[DltRowData] = []
     async with _staging_connection(staged) as conn:
@@ -833,12 +836,12 @@ async def read_staged_documents(
                 [None]
                 if read is None
                 else [
-                    (column, values[start : start + DATA_ID_BATCH_SIZE])
+                    (column, batch)
                     for column, values in (
                         (_DLT_LOAD_ID_COLUMN, read.loads),
                         (DOCUMENT_ID_COLUMN, read.ids),
                     )
-                    for start in range(0, len(values), DATA_ID_BATCH_SIZE)
+                    for batch in id_batches(values)
                 ]
             )
             for column_in in filters:
@@ -874,7 +877,7 @@ def _document_loads_table(staged: StagedSource) -> str:
     return table if schema_name is None else f"{_quote_identifier(schema_name)}.{table}"
 
 
-async def committed_document_loads(staged: StagedSource, dataset_id) -> set[tuple[str, str]]:
+async def committed_document_loads(staged: StagedSource, dataset_id: UUID) -> set[tuple[str, str]]:
     """The (table, dlt load) pairs of this pipeline whose rows cognee committed into the dataset."""
     schema_name = _document_loads_schema(staged)
     async with _staging_connection(staged) as conn:
@@ -896,7 +899,7 @@ async def committed_document_loads(staged: StagedSource, dataset_id) -> set[tupl
 
 
 async def record_committed_document_loads(
-    staged: StagedSource, dataset_id, loads: frozenset[tuple[str, str]]
+    staged: StagedSource, dataset_id: UUID, loads: frozenset[tuple[str, str]]
 ) -> None:
     """Record the (table, dlt load) pairs the staged rows of this sync's tables carry.
 
