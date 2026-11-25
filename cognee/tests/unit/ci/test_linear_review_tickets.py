@@ -6,6 +6,7 @@ and ticket content run exactly as in the workflow, with no network.
 """
 
 import importlib.util
+import itertools
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -40,8 +41,17 @@ def _pr(number, title="Fix a thing", merged_at="2026-10-20T10:00:00Z", base="dev
     }
 
 
+_review_ids = itertools.count(1)
+
+
 def _review(user, state, at):
-    return {"user": user, "state": state, "submitted_at": at}
+    return {"id": next(_review_ids), "user": user, "state": state, "submitted_at": at}
+
+
+def _dismissal(review, was, message=None):
+    """The event GitHub records when it dismisses ``review``; ``was`` is its state until then."""
+    dismissed = {"review_id": review["id"], "state": was, "dismissal_message": message}
+    return {"event": "review_dismissed", "dismissed_review": dismissed}
 
 
 # --------------------------------------------------------------------------- #
@@ -55,7 +65,7 @@ def test_approvals_keep_each_human_approver_once_at_their_first_approval():
         _review(ALICE, "APPROVED", "2026-10-20T09:30:00Z"),
         _review(ALICE, "APPROVED", "2026-10-20T09:00:00Z"),
         _review(BOB, "CHANGES_REQUESTED", "2026-10-20T08:30:00Z"),
-        _review(BOB, "DISMISSED", "2026-10-20T08:45:00Z"),  # a dismissed approval
+        _review(BOB, "DISMISSED", "2026-10-20T08:45:00Z"),  # a dismissed change request
         _review(BOT, "APPROVED", "2026-10-20T08:50:00Z"),
         _review(AUTHOR, "APPROVED", "2026-10-20T08:55:00Z"),
     ]
@@ -72,6 +82,32 @@ def test_approvals_keep_each_human_approver_once_at_their_first_approval():
 def test_a_pull_request_without_approvals_yields_nothing():
     reviews = [_review(ALICE, "COMMENTED", "2026-10-20T08:00:00Z")]
     assert lrt.approvals_of(_pr(7), reviews) == []
+
+
+def test_an_approval_counts_after_it_was_dismissed():
+    approval = _review(BOB, "DISMISSED", "2026-10-20T08:45:00Z")
+    change_request = _review(ALICE, "DISMISSED", "2026-10-20T08:50:00Z")
+    bot_approval = _review(BOT, "DISMISSED", "2026-10-20T08:55:00Z")
+    own_approval = _review(AUTHOR, "DISMISSED", "2026-10-20T08:56:00Z")
+    reviews = [approval, change_request, bot_approval, own_approval]
+    dismissed_approvals = frozenset({approval["id"], bot_approval["id"], own_approval["id"]})
+
+    approvals = lrt.approvals_of(_pr(7), reviews, dismissed_approvals)
+
+    assert [(a.reviewer_login, a.approved_at) for a in approvals] == [
+        ("bob", "2026-10-20T08:45:00Z")
+    ]
+
+
+def test_a_reviewer_who_approved_again_after_a_dismissal_is_counted_once():
+    dismissed = _review(ALICE, "DISMISSED", "2026-10-20T08:00:00Z")
+    reviews = [dismissed, _review(ALICE, "APPROVED", "2026-10-20T09:00:00Z")]
+
+    approvals = lrt.approvals_of(_pr(7), reviews, frozenset({dismissed["id"]}))
+
+    assert [(a.reviewer_login, a.approved_at) for a in approvals] == [
+        ("alice", "2026-10-20T08:00:00Z")
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -252,7 +288,8 @@ def world(monkeypatch, tmp_path):
             _review(BOT, "APPROVED", "2026-10-20T10:05:00Z"),
         ],
     }
-    searches = []
+    events = {}
+    searches, paged = [], []
 
     def github_get(path):
         if path.startswith("/search/issues"):
@@ -262,6 +299,9 @@ def world(monkeypatch, tmp_path):
         return prs[number]
 
     def github_paged(path):
+        paged.append(path)
+        if path.endswith("/events"):
+            return events[int(path.split("/issues/")[1].split("/")[0])]
         return reviews[int(path.split("/pulls/")[1].split("/")[0])]
 
     monkeypatch.setattr(lrt, "github_get", github_get)
@@ -275,7 +315,14 @@ def world(monkeypatch, tmp_path):
     monkeypatch.delenv("PR_NUMBER", raising=False)
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-    return {"summary": summary, "searches": searches, "prs": prs}
+    return {
+        "summary": summary,
+        "searches": searches,
+        "prs": prs,
+        "reviews": reviews,
+        "events": events,
+        "paged": paged,
+    }
 
 
 def _install(monkeypatch, fake):
@@ -315,6 +362,30 @@ def test_creates_one_completed_ticket_per_matched_approver(monkeypatch, world):
     assert "1 approval(s) with no Linear user" in summary
     assert "@outsider" in summary
     assert "coderabbitai" not in summary  # bots are not even reported
+
+
+def test_a_dismissed_approval_gets_a_ticket_and_a_dismissed_change_request_none(monkeypatch, world):
+    """#7 changed after both reviews: alice had approved it, bob had requested changes."""
+    approval = _review(ALICE, "DISMISSED", "2026-10-20T09:00:00Z")
+    change_request = _review(BOB, "DISMISSED", "2026-10-20T09:10:00Z")
+    world["reviews"][7] = [approval, change_request]
+    world["events"][7] = [
+        {"event": "labeled"},
+        _dismissal(approval, "approved", "The merge-base changed after approval."),
+        _dismissal(change_request, "changes_requested"),
+    ]
+    fake = FakeLinear()
+    _install(monkeypatch, fake)
+    monkeypatch.setenv("DRY_RUN", "false")
+
+    lrt.main()
+
+    assert [t["assigneeId"] for t in fake.created] == ["u-alice"]
+    assert "Approved: 2026-10-20T09:00:00Z" in fake.created[0]["description"]
+    # #8 has no dismissed review, so its events are never read.
+    assert [path for path in world["paged"] if path.endswith("/events")] == [
+        f"/repos/{REPO}/issues/7/events"
+    ]
 
 
 def test_dry_run_reads_everything_and_writes_nothing(monkeypatch, world):
