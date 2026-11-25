@@ -2,6 +2,7 @@ import os
 from typing import Any
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.files.utils.decode_text_file import decode_text_file
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 from cognee.infrastructure.loaders.exceptions import UnreadableFileContentError
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
@@ -79,8 +80,12 @@ class TextLoader(LoaderInterface):
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
         try:
-            with open(file_path, encoding=encoding) as f:
-                content = f.read()
+            with open(file_path, "rb") as f:
+                # BOM-aware: an editor's "Unicode" save writes UTF-16/UTF-32 with a
+                # byte order mark, and a strict UTF-8 read raises on its interleaved
+                # null bytes even though the content is plain text. Decode by the
+                # BOM when one is present, strict either way.
+                content = decode_text_file(f.read(), encoding=encoding)
         except UnicodeDecodeError as error:
             # This loader is the content-detection fallback, so a binary file
             # whose bytes the sniffer reads as text/plain (a .dmg, an archive)
@@ -88,7 +93,7 @@ class TextLoader(LoaderInterface):
             # decode error escape as an untyped 500.
             raise UnreadableFileContentError(
                 f"'{os.path.basename(file_path)}' cannot be read as text: decoding it as "
-                f"{encoding} failed ({error.reason} at byte {error.start}). Its content was "
+                f"{error.encoding} failed ({error.reason} at byte {error.start}). Its content was "
                 "detected as plain text, but the bytes are binary, so no cognee loader can "
                 f"read this file. Supported text extensions: {', '.join(self.supported_extensions)}; "
                 "PDFs and office documents need their own loader (the `docling` extra)."
