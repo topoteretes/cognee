@@ -76,6 +76,9 @@ from cognee.infrastructure.session.session_context_models import (
     CodingAgentContextExtraction,
     ContextProfile,
 )
+from cognee.infrastructure.session.session_context_models import (
+    clip_text as _clip,
+)
 from cognee.infrastructure.session.session_node_set import get_session_node_set
 from cognee.infrastructure.session.session_persist_watermark import StateRowWatermark
 from cognee.infrastructure.session.trace_phases import (
@@ -202,11 +205,6 @@ def relative_path(path: str, repo_root: str) -> str:
         return "."
     match = re.match(r"^(?:/Users|/home)/[^/]+/(.*)$", text)
     return match.group(1) if match else text
-
-
-def _clip(text: str, limit: int) -> str:
-    text = " ".join(str(text or "").split())
-    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def program_words(command: str) -> list[str]:
@@ -563,11 +561,20 @@ def build_failure_candidates(
             room,
         )
         content = f"{key}{problem}{failed_with}{error_line}{arrow}{worked}"
+        # The observed failures and their fix, so the lesson clears the agent-profile
+        # evidence gate (``supported_project_candidate``) like an LLM lesson must.
+        evidence = _clip(
+            f"{group.tool} failed {len(group.failures)} times with "
+            f'"{group.error_text}"; fixed by: {render_fixes(group.fixes, repo_root)}',
+            MAX_CONTEXT_CONTENT_CHARS,
+        )
         candidates.append(
             (
                 failure.trace_id,
                 CandidateFailureLessonUpdate(
-                    content=content, confidence=FAILURE_CANDIDATE_CONFIDENCE
+                    content=content,
+                    confidence=FAILURE_CANDIDATE_CONFIDENCE,
+                    evidence=evidence,
                 ),
             )
         )
@@ -908,12 +915,13 @@ async def load_pending_backlog(
     total = await session_manager.get_agent_trace_count(user_id=user_id, session_id=session_id)
     stored = await TRACE_EXTRACTION_WATERMARK.read_count(session_manager, user_id, session_id)
     processed = StateRowWatermark.resolve_effective(stored, total, session_id=session_id)
-    pending = total - processed
-    if pending <= 0:
+    if processed >= total:
         return None
 
+    # By position, not from the tail: a trace written after the count would shift a
+    # tail read (last_n) past the oldest pending trace.
     traces = await session_manager.get_agent_trace_session(
-        user_id=user_id, session_id=session_id, last_n=pending
+        user_id=user_id, session_id=session_id, start=processed, end=total
     )
     rows = await session_manager.get_session(
         user_id=user_id, session_id=session_id, formatted=False
