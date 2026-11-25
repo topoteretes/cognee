@@ -13,7 +13,7 @@ model actually sees, truncation enabled at its window).
 
 Run: ``python cognee/tests/e2e/keyless/chunk_token_budget_check.py [fastembed model]``
 
-With no argument the keyless default (BAAI/bge-small-en-v1.5) is used. The CI job
+With no argument the keyless default (perplexity-ai/pplx-embed-v1-0.6b) is used. The CI job
 also runs it with ``snowflake/snowflake-arctic-embed-xs``, whose tokenizer.json
 stores truncation at 512 (a counter that honoured it would report at most 512
 tokens for any document), and with ``sentence-transformers/all-MiniLM-L6-v2``,
@@ -62,6 +62,7 @@ async def main() -> None:
         get_embedding_engine,
     )
     from cognee.infrastructure.llm.utils import resolve_chunk_size
+    from cognee.tasks.chunks.chunk_by_word import chunk_by_word
 
     text = " ".join(TEXT_PATH.read_text(encoding="utf-8").split()[:WORDS])
     await cognee.prune.prune_data()
@@ -122,9 +123,20 @@ async def main() -> None:
             problems.append(
                 f"chunk {chunk['chunk_index']}: fastembed truncates it ({truth} tokens, window {window})"
             )
-        if abs(believed - truth) > max(2, truth // 20):
+        # The chunker sizes a chunk by adding up its words' token counts. With a
+        # WordPiece tokenizer that is the chunk's own count. A BPE one (the default
+        # model's) counts the space after a word as a token of its own, so the sum
+        # is about twice the chunk's count: chunks come out smaller than the budget.
+        by_word = sum(len(oracle.tokenize(word)) for word, _ in chunk_by_word(text_))
+        if abs(believed - by_word) > max(2, by_word // 20):
             problems.append(
-                f"chunk {chunk['chunk_index']}: chunker counted {believed}, tokenizer says {truth}"
+                f"chunk {chunk['chunk_index']}: chunker counted {believed}, "
+                f"its words add up to {by_word}"
+            )
+        if believed < truth - max(2, truth // 20):
+            problems.append(
+                f"chunk {chunk['chunk_index']}: chunker counted {believed}, "
+                f"fewer than the {truth} tokens it holds"
             )
 
     # Every chunk must have been embedded: its id must come back from the vector store.

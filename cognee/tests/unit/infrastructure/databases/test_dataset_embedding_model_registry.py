@@ -44,6 +44,7 @@ preflight_mod = importlib.import_module("cognee.modules.preflight.config_preflig
 
 SMALL = {MODEL_KEY: "BAAI/bge-small-en-v1.5", DIMENSIONS_KEY: 384}
 LARGE = {MODEL_KEY: "openai/text-embedding-3-large", DIMENSIONS_KEY: 3072}
+LOCAL_DEFAULT = {MODEL_KEY: "perplexity-ai/pplx-embed-v1-0.6b", DIMENSIONS_KEY: 1024}
 
 
 def _row(**info):
@@ -92,6 +93,8 @@ async def test_a_different_width_is_refused_with_both_models_named(store):
     assert "BAAI/bge-small-en-v1.5" in error.message and "384" in error.message
     assert "openai/text-embedding-3-large" in error.message and "3072" in error.message
     assert "EMBEDDING_MODEL" in error.remediation and "forget" in error.remediation
+    # After an upgrade a pending migration may be what moves the dataset.
+    assert "cognee-cli upgrade" in error.remediation
 
 
 @pytest.mark.asyncio
@@ -105,6 +108,9 @@ async def test_an_unfinished_reembed_is_refused_even_with_a_matching_model(store
 
     assert refused.value.target_model == "the-new-model"
     assert "reembed_dataset" in refused.value.remediation
+    # One that began during an upgrade is continued by the migrations.
+    assert "wait" in refused.value.remediation
+    assert "cognee-cli upgrade" in refused.value.remediation
     store["engine"].get_stored_vector_size.assert_not_awaited()
 
 
@@ -328,7 +334,7 @@ async def test_creation_records_the_model_and_prune_clears_it(monkeypatch):
 @pytest.mark.parametrize(
     ("llm_api_key", "expected"),
     [
-        (None, SMALL),  # keyless: embeddings are rerouted to the local model
+        (None, LOCAL_DEFAULT),  # keyless: embeddings are rerouted to the local model
         ("sk-a-real-key", LARGE),  # a usable key keeps the configured embedder
     ],
 )

@@ -322,6 +322,28 @@ async def test_a_row_is_embedded_from_the_text_an_index_write_embeds(open_store)
 
 
 @pytest.mark.asyncio
+async def test_staging_logs_how_far_each_collection_is(open_store, monkeypatch, caplog):
+    await _write_old_store(open_store)
+    store = open_store(_Model(marker=2.0, width=NEW_WIDTH, request_limit=REQUEST_SIZE))
+    names = await get_reembeddable_collection_names(store)
+    chunks = _collection(names, "_Chunk_text")
+    monkeypatch.setattr("cognee.tasks.storage.reembed_collections.ROWS_PER_STEP", 2)
+
+    with caplog.at_level("INFO"):
+        await stage_collections(store, [chunks])
+
+    said = [r.getMessage() for r in caplog.records if chunks in r.getMessage()]
+    expected = [
+        f"Re-embedding 5 row(s) of {chunks}",
+        f"Re-embedded 2 of 5 row(s) of {chunks}",
+        f"Re-embedded 4 of 5 row(s) of {chunks}",
+        f"Re-embedded 5 of 5 row(s) of {chunks}",
+    ]
+    assert len(said) == len(expected)
+    assert all(line in message for line, message in zip(expected, said, strict=True))
+
+
+@pytest.mark.asyncio
 async def test_staging_again_follows_what_changed_in_the_collection(open_store):
     """A second stage call (an interrupted one, continued) leaves staging equal to the rows."""
     old = await _write_old_store(open_store)

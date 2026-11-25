@@ -1687,7 +1687,7 @@ requires-dist = [
     { name = "notebook", marker = "extra == 'dev'", specifier = ">=7.1.0,<8" },
     { name = "notebook", marker = "extra == 'notebook'", specifier = ">=7.1.0,<8" },
     { name = "numpy", specifier = ">=1.26.4,<=4.0.0" },
-    { name = "onnxruntime", specifier = ">=1.17" },
+    { name = "onnxruntime", specifier = ">=1.23" },
     { name = "onnxruntime", marker = "python_full_version < '3.11' or (python_full_version >= '3.11' and python_full_version < '3.14' and 'Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin')", specifier = "<=1.23.2" },
     { name = "openai", specifier = ">=1.80.1" },
     { name = "opentelemetry-api", marker = "extra == 'tracing'", specifier = ">=1.20.0,<2" },

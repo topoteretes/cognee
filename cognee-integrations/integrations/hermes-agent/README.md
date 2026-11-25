@@ -247,7 +247,9 @@ session.
 A server that reports no version is used.
 
 **Without an LLM key**, cognee builds memory with local models: the GLiNER
-extractor for the graph and the fastembed `BAAI/bge-small-en-v1.5` embedder. The
+extractor for the graph and a local fastembed embedder
+(`perplexity-ai/pplx-embed-v1-0.6b`, about 0.7 GB; `BAAI/bge-small-en-v1.5` in
+earlier cognee releases). The
 first graph build installs CPU PyTorch and `gliner2` into the runtime (about
 800 MB more) and downloads the GLiNER model (about 750 MB); later builds take
 seconds. Recall then returns the stored text that matches rather than a
@@ -256,11 +258,12 @@ machine instead, set `LLM_PROVIDER=ollama` (see
 [Local models via Ollama](#local-models-via-ollama-embedding-settings)).
 
 > **The embedder sticks to the store.** Keyless mode embeds with fastembed
-> (384 dimensions); adding an LLM key later switches cognee's default embedder
+> (1024 dimensions); adding an LLM key later switches cognee's default embedder
 > to OpenAI, and the existing store then refuses it with
 > `EmbeddingDimensionMismatchError`. To add a key to a keyless store, also set
-> `EMBEDDING_PROVIDER=fastembed` and `EMBEDDING_MODEL=BAAI/bge-small-en-v1.5` in
-> `~/.hermes/.env`, or start a new store (`COGNEE_DATA_ROOT`,
+> `EMBEDDING_PROVIDER=fastembed` and `EMBEDDING_MODEL=perplexity-ai/pplx-embed-v1-0.6b`
+> in `~/.hermes/.env` (`BAAI/bge-small-en-v1.5` for a store an earlier cognee
+> release built and that already has a key), or start a new store (`COGNEE_DATA_ROOT`,
 > `COGNEE_SYSTEM_ROOT`).
 
 At session start the plugin attaches to a cognee server already running on

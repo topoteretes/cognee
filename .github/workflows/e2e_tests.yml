@@ -257,7 +257,7 @@ jobs:
       # GLiNER and embeddings to fastembed, and add -> cognify -> search ->
       # visualize -> remember -> recall must all complete without a provider
       # call. The script scrubs any provider variable that leaks in.
-      # TODO: expand this job — cache the model downloads (~800 MB per run),
+      # TODO: expand this job — cache the model downloads (~1.5 GB per run),
       # add the session-scoped remember/improve path (SDK-691) and the CLI /
       # REST default search types once they are keyless-aware (SDK-690).
       - name: Run keyless e2e

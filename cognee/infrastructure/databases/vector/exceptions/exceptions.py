@@ -45,6 +45,8 @@ class EmbeddingDimensionMismatchError(CogneeValidationError):
             name=name,
             status_code=status_code,
             remediation=(
+                "If cognee was just upgraded, run `cognee-cli upgrade` first: a pending "
+                "migration may re-embed this dataset with the current model. Otherwise: "
                 f"{keep_using} to keep using this dataset, or delete the dataset "
                 "(forget(dataset=...) / cognee-cli forget) and ingest it again with the "
                 "current model."
@@ -73,8 +75,10 @@ class DatasetReembedIncompleteError(CogneeValidationError):
             name=name,
             status_code=status_code,
             remediation=(
-                "If no re-embed of this dataset is running, run reembed_dataset for it again "
-                f"with '{target_model}': it continues where the last one stopped."
+                "If a cognee upgrade or a reembed_dataset call is re-embedding it now, wait "
+                "for that to finish. If none is running, continue where it stopped: run "
+                "`cognee-cli upgrade` if it began during an upgrade, else run reembed_dataset "
+                f"for it again with '{target_model}'."
             ),
         )
 
