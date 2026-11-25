@@ -87,6 +87,8 @@ async def test_messages_are_stored_with_their_chat_node_set_and_container(clean_
         NAME
     }
     assert source.cognee_sync_stats["scanned"] == 3 and source.cognee_sync_stats["skipped"] == 1
+    # The upgrade announcement has no text: a service message.
+    assert source.cognee_sync_stats["skipped_empty_content"] == 1
 
     ids = {key: doc.id for key, doc in documents.items()}
     quiet = await _sync(bot)

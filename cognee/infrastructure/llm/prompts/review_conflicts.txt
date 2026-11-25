@@ -8,7 +8,9 @@ label and never with a document identifier. The label-valued fields - `reviewed`
 `Subject [n#] name (types: ...)` opens a subject, then its fact lines, each written
 `[label] relation | what a document states | sources`.
 - `[r#]` is a relationship, `n# --relationship_name--> n#`; `[s#]` is a statement about the
-  subject; `[n#]` labels an entity, non-subject names after the subjects with their types.
+  subject; `[n#]` labels an entity.
+- `Value [n#] name (types: ...)`, after the subjects, names an entity that facts mention and that
+  is not a subject of this call: it is never `reviewed` and never the `about` of a conflict.
 - `sources` lists the `d#` labels of the documents stating the fact, each dated in
   parentheses where known; the last block names each document once as `[d#] name`.
 - `Competing relationships:` groups facts whose values could stand for one attribute of the

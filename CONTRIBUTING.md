@@ -3,9 +3,7 @@
 
 # 🎉 Welcome to **cognee**!
 
-We're excited that you're interested in contributing to our project!
-We want to ensure that every user and contributor feels welcome, included and supported to participate in cognee community.
-This guide will help you get started and ensure your contributions can be efficiently integrated into the project.
+We're excited that you're interested in contributing to our project! We want to ensure that every user and contributor feels welcome, included and supported to participate in cognee community. This guide will help you get started and ensure your contributions can be efficiently integrated into the project.
 
 ## 🌟 Quick Links
 
@@ -94,7 +92,7 @@ git checkout -b feature/your-feature-name
 ## 3. 🎯 Making Changes
 
 1. **Code Style**: Follow the project's coding standards
-2. **Documentation**: Update relevant documentation
+2. **Documentation**: Update the relevant topic guide, public docs, or docstring when behavior changes. Keep [`AGENTS.md`](AGENTS.md) for shared rules and links to those references. Keep [`CLAUDE.md`](CLAUDE.md) as the import for those rules.
 3. **Tests**: Add tests for new features
 4. **Commits**: Write clear commit messages
 
@@ -105,6 +103,20 @@ Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 ```shell
 uv run python cognee/tests/test_library.py
 ```
+
+### Running the SDK, CLI, and API
+
+Run `uv sync --dev` from the repository root. Optional dependencies are listed in [`pyproject.toml`](pyproject.toml) under `project.optional-dependencies`. Install the extras needed for your work with `uv sync --dev --extra <name>`.
+
+```bash
+uv run cognee-cli remember "Cognee turns documents into AI memory."
+uv run cognee-cli recall "What does cognee do?"
+uv run cognee-cli improve -d main_dataset
+uv run python -m cognee.api.client
+uv run cognee-cli -ui
+```
+
+`-ui` starts the UI, API, and MCP server together. Run `uv run cognee-cli --help` for the full command list. See the [runtime configuration guide](docs/runtime-configuration.md) for provider setup.
 
 ### Minimal Docker Compose Try-out
 
@@ -152,10 +164,13 @@ uv run python examples/guides/simple_cognee_example.py
    - Fill in the PR template with details about your changes
    - You MUST provide screenshots of unit and integration tests passing on your machine. We can't merge PRs otherwise
 
+### Commit Messages
+
+Use an imperative subject of at most 72 characters in `type: Summary` form. Capitalize the summary and omit the final period. Include the issue key when applicable. If a body is needed, leave a blank line after the subject and explain the motivation for the change.
+
 ### PR Titles
 
-Use `type: Summary` for your PR title. The [PR title check](.github/workflows/pr_lint.yml)
-accepts these types:
+Use `type: Summary` for your PR title. The [PR title check](.github/workflows/pr_lint.yml) accepts these types:
 
 | Type | Example |
 | --- | --- |
@@ -172,13 +187,9 @@ accepts these types:
 
 ### Changelog Entries
 
-This repository has no `CHANGELOG.md`. Release notes are compiled from merged PR titles when a
-release is cut (see `.github/docs/release.md`), so your PR title *is* the changelog entry: use the
-conventional `type: Summary` form described above and make it understandable on its own.
+This repository has no `CHANGELOG.md`. Release notes are compiled from merged PR titles when a release is cut (see `.github/docs/release.md`), so your PR title *is* the changelog entry: use the conventional `type: Summary` form described above and make it understandable on its own.
 
-> **Reviewers are auto-routed.** Cognee uses a [`CODEOWNERS`](.github/CODEOWNERS)
-> file to request reviews automatically based on the directories your PR touches.
-> No manual ping required — the right person will get notified when you open the PR.
+> **Reviewers are auto-routed.** Cognee uses a [`CODEOWNERS`](.github/CODEOWNERS) file to request reviews automatically based on the directories your PR touches. No manual ping required — the right person will get notified when you open the PR.
 
 ## 5. 📜 Developer Certificate of Origin (DCO)
 

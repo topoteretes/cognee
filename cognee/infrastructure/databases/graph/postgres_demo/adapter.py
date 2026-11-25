@@ -1167,6 +1167,40 @@ class PostgresDemoAdapter(GraphDBInterface):
             ]
             return nodes, edges
 
+    async def get_node_ids_by_property(
+        self, node_types: list[str], property_name: str, values: list[Any]
+    ) -> list[str]:
+        """Ids of typed nodes whose property is one of ``values``, filtered in SQL."""
+        if not node_types or not values:
+            return []
+        column = "name" if property_name == "name" else "properties->>:property"
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text(
+                    f"SELECT id FROM graph_node WHERE type = ANY(:types) AND {column} = ANY(:values)"
+                ),
+                {
+                    "types": list(node_types),
+                    "property": property_name,
+                    "values": [str(value) for value in values],
+                },
+            )
+            return [str(row[0]) for row in result.all()]
+
+    async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
+        """Keys of the edges leaving ``source_ids``, read off the source index."""
+        if not source_ids:
+            return []
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text(
+                    "SELECT source_id, target_id, relationship_name FROM graph_edge "
+                    "WHERE source_id = ANY(:ids)"
+                ),
+                {"ids": [str(source_id) for source_id in source_ids]},
+            )
+            return [(str(row[0]), str(row[1]), row[2]) for row in result.all()]
+
     async def get_id_filtered_graph_data(
         self, target_ids: list[str]
     ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
