@@ -25,6 +25,7 @@ from .extract_code_graph import (
     build_code_graph_edges,
     extract_code_graph,
     get_code_graph_tasks,
+    load_code_graph,
     map_facts_to_data_points,
     receipt_projection,
 )

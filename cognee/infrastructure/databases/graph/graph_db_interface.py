@@ -826,6 +826,37 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError
 
+    async def get_node_ids_by_property(
+        self, node_types: list[str], property_name: str, values: list[Any]
+    ) -> list[str]:
+        """Ids of the nodes of one of ``node_types`` whose ``property_name`` is one of ``values``.
+
+        Values compare as text: a stored value matches when its text equals
+        ``str(value)`` of a wanted one, and a missing or null property never
+        matches. Only string and integer values are supported: booleans and
+        floats have no text form every backend agrees on (``str(True)`` is
+        "True", a database prints "true").
+
+        Filter in the database; the code graph load calls this to find one
+        repository's nodes, so it must not read the whole graph.
+
+        Required for the code graph, but not abstract: an adapter without it
+        still serves everything else, and only a code graph load fails.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no get_node_ids_by_property")
+
+    async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
+        """``(source_id, target_id, relationship_name)`` of every edge leaving ``source_ids``.
+
+        Ids that are not in the graph have no edges. Look the sources up by
+        index; the code graph load calls this once per batch of edges, so it
+        must not read the whole graph.
+
+        Required for the code graph, but not abstract: an adapter without it
+        still serves everything else, and only a code graph load fails.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no get_outgoing_edge_keys")
+
     async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
         """Ids of up to ``top_k`` well-connected nodes, to seed a graph view.
 
