@@ -25,9 +25,13 @@ A dataset farther than `DATASET_ROUTING_DISTANCE_CUTOFF` (cosine distance,
 default 0.8) is skipped, and when none is within it all are searched; datasets
 within `DATASET_ROUTING_TIE_MARGIN` (default 0.001) of the last routed one are
 searched too. A routed search that finds nothing is widened to the rest. The
-search log prints every dataset's distance. Routing assumes
-one embedding model across datasets; after an `EMBEDDING_MODEL` change it
-logs a warning and every readable dataset is searched. Pass
+search log prints every dataset's distance. Shared routing summaries and queries
+use deployment embeddings, even for differently embedded datasets. All readable
+datasets remain eligible; entering a selected dataset with incompatible dimensions
+raises `EmbeddingDimensionMismatchError`, including during widening. A model change
+selects a new routing collection; the next enabled improve repopulates summaries,
+without re-embedding dataset chunks/entities. Until then those datasets are unindexed.
+Populated legacy stores keep unknown model provenance unknown. Pass
 `datasets=["research"]` (names) or `dataset_ids=[...]` (UUIDs, which win) to
 pin the scope yourself; an explicit scope is never routed.
 

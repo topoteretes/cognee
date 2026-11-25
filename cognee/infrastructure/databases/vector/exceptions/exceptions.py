@@ -85,7 +85,7 @@ class StoredVectorWidthMismatchError(CogneeValidationError):
             )
         super().__init__(
             message=(
-                f"LanceDB collection '{collection_name}' holds {stored}, but the configured "
+                f"Vector collection '{collection_name}' holds {stored}, but the configured "
                 f"embedding model produces {configured_dimensions} dimensions. A schema "
                 "migration keeps the stored vectors, so it cannot bring this table to the "
                 "current model."

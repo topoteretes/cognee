@@ -662,24 +662,39 @@ class GlobalContextIndexStage(BaseStage):
 
         from cognee.context_global_variables import backend_access_control_enabled
         from cognee.memify_pipelines.global_context_index import global_context_index_pipeline
+        from cognee.modules.search.dataset_routing.store import get_dataset_route_embedding
 
         from .watermarks import (
             GLOBAL_CONTEXT_WATERMARK_KEY,
             has_dataset_changed_since_last_improve,
+            last_improve_watermark,
             watermark_stamp,
         )
 
         # Captured before the change check and the build, so a write racing
         # this run stays visible to the next run's check.
         started_at = datetime.now(timezone.utc)
-        if await has_dataset_changed_since_last_improve(
+        routing_identity = None
+        identity_changed = False
+        if backend_access_control_enabled():
+            routing_identity = (await get_dataset_route_embedding()).collection
+            previous = await last_improve_watermark(
+                inputs.dataset_id,
+                GLOBAL_CONTEXT_WATERMARK_KEY,
+                exclude_operation_id=inputs.improve_operation_id,
+            )
+            identity_changed = (
+                previous is None or previous.stamp.get("routing_identity") != routing_identity
+            )
+        dataset_changed = await has_dataset_changed_since_last_improve(
             inputs.dataset_id,
             GLOBAL_CONTEXT_WATERMARK_KEY,
             exclude_operation_id=inputs.improve_operation_id,
             # Without access control datasets share one graph, and relation and
             # type lines read edges that any of them may write.
             any_dataset=not backend_access_control_enabled(),
-        ):
+        )
+        if identity_changed or dataset_changed:
             run_result = await global_context_index_pipeline(
                 user=inputs.user,
                 dataset=inputs.dataset_id,
@@ -691,6 +706,9 @@ class GlobalContextIndexStage(BaseStage):
             result = _already_completed(self.name, REASON_NO_WRITES_SINCE_LAST_IMPROVE)
         if result.status in ("completed", "already_completed"):
             result._run_info_stamp = watermark_stamp(
-                GLOBAL_CONTEXT_WATERMARK_KEY, result.status, started_at
+                GLOBAL_CONTEXT_WATERMARK_KEY,
+                result.status,
+                started_at,
+                routing_identity=routing_identity,
             )
         return result

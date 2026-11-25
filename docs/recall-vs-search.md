@@ -33,6 +33,40 @@ Source of truth: `cognee/api/v1/recall/recall.py` and `cognee/api/v1/search/sear
 
 Dataset routing is not on this list because it lives one level down and is shared by `recall()` and `search()` through the same authorized search path. See [dataset routing](retrieval-internals.md#search-retrieval) for details.
 
+### Dataset routing
+
+Unscoped `search()` and `recall()` route among **all readable datasets**, regardless
+of the embedding model or width recorded for a dataset. Routing summaries and the
+routing query use the deployment's resolved embedding settings, never a per-call
+`embedding_config`. New or changed summaries are embedded during indexing, not
+on each query. The default vector store holds a collection per exact deployment
+model and width (`DatasetRoute_text__<digest>`).
+
+Dataset-local summaries, chunks and entities retain their dataset embeddings.
+Routing can select a differently embedded dataset: entering it with incompatible
+retrieval dimensions raises `EmbeddingDimensionMismatchError`. That error fails the
+request even alongside successful sibling results or during widening; it is not
+an empty result. Equal-width different-model datasets remain eligible under existing
+dataset-entry behavior; routing does not make their dataset vectors comparable.
+Unknown provenance in populated legacy stores stays unknown; only empty stores
+adopt the effective dataset model through the existing registration path.
+
+A deployment-model change or the routing-layout upgrade triggers the next enabled
+global-context improve stage. It repopulates routing summaries in the new space,
+invalidating that dataset's rows in older routing collections. No query-time rebuild
+occurs: missing active rows remain unindexed and eligible for ordinary fan-out or
+widening over every readable dataset. This routing-summary repopulation is separate
+from the planned user-facing dataset re-embedding operation. Improve still needs a
+valid dataset context; supply a compatible per-call configuration to index a
+different-width dataset while routing uses deployment settings.
+
+Explicit scopes (including `dataset_ids=[]`), `CODE`, zero/one-readable-dataset
+cases and access-control-off behavior keep their routing bypasses. Thresholds,
+ties, result ordering and genuine empty-result widening are unchanged. Deletion
+cleans the relevant root/document IDs in every named and legacy routing collection;
+`prune_system()` drops all routing collections, including orphans. The legacy
+`DatasetRoute_text` collection is never scored because its model is unknown.
+
 ## When to call search() directly
 
 - You need the agentic extras as first-class parameters: `skills`, `tools`, `max_iter`,

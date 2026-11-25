@@ -612,6 +612,20 @@ class TestCogneeErrorPassthrough:
         assert resp.status_code == 409
         assert "session chat-1 is bound to another dataset" in resp.text
 
+    def test_selected_dataset_dimension_mismatch_keeps_http_contract(self, client, monkeypatch):
+        from cognee.infrastructure.databases.vector.exceptions.exceptions import (
+            EmbeddingDimensionMismatchError,
+        )
+
+        search_pkg = importlib.import_module("cognee.api.v1.search")
+        error = EmbeddingDimensionMismatchError(MOCK_DATASET_ID, "B", 16, "A", 8)
+        monkeypatch.setattr(search_pkg, "search", AsyncMock(side_effect=error))
+        response = client.post("/search", json={"query": "q"})
+        assert response.status_code == 409
+        assert str(MOCK_DATASET_ID) in response.text
+        assert "16 dimensions" in response.text and "produces 8" in response.text
+        assert "EmbeddingDimensionMismatchError" in response.text
+
     def test_recall_surfaces_cognee_error_message_and_status(self, client, monkeypatch):
         recall_pkg = importlib.import_module("cognee.api.v1.recall")
         error = self._conflict("recall conflict detail the caller must see")

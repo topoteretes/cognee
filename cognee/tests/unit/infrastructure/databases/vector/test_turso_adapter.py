@@ -86,6 +86,44 @@ async def test_has_collection_lifecycle(adapter):
 
 
 @pytest.mark.asyncio
+async def test_explicit_raw_width_and_case_insensitive_discovery(adapter, monkeypatch):
+    from uuid import uuid4
+
+    from cognee.modules.search.dataset_routing.store import (
+        dataset_route_collection,
+        dataset_route_collections,
+    )
+
+    def forbidden():
+        raise AssertionError("explicit raw width must not use cached embedder")
+
+    monkeypatch.setattr(adapter.embedding_engine, "get_vector_size", forbidden)
+    row_id = uuid4()
+    collection = dataset_route_collection("A", 2).upper()
+    await adapter.upsert_raw_vectors(
+        collection,
+        [{"id": row_id, "vector": [1.0, 0.0], "payload": {"text": "route"}}],
+        vector_size=2,
+    )
+    assert await adapter.has_collection(collection.lower())
+    assert [name.lower() for name in await dataset_route_collections(adapter)] == [
+        collection.lower()
+    ]
+    [row] = await adapter.retrieve(collection, [str(row_id)], include_vector=True)
+    assert row.payload["vector"] == [1.0, 0.0]
+    from cognee.infrastructure.databases.vector.exceptions import StoredVectorWidthMismatchError
+
+    with pytest.raises(StoredVectorWidthMismatchError):
+        await adapter.upsert_raw_vectors(
+            collection,
+            [{"id": row_id, "vector": [1.0] * 3, "payload": {"text": "wrong width"}}],
+            vector_size=3,
+        )
+    [row] = await adapter.retrieve(collection, [str(row_id)], include_vector=True)
+    assert row.payload["vector"] == [1.0, 0.0]
+
+
+@pytest.mark.asyncio
 async def test_create_data_points_and_search_ordering(adapter):
     docs = _docs()
     await adapter.create_data_points("DocumentChunk_text", docs)

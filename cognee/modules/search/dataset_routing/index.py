@@ -9,9 +9,8 @@ changed and deletes the rest. It can only address rows whose document still
 has a ``Data`` row, so deletion removes rows itself, while their ids are still
 derivable: ``remove_dataset_routes`` with the deleted documents, which also
 takes the root, since the root names every document and the index drops its
-own root at the same time; ``prune_dataset_routes`` drops the whole
-collection, so a prune followed by an embedding model change starts from a
-clean table.
+own root at the same time. Removal covers every routing collection;
+``prune_dataset_routes`` drops all named and legacy routing collections.
 
 Nothing here runs with backend access control off. Every dataset then shares
 one store, so there is nothing to route between, and the rows would land in
@@ -23,13 +22,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import (
+    embedding_request_scope,
+)
 from cognee.modules.data.methods.get_data_ids_by_dataset import get_data_ids_by_dataset
 from cognee.shared.logging_utils import get_logger
 
 from .store import (
-    DATASET_ROUTE_COLLECTION,
+    dataset_route_collections,
+    get_dataset_route_embedding,
     get_dataset_route_engine,
-    routing_width_matches,
 )
 
 if TYPE_CHECKING:
@@ -71,65 +73,54 @@ async def sync_dataset_routes(
     missing from the collection, for instance after an upgrade that found the
     graph index already built, is written on the next build. A summary whose id
     the read path cannot derive (an ``llm``-method bucket) is not mirrored.
-    Nothing is written while the collection's vector width differs from the
-    configured model's; the rows wait for a prune.
-
-    The rows are not embedded again: ``index_engine`` is the dataset's own
-    vector store, where the index build just embedded these summaries, and the
-    rows it stored for them are copied as they are, vector and payload, so a
-    routing row is the index row of every other ``<Type>_<field>`` collection
-    (the adapter's ``IndexSchema``; ``upsert_raw_vectors`` with no payload
-    schema stores that shape). One embedding model for the deployment is what
-    makes the copy correct, and it is the assumption routing rests on anyway
-    (the width check above is its guard).
+    Source payloads retain their index shape and tags. New or changed text is
+    embedded together in deployment space; source vectors are never read or
+    modified. Noncurrent deployment collections are invalidated first so an
+    older model cannot score stale summaries after a later switch.
     """
     if not backend_access_control_enabled():
         return 0
 
     engine = await get_dataset_route_engine()
-    if not await routing_width_matches(engine):
-        return 0
+    embedding = await get_dataset_route_embedding()
+    collection = embedding.collection
 
     documents = await get_data_ids_by_dataset([UUID(dataset_id)])
     addressable = set(dataset_route_ids(dataset_id, documents.get(UUID(dataset_id), [])))
     wanted = {str(summary.id): summary for summary in desired if str(summary.id) in addressable}
 
+    collections = await dataset_route_collections(engine)
+    addressable_ids = [UUID(row_id) for row_id in addressable]
+    for old_collection in collections:
+        if old_collection.lower() != collection.lower():
+            await engine.delete_data_points(old_collection, addressable_ids)
+
     existing = {
         str(row.id): (row.payload or {}).get("text")
-        for row in await engine.retrieve(DATASET_ROUTE_COLLECTION, list(addressable))
+        for row in await engine.retrieve(collection, list(addressable))
     }
     stale = [UUID(row_id) for row_id in existing if row_id not in wanted]
     changed = [
         summary for row_id, summary in wanted.items() if existing.get(row_id) != summary.text
     ]
     if stale:
-        await engine.delete_data_points(DATASET_ROUTE_COLLECTION, stale)
+        await engine.delete_data_points(collection, stale)
     if changed:
         rows = await _index_rows(index_engine, dataset_id, changed)
-        try:
-            await engine.upsert_raw_vectors(
-                DATASET_ROUTE_COLLECTION,
-                [
-                    {
-                        "id": summary.id,
-                        "vector": rows[str(summary.id)]["vector"],
-                        "payload": {
-                            key: value
-                            for key, value in rows[str(summary.id)].items()
-                            if key != "vector"
-                        },
-                    }
-                    for summary in changed
-                ],
+        with embedding_request_scope(embedding.requests):
+            vectors = await embedding.engine.embed_text(
+                [rows[str(summary.id)]["text"] for summary in changed]
             )
-        except NotImplementedError:
-            logger.warning(
-                "The %s vector adapter cannot write precomputed vectors; the dataset routing "
-                "rows of %s were not written and the dataset is searched without routing.",
-                type(engine).__name__,
-                dataset_id,
-            )
-            return len(stale)
+        if len(vectors) != len(changed):
+            raise ValueError("Dataset routing embedder returned an incorrect number of vectors")
+        await engine.upsert_raw_vectors(
+            collection,
+            [
+                {"id": summary.id, "vector": vector, "payload": rows[str(summary.id)]}
+                for summary, vector in zip(changed, vectors)
+            ],
+            vector_size=embedding.vector_size,
+        )
     logger.info(
         "Dataset routing index for %s: %d row(s) written, %d removed",
         dataset_id,
@@ -144,8 +135,7 @@ async def _index_rows(
 ) -> dict[str, dict]:
     """The rows the index build stored for ``summaries``, by id, from the dataset's store.
 
-    Each is the stored payload with the vector under ``"vector"``, as
-    ``retrieve(..., include_vector=True)`` returns it.
+    Payload-only retrieval leaves the dataset's vectors in its own space.
     """
     from cognee.tasks.memify.global_context_index.constants import (
         GLOBAL_CONTEXT_SUMMARY_COLLECTION,
@@ -154,15 +144,14 @@ async def _index_rows(
     rows = await index_engine.retrieve(
         GLOBAL_CONTEXT_SUMMARY_COLLECTION,
         [str(summary.id) for summary in summaries],
-        include_vector=True,
     )
     stored = {str(row.id): row.payload for row in rows}
     missing = [str(summary.id) for summary in summaries if str(summary.id) not in stored]
     if missing:
         raise LookupError(
             f"Dataset routing: {len(missing)} index row(s) of dataset {dataset_id} have no "
-            f"vector in {GLOBAL_CONTEXT_SUMMARY_COLLECTION}; the index is written before it "
-            "is mirrored, so the routing rows copy its vectors instead of embedding again."
+            f"payload in {GLOBAL_CONTEXT_SUMMARY_COLLECTION}; the index must be written "
+            "before its routing summaries."
         )
     return stored
 
@@ -178,28 +167,16 @@ async def remove_dataset_routes(dataset_id: UUID | str, document_ids: list[UUID 
     """
     if not backend_access_control_enabled():
         return
-    await (await get_dataset_route_engine()).delete_data_points(
-        DATASET_ROUTE_COLLECTION,
-        [UUID(row_id) for row_id in dataset_route_ids(dataset_id, document_ids)],
-    )
+    engine = await get_dataset_route_engine()
+    ids = [UUID(row_id) for row_id in dataset_route_ids(dataset_id, document_ids)]
+    for collection in await dataset_route_collections(engine):
+        await engine.delete_data_points(collection, ids)
 
 
 async def prune_dataset_routes() -> None:
-    """Drop the routing collection; for ``prune_system``.
-
-    The collection's vector width is fixed when it is created, so emptying it
-    would leave a prune followed by an ``EMBEDDING_MODEL`` change unable to
-    write; dropping it lets the next index build create it at the new width.
-    """
+    """Drop every routing collection, including orphaned/legacy ones, for ``prune_system``."""
     if not backend_access_control_enabled():
         return
     engine = await get_dataset_route_engine()
-    try:
-        await engine.delete_collection(DATASET_ROUTE_COLLECTION)
-    except NotImplementedError:
-        logger.warning(
-            "The %s vector adapter cannot drop a collection; the dataset routing "
-            "collection %s was left in place.",
-            type(engine).__name__,
-            DATASET_ROUTE_COLLECTION,
-        )
+    for collection in await dataset_route_collections(engine):
+        await engine.delete_collection(collection)

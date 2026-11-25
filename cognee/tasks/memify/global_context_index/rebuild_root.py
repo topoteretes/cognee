@@ -5,7 +5,7 @@ its text names the deleted document. Until the next ``improve()`` the dataset
 would then have bucket rows but no root row in the routing collection, so a
 broad question has nothing to land on and the dataset can lose the routing to
 another one. The ``from_entities`` root is a rendered vocabulary: one graph read
-and one embedding of a short text, no LLM, so it is written again at once.
+and embeddings of a short text in dataset and routing space, no LLM, so it is written again at once.
 
 Only that method's root. The ``llm`` method's root is an LLM summary over bucket
 summaries that still describe the deleted document; it stays dropped until its
@@ -89,7 +89,7 @@ async def _rebuild_root(dataset_id: str, user) -> GlobalContextSummary | None:
             [], dataset_id, unified_engine, link_documents=False, relink=buckets, ctx=ctx
         )
         # The buckets go in as stored, so the mirror sees them unchanged and
-        # copies the root's vector only. Their texts shift a little with the
+        # embeds only changed routing text. Their texts shift a little with the
         # deletion (tf-idf over fewer documents); the next build writes those.
         await sync_dataset_routes(dataset_id, [*buckets, root], unified_engine.vector)
     except Exception:
@@ -97,7 +97,7 @@ async def _rebuild_root(dataset_id: str, user) -> GlobalContextSummary | None:
         # both, so a failure can leave a root with no vector or no bucket
         # edges. The build compares text, and this root's text is the one it
         # computes, so it would leave such a root as it is: unembedded, the
-        # mirror cannot copy its vector and every later build fails. Take the
+        # routing index cannot read its payload and every later build fails. Take the
         # root out again, and the next build writes it as one that was missing.
         await delete_context_index_nodes(unified_engine, [root_id])
         raise

@@ -7,6 +7,7 @@ from collections import OrderedDict
 from enum import Enum
 from os import path
 from typing import (  # noqa: UP035 - typing.List is a distinct origin key, not an annotation
+    Any,
     List,
     Optional,
     Union,
@@ -445,9 +446,13 @@ class LanceDBAdapter(VectorDBInterface):
         ``has_collection`` lists every table on each call, so the interface
         default would list them once per name.
         """
-        connection = await self.get_connection()
-        table_names = set(await connection.table_names())
+        table_names = set(await self.list_collections())
         return [name for name in collection_names if name in table_names]
+
+    async def list_collections(self) -> list[str]:
+        """Every table in this adapter's LanceDB store, from one async listing."""
+        connection = await self.get_connection()
+        return await connection.table_names()
 
     async def delete_collection(self, collection_name: str) -> None:
         """Drop the table for ``collection_name``; a missing table is not an error.
@@ -686,7 +691,9 @@ class LanceDBAdapter(VectorDBInterface):
         self,
         collection_name: str,
         points: list[dict],
-        payload_schema: type[BaseModel] | None = None,
+        payload_schema: Any | None = None,
+        *,
+        vector_size: int | None = None,
     ) -> None:
         """Upsert caller-provided vectors without invoking the embedding engine.
 
@@ -706,12 +713,13 @@ class LanceDBAdapter(VectorDBInterface):
         if payload_schema is None:
             payload_schema = IndexSchema
 
-        vector_size = self.embedding_engine.get_vector_size()
+        if vector_size is None:
+            vector_size = self.embedding_engine.get_vector_size()
+        rows = validate_raw_vector_points(points, vector_size)
         payload_model = self._payload_model_for(payload_schema)
         LanceDataPoint = self._make_lance_datapoint_cls(payload_model, vector_size)
 
         # Every check runs before the table exists, so a rejected call creates nothing.
-        rows = validate_raw_vector_points(points, vector_size)
         properties_by_id = {
             row_id: payload_model.model_validate(serialize_data(row["payload"])).model_dump()
             for row_id, row in rows.items()
@@ -728,6 +736,11 @@ class LanceDBAdapter(VectorDBInterface):
                     )
 
         collection = await self.get_collection(collection_name)
+
+        schema = await collection.schema()
+        stored_width = schema.field("vector").type.list_size
+        if stored_width != vector_size:
+            raise StoredVectorWidthMismatchError(collection_name, stored_width, vector_size)
 
         self._mark_written(collection_name)
         # Read the stored tags, build and write under one lock section, as
@@ -768,7 +781,9 @@ class LanceDBAdapter(VectorDBInterface):
                 collection_name,
                 e,
             )
-            await self._migrate_collection_schema(collection_name, payload_schema, raw_points)
+            await self._migrate_collection_schema(
+                collection_name, payload_schema, raw_points, vector_size=vector_size
+            )
 
     # ------------------------------------------------------------------
     # Compaction
@@ -1021,6 +1036,8 @@ class LanceDBAdapter(VectorDBInterface):
         collection_name: str,
         payload_schema: type,
         new_lance_data_points: list,
+        *,
+        vector_size: int | None = None,
     ):
         """Bring a LanceDB table to the current payload schema and write the points.
 
@@ -1049,7 +1066,11 @@ class LanceDBAdapter(VectorDBInterface):
                     if not self._is_schema_drift_error(e):
                         raise
             return await self._evolve_collection_schema(
-                collection_name, collection, payload_schema, new_lance_data_points
+                collection_name,
+                collection,
+                payload_schema,
+                new_lance_data_points,
+                vector_size=vector_size,
             )
 
     async def _evolve_collection_schema(
@@ -1058,6 +1079,8 @@ class LanceDBAdapter(VectorDBInterface):
         old_collection,
         payload_schema: type,
         new_lance_data_points: list,
+        *,
+        vector_size: int | None = None,
     ):
         """Bring the table's ``payload`` struct to ``payload_schema``'s shape, in place.
 
@@ -1073,8 +1096,9 @@ class LanceDBAdapter(VectorDBInterface):
         are not the configured width is refused: that is a re-embedding, not a schema
         migration.
         """
-        vector_size = self.embedding_engine.get_vector_size()
-        target, required = self._target_payload_struct(payload_schema)
+        if vector_size is None:
+            vector_size = self.embedding_engine.get_vector_size()
+        target, required = self._target_payload_struct(payload_schema, vector_size=vector_size)
         if target is None:
             raise TypeError(
                 f"The payload model of '{collection_name}' has no Arrow representation, so "
@@ -1184,11 +1208,12 @@ class LanceDBAdapter(VectorDBInterface):
 
         return {"kind": type(arrow_type).__name__, "repr": str(arrow_type)}
 
-    def _model_payload_arrow_type(self, payload_schema: type):
+    def _model_payload_arrow_type(self, payload_schema: type, *, vector_size: int | None = None):
         """The ``payload`` struct ``LanceModel`` derives for ``payload_schema``, with the
         model's own nullability (required fields non-null), or ``None`` when the model
         has no Arrow form (complex unions)."""
-        vector_size = self.embedding_engine.get_vector_size()
+        if vector_size is None:
+            vector_size = self.embedding_engine.get_vector_size()
         payload_model = self._payload_model_for(payload_schema)
         try:
             schema = self._make_lance_datapoint_cls(payload_model, vector_size).to_arrow_schema()
@@ -1199,7 +1224,7 @@ class LanceDBAdapter(VectorDBInterface):
             return None
         return schema.field(payload_field_index).type
 
-    def _target_payload_struct(self, payload_schema: type):
+    def _target_payload_struct(self, payload_schema: type, *, vector_size: int | None = None):
         """The Arrow struct this adapter writes for ``payload_schema`` and the names of
         the fields the model requires a value for; ``(None, frozenset())`` when the
         model has no Arrow form. One schema build for both.
@@ -1210,7 +1235,7 @@ class LanceDBAdapter(VectorDBInterface):
         hold a value is the model's rule (non-null in the struct ``LanceModel``
         derives), kept apart from the struct the table is stored with.
         """
-        payload_type = self._model_payload_arrow_type(payload_schema)
+        payload_type = self._model_payload_arrow_type(payload_schema, vector_size=vector_size)
         if payload_type is None:
             return None, frozenset()
         required = frozenset(field.name for field in payload_type if not field.nullable)
