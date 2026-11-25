@@ -39,6 +39,11 @@ export interface TenantContextValue {
   // that need a real terminal error state (not just "still connecting")
   // read this instead.
   podUnreachable: boolean;
+  // Where the app is in waking a scaled-to-zero workspace. Always "idle" in
+  // the open-source build, which has no suspend/restore, but the shared shell
+  // reads it so the shape has to match the SaaS original.
+  wakeState: "idle" | "waking" | "failed";
+  wakeStartedAt: number | null;
   error: string | null;
   statusMessage: { title: string; subtitle: string } | null;
   switchTenant: (tenantId: string, tenantName?: string, navigateTo?: string) => void;
@@ -64,6 +69,8 @@ export const TenantContext = createContext<TenantContextValue>({
   isInitializing: true,
   tenantReady: true,
   podUnreachable: false,
+  wakeState: "idle",
+  wakeStartedAt: null,
   error: null,
   statusMessage: null,
   switchTenant: () => {},
@@ -86,9 +93,10 @@ export function useTenant() {
     (t) => t.id === context.tenant?.tenant_id,
   );
   const isOwner = currentAvailable?.isOwner ?? false;
-  // Whether the currently-selected tenant is the user's personal workspace —
-  // matched by name, since the tenant list carries no creation date. Falls back
-  // to the active tenant's own name when it isn't in availableTenants yet.
+  // The name to SHOW for the current workspace. The tenant list wins over
+  // context.tenant.tenant_name, which useTenantInit seeds from localStorage
+  // before it looks the tenant up, so the two can disagree and the chrome would
+  // then name one workspace while a wake screen names another.
   const currentName = currentAvailable?.name ?? context.tenant?.tenant_name;
   const isPersonal = currentName === PERSONAL_WORKSPACE_NAME;
   return {
@@ -96,10 +104,13 @@ export function useTenant() {
     isInitializing: context.isInitializing,
     tenantReady: context.tenantReady,
     podUnreachable: context.podUnreachable,
+    wakeState: context.wakeState,
+    wakeStartedAt: context.wakeStartedAt,
     error: context.error,
     availableTenants,
     isOwner,
     isPersonal,
+    currentName,
     switchTenant: context.switchTenant,
     planType: context.planType,
     hasAccess: context.hasAccess,

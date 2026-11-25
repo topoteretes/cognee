@@ -36,6 +36,7 @@ shallow clone (``resolve_code_repository_url``): the clone directory is the
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -136,6 +137,17 @@ def is_code_repo_sourced(metadata) -> bool:
     return metadata_source(metadata) == "code_repo"
 
 
+def code_repo_node_set(data_item) -> list[str] | None:
+    """The call-level node_set tag a ``code_repo`` row carries, or None.
+
+    Read off the manifest row's external_metadata (identical shape to
+    classify_documents) so every code node the row produces carries the same
+    tag its documents got from add()/remember().
+    """
+    metadata = decode_external_metadata(getattr(data_item, "external_metadata", None))
+    return validate_node_set_names(metadata.get("node_set")) if metadata else None
+
+
 def detect_code_project(directory: Path) -> bool:
     """Whether a directory's ROOT carries a code-project marker."""
     return any((directory / marker).exists() for marker in PROJECT_MARKERS)
@@ -143,6 +155,26 @@ def detect_code_project(directory: Path) -> bool:
 
 def _is_skipped_path(relative_path: Path) -> bool:
     return any(part in SKIP_DIRS or part.startswith(".") for part in relative_path.parts)
+
+
+# Git LFS leaves a file it did not download as a small pointer (spec: under
+# 1024 bytes; a version line, optional ext lines, then oid and size). cognee runs
+# git with LFS downloads off, so a repository's LFS documents arrive as pointers;
+# ingesting one would store the pointer text as if it were the document.
+_LFS_POINTER = re.compile(
+    rb"version https://git-lfs\.github\.com/spec/v1\n"
+    rb"(?:ext-\d+-\w+ sha256:[0-9a-f]{64}\n)*"
+    rb"oid sha256:[0-9a-f]{64}\n"
+    rb"size \d+\n?"
+)
+_LFS_POINTER_MAX_BYTES = 1024
+
+
+def _is_lfs_pointer(file_path: Path) -> bool:
+    """Whether ``file_path`` is a Git LFS pointer rather than the file it stands for."""
+    if file_path.stat().st_size >= _LFS_POINTER_MAX_BYTES:
+        return False
+    return _LFS_POINTER.fullmatch(file_path.read_bytes()) is not None
 
 
 def _document_extensions() -> frozenset:
@@ -171,9 +203,9 @@ def partition_repo_files(directory: Path) -> tuple[list[Path], list[Path], list[
     covered: source files + project manifests — represented by the single
     repo item and consumed by enola. documents: files whose extension a
     non-code loader claims — emitted individually so their content stays in
-    the document pipeline. skipped: hidden files/dirs, build junk, and
-    unclaimed extensions (binaries) — never ingested, so one .pyc cannot
-    abort the add.
+    the document pipeline. skipped: hidden files/dirs, build junk,
+    unclaimed extensions (binaries) and Git LFS pointers of documents that were
+    not downloaded — never ingested, so one .pyc cannot abort the add.
     """
     from cognee.infrastructure.loaders.core.code_loader import SUPPORTED_CODE_EXTENSIONS
 
@@ -202,7 +234,7 @@ def partition_repo_files(directory: Path) -> tuple[list[Path], list[Path], list[
             covered.append(file_path)
         elif extension in REPO_SKIPPED_MEDIA_EXTENSIONS:
             skipped.append(file_path)
-        elif extension in document_extensions:
+        elif extension in document_extensions and not _is_lfs_pointer(file_path):
             documents.append(file_path)
         else:
             skipped.append(file_path)
@@ -425,6 +457,10 @@ async def extract_code_repo_graph(
     there, exactly like remember(content_type="code")). One repository node,
     cross-file edges, one graph read per repo. No LLM, no embeddings.
 
+    A dataset holding several repositories is one enola cluster: the first of
+    its rows to get here loads all of them from one snapshot, with the edges
+    between repositories (see cluster.load_dataset_cluster).
+
     A call-level node_set (add()/remember()'s ``node_set`` argument) reaches
     every document this manifest's repo carries, but not the code nodes
     themselves -- add_data_points only tags the DataPoints it is given, and
@@ -434,6 +470,7 @@ async def extract_code_repo_graph(
     down so every code node -- CodeRepository included -- carries it too.
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
+    from cognee.tasks.code_graph.cluster import load_dataset_cluster
     from cognee.tasks.code_graph.extract_code_graph import (
         add_code_graph_data_points,
         add_code_graph_edges,
@@ -458,8 +495,10 @@ async def extract_code_repo_graph(
                 "its current location."
             )
 
-        metadata = decode_external_metadata(data_item.external_metadata)
-        node_set = validate_node_set_names(metadata.get("node_set")) if metadata else None
+        if await load_dataset_cluster(ctx):
+            continue
+
+        node_set = code_repo_node_set(data_item)
 
         data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
         state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)

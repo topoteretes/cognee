@@ -4,13 +4,15 @@ from typing import Literal
 import pydantic
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cognee.exceptions import CogneeConfigurationError
+
 
 class CacheConfig(BaseSettings):
     """
     Configuration for distributed cache systems (e.g., Redis), used for locking or coordination.
 
     Attributes:
-    - cache_backend: Session cache backend; one of "redis", "fs", "tapes", "sqlite", "turso",
+    - cache_backend: Session cache backend; one of "redis", "tapes", "sqlite", "turso",
       "postgres" (default "sqlite"). "sqlite", "turso" and "postgres" use the SQL cache adapter,
       differing only in default connection URL resolution and driver: "turso" is the same
       cache.db layout on the Turso rewrite engine (pyturso, ``pip install cognee"[turso]"``),
@@ -50,7 +52,7 @@ class CacheConfig(BaseSettings):
       its context updates reach this turn's answer -- at the cost of two calls in a row.
     """
 
-    cache_backend: Literal["redis", "fs", "tapes", "sqlite", "turso", "postgres"] = "sqlite"
+    cache_backend: Literal["redis", "tapes", "sqlite", "turso", "postgres"] = "sqlite"
     cache_db_url: str | None = None
     cache_purge_interval_seconds: int = 900
     caching: bool = True
@@ -77,6 +79,24 @@ class CacheConfig(BaseSettings):
     tapes_request_timeout: float = 5.0
 
     model_config = SettingsConfigDict(extra="allow")
+
+    @pydantic.field_validator("cache_backend", mode="before")
+    @classmethod
+    def reject_removed_fs_backend(cls, value):
+        # Raised as-is (not a ValueError), so the user sees this instead of a Literal mismatch.
+        if isinstance(value, str) and value.strip().lower() == "fs":
+            raise CogneeConfigurationError(
+                "CACHE_BACKEND=fs is no longer supported: the filesystem session cache was "
+                "removed. Sessions it stored under <data_root>/.cognee_fs_cache are not "
+                "read anymore.",
+                remediation=(
+                    "Unset CACHE_BACKEND to use the default sqlite cache (a cache.db next to "
+                    "the relational database), or set it to one of: sqlite, turso, postgres, "
+                    "redis, tapes. On an S3 system root, use CACHE_BACKEND=postgres or set "
+                    "CACHE_DB_URL."
+                ),
+            )
+        return value
 
     @pydantic.model_validator(mode="after")
     def sync_legacy_ladybug_lock(self):

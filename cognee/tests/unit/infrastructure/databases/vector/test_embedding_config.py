@@ -50,9 +50,38 @@ def test_resolve_fastembed_uses_registry():
 
     fake_module.TextEmbedding = _FakeTextEmbedding
 
+    # The lookup is cached per (provider, model); clear it so the fake registry answers.
+    _resolve_embedding_dimensions.cache_clear()
     with patch.dict(sys.modules, {"fastembed": fake_module}):
         assert _resolve_embedding_dimensions("fastembed", "BAAI/bge-small-en-v1.5") == 384
         assert _resolve_embedding_dimensions("fastembed", "BAAI/bge-large-en-v1.5") == 1024
+    # Drop the fake registry's answers so later lookups read the real one.
+    _resolve_embedding_dimensions.cache_clear()
+
+
+def test_resolve_dimensions_reads_the_registry_once_per_model():
+    """Every embedding-engine lookup resolves the dimensions; the registry scan runs once."""
+    import sys
+    import types
+
+    calls = []
+
+    class _FakeTextEmbedding:
+        @staticmethod
+        def list_supported_models():
+            calls.append(1)
+            return [{"model": "BAAI/bge-small-en-v1.5", "dim": 384}]
+
+    fake_module = types.ModuleType("fastembed")
+    fake_module.TextEmbedding = _FakeTextEmbedding
+
+    _resolve_embedding_dimensions.cache_clear()
+    with patch.dict(sys.modules, {"fastembed": fake_module}):
+        for _ in range(3):
+            assert _resolve_embedding_dimensions("fastembed", "BAAI/bge-small-en-v1.5") == 384
+    _resolve_embedding_dimensions.cache_clear()
+
+    assert len(calls) == 1
 
 
 def _clear_embedding_env(monkeypatch):

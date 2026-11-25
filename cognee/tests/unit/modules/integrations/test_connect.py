@@ -37,9 +37,6 @@ class _FakeIntegration(OAuthIntegration):
         assert token_response == {"raw": "response"}
         return self._installation
 
-    def state_signing_secret(self):
-        raise NotImplementedError
-
     def frontend_base_url(self):
         raise NotImplementedError
 
@@ -101,7 +98,7 @@ async def test_reconnect_does_not_overwrite_existing_resource_selection(selectio
     )
     integration = _FakeIntegration(installation, [])
     integration.resource_selection_key = "selected_label_ids"
-    existing = SimpleNamespace(provider_metadata={"selected_label_ids": selection})
+    existing = SimpleNamespace(user_id=USER_ID, provider_metadata={"selected_label_ids": selection})
     with (
         patch(
             "cognee.modules.integrations.connect.get_credential_by_account",
@@ -136,3 +133,55 @@ async def test_first_install_keeps_opt_in_selection_default():
         await complete_installation(integration, code="new-code", user_id=USER_ID)
 
     assert upsert.await_args.kwargs["provider_metadata"] == {"selected_label_ids": []}
+
+
+async def _install_over(existing):
+    """Connect ``ACC1`` as USER_ID over ``existing``; the metadata handed to upsert."""
+    integration = _FakeIntegration(
+        OAuthInstallation(
+            provider_account_id="ACC1",
+            token_payload={"access_token": "token"},
+            provider_metadata={"email": "b@example.com", "selected_label_ids": []},
+        ),
+        [],
+    )
+    integration.resource_selection_key = "selected_label_ids"
+    with (
+        patch(
+            "cognee.modules.integrations.connect.get_credential_by_account",
+            AsyncMock(return_value=existing),
+        ),
+        patch("cognee.modules.integrations.connect.upsert_credential", AsyncMock()) as upsert,
+    ):
+        await complete_installation(integration, code="code", user_id=USER_ID)
+    return upsert.await_args.kwargs["provider_metadata"]
+
+
+@pytest.mark.asyncio
+async def test_a_new_owner_inherits_neither_the_selection_nor_the_settings_of_the_previous_one():
+    """The installation's own metadata goes to upsert as it is: upsert starts another
+    owner from it alone, so nothing the previous owner chose reaches the new one."""
+    previous_owner = SimpleNamespace(
+        user_id=uuid4(),
+        provider_metadata={"selected_label_ids": ["PRIVATE"], "forget_unavailable": True},
+    )
+
+    metadata = await _install_over(previous_owner)
+
+    assert metadata == {
+        "email": "b@example.com",
+        "selected_label_ids": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_same_owner_reconnecting_keeps_the_selection_and_the_settings():
+    same_owner = SimpleNamespace(
+        user_id=USER_ID,
+        provider_metadata={"selected_label_ids": ["INBOX"], "forget_unavailable": True},
+    )
+
+    metadata = await _install_over(same_owner)
+
+    # Neither key is written, so upsert's merge keeps the stored values.
+    assert metadata == {"email": "b@example.com"}

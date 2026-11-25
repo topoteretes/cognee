@@ -161,9 +161,11 @@ Python classes for those.
 - **Not with GLiNER.** `extractor="gliner_demo"` (alias `"gliner"`) raises
   with a custom `graph_model`, and so does the default `GRAPH_EXTRACTOR=auto`
   when no LLM key is configured (it resolves to `gliner_demo`).
-- **Remote mode drops it.** After `cognee.serve(url)`, `remember()` and
-  `cognify()` do not forward `graph_model`; the server builds a generic
-  graph.
+- **Remote mode sends it as a schema.** After `cognee.serve(url)`, `remember()`
+  and `cognify()` forward `graph_model` as the JSON schema from
+  `graph_model_to_graph_schema`, typed edges and `FromIdentity` references
+  included (`x-cognee-edge` / `x-cognee-from-identity` keys the server turns
+  back into the annotations). `ontology_file_path` is not forwarded.
 - A custom model skips the generic path's ontology resolution, per-graph
   node dedup. Summaries still run.
 

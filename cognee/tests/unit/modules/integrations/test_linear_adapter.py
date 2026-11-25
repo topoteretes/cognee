@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 import aiohttp
 import pytest
 
+from cognee.modules.integrations import outbound as outbound_module
 from cognee.modules.integrations.linear import adapter as adapter_module
 from cognee.modules.integrations.linear.adapter import LinearAuthError, LinearIntegration
 from cognee.modules.integrations.linear.verify_linear_signature import LinearWebhookVerifier
@@ -90,6 +91,8 @@ def _fake_aiohttp(monkeypatch, session):
         ClientError=aiohttp.ClientError,
     )
     monkeypatch.setattr(adapter_module, "aiohttp", fake)
+    # Sessions are opened through outbound.client_session, which reads aiohttp there.
+    monkeypatch.setattr(outbound_module, "aiohttp", fake)
     return session
 
 
@@ -106,10 +109,6 @@ def test_authorize_url_is_the_agent_install_flow():
     # workspace) rather than acting as the authorizing human.
     assert params["actor"] == ["app"]
     assert params["scope"] == ["read,write,app:assignable,app:mentionable"]
-
-
-def test_state_signing_secret_is_the_webhook_secret():
-    assert LinearIntegration().state_signing_secret() == "hook-secret"
 
 
 def test_webhook_verifier_is_registered():
@@ -351,7 +350,7 @@ async def test_refresh_access_token_uses_the_refresh_timeout(monkeypatch):
         return session
 
     monkeypatch.setattr(
-        adapter_module,
+        outbound_module,  # sessions are opened through outbound.client_session
         "aiohttp",
         SimpleNamespace(ClientSession=client_session, ClientError=aiohttp.ClientError),
     )
@@ -474,7 +473,7 @@ async def test_revoke_remote_opens_its_sessions_with_the_revoke_timeout(monkeypa
         return session
 
     monkeypatch.setattr(
-        adapter_module,
+        outbound_module,  # sessions are opened through outbound.client_session
         "aiohttp",
         SimpleNamespace(ClientSession=client_session, ClientError=aiohttp.ClientError),
     )

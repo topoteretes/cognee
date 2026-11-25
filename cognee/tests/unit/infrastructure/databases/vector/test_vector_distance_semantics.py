@@ -21,6 +21,12 @@ except ModuleNotFoundError:
     HAS_PGVECTOR = False
 
 
+def _vector_type():
+    from pgvector.sqlalchemy import Vector
+
+    return Vector(3)
+
+
 class _DummyEmbeddingEngine:
     def get_vector_size(self):
         return 3
@@ -188,12 +194,17 @@ async def test_pgvector_search_returns_raw_distance(monkeypatch):
 
     adapter = PGVectorAdapter.__new__(PGVectorAdapter)
     adapter.embedding_engine = _DummyEmbeddingEngine()
+    # No pgvector version: the exact-scan path (the index path is covered in
+    # test_pgvector_hnsw_index.py and the pgvector integration test).
+    adapter._pgvector_version = AsyncMock(return_value=None)
     adapter.get_table = AsyncMock(
         return_value=SimpleNamespace(
             c=SimpleNamespace(
                 id="id_col",
                 vector=SimpleNamespace(
-                    cosine_distance=lambda _v: SimpleNamespace(label=lambda _l: "x")
+                    cosine_distance=lambda _v: SimpleNamespace(label=lambda _l: "x"),
+                    # Search reads the column's type: a ``vector`` collection here.
+                    type=_vector_type(),
                 ),
             )
         )
@@ -214,7 +225,8 @@ async def test_pgvector_search_returns_raw_distance(monkeypatch):
         limit=2,
     )
 
-    assert [r.score for r in results] == [1.19, 0.51]
+    # Rows come back sorted by the exact distance, whatever order the database used.
+    assert [r.score for r in results] == [0.51, 1.19]
     assert any(r.score > 1.0 for r in results)
 
 
@@ -236,13 +248,16 @@ async def test_pgvector_search_never_selects_vector_column(monkeypatch, include_
     monkeypatch.setattr(pg_module, "select", _select)
 
     distance = SimpleNamespace(label=lambda _l: "distance_col")
-    vector_col = SimpleNamespace(cosine_distance=lambda _v: distance)
+    vector_col = SimpleNamespace(cosine_distance=lambda _v: distance, type=_vector_type())
     table = SimpleNamespace(
         c=SimpleNamespace(id="id_col", payload="payload_col", vector=vector_col)
     )
 
     adapter = PGVectorAdapter.__new__(PGVectorAdapter)
     adapter.embedding_engine = _DummyEmbeddingEngine()
+    # No pgvector version: the exact-scan path (the index path is covered in
+    # test_pgvector_hnsw_index.py and the pgvector integration test).
+    adapter._pgvector_version = AsyncMock(return_value=None)
     adapter.get_table = AsyncMock(return_value=table)
     adapter.get_async_session = lambda: _AsyncContextManager(
         _FakeSession([SimpleNamespace(id=str(uuid4()), payload={"text": "x"}, similarity=0.3)])

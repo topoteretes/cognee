@@ -82,7 +82,6 @@ class PipelineRun(Base):
     tokens_out = Column(Integer)
     embedding_tokens = Column(Integer)  # same convention; never part of tokens_in
     origin = Column(String)  # initiating surface: "sdk" / "api" / "cli" / "mcp" / "background"
-    session_id = Column(String, index=True)  # session-cache id; joins SessionModelUsage
     # Parent operation's pipeline_run_id — makes remember → add/cognify/improve
     # nesting a queryable tree (token totals chain to parents; never SUM across levels).
     parent_operation_id = Column(Uuid, index=True)

@@ -13,10 +13,20 @@ describe("oauthOutcome", () => {
     jest.restoreAllMocks();
   });
 
+  describe("the framework's own outcomes", () => {
+    it("says an unconfigured connector cannot be retried into working", () => {
+      expect(describeOAuthFailure("error_not_configured", "GitHub")).toContain("not switched on");
+    });
+
+    it("names lost ownership as the reason, not a generic failure", () => {
+      expect(describeOAuthFailure("error_not_authorized", "GitHub")).toContain("no longer the owner");
+    });
+  });
+
   describe("the popup-to-opener handoff", () => {
     it("carries the outcome across", () => {
       stashOAuthOutcome("slack", "error_already_connected");
-      expect(takeOAuthOutcome("slack")).toBe("error_already_connected");
+      expect(takeOAuthOutcome("slack")).toEqual({ outcome: "error_already_connected", choiceToken: null });
     });
 
     it("consumes the outcome, so a retry is not judged by the last attempt", () => {
@@ -32,6 +42,20 @@ describe("oauthOutcome", () => {
     it("ignores an outcome belonging to a different provider", () => {
       stashOAuthOutcome("notion", "connected");
       expect(takeOAuthOutcome("slack")).toBeNull();
+    });
+
+    it("leaves a mismatched outcome in place for the provider it actually belongs to", () => {
+      // The bug this guards against (review-reported): two popups can share
+      // this one slot when a modal is closed mid-flow without cancelling its
+      // poll (github's, say) and a different connector is started instead
+      // (slack). Both polls end up watching the same window, and whichever
+      // fires first on close used to delete the slot before checking whose
+      // outcome it was — so slack's own poll, firing moments later, found
+      // nothing and reported nothing, even though slack really did fail.
+      stashOAuthOutcome("notion", "error_already_connected");
+
+      expect(takeOAuthOutcome("slack")).toBeNull();
+      expect(takeOAuthOutcome("notion")).toEqual({ outcome: "error_already_connected", choiceToken: null });
     });
 
     it("ignores a stale outcome no one consumed", () => {
@@ -72,11 +96,33 @@ describe("oauthOutcome", () => {
       });
       expect(takeOAuthOutcome("slack")).toBeNull();
     });
+
+    describe("the link-existing choice token (CLO-627)", () => {
+      it("carries the token across alongside choose_installation", () => {
+        stashOAuthOutcome("github", "choose_installation", "tok-123");
+        expect(takeOAuthOutcome("github")).toEqual({ outcome: "choose_installation", choiceToken: "tok-123" });
+      });
+
+      it("reports no token for an outcome that does not carry one", () => {
+        stashOAuthOutcome("github", "connected");
+        expect(takeOAuthOutcome("github")).toEqual({ outcome: "connected", choiceToken: null });
+      });
+
+      it("does not write a token field at all when none is given", () => {
+        stashOAuthOutcome("github", "connected");
+        const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) as string);
+        expect(stored).not.toHaveProperty("choiceToken");
+      });
+    });
   });
 
   describe("isFailureOutcome", () => {
     it("treats a successful install as no failure", () => {
       expect(isFailureOutcome("connected")).toBe(false);
+    });
+
+    it("treats choose_installation as no failure — the install is only pending a pick", () => {
+      expect(isFailureOutcome("choose_installation")).toBe(false);
     });
 
     it("treats a missing outcome as no failure — silence is correct there", () => {

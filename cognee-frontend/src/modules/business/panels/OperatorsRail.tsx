@@ -1,12 +1,19 @@
 "use client";
 
 import { useEffect } from "react";
-import type { GovernanceIndex } from "../useGovernanceIndex";
+import type { ReadableGovernanceIndex, ReadableListState } from "../useGovernanceIndex";
 import { accessibleDatasetIds, userLabel } from "../useGovernanceIndex";
 import AccessChipList from "./AccessChipList";
 
 interface OperatorsRailProps {
-  index: GovernanceIndex;
+  // Narrowed; see BrainSwitcher's index prop for why the type is branded.
+  index: ReadableGovernanceIndex;
+  // While the readable list is still answering (or after it failed) the index
+  // above is narrowed to nothing, and AccessChipList renders nothing at all
+  // for it — the access row silently vanishes from every card and pops back
+  // seconds later, reading as a fact about the workspace rather than about a
+  // request still in flight. This is what lets the rail say which it is.
+  listState: ReadableListState;
   onHoverPrincipal: (principalId: string | null) => void;
   // The dataset currently being viewed — ports focusKnowledge's "light up
   // who this brain applies to; dim everyone else" (customer_tutorial.html
@@ -33,7 +40,7 @@ const memBadgeBase = "rounded px-1.5 py-0.5";
 // principal up, and the knowledge rail decides its own highlight state —
 // same "access is a highlight on hover, never a drawn edge" rule, React-native.
 export default function OperatorsRail({
-  index, onHoverPrincipal, focusedDatasetId, askingPrincipalId, onOpenSessionMemory,
+  index, listState, onHoverPrincipal, focusedDatasetId, askingPrincipalId, onOpenSessionMemory,
 }: OperatorsRailProps) {
   // Leaving a hovered row (unmount mid-hover: a dataset switch, a governance
   // refetch) fires no mouseleave, so the last reported principal stuck — and
@@ -67,14 +74,41 @@ export default function OperatorsRail({
     if (!ownerId) return;
     (agentsByOwner[ownerId] = agentsByOwner[ownerId] || []).push(a);
   });
+  // The middle case matters: while the readable list is still answering (and
+  // permanently, when it failed and the graph opened on a governance-seeded
+  // id), the focused dataset is not in this narrowed index at all. Access to it
+  // is then unknown rather than absent, and dimming on unknown greyed every
+  // card on the rail to 25% on each repeat visit.
   const holdsFocused = (principalId: string): boolean =>
-    !focusedDatasetId || Boolean((index.access[principalId] || {})[focusedDatasetId]);
+    !focusedDatasetId
+    || !index.datasetById[focusedDatasetId]
+    || Boolean((index.access[principalId] || {})[focusedDatasetId]);
   // Only worth a glance when access is actually restricted — an owner/
   // full-access principal's chip row already reads as "everything", so a
   // "7/7" badge next to every single card would be noise, not signal.
   const restrictedReach = (principalId: string): string | null => {
     const reach = accessibleDatasetIds(index, principalId).size;
     return reach < index.datasets.length ? `${reach}/${index.datasets.length} datasets` : null;
+  };
+
+  // Access, or why there is none to show yet. Placed where the chip list would
+  // be so the card keeps its height across the transition.
+  const accessBlock = (principalId: string, principalName: string) => {
+    if (listState === "ready") {
+      return (
+        <AccessChipList
+          access={index.access[principalId] || {}}
+          datasets={index.datasets}
+          principalName={principalName}
+          focusedDatasetId={focusedDatasetId}
+        />
+      );
+    }
+    return (
+      <div className="mt-1.5 text-[9.5px] text-[#7E8CA6]">
+        access · {listState === "loading" ? "loading…" : "unavailable"}
+      </div>
+    );
   };
 
   return (
@@ -106,7 +140,7 @@ export default function OperatorsRail({
                 </span>
                 <span className="min-w-0 truncate" title={uLabel}>{uLabel}</span>
                 <span
-                  className={`${memBadgeBase} ml-auto shrink-0 border border-[rgba(245,168,60,.45)] text-[#F5A83C]`}
+                  className={`${memBadgeBase} ml-auto shrink-0 border border-[#2A3652] text-[#E9EEF6]`}
                   title="session memory — this user's own conversation history; distilled traces land as session_learnings"
                 >
                   session
@@ -115,14 +149,7 @@ export default function OperatorsRail({
               {!ownsEverything(u.id) && restrictedReach(u.id) && (
                 <div className="ml-[26px] mt-0.5 text-[10.5px] text-[#7E8CA6]">{restrictedReach(u.id)}</div>
               )}
-              {!ownsEverything(u.id) && (
-                <AccessChipList
-                  access={index.access[u.id] || {}}
-                  datasets={index.datasets}
-                  principalName={uLabel}
-                  focusedDatasetId={focusedDatasetId}
-                />
-              )}
+              {!ownsEverything(u.id) && accessBlock(u.id, uLabel)}
             </div>
             {(agentsByOwner[u.id] || []).map((a) => {
               const aLabel = String(a.name || "agent");
@@ -148,20 +175,13 @@ export default function OperatorsRail({
                     memory:
                     <span
                       className={`${memBadgeBase} border border-solid border-[#E9EEF6] text-[#E9EEF6]`}
-                      title="permanent memory — searches its brains (with_memory)"
+                      title="permanent memory — searches its datasets (with_memory)"
                     >
                       permanent
                     </span>
                     {restrictedReach(a.id) && <span className="ml-auto shrink-0">{restrictedReach(a.id)}</span>}
                   </div>
-                  {!ownsEverything(a.id) && (
-                    <AccessChipList
-                      access={index.access[a.id] || {}}
-                      datasets={index.datasets}
-                      principalName={`${aLabel} (agent)`}
-                      focusedDatasetId={focusedDatasetId}
-                    />
-                  )}
+                  {!ownsEverything(a.id) && accessBlock(a.id, `${aLabel} (agent)`)}
                 </div>
               );
             })}

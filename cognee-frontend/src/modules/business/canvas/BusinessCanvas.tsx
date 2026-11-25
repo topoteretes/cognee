@@ -2,6 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, type MouseEvent, type RefObject } from "react";
 import type { BrainState, BusinessEntity } from "../sceneTypes";
+import type { ColorMode } from "../colorEncoding";
 import { useBusinessSimulation } from "../simulation/useBusinessSimulation";
 import { useViewportActiveIds } from "../simulation/useViewportActiveIds";
 import type { ZoomTransform } from "d3";
@@ -42,7 +43,11 @@ export interface BusinessCanvasHandle {
 }
 
 interface BusinessCanvasProps {
+  // The row-filter projection of brainState; simulation keeps using brainState.
+  viewState?: BrainState | null;
+  rowFilterKey?: string;
   brainState: BrainState | null;
+  colorMode: ColorMode;
   selectedId: string | null;
   // shiftKey lets BusinessView tell a plain click (select this, replacing
   // whatever was selected) apart from a shift-click (trace the shortest
@@ -57,6 +62,7 @@ interface BusinessCanvasProps {
   onBackgroundClick: () => void;
   spotlight: Spotlight | null;
   focusSets: Set<string> | null;
+  focusTypes: Set<string> | null;
   onLevelChange?: (level: number, plumbing: boolean) => void;
   sourceCardRefs?: CardRefMap;
   activeDatasetId?: string | null;
@@ -99,7 +105,7 @@ interface BusinessCanvasProps {
 // loop below on every unrelated re-render of this component.
 const BusinessCanvas = forwardRef<BusinessCanvasHandle, BusinessCanvasProps>(function BusinessCanvas(
   {
-    brainState, selectedId, onSelectEntity, onHover, onHoverMove, onBackgroundClick, spotlight, focusSets,
+    brainState, viewState = null, rowFilterKey = "", colorMode, selectedId, onSelectEntity, onHover, onHoverMove, onBackgroundClick, spotlight, focusSets, focusTypes,
     onLevelChange, sourceCardRefs, activeDatasetId, onGrowth,
     answeredIds, pathIds, pathEdgeKeys,
     askingAgent, hoveredPrincipalId, onHoverAgent,
@@ -135,6 +141,8 @@ const BusinessCanvas = forwardRef<BusinessCanvasHandle, BusinessCanvasProps>(fun
   spotlightRef.current = spotlight;
   const focusSetsRef = useRef(focusSets);
   focusSetsRef.current = focusSets;
+  const focusTypesRef = useRef(focusTypes);
+  focusTypesRef.current = focusTypes;
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
   const answeredIdsRef = useRef(answeredIds);
@@ -179,7 +187,9 @@ const BusinessCanvas = forwardRef<BusinessCanvasHandle, BusinessCanvasProps>(fun
   // simulation mutates in place.
   const noopTick = useCallback(() => {}, []);
 
-  const brain = brainState ?? EMPTY_BRAIN_STATE;
+  const fullBrain = brainState ?? EMPTY_BRAIN_STATE;
+  const brain = viewState ?? brainState ?? EMPTY_BRAIN_STATE;
+  const encoding = brain.encodings[colorMode];
   // Recomputed only when entities change, then read through a ref by the
   // persistent rAF draw loop below — computing it per frame allocated a Set
   // and walked every entity 60 times a second for a per-dataset constant.
@@ -188,12 +198,12 @@ const BusinessCanvas = forwardRef<BusinessCanvasHandle, BusinessCanvasProps>(fun
   namesWithEntitiesRef.current = namesWithEntities;
   const { transformRef, levelRef, plumbingRef, lastInteractionRef, fitToEntities, goToAltimeterLevel, centerOnWorld, applyTransform } =
     useBusinessCamera(canvasRef, onLevelChange);
-  const activeIds = useViewportActiveIds(brain.entities, transformRef, width, height);
+  const activeIds = useViewportActiveIds(fullBrain.entities, transformRef, width, height);
   const { newbornAt } = useBusinessSimulation(
-    brain.entities,
-    brain.semanticLinks,
-    brain.anchors,
-    brain.importanceMax,
+    fullBrain.entities,
+    fullBrain.graphLinks,
+    fullBrain.entityAnchors,
+    fullBrain.importanceMax,
     noopTick,
     onGrowth,
     activeIds,
@@ -202,7 +212,8 @@ const BusinessCanvas = forwardRef<BusinessCanvasHandle, BusinessCanvasProps>(fun
 
   useImperativeHandle(ref, () => ({
     fit: (animate) => fitToEntities(brain.entities, width, height, animate),
-    goToAltimeterLevel: (level) => goToAltimeterLevel(level, width, height, brain.entities, focusSetsRef.current),
+    goToAltimeterLevel: (level) =>
+      goToAltimeterLevel(level, width, height, brain.entities, focusSetsRef.current, focusTypesRef.current, brain.entityType),
     focusOnIds: (ids) => fitToEntities(brain.entities.filter((n) => ids.has(n.id)), width, height, true),
     getIdleMs: () => (lastInteractionRef.current === 0 ? Infinity : performance.now() - lastInteractionRef.current),
     getTransform: () => transformRef.current,
@@ -221,7 +232,7 @@ const BusinessCanvas = forwardRef<BusinessCanvasHandle, BusinessCanvasProps>(fun
   // useBusinessSimulation() call above guarantees React flushes it after
   // that hook's own effect in the same commit, so entities are always
   // already seeded by the time fitToEntities measures them here.
-  const lastFitRef = useRef<{ datasetId: string | null; hadEntities: boolean } | undefined>(undefined);
+  const lastFitRef = useRef<{ datasetId: string | null; rowFilterKey: string; hadEntities: boolean } | undefined>(undefined);
   useEffect(() => {
     // Fitting with zero entities is still deliberate (a dataset with zero
     // entity-stage nodes never grows any, and skipping the fit left the
@@ -236,12 +247,12 @@ const BusinessCanvas = forwardRef<BusinessCanvasHandle, BusinessCanvasProps>(fun
     const datasetId = activeDatasetId ?? null;
     const hasEntities = brain.entities.length > 0;
     const prev = lastFitRef.current;
-    if (prev && prev.datasetId === datasetId && (prev.hadEntities || !hasEntities)) return;
+    if (prev && prev.datasetId === datasetId && prev.rowFilterKey === rowFilterKey && (prev.hadEntities || !hasEntities)) return;
     const isFirstFit = prev === undefined;
-    lastFitRef.current = { datasetId, hadEntities: hasEntities };
+    lastFitRef.current = { datasetId, rowFilterKey, hadEntities: hasEntities };
     fitToEntities(brain.entities, width, height, !isFirstFit);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeDatasetId, brain.entities, width, height]);
+  }, [activeDatasetId, rowFilterKey, brain.entities, width, height]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -340,7 +351,7 @@ const BusinessCanvas = forwardRef<BusinessCanvasHandle, BusinessCanvasProps>(fun
       // world origin (0,0), and with an empty entity set fitToEntities
       // recenters the camera there too, so the filament used to draw a
       // stray line from the source card straight to screen-center.
-      const hasGraphContent = brain.entities.length > 0 || brain.semanticLinks.length > 0;
+      const hasGraphContent = brain.entities.length > 0 || brain.graphLinks.length > 0;
       // Filaments thread to entity-cluster centroids, so they only mean
       // anything while the entity layer is actually on screen — past the
       // schema crossfade those clusters aren't drawn at all and the threads
@@ -358,19 +369,25 @@ const BusinessCanvas = forwardRef<BusinessCanvasHandle, BusinessCanvasProps>(fun
         // are hidden, so its thread to an empty territory read as stray
         // lines crossing the canvas from nowhere to nowhere.
         const focusSetsNow = focusSetsRef.current;
+        const focusTypesNow = focusTypesRef.current;
+        const filamentTargetsNow = filamentTargets(brain.entities, brain.anchors, focusTypesNow, brain.entityType);
         // sourceNames also includes dataset sources with zero extracted
         // entities (COG-6233) — skip those or the filament threads to a
-        // fallback anchor with nothing real on the other end.
+        // fallback anchor with nothing real on the other end. Under an
+        // active type lens, filamentTargetsNow additionally omits any source
+        // whose entities exist but don't match the focused type (see its own
+        // comment) — checking for that here too, not just namesWithEntitiesNow
+        // (which is type-unaware), stops the same "thread to nothing" case.
         const namesWithEntitiesNow = namesWithEntitiesRef.current;
         const filamentNames = (focusSetsNow
           ? brain.sourceNames.filter((name) => focusSetsNow.has(name))
           : brain.sourceNames
-        ).filter((name) => namesWithEntitiesNow.has(name));
+        ).filter((name) => namesWithEntitiesNow.has(name) && filamentTargetsNow[name] !== undefined);
         filamentNames.forEach((name) => {
           const pos = cardScreenPosition(cardMap, name, canvasRect);
           if (pos) cardPositions[name] = pos;
         });
-        drawFilaments(ctx, cardPositions, filamentTargets(brain.entities, brain.anchors), transformRef.current, now, filamentAlpha);
+        drawFilaments(ctx, cardPositions, filamentTargetsNow, transformRef.current, now, filamentAlpha);
       }
 
       ctx.translate(transformRef.current.x, transformRef.current.y);
@@ -381,18 +398,19 @@ const BusinessCanvas = forwardRef<BusinessCanvasHandle, BusinessCanvasProps>(fun
         entities: brain.entities,
         typeNodes: brain.typeNodes,
         typeLinks: brain.typeLinks,
-        semanticLinks: brain.semanticLinks,
+        semanticLinks: brain.graphLinks,
         docLinks: brain.docLinks,
         byId: brain.byId,
-        setColor: brain.setColor,
+        encoding,
         sourceNames: brain.sourceNames,
         importanceMax: brain.importanceMax,
-        isSessionSet: brain.isSessionSet,
         newbornAt,
         hoveredId: hoveredIdRef.current,
         selectedId: selectedIdRef.current,
         spotlight: spotlightRef.current,
         focusSets: focusSetsRef.current,
+        focusTypes: focusTypesRef.current,
+        entityType: brain.entityType,
         reducedMotion,
         answeredIds: answeredIdsRef.current ?? EMPTY_ANSWERED_IDS,
         pathIds: pathIdsRef.current ?? EMPTY_PATH_IDS,
@@ -426,7 +444,7 @@ const BusinessCanvas = forwardRef<BusinessCanvasHandle, BusinessCanvasProps>(fun
       // panel filters (a source, a focus lens) aren't contradicted by a
       // minimap still tracking the whole unfiltered graph.
       const minimapEntities = brain.entities.filter((n) => visibleEntityIdsRef.current.has(n.id));
-      drawMinimap(ctx, minimapEntities, brain.setColor, transformRef.current, width, height);
+      drawMinimap(ctx, minimapEntities, encoding, brain.entityType, transformRef.current, width, height);
       ctx.restore();
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -435,12 +453,12 @@ const BusinessCanvas = forwardRef<BusinessCanvasHandle, BusinessCanvasProps>(fun
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
   }, [
-    // selectedId/spotlight/focusSets/answeredIds/pathIds/pathEdgeKeys/
+    // selectedId/spotlight/focusSets/focusTypes/answeredIds/pathIds/pathEdgeKeys/
     // activeDatasetId are deliberately NOT here — they're read through the
     // refs synced above, so this persistent RAF loop survives their changes
     // instead of being torn down and rebuilt on every one (COG-6233; see
     // this component's own header comment on why refs exist).
-    brain, transformRef, levelRef, plumbingRef, dpr, width, height, newbornAt,
+    brain, encoding, transformRef, levelRef, plumbingRef, dpr, width, height, newbornAt,
     reducedMotion, sourceCardRefs,
   ]);
 

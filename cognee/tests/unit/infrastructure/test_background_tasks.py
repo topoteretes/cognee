@@ -148,7 +148,7 @@ async def test_api_lifespan_drains_background_tasks_on_shutdown(monkeypatch):
         ("cognee.run_migrations", "run_migrations"),
         ("cognee.modules.users.methods", "get_default_user"),
         ("cognee.modules.cognify.recovery", "recover_stale_pipeline_runs_on_startup"),
-        ("cognee.shared.utils", "close_telemetry_session"),
+        ("cognee.shared.utils", "flush_telemetry"),
     ):
         monkeypatch.setattr(importlib.import_module(module_name), attr, _noop)
 

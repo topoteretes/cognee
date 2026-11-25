@@ -65,7 +65,7 @@ export default function SkillsPage() {
   const { datasets, selectedDataset } = useFilter();
 
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
-  // Skills per dataset, populated by scanning every brain. A brain is only
+  // Skills per dataset, populated by scanning every dataset. A dataset is only
   // shown in the list once it has at least one registered skill.
   const [skillsByDataset, setSkillsByDataset] = useState<Record<string, Skill[]>>({});
   const [scanning, setScanning] = useState(false);
@@ -98,7 +98,7 @@ export default function SkillsPage() {
     [expandedId, cogniInstance, selectedDatasetId, details],
   );
 
-  // Scan every brain for skills in parallel and keep only the populated ones.
+  // Scan every dataset for skills in parallel and keep only the populated ones.
   const scanAll = useCallback(async () => {
     if (!cogniInstance || datasets.length === 0) return;
     setScanning(true);
@@ -127,13 +127,13 @@ export default function SkillsPage() {
     scanAll();
   }, [cogniInstance, isInitializing, datasets, scanAll]);
 
-  // Only brains that actually have skills registered.
+  // Only datasets that actually have skills registered.
   const datasetsWithSkills = useMemo(
     () => datasets.filter((d) => (skillsByDataset[d.id]?.length ?? 0) > 0),
     [datasets, skillsByDataset],
   );
 
-  // Keep the selection valid: default to / fall back to a brain that has skills.
+  // Keep the selection valid: default to / fall back to a dataset that has skills.
   useEffect(() => {
     if (datasetsWithSkills.length === 0) {
       if (selectedDatasetId) setSelectedDatasetId(null);
@@ -185,7 +185,7 @@ export default function SkillsPage() {
           <button onClick={() => setUploadOpen(true)} disabled={datasets.length === 0}
             className="cursor-pointer"
             style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6, opacity: datasets.length === 0 ? 0.5 : 1, cursor: datasets.length === 0 ? "not-allowed" : "pointer" }}
-            title="Upload a SKILL.md and attach it to brains">
+            title="Upload a SKILL.md and attach it to datasets">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
             </svg>
@@ -208,7 +208,7 @@ export default function SkillsPage() {
         <div style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden", marginInline: 32, marginBottom: 32, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(20px)" }}>
           <div style={{ width: 264, flexShrink: 0, borderRight: "1px solid rgba(255,255,255,0.1)", display: "flex", flexDirection: "column" }}>
             <div style={{ height: 44, padding: "0 14px", borderBottom: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Brain</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Datasets</span>
             </div>
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} style={{ padding: "11px 14px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
@@ -218,7 +218,7 @@ export default function SkillsPage() {
           </div>
           <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
             <div style={{ height: 44, padding: "0 16px", borderBottom: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.45)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Scanning brains for skills…</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.45)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Scanning datasets for skills…</span>
             </div>
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
@@ -234,10 +234,10 @@ export default function SkillsPage() {
       ) : datasetsWithSkills.length > 0 ? (
         <div style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden", marginInline: 32, marginBottom: 32, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(20px)" }}>
 
-          {/* Column 1 — Brains that have skills */}
+          {/* Column 1 — Datasets that have skills */}
           <div style={{ width: 264, flexShrink: 0, borderRight: "1px solid rgba(255,255,255,0.1)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <div style={{ height: 44, padding: "0 14px", borderBottom: "1px solid rgba(255,255,255,0.1)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Brain</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Datasets</span>
               <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)" }}>{datasetsWithSkills.length}</span>
             </div>
             <div style={{ flex: 1, overflowY: "auto" }}>
@@ -318,8 +318,8 @@ export default function SkillsPage() {
                         <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", flexShrink: 0 }}>
                           <button
                             onClick={(e) => { e.stopPropagation(); setShareSkill(skill); }}
-                            title="Add this skill to more brains"
-                            aria-label="Add to more brains"
+                            title="Add this skill to more datasets"
+                            aria-label="Add to more datasets"
                             className="hover:bg-white/10 cursor-pointer"
                             style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 6, background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(237,236,234,0.6)" }}
                           >
@@ -355,7 +355,7 @@ export default function SkillsPage() {
                             <DetailField label="Repository" value={skill.sourceRepoUrl ? "View source" : "—"} href={skill.sourceRepoUrl} />
                             <DetailField label="Version" value={skill.version ? `v${skill.version}` : "—"} />
                             <DetailField label="Status" value={skill.isActive ? "Active" : "Inactive"} />
-                            <DetailField label="Brains" value={skill.datasetScope.length ? String(skill.datasetScope.length) : "—"} />
+                            <DetailField label="Datasets" value={skill.datasetScope.length ? String(skill.datasetScope.length) : "—"} />
                             {skill.sourceDir && <DetailField label="Source dir" value={skill.sourceDir} />}
                           </div>
                           {skill.declaredTools.length > 0 && (
@@ -394,7 +394,7 @@ export default function SkillsPage() {
           <div style={{ flex: 1, background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 48 }}>
             <span style={{ fontSize: 16, fontWeight: 700, color: "#EDECEA" }}>No skills registered yet</span>
             <p style={{ fontSize: 14, color: "rgba(237,236,234,0.35)", margin: 0, maxWidth: 380, textAlign: "center" }}>
-              Skills are scoped to a brain. Once a brain has skills ingested via the cognee skills pipeline, it will appear here — brains without skills are hidden.
+              Skills are scoped to a dataset. Once a dataset has skills ingested via the cognee skills pipeline, it will appear here — datasets without skills are hidden.
             </p>
           </div>
         </div>
@@ -439,9 +439,9 @@ function SkillsEmptyState() {
           <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.8 2.8-2.1-2.1z" />
         </svg>
       </div>
-      <span style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", fontWeight: 500 }}>No skills in this brain</span>
+      <span style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", fontWeight: 500 }}>No skills in this dataset</span>
       <span style={{ fontSize: 12, color: "rgba(237,236,234,0.35)", textAlign: "center", maxWidth: 280 }}>
-        Skills appear here once they are ingested into this brain via the cognee skills pipeline.
+        Skills appear here once they are ingested into this dataset via the cognee skills pipeline.
       </span>
     </div>
   );

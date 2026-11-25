@@ -11,6 +11,7 @@ from cognee.api.client import app
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
 from cognee.modules.users.methods import get_authenticated_user, get_default_user
+from cognee.tests.utils.ci_search_type import completion_or_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,11 @@ async def test_api_endpoint_logging(e2e_config, authenticated_client, cache_engi
 
     search_response = authenticated_client.post(
         "/api/v1/search",
-        json={"query": "Germany", "search_type": "GRAPH_COMPLETION", "datasets": [dataset_name]},
+        json={
+            "query": "Germany",
+            "search_type": completion_or_chunks().value,
+            "datasets": [dataset_name],
+        },
     )
     assert search_response.status_code == 200, f"Search endpoint failed: {search_response.text}"
 

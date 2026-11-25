@@ -3,6 +3,7 @@ from uuid import UUID
 
 from .log_query import log_query
 from .log_result import log_result
+from .search_history_config import search_history_enabled
 
 
 def _completion_of(payload: Any) -> str | None:
@@ -29,7 +30,14 @@ async def log_search_history(
 
     A payload that carries no dataset of its own — which is what happens with
     access control disabled — records ``None``.
+
+    Nothing is built, let alone written, when ``COGNEE_LOG_SEARCH_HISTORY`` is
+    off: the gate sits here, ahead of the per-payload loop, so a deployment
+    that must not retain query or answer text pays nothing for the feature.
     """
+    if not search_history_enabled():
+        return
+
     payloads = [item[0] if isinstance(item, tuple) else item for item in search_results] or [None]
 
     for payload in payloads:

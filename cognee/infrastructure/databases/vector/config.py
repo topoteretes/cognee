@@ -36,6 +36,16 @@ class VectorConfig(BaseSettings):
     vector_db_host: str = ""
     vector_db_subprocess_enabled: bool = True
     vector_pool_args: str | None = None
+    # pgvector only: the number of hash partitions a new collection's table is
+    # created with (1 = one table, as before). See PGVectorAdapter.create_collection.
+    pgvector_collection_partitions: int = pydantic.Field(default=1, ge=1)
+    # Rows per vector write (one upsert per batch), ``VECTOR_WRITE_BATCH_SIZE``. Kept
+    # apart from the embedding request size: EmbeddingGateway embeds a batch larger
+    # than one request in provider-sized requests under the shared request concurrency
+    # limit. 128 measured best on pgvector (fewer statements and commits); larger
+    # batches stopped paying off and cost memory.
+    # Not part of ``to_dict()``, which only carries the engine-construction settings.
+    vector_write_batch_size: int = pydantic.Field(default=128, gt=0)
 
     model_config = SettingsConfigDict(extra="allow")
 

@@ -36,6 +36,16 @@ export const T = {
   amber:        "#E6B24D",   // warning / reconnect
   red:          "#F0808A",   // error
   blue:         "#89B4FA",   // secondary
+
+  // Status-only hues. The activity feed's status column sits directly beside
+  // its action column, and every accent above is already spoken for by an
+  // action (recall green, remember blue, improve purple, forget amber), so a
+  // status reusing one reads as if the two columns encode the same thing.
+  // These two exist to keep the states this feed added out of that overlap,
+  // and both clear 4.5:1 against `panel`, which the grey tiers do not at the
+  // 11px/600 the pills render at.
+  cyan:         "#6FD3E0",   // accepted: work handed off, not finished
+  slate:        "#9AA4B8",   // queued: waiting, nothing has run yet
 } as const;
 
 /** Small uppercase brand eyebrow (cognee's section-label idiom). */

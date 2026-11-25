@@ -8,6 +8,7 @@ from contextlib import ExitStack
 from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, Mock, patch
+from uuid import UUID
 
 import pytest
 
@@ -50,8 +51,11 @@ def sync_mocks():
 
 def credential(**metadata):
     return SimpleNamespace(
+        id=UUID("11111111-1111-1111-1111-111111111111"),
+        provider="google_calendar",
+        workspace_id=None,
         provider_account_id="subject",
-        user_id="user-1",
+        user_id=UUID("22222222-2222-2222-2222-222222222222"),
         provider_metadata={"email": "person@example.com", **metadata},
     )
 
@@ -70,9 +74,12 @@ async def test_selected_calendars_reach_the_source_factory(calendars, sync_mocks
     sync_mocks.source.assert_called_once_with(
         calendar_ids=calendars,
         service="service",
-        check_active="checkpoint",
+        check_active=ANY,
         resource_name=sync_module.ingestion.resource_name("google_calendar", credential()),
     )
+    checkpoint = sync_mocks.source.call_args.kwargs["check_active"]
+    assert checkpoint.__func__ is sync_module.ingestion._SourceProgress.checkpoint
+    assert checkpoint.__self__.check_active == "checkpoint"
     sync_mocks.remember.assert_awaited_once_with(
         "dlt-source",
         dataset_name=sync_module._dataset_name(credential()),

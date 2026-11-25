@@ -1,5 +1,6 @@
 import { captureException } from "@/utils/monitoring";
 import { CogneeInstance } from "../instances/types";
+import { INSUFFICIENT_CREDITS_REASON, normalizeDatasetStatusEntry } from "./datasetStatusDetail";
 
 export type DatasetProcessingStatus =
   | "DATASET_PROCESSING_INITIATED"
@@ -18,9 +19,25 @@ const IN_PROGRESS_STATUSES: DatasetProcessingStatus[] = [
 ];
 
 export class DatasetProcessingError extends Error {
-  constructor(datasetId: string, status: DatasetProcessingStatus) {
+  // Failure cause classified by the pod (e.g. INSUFFICIENT_CREDITS_REASON);
+  // null when the pod could not classify it or predates CLO-306.
+  readonly reason: string | null;
+
+  constructor(datasetId: string, status: DatasetProcessingStatus, reason: string | null = null) {
     super(`Dataset ${datasetId} processing ended with status: ${status}`);
     this.name = "DatasetProcessingError";
+    this.reason = reason;
+  }
+}
+
+// The run died mid-pipeline because LiteLLM rejected an LLM call on the
+// tenant's max_budget. The pre-flight check admitted the run, so no 402 ever
+// reached the client — this is the only place the upload flow learns why.
+// Subclasses DatasetProcessingError so existing instanceof checks still match.
+export class InsufficientCreditsProcessingError extends DatasetProcessingError {
+  constructor(datasetId: string, status: DatasetProcessingStatus) {
+    super(datasetId, status, INSUFFICIENT_CREDITS_REASON);
+    this.name = "InsufficientCreditsProcessingError";
   }
 }
 
@@ -77,14 +94,16 @@ export default function pollDatasetStatus(
 
       try {
         const response = await instance.fetch(
-          `/v1/datasets/status?dataset=${datasetId}`,
+          `/v1/datasets/status?dataset=${datasetId}&include_error_detail=true`,
         );
         if (!response.ok) {
           throw new Error(`Status check failed: ${response.status}`);
         }
-        const data: Record<string, DatasetProcessingStatus> =
-          await response.json();
-        const status = data[datasetId];
+        const data = await response.json();
+        const entry = data[datasetId];
+        // Bare string from pods predating CLO-306, {status, reason, error} otherwise.
+        const detail = entry ? normalizeDatasetStatusEntry(entry) : null;
+        const status = detail?.status;
 
         if (status) {
           onStatus?.(status);
@@ -96,7 +115,10 @@ export default function pollDatasetStatus(
             terminalReadsInARow += 1;
             if (sawInProgress || terminalReadsInARow >= staleConfirmAttempts) {
               if (status === "DATASET_PROCESSING_ERRORED") {
-                const err = new DatasetProcessingError(datasetId, status);
+                const err =
+                  detail?.reason === INSUFFICIENT_CREDITS_REASON
+                    ? new InsufficientCreditsProcessingError(datasetId, status)
+                    : new DatasetProcessingError(datasetId, status, detail?.reason ?? null);
                 captureException(err, { datasetId, status });
                 reject(err);
                 return;

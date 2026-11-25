@@ -3,11 +3,12 @@
 Generate parameter descriptions for router docstring placeholder bullets.
 
 tools/fix_router_docstrings.py leaves ``No description provided in code yet.``
-in generated bullets when a parameter has no description= metadata, no
-vocabulary entry, and no Literal values to derive from. This script finds
-those placeholder bullets under cognee/api, gathers each parameter's endpoint
-source as context, asks Claude for a one-sentence description of each, and
-rewrites the bullets in place.
+in generated bullets when a parameter has no description= metadata and no
+vocabulary entry (Literal parameters keep it too, followed by their values),
+and writes a stub summary line (``Name — METHOD /path.``) for handlers that
+had no docstring. This script finds both under cognee/api, gathers each
+endpoint's source plus the source of the models and cognee helpers it uses,
+asks Claude for the descriptions and summaries, and rewrites them in place.
 
 Runs on plain text and AST only — it does not import cognee, so it needs no
 project environment; only the ``anthropic`` package.
@@ -28,6 +29,8 @@ import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
+from fix_router_docstrings import escape_docstring
+
 logger = logging.getLogger(__name__)
 
 PLACEHOLDER = "No description provided in code yet."
@@ -36,28 +39,67 @@ BULLET_RE = re.compile(
 )
 API_ROOT = Path("cognee/api")
 
+# The stub summary fix_router_docstrings.py writes for a handler with no docstring.
+STUB_SUMMARY_RE = re.compile(
+    r'^(?P<indent>\s*)"""[A-Z][\w ]* — [A-Z]+(?:,[A-Z]+)* /\S*\.(?P<close>""")?$'
+)
+# Names that resolve to cognee code but say nothing about a route's parameters.
+SKIP_CONTEXT = {"User", "get_authenticated_user", "log_usage", "new_span"}
+
 MODEL = "claude-opus-5"
 
 SYSTEM_PROMPT = """\
-You write one-line parameter descriptions for the REST API reference of cognee,
-an open-source AI memory platform (knowledge graphs + vector search for AI agents).
+You write the REST API reference for cognee, an open-source AI memory platform
+(knowledge graphs + vector search for AI agents): parameter descriptions and,
+where a handler has only a stub, its summary.
 
-For each parameter you receive its name, type, and the source code of the FastAPI
-endpoint handler it belongs to. Write a description the way these existing cognee
-descriptions are written:
+You receive app_exception_handlers (how this app turns exceptions into responses)
+and, for each endpoint, the handler source plus the source of the request and
+response models and cognee helpers it uses (related_source). Parameter descriptions
+follow the style of these existing ones:
 
 - "UUID of the dataset (from GET /api/v1/datasets)."
 - "Inline SKILL.md markdown to ingest as a Skill node."
 - "Time window filtered on last_activity_at: 24h, 7d, 30d, or all."
 - "Maximum number of rows to return."
 
-Rules:
-- One sentence, at most 110 characters, ending with a period.
-- Describe what the parameter means and does in THIS endpoint, based on how the
-  source code actually uses it — never guess beyond the code.
-- Do not restate the type or the parameter name.
-- Do not mention defaults (they are rendered separately).
+The reader is a developer calling the API, and specific facts are what they need:
+error statuses and their causes, limits and what happens past them, what an empty
+or omitted value means, response fields, cases that return empty results. Write
+those whenever the source you were given shows them. A later pass checks every
+claim against the full codebase and corrects it, so do not trade a specific claim
+for a vague one — but never invent one either:
+
+- Every claim must come from the source you were given. Where it depends on code
+  you were not given (a function that is called but not included, a setting, an
+  exception class), leave that part out.
+- Statuses: take them from app_exception_handlers, not from FastAPI's defaults
+  (this app maps request validation errors differently). HTTPException(status, ...)
+  returns that status. For an exception you cannot follow to a handler or an
+  HTTPException, do not claim a status.
+- A handler that returns None responds with a JSON null body, not an empty body.
+- Get comparisons exactly right: a check like `count > limit` fails when the limit
+  is exceeded, not when it is reached.
+
+Rules for parameter descriptions:
+- One or two sentences, at most 220 characters, ending with a period.
+- Say what the parameter does in THIS endpoint: what omitting it means, what each
+  allowed value selects (when values are listed), what happens past a limit, and
+  which other parameters it requires or excludes. Validators, Field limits,
+  comments and model docstrings in related_source hold most of these rules.
+- Do not restate the type, the parameter name, or anything in "already_rendered"
+  (defaults, allowed values and numeric limits are rendered after your text).
 - Plain, factual reference tone; no marketing language.
+
+Rules for summaries (only for endpoints with "needs_summary": true):
+- summary: one imperative line, at most 90 characters, ending with a period,
+  e.g. "List the conflicts in a dataset.". Never repeat the method or path.
+- details: up to three sentences on what the parameter list does not show: error
+  statuses and their causes, side effects, cases that return empty results, and the
+  response fields (from the response_model or the value the handler returns).
+  Empty string when the source shows none of these.
+- The summary must agree with the endpoint's existing docstring text (in
+  endpoint_source); where they differ, follow the code.
 """
 
 
@@ -131,19 +173,200 @@ def enclosing_source(path: Path, line_index: int, max_chars: int = 6000) -> str:
     return "\n".join(lines)[:max_chars]
 
 
-def generate_descriptions(placeholders: list[Placeholder]) -> dict[str, str]:
+@dataclass
+class StubSummary:
+    file: Path
+    line: int  # index of the stub summary line
+    indent: str
+    closes: bool  # the stub line also closes the docstring
+
+    @property
+    def key(self) -> str:
+        return f"{self.file}::{self.line + 1}"
+
+
+def find_stub_summaries(root: Path) -> list[StubSummary]:
+    found: list[StubSummary] = []
+    for path in sorted(root.rglob("*.py")):
+        for index, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+            match = STUB_SUMMARY_RE.match(line)
+            if match:
+                found.append(
+                    StubSummary(
+                        file=path,
+                        line=index,
+                        indent=match.group("indent"),
+                        closes=bool(match.group("close")),
+                    )
+                )
+    return found
+
+
+def _module_file(module: str) -> Path | None:
+    if not module.startswith("cognee"):
+        return None
+    base = Path(*module.split("."))
+    for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _absolute_module(path: Path, node: ast.ImportFrom) -> str:
+    if not node.level:
+        return node.module or ""
+    package = list(path.with_suffix("").parts[: -node.level])
+    return ".".join(package + ([node.module] if node.module else []))
+
+
+def resolve_symbol(path: Path, name: str, depth: int = 0) -> tuple[Path, ast.AST] | None:
+    """Where a name used in ``path`` is defined: a module-level def/class in the
+    same file, or one imported from a cognee module (following re-exports)."""
+    if depth > 4:
+        return None
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and node.name == name
+        ):
+            return path, node
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if (alias.asname or alias.name) == name:
+                    target = _module_file(_absolute_module(path, node))
+                    if target is not None:
+                        return resolve_symbol(target, alias.name, depth + 1)
+    return None
+
+
+def _node_source(path: Path, node: ast.AST) -> str:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    start = min([node.lineno] + [d.lineno for d in getattr(node, "decorator_list", [])])
+    return "\n".join(lines[start - 1 : node.end_lineno])
+
+
+def _used_names(node: ast.AST) -> list[str]:
+    """Names a handler (or model) refers to: annotations, decorator arguments
+    such as response_model, and the functions it calls — in source order."""
+    names: list[str] = []
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and child.id not in names:
+            names.append(child.id)
+    return names
+
+
+def related_source(path: Path, line_index: int) -> str:
+    """Source of the cognee models and helpers the enclosing handler uses.
+
+    One hop from the handler, plus the classes those models refer to (a model
+    nested in a request body carries its own validators).
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    handler = None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            start = min([node.lineno] + [d.lineno for d in node.decorator_list])
+            inside = start <= line_index + 1 <= (node.end_lineno or start)
+            if inside and (handler is None or node.lineno > handler.lineno):
+                handler = node
+    if handler is None:
+        return ""
+    # The decorator (response_model=...) belongs to the handler but sits outside it.
+    queue = [(name, path, 0) for name in _used_names(handler)]
+    for decorator in handler.decorator_list:
+        queue += [(name, path, 0) for name in _used_names(decorator)]
+
+    seen: set[tuple[str, str]] = set()
+    chunks: list[str] = []
+    while queue:
+        name, origin, hop = queue.pop(0)
+        if name in SKIP_CONTEXT or name == handler.name:
+            continue
+        found = resolve_symbol(origin, name)
+        if found is None:
+            continue
+        file, node = found
+        marker = (str(file), getattr(node, "name", name))
+        if marker in seen:
+            continue
+        seen.add(marker)
+        chunks.append(f"# {file}\n{_node_source(file, node)}")
+        if isinstance(node, ast.ClassDef) and hop == 0:
+            queue += [(child, file, 1) for child in _used_names(node)]
+    return "\n\n".join(chunks)
+
+
+APP_MODULE = Path("cognee/api/client.py")
+
+
+def app_exception_handlers() -> str:
+    """Source of every @app.exception_handler in the API app: the statuses this app
+    really returns, which can differ from FastAPI's defaults."""
+    if not APP_MODULE.is_file():
+        return ""
+    tree = ast.parse(APP_MODULE.read_text(encoding="utf-8"))
+    chunks = []
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            func = decorator.func if isinstance(decorator, ast.Call) else decorator
+            if isinstance(func, ast.Attribute) and func.attr == "exception_handler":
+                chunks.append(_node_source(APP_MODULE, node))
+                break
+    return "\n\n".join(chunks)
+
+
+def _endpoint_key(path: Path, line_index: int) -> str:
+    return f"{path}::{enclosing_line(path, line_index)}"
+
+
+def enclosing_line(path: Path, line_index: int) -> int:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    best = 0
+    for node in ast.walk(tree):
+        is_function = isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef))
+        if is_function and node.lineno <= line_index + 1 <= (node.end_lineno or node.lineno):
+            best = max(best, node.lineno)
+    return best
+
+
+def generate_descriptions(
+    placeholders: list[Placeholder], stubs: list[StubSummary]
+) -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
+    """(description per placeholder key, (summary, details) per stub key)."""
     import anthropic
 
-    items = [
-        {
-            "key": item.key,
-            "parameter": item.name,
-            "type": item.type_text,
-            "file": str(item.file),
-            "endpoint_source": enclosing_source(item.file, item.start),
-        }
-        for item in placeholders
-    ]
+    endpoints: dict[str, dict] = {}
+
+    def endpoint(path: Path, line_index: int) -> dict:
+        key = _endpoint_key(path, line_index)
+        if key not in endpoints:
+            endpoints[key] = {
+                "endpoint": key,
+                "needs_summary": False,
+                "endpoint_source": enclosing_source(path, line_index),
+                "related_source": related_source(path, line_index),
+                "parameters": [],
+            }
+        return endpoints[key]
+
+    for item in placeholders:
+        endpoint(item.file, item.start)["parameters"].append(
+            {
+                "key": item.key,
+                "parameter": item.name,
+                "type": item.type_text,
+                "already_rendered": item.suffix,
+            }
+        )
+    stub_keys: dict[str, str] = {}
+    for stub in stubs:
+        entry = endpoint(stub.file, stub.line)
+        entry["needs_summary"] = True
+        stub_keys[entry["endpoint"]] = stub.key
 
     schema = {
         "type": "object",
@@ -159,9 +382,22 @@ def generate_descriptions(placeholders: list[Placeholder]) -> dict[str, str]:
                     "required": ["key", "description"],
                     "additionalProperties": False,
                 },
-            }
+            },
+            "summaries": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "endpoint": {"type": "string"},
+                        "summary": {"type": "string"},
+                        "details": {"type": "string"},
+                    },
+                    "required": ["endpoint", "summary", "details"],
+                    "additionalProperties": False,
+                },
+            },
         },
-        "required": ["descriptions"],
+        "required": ["descriptions", "summaries"],
         "additionalProperties": False,
     }
 
@@ -179,8 +415,16 @@ def generate_descriptions(placeholders: list[Placeholder]) -> dict[str, str]:
             {
                 "role": "user",
                 "content": (
-                    "Write a description for each of these parameters. Return one "
-                    "entry per input key.\n\n" + json.dumps(items, indent=2)
+                    "Write a description for each parameter (one entry per parameter "
+                    "key) and a summary for each endpoint with needs_summary set (one "
+                    "entry per such endpoint).\n\n"
+                    + json.dumps(
+                        {
+                            "app_exception_handlers": app_exception_handlers(),
+                            "endpoints": list(endpoints.values()),
+                        },
+                        indent=2,
+                    )
                 ),
             }
         ],
@@ -190,34 +434,77 @@ def generate_descriptions(placeholders: list[Placeholder]) -> dict[str, str]:
 
     text = next(block.text for block in response.content if block.type == "text")
     data = json.loads(text)
-    return {entry["key"]: entry["description"].strip() for entry in data["descriptions"]}
+    descriptions = {entry["key"]: entry["description"].strip() for entry in data["descriptions"]}
+    summaries = {
+        stub_keys[entry["endpoint"]]: (entry["summary"].strip(), entry["details"].strip())
+        for entry in data["summaries"]
+        if entry["endpoint"] in stub_keys
+    }
+    return descriptions, summaries
 
 
-def apply_descriptions(placeholders: list[Placeholder], descriptions: dict[str, str]) -> int:
-    applied = 0
-    by_file: dict[Path, list[Placeholder]] = {}
-    for item in placeholders:
-        by_file.setdefault(item.file, []).append(item)
+Edit = tuple[int, int, list[str]]  # replace lines[start:end] with the new lines
 
-    for path, items in by_file.items():
-        lines = path.read_text(encoding="utf-8").splitlines()
-        # Bottom-up so earlier line indices stay valid.
-        for item in sorted(items, key=lambda entry: entry.start, reverse=True):
-            description = descriptions.get(item.key, "").strip()
-            if not description:
-                continue
-            if not description.endswith("."):
-                description += "."
-            body = f"- **{item.name}** ({item.type_text}): {description}"
-            if item.suffix:
-                body += f" {item.suffix}"
-            wrapped = textwrap.wrap(
-                body,
-                width=max(60, 100 - len(item.indent)),
-                initial_indent=item.indent,
-                subsequent_indent=item.indent + "  ",
+
+def summary_edits(
+    stubs: list[StubSummary], summaries: dict[str, tuple[str, str]]
+) -> dict[Path, list[Edit]]:
+    edits: dict[Path, list[Edit]] = {}
+    for stub in stubs:
+        summary, details = summaries.get(stub.key, ("", ""))
+        if not summary:
+            continue
+        if not summary.endswith("."):
+            summary += "."
+        new = [f'{stub.indent}"""{escape_docstring(summary)}']
+        if details:
+            new += [""] + textwrap.wrap(
+                escape_docstring(details),
+                width=max(60, 100 - len(stub.indent)),
+                initial_indent=stub.indent,
+                subsequent_indent=stub.indent,
             )
-            lines[item.start : item.end] = wrapped
+        if stub.closes:
+            new.append(f'{stub.indent}"""')
+        edits.setdefault(stub.file, []).append((stub.line, stub.line + 1, new))
+    return edits
+
+
+def description_edits(
+    placeholders: list[Placeholder], descriptions: dict[str, str]
+) -> dict[Path, list[Edit]]:
+    edits: dict[Path, list[Edit]] = {}
+    for item in placeholders:
+        description = descriptions.get(item.key, "").strip()
+        if not description:
+            continue
+        if not description.endswith("."):
+            description += "."
+        body = f"- **{item.name}** ({item.type_text}): {escape_docstring(description)}"
+        if item.suffix:
+            body += f" {item.suffix}"
+        wrapped = textwrap.wrap(
+            body,
+            width=max(60, 100 - len(item.indent)),
+            initial_indent=item.indent,
+            subsequent_indent=item.indent + "  ",
+        )
+        edits.setdefault(item.file, []).append((item.start, item.end, wrapped))
+    return edits
+
+
+def apply_edits(*edit_sets: dict[Path, list[Edit]]) -> int:
+    """Apply line-range replacements, bottom-up per file so indices stay valid."""
+    per_file: dict[Path, list[Edit]] = {}
+    for edit_set in edit_sets:
+        for path, edits in edit_set.items():
+            per_file.setdefault(path, []).extend(edits)
+
+    applied = 0
+    for path, edits in per_file.items():
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for start, end, new in sorted(edits, key=lambda edit: edit[0], reverse=True):
+            lines[start:end] = new
             applied += 1
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return applied
@@ -225,30 +512,42 @@ def apply_descriptions(placeholders: list[Placeholder], descriptions: dict[str, 
 
 def main() -> int:
     placeholders = find_placeholders(API_ROOT)
-    if not placeholders:
-        print("No placeholder descriptions found — nothing to do.")
+    stubs = find_stub_summaries(API_ROOT)
+    if not placeholders and not stubs:
+        print("No placeholder descriptions or stub summaries found — nothing to do.")
         return 0
 
     print(f"Found {len(placeholders)} placeholder bullets:")
     for item in placeholders:
         print(f"  {item.key} ({item.type_text})")
+    print(f"Found {len(stubs)} stub summaries:")
+    for stub in stubs:
+        print(f"  {stub.key}")
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ANTHROPIC_API_KEY is not set — leaving placeholders in place.")
         return 0
 
     try:
-        descriptions = generate_descriptions(placeholders)
+        descriptions, summaries = generate_descriptions(placeholders, stubs)
     except Exception as exc:
         logger.debug("Exiting with status 1 after error in main", exc_info=True)
         print(f"Description generation failed: {exc}", file=sys.stderr)
         return 1
 
-    applied = apply_descriptions(placeholders, descriptions)
-    missing = len(placeholders) - applied
-    print(f"\nApplied {applied} generated descriptions.")
-    if missing:
-        print(f"{missing} placeholders received no description and were left in place.")
+    by_description = description_edits(placeholders, descriptions)
+    by_summary = summary_edits(stubs, summaries)
+    apply_edits(by_description, by_summary)
+    applied = sum(len(edits) for edits in by_description.values())
+    applied_summaries = sum(len(edits) for edits in by_summary.values())
+    print(f"\nApplied {applied} generated descriptions and {applied_summaries} summaries.")
+    if len(placeholders) - applied:
+        print(
+            f"{len(placeholders) - applied} placeholders received no description "
+            "and were left in place."
+        )
+    if len(stubs) - applied_summaries:
+        print(f"{len(stubs) - applied_summaries} stub summaries were left in place.")
     return 0
 
 

@@ -66,10 +66,18 @@ async def clean_env(tmp_path, monkeypatch):
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
+    from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
+    from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
+        create_embedding_engine,
+    )
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
     create_relational_engine.cache_clear()
+    # An engine or config cached by an earlier test would ignore MOCK_EMBEDDING
+    # and the settings above, and embed with whatever provider that test had.
+    create_embedding_engine.cache_clear()
+    get_embedding_config.cache_clear()
     graph_db_config.set(None)
     vector_db_config.set(None)
 

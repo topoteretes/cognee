@@ -1,3 +1,5 @@
+import builtins
+
 from pypdf import PdfReader
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
@@ -12,7 +14,7 @@ logger = get_logger("PDFDocument")
 class PdfDocument(Document):
     type: str = "pdf"
 
-    async def read(self, chunker_cls: Chunker, max_chunk_size: int):
+    async def read(self, chunker_cls: builtins.type[Chunker], max_chunk_size: int):
         async with open_data_file(self.raw_data_location, mode="rb") as stream:
             logger.info(f"Reading PDF: {self.raw_data_location}")
 

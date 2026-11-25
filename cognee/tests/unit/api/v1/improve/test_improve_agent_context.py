@@ -18,7 +18,7 @@ from cognee.modules.improve.stages import (
 )
 
 
-def _inputs(session_ids):
+def _inputs(session_ids, **config):
     user = types.SimpleNamespace(id=uuid4())
     dataset = types.SimpleNamespace(id=uuid4(), name="docs", owner_id=user.id)
     return ImproveRunInputs(
@@ -26,7 +26,7 @@ def _inputs(session_ids):
         dataset_id=dataset.id,
         dataset=dataset,
         session_ids=tuple(session_ids),
-        config=ImproveConfig(),
+        config=ImproveConfig(**config),
         capabilities=GraphCapabilities.assume_supported(),
     )
 
@@ -95,3 +95,34 @@ async def test_one_failing_session_does_not_block_others(monkeypatch):
     assert result.status == "errored"
     assert result.counts == {"lessons": 1, "sessions_failed": 1}
     assert "boom" in result.error
+
+
+def _patch_coding_extractor(monkeypatch, behavior):
+    cue_mod = importlib.import_module("cognee.infrastructure.session.coding_unit_extraction")
+    calls = []
+
+    async def fake_extract(*, session_manager, user_id, session_id, dataset):
+        calls.append((session_id, dataset.name))
+        return behavior(session_id)
+
+    monkeypatch.setattr(cue_mod, "extract_coding_unit_context", fake_extract)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_coding_mode_runs_the_unit_extractor_instead(monkeypatch):
+    _patch_session_manager(monkeypatch)
+    window_calls = _patch_extractor(monkeypatch, behavior=lambda _sid: ["unexpected"])
+    unit_calls = _patch_coding_extractor(monkeypatch, behavior=lambda _sid: ["a", "b"])
+
+    result = await ExtractAgentContextStage().run(_inputs(["s1"], distillation_mode="coding"))
+
+    assert unit_calls == [("s1", "docs")] and window_calls == []
+    assert result.status == "completed"
+    assert result.counts == {"lessons": 2, "sessions_failed": 0}
+
+
+def test_coding_mode_gate_ignores_auto_feedback(monkeypatch):
+    _patch_session_manager(monkeypatch, auto_feedback=False)
+    assert ExtractAgentContextStage().gate(_inputs(["s1"], distillation_mode="coding")) is None
+    assert ExtractAgentContextStage().gate(_inputs(["s1"])) == REASON_AUTO_FEEDBACK_DISABLED

@@ -44,10 +44,9 @@ async def history_engine(tmp_path, monkeypatch):
 
     for module in (log_query_mod, log_result_mod, get_history_mod):
         monkeypatch.setattr(module, "get_relational_engine", lambda: engine)
-        # Logging is gated on an env var read at import time; pin it on so the
-        # test does not depend on the ambient environment.
-        if hasattr(module, "_LOG_ENABLED"):
-            monkeypatch.setattr(module, "_LOG_ENABLED", True)
+    # Logging is gated on an env var read at call time; pin it on so the test
+    # does not depend on the ambient environment.
+    monkeypatch.setenv("COGNEE_LOG_SEARCH_HISTORY", "true")
 
     yield engine
 

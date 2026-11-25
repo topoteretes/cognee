@@ -3,7 +3,7 @@
 Assess whether generated dev notes imply a documentation update is needed.
 
 Matches the LLM integration style used by tools/generate_release_notes.py:
-- uses litellm + instructor directly
+- calls cognee's NativeLiteLLMAdapter directly, not through cognee's LLM config
 - reads LLM_API_KEY / LLM_MODEL from the environment
 - raises on missing dependencies, missing credentials, or LLM failures
 """
@@ -65,8 +65,6 @@ def format_markdown(assessment: Any) -> str:
 
 async def assess_with_llm(notes_json: str, notes_markdown: str) -> Any:
     try:
-        import instructor
-        import litellm
         from pydantic import BaseModel, Field
     except ImportError as exc:
         raise RuntimeError(f"Required dependencies not available: {exc}") from exc
@@ -94,16 +92,15 @@ async def assess_with_llm(notes_json: str, notes_markdown: str) -> Any:
     )
 
     try:
-        client = instructor.from_litellm(litellm.acompletion)
-        return await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_model=DocsAssessment,
-            api_key=api_key,
-            max_retries=2,
+        # Imported here, after LLM_API_KEY / LLM_MODEL are read: importing cognee
+        # loads a local .env over the environment.
+        from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+            NativeLiteLLMAdapter,
+        )
+
+        adapter = NativeLiteLLMAdapter(api_key=api_key, model=model, max_completion_tokens=16384)
+        return await adapter.acreate_structured_output(
+            text_input=user_prompt, system_prompt=system_prompt, response_model=DocsAssessment
         )
     except Exception as exc:
         raise RuntimeError(f"LLM assessment failed: {exc}") from exc

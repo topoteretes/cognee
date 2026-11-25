@@ -10,7 +10,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -191,16 +191,12 @@ async def test_payload_carries_the_process_origin(monkeypatch):
     monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
     monkeypatch.setenv("ENV", "local")
     monkeypatch.setenv(utils.TELEMETRY_ORIGIN_ENV, "mcp")
-    request = AsyncMock()
-    monkeypatch.setattr(utils, "_send_telemetry_request", request)
+    enqueue = Mock()
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", enqueue)
 
-    # Only this call's task: another test's unmocked send, left pending on a
-    # loop that is now closed, must not fail this one.
-    pending_before = set(utils._TELEMETRY_TASKS)
     utils.send_telemetry("cognee.recall", "sdk", additional_properties={"top_k": 3})
-    await asyncio.gather(*(utils._TELEMETRY_TASKS - pending_before))
 
-    payload = request.await_args.args[0]
+    payload = enqueue.call_args.args[0]
     assert payload["event_name"] == "cognee.recall"
     assert payload["properties"]["telemetry_origin"] == "mcp"
     assert payload["properties"]["top_k"] == 3

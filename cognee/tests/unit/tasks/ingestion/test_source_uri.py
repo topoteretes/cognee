@@ -1,3 +1,8 @@
+import io
+
+from starlette.datastructures import UploadFile
+
+from cognee.api.v1.serve.cloud_client import _text_upload_filename
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.ingest_data import _source_uri_from_input
 
@@ -38,3 +43,26 @@ def test_source_uri_still_resolves_non_literal_data_item():
     item = DataItem(data="https://example.test/x")
 
     assert _source_uri_from_input(item) == "https://example.test/x"
+
+
+def test_source_uri_resolves_an_open_file(tmp_path):
+    source = tmp_path / "report.txt"
+    source.write_text("report")
+
+    with open(source, "rb") as file:
+        assert _source_uri_from_input(file) == source.resolve().as_uri()
+
+
+def test_source_uri_is_none_for_an_upload():
+    # An upload's filename is the client's, not a path on the server.
+    upload = UploadFile(file=io.BytesIO(b"report"), filename="report.pdf")
+
+    assert _source_uri_from_input(upload) is None
+
+
+def test_source_uri_is_none_for_text_sent_by_a_remote_client():
+    # After serve(), add() uploads raw text as a file named after its content.
+    text = "Raw text added through a remote client."
+    upload = UploadFile(file=io.BytesIO(text.encode()), filename=_text_upload_filename(text))
+
+    assert _source_uri_from_input(upload) is None

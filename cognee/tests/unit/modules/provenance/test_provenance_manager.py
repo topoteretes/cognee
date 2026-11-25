@@ -164,6 +164,105 @@ class TestInvalidate:
         with pytest.raises(ValueError):
             await manager.invalidate("ghost", agent_id="auditor")
 
+    async def test_invalidate_is_idempotent(self, manager):
+        await manager.track_entity("e1", source="doc-a")
+        first = await manager.invalidate("e1", agent_id="forget", reason="deleted")
+        again = await manager.invalidate("e1", agent_id="someone-else", reason="other")
+
+        # Second tombstone: stored entry back, no new slot, no new archive.
+        assert again.sequence_id == first.sequence_id
+        assert again.checksum == first.checksum
+        assert again.invalidated_by == "forget"
+        assert len(await _archive_entries("e1")) == 1
+        assert (await manager.verify_chain())["valid"] is True
+
+    async def test_revision_history_marks_tombstone(self, manager):
+        await manager.track_entity("e1", source="doc-a")
+        await manager.invalidate("e1", agent_id="forget", reason="deleted")
+        history = await manager.revision_history("e1")
+        assert "invalidated" not in history[0]
+        assert history[1]["invalidated"] is True
+        assert history[1]["invalidated_by"] == "forget"
+        assert history[1]["invalidation_reason"] == "deleted"
+
+    @pytest.mark.parametrize("kind", ["relationship", "chunk", "entity"])
+    async def test_retrack_resurrects_tombstone(self, manager, kind):
+        """Deterministic ids come back on re-ingest after forget(); the ledger
+        must show them live again, with the tombstone kept as history."""
+        if kind == "relationship":
+            track = lambda: manager.track_relationship("rel:a:knows:b", source="c1")
+            entity_id = "rel:a:knows:b"
+        elif kind == "chunk":
+            track = lambda: manager.track_chunk("chunk-1", source_document="d")
+            entity_id = "chunk-1"
+        else:
+            track = lambda: manager.track_entity("e1", source="d")
+            entity_id = "e1"
+
+        first = await track()
+        tombstone = await manager.invalidate(entity_id, agent_id="forget", reason="deleted")
+        revived = await track()
+
+        assert revived.invalidated is False
+        assert revived.invalidated_by is None
+        assert revived.sequence_id == tombstone.sequence_id + 1
+        assert revived.previous_checksum == tombstone.checksum
+        assert revived.first_seen == first.first_seen
+        archives = await _archive_entries(entity_id)
+        assert [archive.invalidated for archive in archives].count(True) == 1
+        assert revived.previous_version_id in {archive.entity_id for archive in archives}
+
+        stored = await manager.get_provenance(entity_id)
+        assert stored["invalidated"] is False
+        assert (await manager.verify_chain())["valid"] is True
+        assert (await manager.check())["valid"] is True
+
+    async def test_batch_invalidate(self, manager):
+        await manager.track_entity("e1", source="d")
+        await manager.track_relationship("rel:a:knows:b", source="c1")
+        batch = manager.batch()
+        batch.invalidate("e1", agent_id="forget", reason="deleted")
+        batch.invalidate("rel:a:knows:b", agent_id="forget", reason="deleted")
+        results = await batch.commit()
+
+        assert [entry.invalidated for entry in results] == [True, True]
+        assert [entry.sequence_id for entry in results] == [3, 4]
+        assert (await manager.verify_chain())["valid"] is True
+
+    async def test_batch_invalidate_untracked_fails_batch(self, manager):
+        await manager.track_entity("e1", source="d")
+        batch = manager.batch()
+        batch.invalidate("ghost", agent_id="forget")
+        with pytest.raises(ValueError):
+            await batch.commit()
+        assert (await manager.get_provenance("e1"))["invalidated"] is False
+
+    async def test_data_item_row_versions_on_its_content_hash_only(self, manager):
+        async def track(run_id, content_hash):
+            batch = manager.batch()
+            batch.track_data_item("ds:data_item:d1", content_hash=content_hash, bundle_id=run_id)
+            return await batch.commit()
+
+        [created] = await track("run-1", "hash-1")
+        assert created.entity_type == "data_item" and created.bundle_id == "run-1"
+        # Queued with every batch stored for the item: the same content is a no-op.
+        [again] = await track("run-2", "hash-1")
+        assert again.sequence_id == created.sequence_id and again.bundle_id == "run-1"
+        assert (await manager.get_statistics())["total_entries"] == 1
+
+        # New content is a new version that names both hashes.
+        [updated] = await track("run-3", "hash-2")
+        assert updated.bundle_id == "run-3"
+        assert updated.metadata["delta"] == {"content_hash": ["hash-1", "hash-2"]}
+
+        # A tombstoned row comes back even with the content it had.
+        await manager.invalidate("ds:data_item:d1", "forget", reason="data_deleted")
+        [resurrected] = await track("run-4", "hash-2")
+        assert resurrected.invalidated is False and resurrected.bundle_id == "run-4"
+        history = await manager.revision_history("ds:data_item:d1")
+        assert [bool(v.get("invalidated")) for v in history] == [False, False, True, False]
+        assert (await manager.verify_chain())["valid"] is True
+
 
 class TestRevisionHistory:
     async def test_order_and_synthesized_validity(self, manager):
@@ -281,14 +380,17 @@ class TestBatch:
         with pytest.raises(TypeError):
             batch.track_relationship(123, source="doc")
 
-    async def test_batch_commit_degrades_gracefully(self, manager, monkeypatch):
+    async def test_batch_commit_raises_when_the_ledger_cannot_be_written(
+        self, manager, monkeypatch
+    ):
         async def explode(write_fns):
             raise RuntimeError("db down")
 
         monkeypatch.setattr(storage, "append_chained_many", explode)
         batch = manager.batch()
         batch.track_entity("e1", source="doc")
-        assert await batch.commit() is None
+        with pytest.raises(RuntimeError, match="db down"):
+            await batch.commit()
 
 
 class TestUtility:

@@ -23,18 +23,24 @@ from cognee.modules.graph.utils import (
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.modules.provenance.edge_evidence.capture import capture_graph_provenance
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.provenance.record_provenance import record_provenance_at_storage
 from cognee.tasks.storage.exceptions import (
     InvalidDataPointsInAddDataPointsError,
 )
 
 from .chunk_ownership import collect_chunk_ownership
-from .index_data_points import index_data_points
+from .index_data_points import index_data_points, indexing_budget
 from .index_graph_edges import index_graph_edges
 
 if TYPE_CHECKING:
     from cognee.modules.pipelines.models import PipelineContext
 
 logger = get_logger("add_data_points")
+
+# ctx.extras key under which index_chunks_for_search records the ids of the
+# nodes it already embedded (SDK-397), so the final write of the same chunks
+# upserts their graph rows but does not embed their text a second time.
+SEARCH_INDEXED_IDS = "search_indexed_ids"
 
 
 def _group_by_all_keys(owner_map: dict) -> dict:
@@ -65,6 +71,20 @@ def _group_by_extra_keys(owner_map: dict) -> dict:
     return groups
 
 
+async def _run_to_completion(*coroutines) -> None:
+    """Run the coroutines concurrently; raise the first error once every one has finished.
+
+    ``asyncio.gather`` alone raises as soon as one coroutine fails and leaves the
+    others running in the background, after this call has already reported the
+    failure. Here every write either completes or fails before the caller hears
+    about it, so a failed ``add_data_points`` leaves nothing still writing.
+    """
+    outcomes = await asyncio.gather(*coroutines, return_exceptions=True)
+    for outcome in outcomes:
+        if isinstance(outcome, BaseException):
+            raise outcome
+
+
 @task_summary("Stored {n} data point(s)")
 async def add_data_points(
     data_points: list[DataPoint],
@@ -74,6 +94,7 @@ async def add_data_points(
     embed_triplets: bool | None = None,
     ctx: Optional["PipelineContext"] = None,
     graph_only: bool = False,
+    index_edges: bool = True,
 ) -> list[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
@@ -88,6 +109,10 @@ async def add_data_points(
         ctx: Pipeline runtime context (user, dataset, data_item).
         graph_only: Persist graph nodes and edges without initializing or writing
             a vector engine. Intended for deterministic extraction pipelines.
+        index_edges: Also embed the relationship names of the written edges
+            (the ``EdgeType_relationship_name`` index). ``index_chunks_for_search``
+            passes False: its edges are structural only and the final write of
+            the same chunks indexes them.
     """
     if embed_triplets is not None:
         warnings.warn(
@@ -322,8 +347,8 @@ async def add_data_points(
                 identities = [EdgeIdentity(key[0], key[1], key[2]) for key in edge_keys]
                 await graph_engine.attach_edge_source_refs(identities, list(keys), fold_run_arg)
 
-    # GRAPH BEFORE VECTORS, never concurrently. The two stores fail
-    # independently, and only one of the two orders is recoverable:
+    # GRAPH BEFORE VECTORS, per artifact. The two stores fail independently,
+    # and only one of the two orders is recoverable:
     #
     #   graph ok, vector fails -> the artifact carries its source ref, so
     #     rollback and delete can both find it. Self-healing.
@@ -332,47 +357,75 @@ async def add_data_points(
     #     the vector collection directly and happily returns it — content from
     #     a run that reported failure, served to users, permanently.
     #
-    # Concurrency bought a little latency and made the second case reachable
-    # on every write, so the writes are sequenced instead.
-    if use_hybrid:
-        await graph_engine.add_nodes_with_vectors(nodes)
-    elif graph_only:
-        await _write_nodes_grouped()
+    # So a node's vector is written only after its graph row, and an edge's
+    # vector only after its graph row. Across the two kinds the writes do
+    # overlap: the node vectors are written while the edge graph rows are, since
+    # neither depends on the other, and the edge vectors follow the edge rows.
+    # Finishing every graph write before any vector write was measured slower,
+    # because nothing overlapped any more.
+    # Nodes index_chunks_for_search embedded earlier in this run (SDK-397) keep
+    # their graph upsert but are not embedded a second time, on either path.
+    already_indexed = ctx.extras.get(SEARCH_INDEXED_IDS) if ctx is not None else None
+    if already_indexed:
+        nodes_to_embed = [node for node in nodes if str(node.id) not in already_indexed]
     else:
-        await _write_nodes_grouped()
-        await index_data_points(
-            [node.model_copy(deep=True) for node in nodes],
-            vector_engine=vector_engine,
+        nodes_to_embed = nodes
+
+    async def _write_custom_edges():
+        # Written in their own call, after the data point edges (COG-3488).
+        # Note: custom_edges is already normalized (with nodes) above, before the
+        # rollback-ledger upsert, so no second ensure_default_edge_properties here.
+        await graph_engine.add_edges(
+            custom_edges,
+            source_ref_key=fold_source_ref_key,
+            pipeline_run_id=fold_run_arg,
         )
 
     if use_hybrid:
+        # Hybrid backends embed inside the graph write, so the already embedded
+        # nodes are written without vectors and only the rest with them.
+        if len(nodes_to_embed) != len(nodes):
+            await graph_engine.add_nodes(
+                [node for node in nodes if str(node.id) in already_indexed]
+            )
+        if nodes_to_embed:
+            await graph_engine.add_nodes_with_vectors(nodes_to_embed)
         await graph_engine.add_edges_with_vectors(edges)
+        if custom_edges:
+            await graph_engine.add_edges_with_vectors(custom_edges)
     elif graph_only:
+        await _write_nodes_grouped()
         await _write_edges_grouped(edges)
+        if custom_edges:
+            await _write_custom_edges()
     else:
-        await _write_edges_grouped(edges)
-        await index_graph_edges(edges, vector_engine=vector_engine)
+        await _write_nodes_grouped()
+
+        # One budget for both halves, so together they stay within
+        # EMBEDDING_MAX_CONCURRENT_DATA_POINTS at the provider and a slow store holds
+        # back embedding for both. The nodes are handed over as they are:
+        # index_data_points copies only what it must.
+        budget = indexing_budget(vector_engine)
+
+        async def _index_nodes():
+            await index_data_points(nodes_to_embed, vector_engine=vector_engine, budget=budget)
+
+        async def _write_edges_then_index():
+            await _write_edges_grouped(edges)
+            if custom_edges:
+                await _write_custom_edges()
+            if index_edges:
+                # One pass over both edge lists: an edge type they share is
+                # embedded and written once, not once per list.
+                await index_graph_edges(
+                    edges + custom_edges if custom_edges else edges,
+                    vector_engine=vector_engine,
+                    budget=budget,
+                )
+
+        await _run_to_completion(_index_nodes(), _write_edges_then_index())
 
     if custom_edges:
-        # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
-        # Note: custom_edges is already normalized (with nodes) above, before the
-        # rollback-ledger upsert, so no second ensure_default_edge_properties here.
-        if use_hybrid:
-            await graph_engine.add_edges_with_vectors(custom_edges)
-        elif graph_only:
-            await graph_engine.add_edges(
-                custom_edges,
-                source_ref_key=fold_source_ref_key,
-                pipeline_run_id=fold_run_arg,
-            )
-        else:
-            await graph_engine.add_edges(
-                custom_edges,
-                source_ref_key=fold_source_ref_key,
-                pipeline_run_id=fold_run_arg,
-            )
-            await index_graph_edges(custom_edges, vector_engine=vector_engine)
-
         edges.extend(custom_edges)
 
     if stores_provenance and use_hybrid:
@@ -420,5 +473,11 @@ async def add_data_points(
     # rebuilds nodes as stripped copies, and the chunks a cognify batch carries are
     # nested under its TextSummary objects — capture walks the object graph itself.
     await capture_graph_provenance(data_points, edges, ctx)
+
+    # Audit ledger (PROVENANCE_TRACKING): recorded here, at the one seam every
+    # DataPoint batch crosses, so improve(), code graph, skills and custom
+    # pipelines are covered the same as cognify. A no-op when off; when on, a
+    # ledger write that fails raises and this task fails with it.
+    await record_provenance_at_storage(data_points, ctx)
 
     return data_points

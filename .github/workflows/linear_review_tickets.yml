@@ -1,0 +1,59 @@
+name: PR review tickets
+
+# Once a day: for every pull request merged in the last 72 hours, create a
+# Linear ticket for each reviewer who approved it, assigned to them and
+# already completed, so review time is evidenced in Linear
+# (.github/scripts/linear_review_tickets.py).
+#
+# Required secret:   LINEAR_API_KEY          Linear personal API key.
+# Optional variable: LINEAR_REVIEW_TEAM_KEY  team the tickets go to (default SDK).
+# Optional variable: LINEAR_REVIEW_LABEL     label put on every ticket (default "PR review");
+#                                            must already exist in Linear.
+#
+# The API key needs Read and Create issues on the review team.
+#
+# Scheduled runs only fire on the default branch (main).
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Read everything, create nothing; list the tickets that would be created"
+        type: boolean
+        default: true
+      lookback_hours:
+        description: "Window in hours instead of the default 72 (at most 336)"
+        type: string
+        default: ""
+      pr_number:
+        description: "Handle this one merged pull request only, ignoring the window"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: linear-review-tickets-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  review-tickets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Create Linear tickets for PR approvals
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_REVIEW_TEAM_KEY: ${{ vars.LINEAR_REVIEW_TEAM_KEY || 'SDK' }}
+          LINEAR_REVIEW_LABEL: ${{ vars.LINEAR_REVIEW_LABEL || 'PR review' }}
+          # Scheduled runs write; manual runs follow the dry_run input (default on).
+          DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || (inputs.dry_run && 'true') || 'false' }}
+          LOOKBACK_HOURS: ${{ inputs.lookback_hours }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: python3 .github/scripts/linear_review_tickets.py

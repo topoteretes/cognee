@@ -329,6 +329,122 @@ async def test_budget_exhausted_error_raises_payment_required_without_retry():
 
 
 @pytest.mark.asyncio
+async def test_plain_text_budget_error_raises_payment_required_without_retry():
+    """A budget error on the plain-text (response_model=str) path surfaces as
+    LLMPaymentRequiredError and is not retried (#6185)."""
+    import litellm
+
+    from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key",
+        model="openai/gpt-5-mini",
+        max_completion_tokens=4096,
+    )
+
+    mock_acompletion = AsyncMock(
+        side_effect=litellm.BudgetExceededError(current_cost=1.0, max_budget=0.5)
+    )
+
+    with (
+        patch("litellm.acompletion", mock_acompletion),
+        pytest.raises(LLMPaymentRequiredError) as raised,
+    ):
+        await adapter.acreate_structured_output(
+            text_input="Test input",
+            system_prompt="Test prompt",
+            response_model=str,
+        )
+
+    # Mapped to an actionable, non-retryable error — called exactly once.
+    assert mock_acompletion.call_count == 1
+    # The provider's budget sentence travels on the error for direct adapter
+    # callers too, as it does everywhere else that raises through
+    # raise_if_budget_exhausted (SDK-1224).
+    assert "Max budget: 0.5" in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_structured_budget_error_carries_the_provider_detail():
+    """The structured path raises through the same helper, so the masked
+    provider sentence is on the error without going through LLMGateway (SDK-1224)."""
+    import litellm
+
+    from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key",
+        model="openai/gpt-5-mini",
+        max_completion_tokens=4096,
+    )
+    mock_acompletion = AsyncMock(
+        side_effect=litellm.BudgetExceededError(current_cost=1.0, max_budget=0.5)
+    )
+
+    with (
+        patch("litellm.acompletion", mock_acompletion),
+        pytest.raises(LLMPaymentRequiredError) as raised,
+    ):
+        await adapter.acreate_structured_output(
+            text_input="Test input",
+            system_prompt="Test prompt",
+            response_model=PersonModel,
+        )
+
+    assert mock_acompletion.call_count == 1
+    assert "Max budget: 0.5" in str(raised.value)
+    assert isinstance(raised.value.__cause__, litellm.BudgetExceededError)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response_model", [str, PersonModel])
+async def test_terminal_quota_error_is_not_retried(response_model, monkeypatch):
+    """A terminal quota error is not retried on either path; LLMGateway maps it to
+    LLMQuotaExceededError (shared llm_retry_condition, SDK-1222)."""
+    import litellm
+
+    from cognee.infrastructure.llm import overload_policy as overload_policy_module
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    # A RateLimitError opens an overload episode on the process-wide policy, which
+    # paces later tests through the shared limiter; keep that episode test-local.
+    monkeypatch.setattr(
+        overload_policy_module, "llm_overload_policy", overload_policy_module.OverloadPolicy()
+    )
+
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key",
+        model="openai/gpt-5-mini",
+        max_completion_tokens=4096,
+    )
+
+    mock_acompletion = AsyncMock(
+        side_effect=litellm.RateLimitError(
+            message="You exceeded your current quota: insufficient_quota",
+            llm_provider="openai",
+            model="gpt-5-mini",
+        )
+    )
+
+    with patch("litellm.acompletion", mock_acompletion), pytest.raises(litellm.RateLimitError):
+        await adapter.acreate_structured_output(
+            text_input="Test input",
+            system_prompt="Test prompt",
+            response_model=response_model,
+        )
+
+    assert mock_acompletion.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_schema_native_passes_response_model_as_response_format():
     """Schema-capable models get the Pydantic class straight through as response_format."""
     from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (

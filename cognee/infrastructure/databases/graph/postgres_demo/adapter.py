@@ -44,6 +44,9 @@ from cognee.infrastructure.databases.provenance.source_refs import (
     get_source_ref_key_from_source_run_ref,
 )
 from cognee.infrastructure.databases.relational import get_relational_config
+from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+    DEFAULT_POOL_TIMEOUT,
+)
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.modules.storage.utils import JSONEncoder
@@ -182,17 +185,17 @@ def _select_nodeset_neighbor_ids(
 
 _DEFAULT_POOL_ARGS = {
     "pool_size": 2,
-    "max_overflow": 20,  # 22-connection ceiling, PER DATASET
+    "max_overflow": 10,  # 12-connection ceiling, PER DATASET
     "pool_pre_ping": True,
     "pool_recycle": 280,
-    "pool_timeout": 280,
+    "pool_timeout": DEFAULT_POOL_TIMEOUT,
 }
 
 
 def _resolve_engine_args(configured_pool_args) -> dict:
     """Turn the configured POOL_ARGS into create_async_engine kwargs.
 
-    Defaults mirror PGVectorAdapter._ACCESS_CONTROL_DEFAULT_POOL_ARGS (2/20),
+    Defaults mirror PGVectorAdapter._ACCESS_CONTROL_DEFAULT_POOL_ARGS (2/10),
     NOT SqlAlchemyAdapter's 5/35. Like PGVector's, this engine is created per
     dataset — the engine-cache key includes graph_database_schema — so its
     ceiling is multiplied by dataset count, not paid once. dict() handles the
@@ -934,10 +937,10 @@ class PostgresDemoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_filtered_graph_data(
-        self, attribute_filters: list[dict[str, list[str | int]]]
+        self, attribute_filters: list[dict[str, list[str | int]]], *, include_edges: bool = True
     ) -> tuple[list[tuple[str, dict]], list[tuple[str, str, str, dict]]]:
         """Return core-field matches and the edges induced by those nodes."""
-        if not attribute_filters:
+        if not attribute_filters and include_edges:
             return await self.get_graph_data()
 
         filters: list[tuple[str, set[str]]] = []
@@ -947,7 +950,7 @@ class PostgresDemoAdapter(GraphDBInterface):
                     raise ValueError(f"Invalid filter attribute: {attr!r}")
                 filters.append((attr, {str(value) for value in filter_values}))
 
-        if not filters:
+        if not filters and include_edges:
             return await self.get_graph_data()
 
         async with self.sessionmaker() as session:
@@ -963,6 +966,9 @@ class PostgresDemoAdapter(GraphDBInterface):
                         **_decode_properties(row["properties"]),
                     }
                     nodes.append((row["id"], properties))
+
+            if not include_edges:
+                return nodes, []
 
             edges = await self._fetch_edges_within(session, [node_id for node_id, _ in nodes])
             return nodes, edges

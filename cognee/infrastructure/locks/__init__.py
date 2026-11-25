@@ -1,23 +1,21 @@
-from .dataset_lock import dataset_lock, get_dataset_lock, held_datasets
+from .dataset_lock import DatasetLock, dataset_lock, get_dataset_lock, held_datasets
+from .dataset_schema_lock import dataset_schema_lock, get_dataset_schema_lock
 from .session_lock import (
-    has_pending_improve_rerun,
+    acquire_improve_lock_many,
     release_improve_lock_many,
-    release_or_rerun_improve_lock_many,
-    request_improve_rerun_many,
     session_lock,
     session_turn_lock,
-    try_acquire_improve_lock_many,
 )
 
 __all__ = [
+    "DatasetLock",
+    "acquire_improve_lock_many",
     "dataset_lock",
+    "dataset_schema_lock",
     "get_dataset_lock",
-    "has_pending_improve_rerun",
+    "get_dataset_schema_lock",
     "held_datasets",
     "release_improve_lock_many",
-    "release_or_rerun_improve_lock_many",
-    "request_improve_rerun_many",
     "session_lock",
     "session_turn_lock",
-    "try_acquire_improve_lock_many",
 ]

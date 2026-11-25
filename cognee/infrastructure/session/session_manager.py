@@ -32,7 +32,10 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.session_lifecycle.metrics import record_session_activity
+from cognee.modules.session_lifecycle.metrics import (
+    DEFAULT_SESSION_ID,
+    record_session_activity,
+)
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 
@@ -75,7 +78,7 @@ class SessionManager:
         # TODO: this type should be 'CacheDBInterface', but the current code doesn't use this
         # interface and instead calls functions specific to its implementations.
         cache_engine: Any,
-        default_session_id: str = "default_session",
+        default_session_id: str = DEFAULT_SESSION_ID,
         session_history_last_n: int = 10,
         dataset_id: uuid.UUID | None = None,
     ) -> None:
@@ -83,7 +86,7 @@ class SessionManager:
         Initialize SessionManager with a cache engine.
 
         Args:
-            cache_engine: CacheDBInterface implementation (RedisAdapter or FsCacheAdapter).
+            cache_engine: CacheDBInterface implementation (RedisAdapter or SqlCacheAdapter).
                          Can be None if caching is disabled.
             default_session_id: Session ID to use when session_id is None. Defaults to
                                "default_session".
@@ -147,11 +150,15 @@ class SessionManager:
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         used_session_context_ids: list | None = None,
+        time: str | None = None,
+        prompt_time: str | None = None,
     ) -> str | None:
         """
         Add a QA to the session. Returns qa_id, or None if cache unavailable.
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
         used_session_context_ids: Optional list of session-context entry ids served to this answer.
+        time: The turn's end as the client stamped it (ISO-8601, aware); None stamps the store time.
+        prompt_time: The turn's start (the prompt's submission) as the client stamped it, or None.
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
@@ -190,6 +197,8 @@ class SessionManager:
                 feedback_score=feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
                 used_session_context_ids=used_session_context_ids,
+                time=time,
+                prompt_time=prompt_time,
             )
             await index_session_qa(
                 user_id=user_id,
@@ -214,9 +223,13 @@ class SessionManager:
         method_params: dict | None = None,
         method_return_value: Any = None,
         error_message: str = "",
+        time: str | None = None,
     ) -> str | None:
         """
         Append one agent trace step to the session trace payload.
+
+        ``time`` is the step's end as the client stamped it (ISO-8601, aware); None
+        stamps the store time. The coding distillation pairs steps to turns by it.
 
         ``generate_feedback_with_llm`` asks for a one-line LLM summary of the step's
         return value as its ``session_feedback``. That call is made only when automatic
@@ -260,6 +273,7 @@ class SessionManager:
             method_return_value=method_return_value,
             error_message=error_message,
             session_feedback=session_feedback,
+            time=time,
         )
         await record_session_activity(
             user_id, session_id, dataset_id=self.dataset_id, errored=status == "error"
@@ -292,6 +306,14 @@ class SessionManager:
         if not self.is_auto_feedback_enabled():
             return
         try:
+            # Coding distillation (DISTILLATION_MODE=coding) extracts once per unit of
+            # work from improve(), with tool inputs and the final answer: the per-trace
+            # and per-window passes would only produce the vague lessons it replaces.
+            # Read inside the try: an invalid improve setting must not fail the write.
+            from cognee.modules.improve.config import coding_distillation_enabled
+
+            if coding_distillation_enabled():
+                return
             from cognee.infrastructure.session.agent_context_extraction import (
                 extract_live_agent_context,
                 extract_pending_agent_context,
@@ -943,44 +965,64 @@ class SessionManager:
         Returns True if deleted, False if session did not exist or cache unavailable.
         """
         session_id = self.resolve_session_id(session_id)
-        self._validate_session_params(user_id=user_id, session_id=session_id)
-        if not self.is_available:
-            logger.debug("SessionManager: cache unavailable, skipping delete_session")
-            return False
+        return (await self.delete_sessions([(user_id, session_id)]))[0]
 
-        # One-release cleanup for graph snapshots written by the removed
-        # graph-to-session sync feature.
-        graph_key = f"graph_knowledge:{user_id}:{session_id}"
+    async def delete_sessions(self, sessions: list[tuple[str, str]]) -> list[bool]:
+        """
+        Delete each (user id, session id) pair whole: cache content and Q&A vectors.
+
+        Returns one flag per pair, True if the session existed in the cache;
+        all False when the cache is unavailable. The Q&A vectors of every pair
+        go in one tag-removal call against the current vector store.
+        """
+        for user_id, session_id in sessions:
+            self._validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping delete_sessions")
+            return [False] * len(sessions)
+
+        existed = await self._cache.delete_sessions(sessions)
+        await self._delete_legacy_graph_snapshots(sessions)
+        # Unconditionally: cache entries expire (session TTL) while their Q&A
+        # vectors, which hold the question and answer text, do not.
+        await delete_session_qa_vectors(sessions)
+        return existed
+
+    async def _delete_legacy_graph_snapshots(self, sessions: list[tuple[str, str]]) -> None:
+        """One-release cleanup for graph snapshots written by the removed
+        graph-to-session sync feature; failures are ignored."""
+        keys = [f"graph_knowledge:{user_id}:{session_id}" for user_id, session_id in sessions]
         try:
-            await self._cache.delete_value(graph_key)
+            await self._cache.delete_values(keys)
         except (NotImplementedError, AttributeError, TypeError):
             # Adapter predates the KV interface (missing, non-async, or
             # different-signature delete_value), fall back to legacy duck-typing
-            try:
-                await self._cache.async_redis.delete(graph_key)
-            except AttributeError:
+            for key in keys:
                 try:
-                    del self._cache._cache[graph_key]
+                    await self._cache.async_redis.delete(key)
+                except AttributeError:
+                    try:
+                        del self._cache._cache[key]
+                    except Exception:
+                        logger.debug(
+                            "Ignoring exception in SessionManager.delete_sessions", exc_info=True
+                        )
                 except Exception:
                     logger.debug(
-                        "Ignoring exception in SessionManager.delete_session", exc_info=True
+                        "Ignoring exception in SessionManager.delete_sessions", exc_info=True
                     )
-            except Exception:
-                logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
         except Exception:
-            logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
+            logger.debug("Ignoring exception in SessionManager.delete_sessions", exc_info=True)
 
-        # Also clear the active session-context list (fail-open; adapter.delete_session may also
-        # clear it, but this guarantees no leak if the adapter does not).
-        try:
-            await self._cache.delete_session_context(user_id, session_id)
-        except Exception:
-            logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
+    async def list_session_ids(self, *, user_id: str) -> list[str]:
+        """
+        Every session id the user has content for in the cache.
 
-        deleted = await self._cache.delete_session(
-            user_id=user_id,
-            session_id=session_id,
-        )
-        if deleted:
-            await delete_session_qa_vectors(user_id=user_id, session_id=session_id)
-        return deleted
+        Reads the cache itself, not the ``session_records`` dashboard rows,
+        which are written best-effort. Raises on cache errors: a caller that
+        deletes what this lists must not read a failure as "no sessions".
+        """
+        self._validate_session_params(user_id=user_id)
+        if not self.is_available:
+            return []
+        return await self._cache.list_session_ids(user_id)

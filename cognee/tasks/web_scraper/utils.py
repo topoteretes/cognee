@@ -10,6 +10,7 @@ import os
 import httpx
 
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.web_scraper.ssrf_protection import require_http_requests_allowed
 from cognee.tasks.web_scraper.types import UrlsToHtmls
 
 from .config import DefaultCrawlerConfig, KeenableConfig, TavilyConfig
@@ -50,6 +51,7 @@ async def fetch_page_content(
         ValueError: If an unknown preferred_tool is given.
         ImportError: If required dependencies (e.g., tavily-python) are not installed.
     """
+    require_http_requests_allowed()
     url_list = [urls] if isinstance(urls, str) else urls
 
     if preferred_tool is None:

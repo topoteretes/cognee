@@ -20,7 +20,7 @@ Guarantees:
   is swallowed by design.)
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -61,6 +61,25 @@ def get_current_operation() -> Optional["OperationContext"]:
     return _current_operation.get()
 
 
+def get_current_session_ids() -> tuple[str, ...]:
+    """The session ids bound to the innermost active operation, if any.
+
+    Pipeline log writers stamp them onto their rows, so a pipeline launched by
+    a session-bound operation (an ``improve`` distilling one or more sessions)
+    can be traced back to each session, not only the operation's own record.
+    """
+    context = _current_operation.get()
+    return context.session_ids if context is not None else ()
+
+
+def _normalize_session_ids(session_ids: Iterable[str | None]) -> tuple[str, ...]:
+    """The session ids an operation is bound to: in order, deduplicated, blanks dropped.
+
+    A call with no session passes ``[None]`` or ``()``; both bind nothing.
+    """
+    return tuple(dict.fromkeys(s for s in session_ids if s))
+
+
 class OperationContext:
     """Mutable attribution context for one recorded operation."""
 
@@ -71,7 +90,7 @@ class OperationContext:
         tenant_id: UUID | None = None,
         dataset_id: UUID | None = None,
         usage: OperationUsage | None = None,
-        session_id: str | None = None,
+        session_ids: Iterable[str | None] = (),
         background: bool | None = None,
         parent_operation_id: UUID | None = None,
     ):
@@ -85,7 +104,9 @@ class OperationContext:
         self.tenant_id = tenant_id
         self.dataset_id = dataset_id
         self.usage = usage or OperationUsage()
-        self.session_id = session_id
+        # Every session this operation is bound to, stored one row per session
+        # in pipeline_run_sessions with each pipeline_runs row it writes.
+        self.session_ids: tuple[str, ...] = _normalize_session_ids(session_ids)
         self.background = background
         self.parent_operation_id = parent_operation_id
         self.started_at = datetime.now(timezone.utc)
@@ -95,7 +116,7 @@ class OperationContext:
         self.outcome = None
         self.close_deferred = False
         # Optional JSON payload for the row's run_info column (improve stamps
-        # its enrichment watermark here — see improve/graph_changes.py).
+        # its stage watermarks here — see improve/watermarks.py).
         self.run_info = None
 
     def set_user(self, user) -> None:
@@ -109,10 +130,9 @@ class OperationContext:
         """Bind the target dataset, when the operation has exactly one."""
         self.dataset_id = dataset_id
 
-    def set_session_id(self, session_id: str | None) -> None:
-        """Bind the active session-cache id (joins SessionModelUsage)."""
-        if session_id:
-            self.session_id = session_id
+    def set_session_ids(self, session_ids: Iterable[str | None]) -> None:
+        """Bind every session this operation works on (see ``_normalize_session_ids``)."""
+        self.session_ids = _normalize_session_ids(session_ids)
 
     def set_background(self, background: bool) -> None:
         """Mark whether this call launched background work.
@@ -165,6 +185,7 @@ async def _write_operation_row(
     error_message: str | None,
 ) -> None:
     from cognee.modules.pipelines.models import PipelineRun
+    from cognee.modules.pipelines.operations.run_sessions import add_run_sessions
 
     pipeline_run = PipelineRun(
         status=None,
@@ -185,7 +206,6 @@ async def _write_operation_row(
         tokens_out=context.usage.tokens_out,
         embedding_tokens=context.usage.embedding_tokens,
         origin=get_operation_origin(),
-        session_id=context.session_id,
         parent_operation_id=context.parent_operation_id,
         background=context.background,
     )
@@ -193,7 +213,7 @@ async def _write_operation_row(
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
-        session.add(pipeline_run)
+        add_run_sessions(session, pipeline_run, context.session_ids)
         await session.commit()
 
 
@@ -202,7 +222,7 @@ async def record_operation(
     operation_name: str,
     user: Optional["User"] = None,
     dataset_id: UUID | None = None,
-    session_id: str | None = None,
+    session_ids: Iterable[str | None] = (),
     background: bool | None = None,
 ) -> AsyncIterator[OperationContext]:
     """Record one non-pipeline operation as a single ``pipeline_runs`` row."""
@@ -213,7 +233,7 @@ async def record_operation(
             operation_name=operation_name,
             dataset_id=dataset_id,
             usage=usage,
-            session_id=session_id,
+            session_ids=session_ids,
             background=background,
             # The innermost enclosing run — an operation OR a pipeline (a
             # search inside a custom pipeline parents to that pipeline run).

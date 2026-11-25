@@ -19,7 +19,7 @@ export default function PasteTextModal({
   return (
     <ModalShell onClose={onCancel}>
       <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Paste text</h2>
-      <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0 }}>Paste your text below. It will be added as a document to the selected brain.</p>
+      <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0 }}>Paste your text below. It will be added as a document to the selected dataset.</p>
       <textarea
         autoFocus
         value={value}

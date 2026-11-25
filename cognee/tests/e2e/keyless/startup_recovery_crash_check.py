@@ -76,6 +76,10 @@ async def stage(name: str) -> None:
 
             async def crash_after_n_documents(**kwargs):
                 await real_progress(**kwargs)
+                # cognify() runs the indexing pipeline before the
+                # cognify pipeline (SDK-397); the crash must hit extraction.
+                if kwargs.get("pipeline_name") != "cognify_pipeline":
+                    return
                 done["count"] += 1
                 if done["count"] == CRASH_AFTER_DOCUMENTS:
                     os.kill(os.getpid(), signal.SIGKILL)

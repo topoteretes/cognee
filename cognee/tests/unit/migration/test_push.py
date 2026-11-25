@@ -194,9 +194,7 @@ class TestResolveClient:
         self._clear_sources(monkeypatch)
         from cognee.api.v1.serve import credentials as credentials_module
 
-        creds = CloudCredentials(
-            access_token="t", service_url="https://saved.example", api_key="saved-key"
-        )
+        creds = CloudCredentials(service_url="https://saved.example", api_key="saved-key")
         monkeypatch.setattr(credentials_module, "load_credentials", lambda: creds)
         client, created = _resolve_client(None, None)
         assert created is True
@@ -221,9 +219,7 @@ class TestResolveClient:
         from cognee.api.v1.serve.credentials import CloudCredentials
 
         self._clear_sources(monkeypatch)
-        creds = CloudCredentials(
-            access_token="t", service_url="https://saved.example", api_key="saved-key"
-        )
+        creds = CloudCredentials(service_url="https://saved.example", api_key="saved-key")
         monkeypatch.setattr(credentials_module, "load_credentials", lambda: creds)
         monkeypatch.setenv("COGNEE_SERVICE_URL", "https://env.example")
         monkeypatch.setenv("COGNEE_API_KEY", "env-key")

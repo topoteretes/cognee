@@ -8,8 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cognee.modules.graph.methods.get_global_context_graph_inputs import (
     load_dataset_graph_entity_input,
 )
-
-from .scoring import compute_idf_from_counts
+from cognee.modules.graph.utils.entity_scoring import compute_idf_from_counts
 
 
 async def load_graph_bucketing_inputs(

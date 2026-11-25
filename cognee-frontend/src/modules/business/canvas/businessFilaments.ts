@@ -26,10 +26,13 @@ export function sourcesWithEntities(entities: BusinessEntity[]): Set<string> {
 export function filamentTargets(
   entities: BusinessEntity[],
   anchors: Record<string, Anchor>,
+  focusTypes: Set<string> | null,
+  entityType: Record<string, string>,
 ): Record<string, Anchor> {
   const sums: Record<string, { sx: number; sy: number; n: number }> = {};
   entities.forEach((e) => {
     if (e.x == null || e.y == null) return;
+    if (focusTypes && !focusTypes.has(entityType[e.id] || "other")) return;
     setsOf(e).forEach((s) => {
       const bucket = (sums[s] = sums[s] || { sx: 0, sy: 0, n: 0 });
       bucket.sx += e.x as number;
@@ -37,7 +40,15 @@ export function filamentTargets(
       bucket.n += 1;
     });
   });
-  const targets: Record<string, Anchor> = { ...anchors };
+  // With no type lens active, a source with zero positioned entities still
+  // falls back to its raw (theoretical) anchor — sourcesWithEntities is what
+  // actually decides whether the caller draws that filament at all. Under an
+  // active type lens, a source can have real positioned entities that simply
+  // don't match the focused type; falling back to the raw anchor there would
+  // draw a filament to a fixed point disconnected from the (now invisible)
+  // entities, rather than just omitting it — so the fallback only applies
+  // when there's no type lens to have caused the empty sum.
+  const targets: Record<string, Anchor> = focusTypes ? {} : { ...anchors };
   Object.entries(sums).forEach(([name, { sx, sy, n }]) => {
     targets[name] = { x: sx / n, y: sy / n };
   });

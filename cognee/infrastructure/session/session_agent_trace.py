@@ -16,6 +16,7 @@ import json
 from typing import Any
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.pipeline_stage import caller_scope
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.feedback_models import AgentTraceFeedbackSummary
 from cognee.modules.agent_memory.sanitization import sanitize_value
@@ -75,11 +76,12 @@ async def generate_agent_trace_feedback(
         sanitized_return_value = sanitize_value(method_return_value)
         serialized_return_value = json.dumps(sanitized_return_value, ensure_ascii=False)
 
-        result = await LLMGateway.acreate_structured_output(
-            text_input=serialized_return_value,
-            system_prompt=system_prompt,
-            response_model=AgentTraceFeedbackSummary,
-        )
+        with caller_scope("generate_agent_trace_feedback"):
+            result = await LLMGateway.acreate_structured_output(
+                text_input=serialized_return_value,
+                system_prompt=system_prompt,
+                response_model=AgentTraceFeedbackSummary,
+            )
         session_feedback = result.session_feedback.strip()
         return session_feedback if session_feedback else fallback_feedback
     except Exception as e:

@@ -2,6 +2,7 @@ import os
 import sys
 import types
 from functools import lru_cache
+from threading import Lock
 from typing import Any
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
@@ -16,6 +17,10 @@ logger = get_logger(__name__)
 # a conversion trips over first shifts between docling-slim releases (2.115
 # failed on docling_ibm_models, 2.118 on torch), so match the whole set.
 _SLIM_OMITTED_ML_MODULES = ("docling_ibm_models", "torch", "torchvision", "transformers")
+
+# lru_cache allows concurrent misses. The slim import retry can expose a partially
+# initialized module to another worker, so serialize initialization, not conversion.
+_DOCLING_CONVERTER_LOCK = Lock()
 
 
 def _is_slim_omitted_module(error: ModuleNotFoundError) -> bool:
@@ -137,7 +142,8 @@ class DoclingLoader(LoaderInterface):
 
             storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
-            converter = _get_docling_converter()
+            with _DOCLING_CONVERTER_LOCK:
+                converter = _get_docling_converter()
             try:
                 conv_result = converter.convert(file_path)
             except ModuleNotFoundError as e:

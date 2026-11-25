@@ -31,6 +31,7 @@ jobs:
       has_merges: ${{ steps.prepare.outputs.has_merges }}
       merge_summary: ${{ steps.prepare.outputs.merge_summary }}
       matrix: ${{ steps.prepare.outputs.matrix }}
+      docs_daily_date: ${{ steps.daily_date.outputs.date }}
 
     steps:
       - name: Check out repository
@@ -44,6 +45,14 @@ jobs:
 
       - name: Fetch latest dev branch
         run: git fetch origin dev:refs/remotes/origin/dev --no-tags
+
+      # The docs PRs stack onto a daily automation PR in cognee-docs (RES-91).
+      # The scheduled run starts at 23:59 UTC, after that day's other docs
+      # automations, so it opens the next day's: the UTC date one hour from
+      # now, which also absorbs a late start. A manual daytime run gets today's.
+      - name: Pick the daily docs branch date
+        id: daily_date
+        run: echo "date=$(date -u -d '+1 hour' +%F)" >> "$GITHUB_OUTPUT"
 
       - name: Prepare merged PRs
         id: prepare
@@ -170,13 +179,32 @@ jobs:
             --short-sha "${{ matrix.short_sha }}" \
             --pr-number "${{ matrix.pr_number }}"
 
+      # The docs PR targets the daily branch (RES-91), so start a new docs
+      # branch from it when it exists, like the cognee-docs automations do:
+      # its diff then holds only this PR's edits and sees what was already
+      # merged into it. Otherwise start from main, which the daily branch
+      # will be cut from.
+      - name: Resolve the daily docs branch
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: daily_branch
+        env:
+          GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          DAILY_DATE: ${{ needs.prepare-merged-branches.outputs.docs_daily_date }}
+        run: |
+          branch="automation/daily-${DAILY_DATE}"
+          if gh api "repos/topoteretes/cognee-docs/git/ref/heads/${branch}" --silent 2>/dev/null; then
+            echo "ref=${branch}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check out docs repository
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: topoteretes/cognee-docs
           token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
-          ref: main
+          ref: ${{ steps.daily_branch.outputs.ref }}
           path: docs-repo
           # The Claude steps below can write files in this workspace, so the PAT
           # must not sit in docs-repo/.git. Only the fetch and push get it.
@@ -439,13 +467,15 @@ jobs:
           PR_TITLE: ${{ steps.pr_content.outputs.pr_title }}
           PR_BODY: ${{ steps.pr_content.outputs.pr_body }}
           CHANGES_MADE: ${{ steps.commit_docs.outputs.changes_made }}
+          DAILY_DATE: ${{ needs.prepare-merged-branches.outputs.docs_daily_date }}
         run: |
           python3 -I tools/manage_docs_pr.py \
             --target-repo topoteretes/cognee-docs \
             --head-branch "${HEAD_BRANCH}" \
             --pr-title "${PR_TITLE}" \
             --pr-body "${PR_BODY}" \
-            --changes-made "${CHANGES_MADE}"
+            --changes-made "${CHANGES_MADE}" \
+            --daily-date "${DAILY_DATE}"
 
       - name: Summarize docs PR result
         if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}

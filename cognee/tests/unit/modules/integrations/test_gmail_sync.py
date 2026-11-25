@@ -4,6 +4,7 @@ from contextlib import ExitStack
 from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, Mock, patch
+from uuid import UUID
 
 import pytest
 
@@ -41,8 +42,11 @@ def sync_mocks():
 
 def credential(**metadata):
     return SimpleNamespace(
+        id=UUID("11111111-1111-1111-1111-111111111111"),
+        provider="gmail",
+        workspace_id=None,
         provider_account_id="subject",
-        user_id="user-1",
+        user_id=UUID("22222222-2222-2222-2222-222222222222"),
         provider_metadata={"email": "person@example.com", **metadata},
     )
 

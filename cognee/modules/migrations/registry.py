@@ -33,6 +33,12 @@ from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
 from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
     migrate as namespace_entity_type_node_ids,
 )
+from cognee.modules.migrations.versions.pgvector_hnsw_indexes import (
+    downgrade as pgvector_hnsw_indexes_down,
+)
+from cognee.modules.migrations.versions.pgvector_hnsw_indexes import (
+    migrate as pgvector_hnsw_indexes,
+)
 from cognee.modules.migrations.versions.postgres_graph_provenance_columns import (
     downgrade as postgres_graph_provenance_columns_down,
 )
@@ -108,6 +114,15 @@ MIGRATIONS: list[Migration] = [
         up=rekey_fork_document_ids,
         down_revision="ladybug_graph_provenance_columns",
         down=rekey_fork_document_ids_down,
+    ),
+    # pgvector collections were created without a vector index, so every search was a
+    # full scan of every stored vector. Builds the HNSW index new collections now get.
+    Migration(
+        slug="pgvector_hnsw_indexes",
+        cognee_version="1.6.6",
+        up=pgvector_hnsw_indexes,
+        down_revision="rekey_fork_document_ids",
+        down=pgvector_hnsw_indexes_down,
     ),
 ]
 

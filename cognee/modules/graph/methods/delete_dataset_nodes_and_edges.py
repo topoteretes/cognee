@@ -58,4 +58,6 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Del
     # graph/vector nodes needed deletion (e.g. shared nodes across datasets).
     await delete_dataset_related_nodes(dataset_id)
     await delete_dataset_related_edges(dataset_id)
-    return DeletedGraphElements.from_ledger_rows(affected_nodes or [], affected_edges or [])
+    return DeletedGraphElements.from_ledger_rows(
+        affected_nodes or [], affected_edges or [], owned=bool(affected_nodes)
+    )

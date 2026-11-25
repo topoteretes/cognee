@@ -4,11 +4,14 @@
 import asyncio
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+from cognee.modules.preflight import llm_available
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +178,112 @@ class CogneeTestClient:
             }
             print(f"FAIL memory tools: {e}")
 
+    @staticmethod
+    def _forget_ids(recall_text: str, needle: str) -> dict[str, str]:
+        """The data_id and dataset_id recall printed for the hit that contains needle.
+
+        A chunk hit carries both on a `refs:` line under it. The default answer
+        cites the data_id in its `Evidence:` line and the dataset_id on the
+        `dataset:` line that ends the hit.
+        """
+        lines = recall_text.splitlines()
+        for index, line in enumerate(lines):
+            if needle not in line:
+                continue
+            ids = {}
+            cited = re.search(r"data_id: ([0-9a-f-]{36})", line)
+            if cited:
+                ids["data_id"] = cited.group(1)
+            for following in lines[index + 1 :]:
+                following = following.strip()
+                if following.startswith("["):
+                    break
+                if following.startswith("refs: "):
+                    return dict(
+                        part.split("=", 1) for part in following[len("refs: ") :].split(", ")
+                    )
+                dataset = re.search(r"^dataset: .*dataset_id=([0-9a-f-]{36})\)?$", following)
+                if dataset and "data_id" in ids:
+                    return {**ids, "dataset_id": dataset.group(1)}
+        raise AssertionError(f"No forget ids for the hit containing {needle!r}: {recall_text}")
+
+    async def test_forget_one_memory(self, search_type: str | None):
+        """Recall one item with references, forget it by id, and keep the other."""
+        mode = search_type or "default"
+        name = f"forget_one_memory_{mode.lower()}"
+        print(f"\nTesting forget of a single recalled memory ({mode} recall)...")
+
+        tag = uuid4().hex[:12]
+        dataset = f"mcp_forget_{tag}"
+        secret = f"The vault recovery phrase for {tag} is amber-falcon-42."
+        keep = f"The {tag} team has lunch together every Friday."
+        # The check after forget lists chunks, so it sees every stored item.
+        chunks_args = {
+            "query": f"vault recovery phrase {tag}",
+            "datasets": dataset,
+            "search_type": "CHUNKS",
+            "top_k": 5,
+        }
+
+        try:
+            async with self.mcp_server_session() as session:
+                for text in (secret, keep):
+                    result = await session.call_tool(
+                        "remember",
+                        arguments={
+                            "data": text,
+                            "dataset_name": dataset,
+                            "self_improvement": False,
+                        },
+                    )
+                    if self._content_text(result).startswith("Error"):
+                        raise AssertionError(f"remember failed: {self._content_text(result)}")
+
+                recall_args = {
+                    "query": f"What is the vault recovery phrase for {tag}?",
+                    "datasets": dataset,
+                    "include_references": True,
+                }
+                if search_type:
+                    recall_args = {**chunks_args, "include_references": True}
+                before = self._content_text(
+                    await session.call_tool("recall", arguments=recall_args)
+                )
+                ids = self._forget_ids(before, "amber-falcon-42")
+
+                forgotten = self._content_text(
+                    await session.call_tool(
+                        "forget",
+                        arguments={"data_id": ids["data_id"], "dataset_id": ids["dataset_id"]},
+                    )
+                )
+                if f"Data item '{ids['data_id']}' deleted" not in forgotten:
+                    raise AssertionError(f"Unexpected forget response: {forgotten}")
+
+                after = self._content_text(await session.call_tool("recall", arguments=chunks_args))
+                await session.call_tool("forget", arguments={"dataset": dataset})
+
+            if "amber-falcon-42" in after:
+                raise AssertionError(f"Forgotten memory still recalled: {after}")
+            if "lunch together every Friday" not in after:
+                raise AssertionError(f"The other memory was lost too: {after}")
+
+            self.test_results[name] = {
+                "status": "PASS",
+                "message": f"{mode} recall references led forget to exactly one item",
+            }
+            print(f"PASS forget one memory ({mode} recall)")
+        except Exception as e:
+            logger.debug(
+                "Ignoring exception in CogneeTestClient.test_forget_one_memory", exc_info=True
+            )
+            self.test_results[name] = {
+                "status": "FAIL",
+                "error": str(e),
+                "message": f"Forget-one-memory test failed ({mode} recall)",
+            }
+            print(f"FAIL forget one memory ({mode} recall): {e}")
+
     async def run_all_tests(self):
         """Run the MCP smoke test suite."""
         print("Starting Cognee MCP memory tool smoke tests")
@@ -183,6 +292,18 @@ class CogneeTestClient:
         await self.test_tool_discovery()
         await self.test_hidden_tool_is_still_callable()
         await self.test_memory_tools()
+        # Default recall cites the forget ids in an LLM-written answer; without
+        # an LLM it returns the prompt instead, which cites nothing.
+        if llm_available():
+            await self.test_forget_one_memory(search_type=None)
+        elif os.getenv("CI_HAS_SECRETS") == "true":
+            self.test_results["forget_one_memory_default"] = {
+                "status": "FAIL",
+                "error": "no LLM available although CI has secrets",
+            }
+        else:
+            print("\nSkipping forget of a single recalled memory (default recall): no LLM")
+        await self.test_forget_one_memory(search_type="CHUNKS")
         self.print_test_summary()
 
     def print_test_summary(self):

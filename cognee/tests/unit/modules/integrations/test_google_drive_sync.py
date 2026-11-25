@@ -4,6 +4,7 @@ from contextlib import ExitStack
 from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, Mock, patch
+from uuid import UUID
 
 import pytest
 
@@ -19,8 +20,11 @@ def dataset_name_for_account(email, account_id):
 
 def make_credential(**metadata):
     return SimpleNamespace(
+        id=UUID("11111111-1111-1111-1111-111111111111"),
+        provider="google_drive",
+        workspace_id=None,
         provider_account_id="subject",
-        user_id="user-1",
+        user_id=UUID("22222222-2222-2222-2222-222222222222"),
         provider_metadata={"email": "person@example.com", **metadata},
     )
 
@@ -81,8 +85,11 @@ async def test_selected_folders_use_stable_independent_sources(sync_mocks):
                 "google_drive", make_credential(), folder
             ),
             "service": "service",
+            "service_factory": ANY,
             "check_active": ANY,
         }
+        # each fetch thread gets its own client, built with the same access token
+        assert call.kwargs["service_factory"]() == "service"
     for call in sync_mocks.remember.await_args_list:
         assert not isinstance(call.args[0], list)
         assert call.kwargs == {
@@ -207,3 +214,29 @@ async def test_failed_replacement_does_not_retire_legacy_data(sync_mocks):
     sync_mocks.remember.return_value = SimpleNamespace(status="errored")
     await sync_drive(make_credential(selected_folder_ids=["a"]))
     sync_module.ingestion.retire_resources.assert_not_awaited()
+
+
+def test_a_refused_token_is_reported_as_failed_auth():
+    from cognee.tasks.ingestion.connectors.google_drive import DriveAuthError
+
+    wrapped = RuntimeError("remember failed")
+    wrapped.__cause__ = RuntimeError("dlt failed")
+    wrapped.__cause__.__cause__ = DriveAuthError("rejected")
+    assert sync_module._classify_error(wrapped) == "failed_auth"
+    assert sync_module._classify_error(DriveAuthError("x")) == "failed_auth"
+    assert sync_module._classify_error(RuntimeError("other")) == "failed_ingestion"
+
+
+def test_the_whole_cause_chain_is_followed_and_a_cycle_ends():
+    from cognee.tasks.ingestion.connectors.google_drive import DriveAuthError
+
+    error = DriveAuthError("rejected")
+    for index in range(12):  # deeper than any fixed depth
+        wrapper = RuntimeError(f"wrapper {index}")
+        wrapper.__cause__ = error
+        error = wrapper
+    assert sync_module._classify_error(error) == "failed_auth"
+
+    first, second = RuntimeError("a"), RuntimeError("b")
+    first.__cause__, second.__cause__ = second, first
+    assert sync_module._classify_error(first) == "failed_ingestion"

@@ -8,7 +8,6 @@ import Link from "next/link";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import PageLoading from "@/ui/elements/PageLoading";
-import ScrollLoader from "../partials/ScrollLoader";
 import { MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
 import useDatasetDataPages from "@/modules/datasets/useDatasetDataPages";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
@@ -16,6 +15,8 @@ import deleteDataset from "@/modules/datasets/deleteDataset";
 import { useBrainUpload } from "@/modules/ingestion/useBrainUpload";
 import { withEstimateStage } from "@/modules/ingestion/uploadProgress";
 import UploadProgressBar from "../partials/UploadProgressBar";
+import ScrollLoader from "../partials/ScrollLoader";
+import ProcessingSummary from "../partials/ProcessingSummary";
 import { useLowBalanceUploadWarning } from "@/modules/billing/useLowBalanceUploadWarning";
 import LowBalanceWarningModal from "@/ui/elements/LowBalanceWarningModal";
 import { MAX_FILES_PER_UPLOAD } from "@/modules/ingestion/uploadLimits";
@@ -26,23 +27,29 @@ import PromptEditorModal from "./partials/PromptEditorModal";
 import UploadOntologyModal from "./partials/UploadOntologyModal";
 import MemoryCustomizationBar from "./partials/MemoryCustomizationBar";
 import FilesTable from "./partials/FilesTable";
-import ProcessingSummary from "../partials/ProcessingSummary";
-import { useDatasetProcessing } from "@/modules/datasets/useDatasetProcessing";
 import { decodeFilename } from "@/utils/fileFormat";
+import { fmtCount } from "@/utils/formatCount";
+import { useIsMounted } from "@/utils/useIsMounted";
+import { useAssignmentChoice } from "./useAssignmentChoice";
+import { joinDistinct } from "@/utils/joinDistinct";
 import mapInferredSchema from "@/modules/graphModels/mapInferredSchema";
-import isMemoryBlobName from "@/modules/datasets/isMemoryBlobName";
+import describeTextBlob, { blobsToRead, connectorRepository, type TextBlobDescription } from "@/modules/datasets/describeTextBlob";
+import forEachWithConcurrency from "@/utils/forEachWithConcurrency";
+import readTextPrefix from "@/utils/readTextPrefix";
 import TrashIcon from "@/ui/elements/TrashIcon";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
 import pollDatasetStatus from "@/modules/datasets/pollDatasetStatus";
 import { useDatasetStatuses } from "@/modules/datasets/useDatasetStatuses";
+import { useDatasetProcessing } from "@/modules/datasets/useDatasetProcessing";
 import { INSUFFICIENT_CREDITS_REASON } from "@/modules/datasets/datasetStatusDetail";
-import { notifications } from "@mantine/notifications";
+import { notifications, type NotificationData } from "@mantine/notifications";
 import { Loader } from "@mantine/core";
 import { TrackPageView, trackEvent } from "@/modules/analytics";
+import type { CogneeInstance } from "@/modules/instances/types";
 import type { GraphModel } from "@/modules/graphModels/types";
 import { toCleanSchema } from "@/modules/graphModels/types";
 import { toGraphModelSchema } from "@/modules/graphModels/toGraphModelSchema";
-import { loadGraphModelsConfig, syncGraphModels, assignGraphModelToDataset, assignPromptToDataset, assignOntologyToDataset, clearDatasetOutdated, findModelForDataset, findPromptForDataset, findOntologyForDataset, saveCustomPrompt, deleteCustomPrompt, type CustomPromptsMap } from "@/modules/configuration/userConfiguration";
+import { fetchGraphModelsConfig, addGraphModelForDataset, assignGraphModelToDataset, assignPromptToDataset, assignOntologyToDataset, clearDatasetOutdated, removeOntologyAssignments, flagDatasetsUsingOntology, datasetsAssignedTo, withoutValue, findModelForDataset, findPromptForDataset, findOntologyForDataset, saveCustomPrompt, deleteCustomPrompt, type CustomPromptsMap } from "@/modules/configuration/userConfiguration";
 import { inferSchema, generateCustomPrompt } from "@/modules/llm/managementLlmApi";
 import { listOntologies, uploadOntology, deleteOntology, type OntologyMeta } from "@/modules/ontologies/ontologyApi";
 import ShareDatasetModal from "@/ui/elements/ShareDatasetModal";
@@ -52,12 +59,23 @@ import { v4 as uuid } from "uuid";
 interface FileEntry {
   id: string;
   name: string;
+  label?: string;
   extension?: string;
   mimeType?: string;
   size?: number;
   createdAt?: string;
 }
 
+
+// How many hashed blobs to read at once to title their rows. A dataset fed by
+// a connector holds one per synced file, so the unbounded version of this
+// opened hundreds of simultaneous reads against the tenant pod — the pattern
+// CLO-976 already had to protect the graph endpoint from (review-reported).
+const BLOB_READ_CONCURRENCY = 6;
+// `describeTextBlob` reads a session header or the first meaningful line, so
+// nothing past the head of the file can change its answer. Downloading a whole
+// synced document to render a row title is pure waste (review-reported).
+const BLOB_READ_PREFIX_BYTES = 8 * 1024;
 
 // Default extraction prompt from cognee OSS (generate_graph_prompt.txt)
 const DEFAULT_EXTRACTION_PROMPT = `You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.
@@ -93,61 +111,79 @@ Remember, the knowledge graph should be coherent and easily understandable, so m
 # 4. Strict Compliance
 Adhere to the rules strictly. Non-compliance will result in termination.`;
 
+/**
+ * What a deleted ontology leaves behind. When the unassign failed, what the page
+ * knows decides the wording: with no dataset known to use the key, the failure
+ * was reading the settings, so the user is only told it could not be checked.
+ */
+function ontologyDeletedNotice(key: string, unassigned: boolean, knownInUse: boolean): NotificationData {
+  if (unassigned) return { title: "Ontology deleted", message: `"${key}" removed.`, color: "green", autoClose: 4000 };
+  if (knownInUse) {
+    return { title: "Ontology deleted, not unassigned", message: `"${key}" is gone, but the datasets that used it could not be updated and still have it selected. Choose another ontology for each of them.`, color: "yellow" };
+  }
+  return { title: "Ontology deleted", message: `"${key}" removed, but the dataset settings could not be checked for it. If a dataset still has it selected, choose another ontology there.`, color: "yellow" };
+}
 
 // ── Main Page ──
 
 
 export default function DatasetDetailPage({ datasetId }: { datasetId: string }) {
   const router = useRouter();
+  const isMounted = useIsMounted();
   const { cogniInstance, isInitializing } = useCogniInstance();
   const { datasets: contextDatasets } = useFilter();
   const [datasetName, setDatasetName] = useState<string>(datasetId);
   const [, setLastSynced] = useState<string | null>(null);
+  // The list is one bounded page at a time; the dataset-wide total comes from
+  // the count endpoint, because the loaded rows cannot supply it.
   const {
     data: rawFiles, setData: setFiles, error: filesError, loading,
     total: filesTotal, hasMore, load: loadFilePage, loadMore,
   } = useDatasetDataPages<FileEntry & {
     rawDataLocation?: string; originalExtension?: string; original_extension?: string;
     originalMimeType?: string; original_mime_type?: string; dataSize?: number; size_bytes?: number; file_size?: number;
-  }>(cogniInstance, MAX_RENDERED_ROWS);
-  const files = useMemo(() => rawFiles.map(d => ({
+  }>(cogniInstance, MAX_RENDERED_ROWS, true);
+  const files = useMemo(() => rawFiles.map((d) => ({
     id: d.id,
     name: d.name || d.rawDataLocation?.split("/").pop() || d.id,
+    label: typeof d.label === "string" ? d.label : undefined,
     extension: d.originalExtension || d.original_extension || d.extension,
     mimeType: d.originalMimeType || d.original_mime_type || d.mimeType,
     size: d.dataSize ?? d.size ?? d.size_bytes ?? d.file_size,
     createdAt: d.createdAt,
   })), [rawFiles]);
-  // data id → session id parsed from the memory blob ("Session ID: <id>"
-  // header written by the session→graph bridge), or null when none found.
-  const [memorySessionIds, setMemorySessionIds] = useState<Record<string, string | null>>({});
+  // data id → what that hashed text blob turned out to be, read from its own
+  // content, or null when it could not be read. A blob is only a memory if it
+  // says so; connector content arrives under the same hashed name.
+  const [blobDescriptions, setBlobDescriptions] = useState<Record<string, TextBlobDescription | null>>({});
 
   useEffect(() => {
     if (!cogniInstance) return;
-    const targets = files.filter(f => isMemoryBlobName(f.name) && !(f.id in memorySessionIds));
+    const targets = blobsToRead(files, blobDescriptions);
     if (targets.length === 0) return;
     let cancelled = false;
-    (async () => {
-      const entries = await Promise.all(targets.map(async (f) => {
+    void forEachWithConcurrency(
+      targets,
+      BLOB_READ_CONCURRENCY,
+      async (f) => {
         try {
           const res = await cogniInstance.fetch(`/v1/datasets/${datasetId}/data/${f.id}/raw`);
-          if (!res.ok) return [f.id, null] as const;
-          const text = await res.text();
-          const m = text.match(/^Session ID:\s*(\S+)/);
-          return [f.id, m ? m[1] : null] as const;
+          if (!res.ok) return null;
+          return describeTextBlob(await readTextPrefix(res, BLOB_READ_PREFIX_BYTES));
         } catch {
-          return [f.id, null] as const;
+          return null;
         }
-      }));
-      if (cancelled) return;
-      setMemorySessionIds(prev => {
-        const next = { ...prev };
-        for (const [id, sid] of entries) next[id] = sid;
-        return next;
-      });
-    })();
+      },
+      (f, description) => {
+        // Per result rather than per batch: with a cap, waiting for the whole
+        // list would hold every row's skeleton until the slowest read in the
+        // last round returns.
+        if (cancelled) return;
+        setBlobDescriptions(prev => (f.id in prev ? prev : { ...prev, [f.id]: description }));
+      },
+    );
     return () => { cancelled = true; };
-  }, [cogniInstance, datasetId, files, memorySessionIds]);
+  }, [cogniInstance, datasetId, files, blobDescriptions]);
   const [isDragging, setIsDragging] = useState(false);
   const { stage: uploadStage, progress: uploadProgress, upload } = useBrainUpload(cogniInstance);
   const { pendingWarning: pendingLowBalanceWarning, isEstimating, confirmUpload, cancel: cancelLowBalanceUpload } = useLowBalanceUploadWarning();
@@ -171,7 +207,6 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
 
   // Graph model selection
   const [graphModels, setGraphModels] = useState<GraphModel[]>([]);
-  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [graphOutdated, setGraphOutdated] = useState(false);
   const [datasetStatus, setDatasetStatus] = useState<"ready" | "pending" | "processing" | "failed" | "failed_insufficient_credits" | "outdated" | "empty">("empty");
   const [showCreateModelModal, setShowCreateModelModal] = useState(false);
@@ -179,32 +214,91 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
 
   // Custom prompt selection (simple dict: { name: text })
   const [customPrompts, setCustomPrompts] = useState<CustomPromptsMap>({});
-  const [selectedPromptName, setSelectedPromptName] = useState<string | null>(null);
   const [showCreatePromptModal, setShowCreatePromptModal] = useState(false);
   const [inferringPrompt, setInferringPrompt] = useState(false);
 
   // Ontology selection
   const [ontologies, setOntologies] = useState<Record<string, OntologyMeta>>({});
-  const [selectedOntologyKey, setSelectedOntologyKey] = useState<string | null>(null);
+  // Which datasets use which prompt and ontology, as loaded, so a delete can say
+  // what else it affects: deleting one unassigns it from every dataset.
+  const [storedAssignments, setStoredAssignments] = useState<{ prompts: Record<string, string>; ontologies: Record<string, string> }>({ prompts: {}, ontologies: {} });
   const [showUploadOntologyModal, setShowUploadOntologyModal] = useState(false);
+  const [configStatus, setConfigStatus] = useState<"loading" | "loaded" | "failed">("loading");
+  const [configAttempt, setConfigAttempt] = useState(0);
 
-  // Load graph models and assignment from backend config
+  // A stored change to what this dataset builds with (its model, prompt or
+  // ontology, or the wording of its prompt) makes a graph that already has files
+  // outdated. Each choice is stored as it is made (see useAssignmentChoice).
+  // The changes are counted: a rebuild started before one finished building with
+  // the old input, so it must not clear the flag that change raised (see rebuildGraph).
+  const storedChanges = useRef(0);
+  const noteStoredChange = () => {
+    storedChanges.current += 1;
+    if (files.length > 0) setGraphOutdated(true);
+  };
+  const assignmentOptions = { datasetId, datasetName, onChanged: noteStoredChange };
+  const storeWith = (assign: (instance: CogneeInstance, datasetId: string, choice: string | null) => Promise<void>) =>
+    async (choice: string | null): Promise<void> => {
+      if (!cogniInstance) throw new Error("Not connected to a workspace");
+      await assign(cogniInstance, datasetId, choice);
+    };
+  const modelChoice = useAssignmentChoice({
+    ...assignmentOptions,
+    label: "Graph model",
+    describe: (id) => (id ? graphModels.find((m) => m.id === id)?.name ?? "Unknown" : "Automatic"),
+    save: storeWith(assignGraphModelToDataset),
+  });
+  const promptChoice = useAssignmentChoice({ ...assignmentOptions, label: "Prompt", save: storeWith(assignPromptToDataset) });
+  const ontologyChoice = useAssignmentChoice({ ...assignmentOptions, label: "Ontology", save: storeWith(assignOntologyToDataset) });
+  const selectedModelId = modelChoice.selected;
+  const selectedPromptName = promptChoice.selected;
+  const selectedOntologyKey = ontologyChoice.selected;
+  // Builds and uploads read the three choices, so they are blocked until the
+  // stored configuration has been read (before that the choices are unknown) and
+  // until none is still being stored. Blocked means the buttons are disabled and
+  // files dropped meanwhile are refused with a message; nothing is queued.
+  const choicesSaving = modelChoice.saving || promptChoice.saving || ontologyChoice.saving;
+  const choicesNotReady = choicesSaving || configStatus !== "loaded";
+  const alsoUsedElsewhere = (assignments: Record<string, string>, value: string, what: string): string => {
+    const others = datasetsAssignedTo(assignments, value).filter((id) => id !== datasetId).length;
+    if (others === 0) return "";
+    return ` ${others} other ${others === 1 ? "dataset uses" : "datasets use"} this ${what}; they go back to the default ${what} and their graphs need a rebuild.`;
+  };
+  const { load: loadModel } = modelChoice;
+  const { load: loadPrompt } = promptChoice;
+  const { load: loadOntology } = ontologyChoice;
+  const { setConfirmed: setStoredPrompt } = promptChoice;
+  const { setConfirmed: setStoredOntology } = ontologyChoice;
+
+  // Load graph models and assignment from backend config. A read that fails is
+  // shown as a failure: taking it for "nothing is assigned" would show Automatic
+  // and let a build run without the dataset's model, prompt and ontology.
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
-    loadGraphModelsConfig(cogniInstance).then((cfg) => {
+    // A read for a dataset or workspace the page has since left must not land.
+    let cancelled = false;
+    setConfigStatus("loading");
+    fetchGraphModelsConfig(cogniInstance).then((cfg) => {
+      if (cancelled) return;
       setGraphModels(cfg.models);
       setCustomPrompts(cfg.customPrompts ?? {});
       const assignedModel = findModelForDataset(cfg.models, datasetId);
-      setSelectedModelId(assignedModel?.id ?? null);
+      loadModel(assignedModel?.id ?? null);
       const assignedPrompt = findPromptForDataset(cfg.promptAssignments ?? {}, datasetId);
-      setSelectedPromptName(assignedPrompt);
+      loadPrompt(assignedPrompt);
       const assignedOntology = findOntologyForDataset(cfg.ontologyAssignments ?? {}, datasetId);
-      setSelectedOntologyKey(assignedOntology);
+      loadOntology(assignedOntology);
       if (cfg.outdatedDatasets?.includes(datasetId)) setGraphOutdated(true);
-    }).catch((err) => captureException(err, { context: "dataset-detail.load-graph-config" }));
-    listOntologies(cogniInstance).then(setOntologies).catch((err) =>
+      setStoredAssignments({ prompts: cfg.promptAssignments ?? {}, ontologies: cfg.ontologyAssignments ?? {} });
+      setConfigStatus("loaded");
+    }).catch((err) => {
+      captureException(err, { context: "dataset-detail.load-graph-config" });
+      if (!cancelled) setConfigStatus("failed");
+    });
+    listOntologies(cogniInstance).then((list) => { if (!cancelled) setOntologies(list); }).catch((err) =>
       captureException(err, { context: "dataset-detail.list-ontologies" }));
-  }, [datasetId, cogniInstance, isInitializing]);
+    return () => { cancelled = true; };
+  }, [datasetId, cogniInstance, isInitializing, configAttempt, loadModel, loadPrompt, loadOntology]);
 
   // Dropdown open/close + outside-click handling lives inside
   // MemoryCustomizationBar; the page only owns selection + persistence.
@@ -214,42 +308,29 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     setDeletingOntology(true);
     try {
       await deleteOntology(cogniInstance, key);
+      // The ontology is gone either way. If the datasets that pointed at it cannot
+      // be updated, it is deleted but still assigned there, this one included, so
+      // the selection keeps showing it: picking another one then stores a change.
+      const unassigned = await removeOntologyAssignments(cogniInstance, key).then(() => true, (err: unknown) => {
+        captureException(err, { context: "dataset-detail.remove-ontology-assignments", datasetId, key });
+        return false;
+      });
       setOntologies((prev) => { const next = { ...prev }; delete next[key]; return next; });
-      if (selectedOntologyKey === key) setSelectedOntologyKey(null);
+      if (unassigned) {
+        setStoredAssignments((current) => ({ ...current, ontologies: withoutValue(current.ontologies, key) }));
+        if (selectedOntologyKey === key) {
+          setStoredOntology(null);
+          noteStoredChange();
+        }
+      }
       setConfirmDeleteOntologyKey(null);
-      notifications.show({ title: "Ontology deleted", message: `"${key}" removed.`, color: "green", autoClose: 4000 });
+      // storedAssignments is what was loaded; a pick made on this page since is only in the selection.
+      const knownInUse = selectedOntologyKey === key || datasetsAssignedTo(storedAssignments.ontologies, key).length > 0;
+      notifications.show(ontologyDeletedNotice(key, unassigned, knownInUse));
     } catch (err) {
       notifications.show({ title: "Delete failed", message: err instanceof Error ? err.message : String(err), color: "red" });
     } finally {
       setDeletingOntology(false);
-    }
-  }
-
-  function handleSelectOntology(key: string | null) {
-    const prev = selectedOntologyKey;
-    setSelectedOntologyKey(key);
-    notifications.show({ title: "Ontology updated", message: `"${datasetName}" now uses "${key ?? "Automatic"}".`, color: "green", autoClose: 4000 });
-    if (prev !== key && files.length > 0) {
-      setGraphOutdated(true);
-    }
-    if (cogniInstance) {
-      assignOntologyToDataset(cogniInstance, datasetId, key).catch((err) =>
-        console.error("Failed to save ontology assignment:", err)
-      );
-    }
-  }
-
-  function handleSelectPrompt(name: string | null) {
-    const prev = selectedPromptName;
-    setSelectedPromptName(name);
-    notifications.show({ title: "Prompt updated", message: `"${datasetName}" now uses "${name ?? "Automatic"}".`, color: "green", autoClose: 4000 });
-    if (prev !== name && files.length > 0) {
-      setGraphOutdated(true);
-    }
-    if (cogniInstance) {
-      assignPromptToDataset(cogniInstance, datasetId, name).catch((err) =>
-        console.error("Failed to save prompt assignment:", err)
-      );
     }
   }
 
@@ -295,8 +376,12 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     setDeletingPrompt(true);
     try {
       await deleteCustomPrompt(cogniInstance, name);
+      setStoredAssignments((current) => ({ ...current, prompts: withoutValue(current.prompts, name) }));
       setCustomPrompts((prev) => { const next = { ...prev }; delete next[name]; return next; });
-      if (selectedPromptName === name) setSelectedPromptName(null);
+      if (selectedPromptName === name) {
+        setStoredPrompt(null);
+        noteStoredChange();
+      }
       setConfirmDeletePrompt(false);
       setShowPromptEditor(false);
       notifications.show({ title: "Prompt deleted", message: `"${name}" removed.`, color: "green", autoClose: 4000 });
@@ -316,10 +401,15 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     }
     setSavingPrompt(true);
     try {
+      const wordingChanged = name in customPrompts && customPrompts[name] !== editingPromptText;
       await saveCustomPrompt(cogniInstance, name, editingPromptText);
       setCustomPrompts((prev) => ({ ...prev, [name]: editingPromptText }));
-      setSelectedPromptName(name);
       setShowPromptEditor(false);
+      // The stored configuration already flags this dataset; this is the banner,
+      // and it keeps a rebuild that started before from clearing that flag.
+      if (wordingChanged && name === selectedPromptName) noteStoredChange();
+      // Saving the text does not assign it to this dataset; selecting does.
+      promptChoice.select(name);
       notifications.show({ title: "Prompt saved", message: `"${name}" saved.`, color: "green", autoClose: 4000 });
     } catch (err) {
       console.error("Failed to save prompt:", err);
@@ -335,18 +425,16 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     if (!cogniInstance) return;
     try {
       await uploadOntology(cogniInstance, key, file, description);
+      // Datasets that still point at this key (a delete that could not unassign
+      // it) build from the new file now. This one is told here: re-selecting the
+      // key it already has would store nothing.
+      flagDatasetsUsingOntology(cogniInstance, key).catch((err) =>
+        captureException(err, { context: "dataset-detail.flag-ontology-users", datasetId, key }));
+      if (selectedOntologyKey === key) noteStoredChange();
+      else ontologyChoice.select(key);
       const updated = await listOntologies(cogniInstance);
       setOntologies(updated);
-      setSelectedOntologyKey(key);
       setShowUploadOntologyModal(false);
-      assignOntologyToDataset(cogniInstance, datasetId, key).catch((err) => {
-        captureException(err, { context: "dataset-detail.assign-ontology-after-upload", datasetId, key });
-        notifications.show({
-          title: "Ontology uploaded, but not assigned",
-          message: `"${key}" was uploaded but couldn't be assigned to this dataset automatically. Assign it manually from the dropdown.`,
-          color: "orange",
-        });
-      });
       notifications.show({ title: "Ontology uploaded", message: `"${key}" is ready to use.`, color: "green", autoClose: 4000 });
     } catch (err) {
       notifications.show({ title: "Upload failed", message: err instanceof Error ? err.message : String(err), color: "red" });
@@ -355,20 +443,8 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   }
 
   function handleSelectModel(modelId: string | null) {
-    const prevModelId = selectedModelId;
-    setSelectedModelId(modelId);
-    const modelName = modelId ? graphModels.find((m) => m.id === modelId)?.name ?? "Unknown" : "Automatic";
     trackEvent({ pageName: "Dataset Detail", eventName: "graph_model_selected", additionalProperties: { dataset_id: datasetId, model_id: modelId ?? "automatic" } });
-    notifications.show({ title: "Graph model updated", message: `"${datasetName}" now uses "${modelName}".`, color: "green", autoClose: 4000 });
-    // Mark graph as outdated if the model actually changed and there are files
-    if (prevModelId !== modelId && files.length > 0) {
-      setGraphOutdated(true);
-    }
-    if (cogniInstance) {
-      assignGraphModelToDataset(cogniInstance, datasetId, modelId).catch((err) =>
-        console.error("Failed to save graph model assignment:", err)
-      );
-    }
+    modelChoice.select(modelId);
   }
 
   function getCognifyOptions(): { graphModel?: object; customPrompt?: string; ontologyKey?: string[] } {
@@ -416,7 +492,6 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
 
     // Save the new model to backend config (read-modify-write)
     try {
-      const cfg = await loadGraphModelsConfig(cogniInstance);
       const newModel: GraphModel = {
         id: newModelId,
         name: `${datasetName} Schema`,
@@ -426,11 +501,12 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         status: "draft",
         assignedDatasets: [datasetId],
       };
-      await syncGraphModels(cogniInstance, [...cfg.models, newModel]);
+      await addGraphModelForDataset(cogniInstance, newModel, datasetId);
+      noteStoredChange();
       // Store in sessionStorage so the editor can load immediately
       sessionStorage.setItem(`graph-model-${newModelId}`, JSON.stringify(newModel));
       setShowCreateModelModal(false);
-      router.push(`/graph-models/${newModelId}`);
+      if (isMounted()) router.push(`/graph-models/${newModelId}`);
     } catch (err) {
       console.error("Failed to create model:", err);
       notifications.show({ title: "Failed", message: "Could not create graph model.", color: "red" });
@@ -462,7 +538,10 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
 
   const { statusDetails, refetch: refetchStatuses } = useDatasetStatuses(!isInitializing);
   const processingCounts = useDatasetProcessing(datasetId);
-  const completionById = new Map(processingCounts.data?.items.map(item => [item.id, item.completed]));
+  const completionById = useMemo(
+    () => new Map(processingCounts.data?.items.map((item) => [item.id, item.completed])),
+    [processingCounts.data],
+  );
 
   useEffect(() => {
     const detail = statusDetails[datasetId];
@@ -487,6 +566,12 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
 
   async function handleUpload(newFiles: FileList | File[]) {
     if (!cogniInstance) return;
+    if (choicesNotReady) {
+      notifications.show(configStatus === "failed"
+        ? { title: "Settings not loaded", message: "This dataset's model, prompt and ontology could not be read, so nothing is built or uploaded with them. Try again.", color: "red" }
+        : { title: "Saving your settings", message: "Try again in a moment.", color: "yellow" });
+      return;
+    }
     const filesArray = Array.from(newFiles);
 
     if (filesArray.length > MAX_FILES_PER_UPLOAD) {
@@ -510,7 +595,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         dataset_id: datasetId,
         file_count: String(filesArray.length),
         total_bytes: String(totalBytes),
-        file_types: fileTypes.join(","),
+        file_types: joinDistinct(fileTypes),
       },
     });
 
@@ -539,7 +624,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
             dataset_id: datasetId,
             file_count: String(filesArray.length),
             total_bytes: String(totalBytes),
-            file_types: fileTypes.join(","),
+            file_types: joinDistinct(fileTypes),
             duration_ms: String(ctx.durationMs),
             error_name: errorName,
             error_message: errorMessage,
@@ -617,7 +702,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     try {
       await deleteDatasetData(datasetId, fileId, cogniInstance);
       const deletedFile = files.find((f) => f.id === fileId);
-      trackEvent({ pageName: "Dataset Detail", eventName: "dataset_file_deleted", additionalProperties: { dataset_id: datasetId, file_name: deletedFile?.name ?? fileId } });
+      trackEvent({ pageName: "Dataset Detail", eventName: "dataset_file_deleted", additionalProperties: { dataset_id: datasetId, file_name: deletedFile ? (connectorRepository(deletedFile) ?? deletedFile.name) : fileId } });
       setFiles((prev) => prev.filter((f) => f.id !== fileId));
       setDeleteFileTarget(null);
     } catch (err) {
@@ -656,13 +741,18 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   // "failed" banners). onError restores the pre-rebuild banner state.
   async function rebuildGraph(onError: () => void): Promise<void> {
     if (!cogniInstance) return;
+    const changesAtStart = storedChanges.current;
     setGraphOutdated(false);
     setDatasetStatus("processing");
     try {
       await cognifyDataset({ id: datasetId, name: datasetName, data: [], status: "processing" }, cogniInstance, getCognifyOptions());
       trackEvent({ pageName: "Dataset Detail", eventName: "dataset_recognified", additionalProperties: { dataset_id: datasetId } });
-      clearDatasetOutdated(cogniInstance, datasetId).catch((err) =>
-        captureException(err, { context: "dataset-detail.clear-outdated-flag", datasetId }));
+      // A change stored while the build was starting raised the flag again, and
+      // this build did not use it: leave the flag for the next rebuild.
+      if (storedChanges.current === changesAtStart) {
+        clearDatasetOutdated(cogniInstance, datasetId).catch((err) =>
+          captureException(err, { context: "dataset-detail.clear-outdated-flag", datasetId }));
+      }
       // Force an immediate status re-fetch so the shared poller picks up the
       // new in-progress state right away instead of waiting for the next tick.
       refetchStatuses();
@@ -679,15 +769,17 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     try {
       await deleteDataset(datasetId, cogniInstance);
       trackEvent({ pageName: "Dataset Detail", eventName: "dataset_deleted", additionalProperties: { dataset_id: datasetId } });
-      router.push("/datasets");
+      if (isMounted()) router.push("/datasets");
     } catch (err) {
-      console.error("Delete brain failed:", err);
+      console.error("Delete dataset failed:", err);
       setDeleting(false);
       setShowDeleteConfirm(false);
     }
   }
 
-  const filtered = search ? files.filter((f) => f.name.toLowerCase().includes(search.toLowerCase())) : files;
+  const filtered = search
+    ? files.filter((f) => `${f.name} ${connectorRepository(f) ?? ""}`.toLowerCase().includes(search.toLowerCase()))
+    : files;
 
   if ((loading && files.length === 0) || isInitializing) {
     return <><TrackPageView page="Dataset Detail" additionalProperties={{ dataset_id: datasetId }} /><PageLoading name="Files" /></>;
@@ -719,7 +811,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
             )}
           </div>
           <span style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", display: "flex", alignItems: "center", gap: 6 }}>
-            {filesTotal === null ? `${files.length.toLocaleString()} loaded` : filesTotal.toLocaleString()} documents
+            {filesTotal === null ? `${fmtCount(files.length)} loaded` : fmtCount(filesTotal)} documents
             {datasetStatus === "processing" || processing ? (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#6510F4", fontWeight: 500 }}>
                 · <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
@@ -746,7 +838,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
           {isConnectedSource && (
             <button
               onClick={handleSync}
-              disabled={syncing}
+              disabled={syncing || choicesNotReady}
               className="cursor-pointer hover:bg-white/10"
               style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", color: "rgba(237,236,234,0.7)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}
             >
@@ -778,7 +870,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={combinedUploadProgress.stage !== "idle"}
+            disabled={combinedUploadProgress.stage !== "idle" || choicesNotReady}
             className="cursor-pointer hover:bg-[#5A0ED6]"
             style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}
           >
@@ -822,7 +914,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       {/* Delete confirmation modal */}
       {showDeleteConfirm && (
         <DeleteConfirmModal
-          title="Delete brain"
+          title="Delete dataset"
           message={<>Are you sure you want to delete <strong>{datasetName}</strong>? This will permanently remove the dataset and all its files. This action cannot be undone.</>}
           onConfirm={handleDeleteDataset}
           onCancel={() => setShowDeleteConfirm(false)}
@@ -870,7 +962,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       {confirmDeletePrompt && (
         <DeleteConfirmModal
           title="Delete prompt"
-          message={<>Are you sure you want to delete <strong>{editingPromptName.trim() || "this prompt"}</strong>? This action cannot be undone.</>}
+          message={<>Are you sure you want to delete <strong>{editingPromptName.trim() || "this prompt"}</strong>?{alsoUsedElsewhere(storedAssignments.prompts, editingPromptName.trim(), "prompt")} This action cannot be undone.</>}
           onConfirm={handleConfirmDeletePrompt}
           onCancel={() => setConfirmDeletePrompt(false)}
           busy={deletingPrompt}
@@ -881,7 +973,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       {confirmDeleteOntologyKey && (
         <DeleteConfirmModal
           title="Delete ontology"
-          message={<>Are you sure you want to delete <strong>{confirmDeleteOntologyKey}</strong>? This action cannot be undone.</>}
+          message={<>Are you sure you want to delete <strong>{confirmDeleteOntologyKey}</strong>?{alsoUsedElsewhere(storedAssignments.ontologies, confirmDeleteOntologyKey, "ontology")} This action cannot be undone.</>}
           onConfirm={() => handleDeleteOntology(confirmDeleteOntologyKey)}
           onCancel={() => setConfirmDeleteOntologyKey(null)}
           busy={deletingOntology}
@@ -892,7 +984,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       {deleteFileTarget && (
         <DeleteConfirmModal
           title="Delete file"
-          message={<>Are you sure you want to delete <strong>{decodeFilename(deleteFileTarget.name)}</strong>? This action cannot be undone.</>}
+          message={<>Are you sure you want to delete <strong>{connectorRepository(deleteFileTarget) ?? decodeFilename(deleteFileTarget.name)}</strong>? This action cannot be undone.</>}
           onConfirm={() => handleDelete(deleteFileTarget.id)}
           onCancel={() => setDeleteFileTarget(null)}
           busy={deletingFileId === deleteFileTarget.id}
@@ -911,6 +1003,20 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       </div>
 
       {/* Memory customization */}
+      {configStatus === "failed" && (
+        <div role="alert" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ flex: 1, fontSize: 13, color: "#F87171" }}>
+            This dataset&apos;s graph model, prompt and ontology could not be loaded. Uploads and builds are paused so they do not run without them.
+          </span>
+          <button
+            onClick={() => setConfigAttempt((attempt) => attempt + 1)}
+            className="cursor-pointer"
+            style={{ background: "rgba(239,68,68,0.2)", border: "1px solid rgba(239,68,68,0.35)", borderRadius: 6, padding: "6px 14px", fontSize: 13, fontWeight: 500, color: "#F87171", whiteSpace: "nowrap", fontFamily: "inherit" }}
+          >
+            Try again
+          </button>
+        </div>
+      )}
       <MemoryCustomizationBar
         graphModels={graphModels}
         selectedModelId={selectedModelId}
@@ -919,12 +1025,12 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         onCreateModel={() => setShowCreateModelModal(true)}
         customPrompts={customPrompts}
         selectedPromptName={selectedPromptName}
-        onSelectPrompt={handleSelectPrompt}
+        onSelectPrompt={promptChoice.select}
         onEditPrompt={(name, text) => { setEditingPromptName(name); setEditingPromptText(text); setShowPromptEditor(true); }}
         onCreatePrompt={() => setShowCreatePromptModal(true)}
         ontologies={ontologies}
         selectedOntologyKey={selectedOntologyKey}
-        onSelectOntology={handleSelectOntology}
+        onSelectOntology={ontologyChoice.select}
         onDeleteOntology={setConfirmDeleteOntologyKey}
         onUploadOntology={() => setShowUploadOntologyModal(true)}
       />
@@ -937,20 +1043,24 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         />
       )}
 
-      {/* Outdated graph banner */}
-      <ProcessingSummary data={processingCounts.data} error={processingCounts.isError}
+      <ProcessingSummary
+        data={processingCounts.data}
+        error={processingCounts.isError}
         running={processing || datasetStatus === "processing" || datasetStatus === "pending"}
         failed={datasetStatus === "failed" || datasetStatus === "failed_insufficient_credits"}
-        onRefresh={() => { void processingCounts.refetch(); void refetchStatuses(); }} />
+        onRefresh={() => { void processingCounts.refetch(); void refetchStatuses(); }}
+      />
 
-      {graphOutdated && !processing && datasetStatus !== "processing" && (
+      {/* Outdated graph banner */}
+      {graphOutdated && files.length > 0 && !processing && datasetStatus !== "processing" && (
         <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 8, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}><path d="M8 1L1 14h14L8 1z" fill="rgba(245,158,11,0.25)" stroke="#F59E0B" strokeWidth="1" /><text x="8" y="12" textAnchor="middle" fontSize="9" fontWeight="700" fill="#FBBF24">!</text></svg>
           <span style={{ flex: 1, fontSize: 13, color: "#FBBF24" }}>
-            Knowledge graph is outdated. The graph model was changed since the last build.
+            Knowledge graph is outdated. The graph model, prompt or ontology was changed since the last build.
           </span>
           <button
             onClick={() => rebuildGraph(() => { setGraphOutdated(true); setDatasetStatus("outdated"); })}
+            disabled={choicesNotReady}
             className="cursor-pointer hover:bg-yellow-500/20"
             style={{ background: "rgba(245,158,11,0.2)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 6, padding: "6px 14px", fontSize: 13, fontWeight: 500, color: "#FBBF24", whiteSpace: "nowrap", fontFamily: "inherit" }}
           >
@@ -985,6 +1095,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
           </span>
           <button
             onClick={() => rebuildGraph(() => setDatasetStatus("failed"))}
+            disabled={choicesNotReady}
             className="cursor-pointer hover:bg-red-500/20"
             style={{ background: "rgba(239,68,68,0.2)", border: "1px solid rgba(239,68,68,0.35)", borderRadius: 6, padding: "6px 14px", fontSize: 13, fontWeight: 500, color: "#F87171", whiteSpace: "nowrap", fontFamily: "inherit" }}
           >
@@ -1007,8 +1118,8 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
 
       {/* Files table */}
       <FilesTable
-        files={filtered.map(file => ({ ...file, completed: completionById.get(file.id) }))}
-        memorySessionIds={memorySessionIds}
+        files={filtered.map((file) => ({ ...file, completed: completionById.get(file.id) }))}
+        blobDescriptions={blobDescriptions}
         search={search}
         loadError={filesError}
         onDelete={(id) => setDeleteFileTarget(filtered.find((f) => f.id === id) ?? null)}

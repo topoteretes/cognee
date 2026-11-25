@@ -1,4 +1,6 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 from cognee.modules.retrieval.only_context_prompt import build_only_context_prompt
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
 from cognee.modules.retrieval.utils.evidence import (
@@ -12,12 +14,20 @@ from cognee.modules.search.methods.hybrid_deferral import (
     hybrid_deferral_reason,
     reject_hybrid_graph_only_knobs,
 )
+from cognee.modules.search.methods.node_name_scope import lucky_search_types
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations.select_search_type import select_search_type
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
+
+# The types served by the hybrid lanes. When they cannot serve a request,
+# HYBRID_COMPLETION (the default type) answers through GRAPH_COMPLETION, while
+# HYBRID_COMPLETION_DECOMPOSITION, always chosen explicitly, refuses the request.
+_HYBRID_TYPES = frozenset(
+    {SearchType.HYBRID_COMPLETION, SearchType.HYBRID_COMPLETION_DECOMPOSITION}
+)
 
 
 async def _effective_search_type(
@@ -28,17 +38,29 @@ async def _effective_search_type(
         if graph_is_empty:
             resolved = SearchType.HYBRID_COMPLETION
         else:
-            resolved = await select_search_type(query_text)
+            resolved = await select_search_type(
+                query_text,
+                allowed_search_types=lucky_search_types(
+                    kwargs.get("node_type", NodeSet), kwargs.get("node_name")
+                ),
+            )
     else:
         resolved = query_type
 
-    if resolved is SearchType.HYBRID_COMPLETION:
+    if resolved in _HYBRID_TYPES:
         reject_hybrid_graph_only_knobs(kwargs)
         reason = await hybrid_deferral_reason(kwargs, graph_is_empty=graph_is_empty)
+        if reason and resolved is SearchType.HYBRID_COMPLETION_DECOMPOSITION:
+            raise QueryValidationError(
+                message=(
+                    f"{resolved.value} cannot serve this search: {reason}. "
+                    f"Use {SearchType.GRAPH_COMPLETION_DECOMPOSITION.value} for this request."
+                )
+            )
         if reason:
             logger.warning(
-                "HYBRID_COMPLETION is not available for this search; answering with "
-                "GRAPH_COMPLETION instead."
+                f"{resolved.value} is not available for this search; answering with "
+                f"{SearchType.GRAPH_COMPLETION.value} instead."
             )
             # Payload.search_type records this. search() strips it; only_context
             # and verbose callers that parse shape must pin query_type.
@@ -63,7 +85,8 @@ def _context_evidence(retriever_instance, retrieved_objects, kwargs: dict) -> li
         return []
     dataset = kwargs.get("dataset")
     try:
-        return evidence_method(retrieved_objects, dataset_id=getattr(dataset, "id", None))
+        # None from a retriever means "no evidence", like []; callers iterate the result.
+        return evidence_method(retrieved_objects, dataset_id=getattr(dataset, "id", None)) or []
     except Exception as error:
         logger.warning("Unable to build structured context evidence: %s", error, exc_info=True)
         return []

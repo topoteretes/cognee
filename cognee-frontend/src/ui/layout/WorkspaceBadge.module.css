@@ -1,0 +1,17 @@
+/* The hollow badge breathes while a workspace is being woken. Opacity rather
+   than a spinner: the badge is 16px in the picker and 20px in the top bar, too
+   small for a legible rotating ring, and this reads at both sizes. */
+.waking {
+  animation: badge-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes badge-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waking {
+    animation: none;
+  }
+}

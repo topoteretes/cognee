@@ -143,7 +143,7 @@ The bundled GLiNER extractor is a demo of Cognee's small-model pipeline. For a p
 ```python
 import os
 
-os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
+os.environ["LLM_API_KEY"] = "YOUR_OPENAI_API_KEY"
 ```
 Alternatively, create a `.env` file using our [template](https://github.com/topoteretes/cognee/blob/main/.env.template).
 
@@ -215,11 +215,12 @@ codex plugin marketplace add topoteretes/cognee-integrations --ref main
 codex plugin add cognee@cognee
 ```
 
-Follow the [plugin setup guide](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) to configure local or remote memory.
+Follow the setup guide for [Claude Code](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) or [Codex](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/codex) to configure local or remote memory.
 
 | Interface | Start here |
 | --- | --- |
 | Claude Code memory plugin | [Install and configure the plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) |
+| Codex memory plugin | [Install and configure the plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/codex) |
 | OpenClaw memory plugin | [Install `@cognee/cognee-openclaw`](https://www.npmjs.com/package/@cognee/cognee-openclaw) |
 | Cursor, Cline, and other MCP clients | [Cognee MCP guide](https://docs.cognee.ai/cognee-mcp/mcp-overview) and [server README](cognee-mcp/README.md) |
 | Python applications | [Python API reference](https://docs.cognee.ai/python-api) |

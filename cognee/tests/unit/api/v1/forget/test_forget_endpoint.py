@@ -71,6 +71,34 @@ def test_forget_endpoint_passes_memory_only_flag(client, mock_default_user):
         assert call_kwargs["dataset_id"] == uuid.UUID(dataset_id)
 
 
+def test_forget_endpoint_passes_clean_history_flag(client):
+    """POST /v1/forget with cleanHistory=true passes clean_history=True to forget()."""
+    dataset_id = str(uuid.uuid4())
+    data_id = str(uuid.uuid4())
+
+    with patch.object(forget_pkg, "forget", new_callable=AsyncMock) as mock_forget:
+        mock_forget.return_value = {"status": "success", "history_cleaned": True}
+
+        response = client.post(
+            "/api/v1/forget",
+            json={"datasetId": dataset_id, "dataId": data_id, "cleanHistory": True},
+        )
+
+        assert response.status_code == 200
+        call_kwargs = mock_forget.call_args.kwargs
+        assert call_kwargs["clean_history"] is True
+        assert call_kwargs["data_id"] == uuid.UUID(data_id)
+
+
+def test_forget_endpoint_clean_history_defaults_to_false(client):
+    with patch.object(forget_pkg, "forget", new_callable=AsyncMock) as mock_forget:
+        mock_forget.return_value = {"status": "success"}
+
+        client.post("/api/v1/forget", json={"dataset_id": str(uuid.uuid4())})
+
+        assert mock_forget.call_args.kwargs["clean_history"] is False
+
+
 def test_forget_endpoint_memory_only_defaults_to_false(client):
     """POST /v1/forget without memory_only should default to False."""
     with patch.object(forget_pkg, "forget", new_callable=AsyncMock) as mock_forget:

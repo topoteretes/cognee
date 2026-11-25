@@ -9,9 +9,12 @@ type TransformRef = Parameters<typeof useViewportActiveIds>[1];
 
 function makeTransformRef(
   invertFn: (point: [number, number]) => [number, number],
+  // k/x/y are read only to tell whether the camera moved between polls, so
+  // any distinct triple stands for "a different camera" (see the still-camera
+  // test below). The rest of ZoomTransform is irrelevant.
+  stamp: { k: number; x: number; y: number } = { k: 1, x: 0, y: 0 },
 ): TransformRef {
-  // The hook only calls `.invert()`; the rest of ZoomTransform is irrelevant.
-  return { current: { invert: invertFn } } as unknown as TransformRef;
+  return { current: { ...stamp, invert: invertFn } } as unknown as TransformRef;
 }
 
 // Identity: world-space coords == screen-space coords (no zoom, no pan).
@@ -30,7 +33,7 @@ function buildEntities(count: number, x?: number, y?: number): BusinessEntity[] 
 
 // These mirror the private constants in the source; kept local so we assert
 // the observable contract rather than implementation details.
-const THRESHOLD = 500;
+const THRESHOLD = 1500;
 const WIDTH = 1000;
 const HEIGHT = 800;
 
@@ -158,44 +161,60 @@ describe("useViewportActiveIds", () => {
       expect(result.current?.has("unpositioned")).toBe(true);
     });
 
-    it("picks up a newly visible entity after the recheck interval elapses", () => {
+    it("ignores simulated motion entirely while the camera sits still", () => {
+      // Membership must be a function of the CAMERA, not of live positions.
+      // Deriving it from positions fed itself: a set change restarts the
+      // simulation, the restart moves entities, entities leaving take their
+      // collide force with them so the rest expand and drift out too.
+      // Measured in the app as the active count sliding 163 → 137 → 112 → 99
+      // → 92 → 87 → 84 across consecutive polls with nobody touching
+      // anything, which reads on screen as the graph shoving itself around.
       const far = buildEntities(THRESHOLD, OUT_OF_VIEW_X, OUT_OF_VIEW_Y);
-      // d3-force mutates entity objects in place — simulate that by keeping a
-      // mutable reference and moving it into the viewport after the first tick.
+      const leaver: BusinessEntity = makeEntity("leaver", IN_VIEW_X, IN_VIEW_Y);
       const mover: BusinessEntity = makeEntity("mover", OUT_OF_VIEW_X, OUT_OF_VIEW_Y);
-      const entities = [...far, mover];
 
       const { result } = renderHook(() =>
-        useViewportActiveIds(entities, identityRef(), WIDTH, HEIGHT),
+        useViewportActiveIds([...far, leaver, mover], identityRef(), WIDTH, HEIGHT),
       );
+      const before = result.current;
+      expect(before?.has("leaver")).toBe(true);
+      expect(before?.has("mover")).toBe(false);
 
-      expect(result.current?.has("mover")).toBe(false);
-
+      // d3-force mutates entity objects in place — both directions at once.
+      leaver.x = OUT_OF_VIEW_X;
+      leaver.y = OUT_OF_VIEW_Y;
       mover.x = IN_VIEW_X;
       mover.y = IN_VIEW_Y;
 
       act(() => jest.advanceTimersByTime(800));
+      act(() => jest.advanceTimersByTime(800));
 
-      expect(result.current?.has("mover")).toBe(true);
+      // Same instance, not merely equal contents: activeIds is a dependency of
+      // the simulation effect, so a fresh Set would rebuild the simulation.
+      expect(result.current).toBe(before);
     });
 
-    it("drops an entity that has moved out of the viewport after the recheck interval elapses", () => {
+    it("re-derives membership once the camera actually moves", () => {
       const far = buildEntities(THRESHOLD, OUT_OF_VIEW_X, OUT_OF_VIEW_Y);
-      const leaver: BusinessEntity = makeEntity("leaver", IN_VIEW_X, IN_VIEW_Y);
-      const entities = [...far, leaver];
+      const subject = makeEntity("subject", IN_VIEW_X, IN_VIEW_Y);
+      // Starts identity, then pans far enough that `subject` clears even the
+      // wider release band the hysteresis holds entities in.
+      const ref = makeTransformRef((p) => p);
 
       const { result } = renderHook(() =>
-        useViewportActiveIds(entities, identityRef(), WIDTH, HEIGHT),
+        useViewportActiveIds([...far, subject], ref, WIDTH, HEIGHT),
       );
+      expect(result.current?.has("subject")).toBe(true);
 
-      expect(result.current?.has("leaver")).toBe(true);
-
-      leaver.x = OUT_OF_VIEW_X;
-      leaver.y = OUT_OF_VIEW_Y;
+      const pan = 100_000;
+      ref.current = makeTransformRef(
+        (p: [number, number]): [number, number] => [p[0] + pan, p[1]],
+        { k: 1, x: -pan, y: 0 },
+      ).current;
 
       act(() => jest.advanceTimersByTime(800));
 
-      expect(result.current?.has("leaver")).toBe(false);
+      expect(result.current?.has("subject")).toBe(false);
     });
 
     it("returns to null when entity count drops back to the threshold on a rerender", () => {

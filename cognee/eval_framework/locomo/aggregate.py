@@ -1,7 +1,7 @@
 """Aggregate LoCoMo LLM-judge accuracy across conversations and repeated runs.
 
-Reads every ``qa/locomo_metrics_conv<i>_<retriever>_run<r>.json`` under a run directory and
-produces, per retriever (pooled over all conversations):
+Reads every ``qa/locomo_metrics_conv<i>_<retriever>_run<r>.json`` of a run directory (at its
+top or under ``conv_NN/``) and produces, per retriever (pooled over all conversations):
 
 - the total, which leaves out open-domain questions (they are not the focus of the evaluation and
   appear only per category),
@@ -18,7 +18,6 @@ the numbers on all questions too.
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import statistics
 from collections import defaultdict
@@ -26,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from cognee.eval_framework.analysis.metrics_calculator import bootstrap_ci
+from cognee.eval_framework.locomo.scope import load_gold_exclusions
 from cognee.eval_framework.reporting.io import read_json, write_json
 
 METRICS = ("llm_judge",)
@@ -36,8 +36,12 @@ _FILE_RE = re.compile(r"locomo_metrics_conv(?P<conv>\d+)_(?P<retriever>.+)_run(?
 
 
 def find_metric_files(run_dir: Path) -> list[dict[str, Any]]:
+    """The per-question files of one run: in ``qa/`` at the top (an artifacts folder) or under
+    ``conv_NN/qa/`` (a driver run directory). Deeper folders hold other runs and are left alone."""
     found = []
-    for path in sorted(run_dir.rglob("locomo_metrics_conv*_run*.json")):
+    paths = list(run_dir.glob("qa/locomo_metrics_conv*_run*.json"))
+    paths += run_dir.glob("conv_*/qa/locomo_metrics_conv*_run*.json")
+    for path in sorted(paths):
         match = _FILE_RE.search(path.name)
         if not match:
             continue
@@ -50,23 +54,6 @@ def find_metric_files(run_dir: Path) -> list[dict[str, Any]]:
             }
         )
     return found
-
-
-def load_gold_exclusions(path: Path) -> dict[str, set[tuple[int, int]]]:
-    """``{variant: {(conversation_index, question_idx), ...}}`` from a gold-exclusions file.
-
-    The file lists question sets under ``sets.<name>.questions`` and, under ``variants``, which
-    sets each variant removes together.
-    """
-    document = json.loads(path.read_text(encoding="utf-8"))
-    sets = {
-        name: {(int(q["conversation_index"]), int(q["question_idx"])) for q in block["questions"]}
-        for name, block in document["sets"].items()
-    }
-    return {
-        variant: set().union(*(sets[name] for name in names))
-        for variant, names in document["variants"].items()
-    }
 
 
 def _score(entry: dict[str, Any], metric: str) -> float | None:

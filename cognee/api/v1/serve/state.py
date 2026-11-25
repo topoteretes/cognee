@@ -46,6 +46,14 @@ def _note_local_execution() -> None:
         )
 
 
+def peek_remote_client() -> Optional["CloudClient"]:
+    """The active client, without the local-execution warning or a file read.
+
+    For callers such as telemetry that only inspect the connection state.
+    """
+    return _remote_client
+
+
 def set_remote_client(client: Optional["CloudClient"]) -> None:
     global _remote_client
     _remote_client = client

@@ -10,3 +10,4 @@ from .convert_node_to_data_point import convert_node_to_data_point
 from .deduplicate_nodes_and_edges import deduplicate_nodes_and_edges
 from .resolve_edges_to_text import resolve_edges_to_text
 from .get_entity_nodes_from_triplets import get_entity_nodes_from_triplets
+from .coerce_graph_uuid import coerce_graph_uuid, coerce_graph_uuid_set

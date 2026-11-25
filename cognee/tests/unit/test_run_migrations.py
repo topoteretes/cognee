@@ -56,6 +56,18 @@ class TestRunRelationalMigrations(unittest.TestCase):
         heads = ScriptDirectory.from_config(startup._build_alembic_config()).get_heads()
         self.assertEqual(len(heads), 1, f"expected one Alembic head, found {len(heads)}: {heads}")
 
+    def test_database_uri_preserves_percent_encoded_credentials(self):
+        from alembic.config import Config
+
+        startup = importlib.import_module("cognee.modules.migrations.startup")
+        config = Config()
+        config.set_main_option("sqlalchemy.url", "%(SQLALCHEMY_DATABASE_URI)s")
+        db_uri = "postgresql+asyncpg://user%40example.com:p%40ss@localhost:5432/cognee"
+
+        startup._set_alembic_database_uri(config, db_uri)
+
+        self.assertEqual(config.get_main_option("sqlalchemy.url"), db_uri)
+
     def test_runs_alembic_in_process_without_logger_clobbering(self):
         shim = importlib.import_module("cognee.run_migrations")
         startup = importlib.import_module("cognee.modules.migrations.startup")

@@ -9,6 +9,8 @@ import { truncate } from "./textUtils";
 import { setsOf } from "./computeBrainState";
 import { useReasoningTraceWalk, MAX_TRACE_DURATION_MS } from "./useReasoningTraceWalk";
 
+const NO_SESSION_SETS: string[] = [];
+
 // Below this many contributing facts, walking node-by-node adds ceremony
 // without a story to tell — go straight to the combined highlight, same as
 // before this feature existed.
@@ -89,7 +91,7 @@ export function useBusinessQaSurface(
   const qaSurfaceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reasoningTraceWalk = useReasoningTraceWalk(canvasRef, narrate, setSpotlight);
 
-  const distilledSets = Object.keys(brainState?.setColor ?? {}).filter((name) => brainState?.isSessionSet(name));
+  const distilledSets = brainState?.sessionSetNames ?? NO_SESSION_SETS;
 
   // Opens the asking window (a fresh search event) or extends its end
   // (finalizeAnswer, once the real answer window is known), always keeping
@@ -159,7 +161,7 @@ export function useBusinessQaSurface(
       holdAskingWindow(agentId, MAX_ASKING_WINDOW_MS);
 
       if (ids.size >= MIN_IDS_FOR_TRACE_WALK && brainState) {
-        reasoningTraceWalk.play(ids, brainState.semanticLinks, brainState.entityById, () =>
+        reasoningTraceWalk.play(ids, brainState.graphLinks, brainState.entityById, () =>
           finalizeAnswer(evt, ids, agentId),
         );
       } else {
@@ -204,7 +206,7 @@ export function useBusinessQaSurface(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestSearchEvent, playSearchEvent]);
 
-  // Ports showSessionMemory's click trigger — reuses isSessionSet
+  // Ports showSessionMemory's click trigger — reads sessionSetNames
   // (computeBrainState) to find which session-memory sets, if any, the
   // active brain already has, then lenses the canvas to them the same way
   // source's setFocusSets(sessionSets, 'distilled session memory (agent-made,
@@ -221,7 +223,7 @@ export function useBusinessQaSurface(
         setFocusSets(new Set(distilledSets));
         const entityCount = brainState?.entities.filter((e) => setsOf(e).some((x) => distilledSets.includes(x))).length ?? 0;
         narrate(
-          `showing only distilled session memory (user-made, in amber) — ${entityCount} entities · click again for everything`,
+          `showing only distilled session memory (user-made) — ${entityCount} entities · click again for everything`,
           "#43D9E8",
         );
       }

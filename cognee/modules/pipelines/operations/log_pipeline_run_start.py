@@ -1,11 +1,11 @@
 from datetime import datetime, timezone
-from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.operations import get_operation_origin
+from cognee.modules.operations import get_current_session_ids, get_operation_origin
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
-from cognee.modules.pipelines.utils import generate_pipeline_run_id, summarize_run_info_data
+from cognee.modules.pipelines.operations.run_sessions import add_run_sessions
+from cognee.modules.pipelines.utils import generate_pipeline_run_id
 from cognee.modules.users.models import User
 
 
@@ -13,14 +13,14 @@ async def log_pipeline_run_start(
     pipeline_id: UUID,
     pipeline_name: str,
     dataset_id: UUID,
-    data: Any,
     *,
     user: User | None = None,
     recovery_token: str | None = None,
 ):
-    data_info = summarize_run_info_data(data)
-
     pipeline_run_id = generate_pipeline_run_id(pipeline_id, dataset_id)
+    # Same reason as origin below: a session-scoped reader must see the run
+    # while it is still in flight, not only once it has finished.
+    session_ids = get_current_session_ids()
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
@@ -28,10 +28,7 @@ async def log_pipeline_run_start(
         pipeline_id=pipeline_id,
         status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
         dataset_id=dataset_id,
-        run_info={
-            "data": data_info,
-            **({"recovery_lock": recovery_token} if recovery_token else {}),
-        },
+        run_info={"recovery_lock": recovery_token} if recovery_token else {},
         user_id=user.id if user else None,
         tenant_id=getattr(user, "tenant_id", None) if user else None,
         operation_name=pipeline_name,
@@ -45,7 +42,7 @@ async def log_pipeline_run_start(
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
-        session.add(pipeline_run)
+        add_run_sessions(session, pipeline_run, session_ids)
         await session.commit()
 
     return pipeline_run
