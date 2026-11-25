@@ -24,6 +24,7 @@ from cognee.infrastructure.session.session_context_models import (
     ContextProfile,
     ContextSection,
     SessionContextEntry,
+    clip_text,
     normalize_content,
     valid_sections_for,
 )
@@ -173,7 +174,8 @@ def coerce_active_context_entries(raw_entries: list) -> list[SessionContextEntry
             entry = SessionContextEntry.model_validate(raw)
         else:
             continue
-        entries.append(entry)
+        if not entry.expired_at:
+            entries.append(entry)
     return entries
 
 
@@ -353,6 +355,12 @@ async def build_active_context_block(
             session_id=session_id,
         )
         entries = coerce_active_context_entries(raw_entries) if raw_entries else []
+        if context_profile == ContextProfile.AGENT.value and entries:
+            from .context_quality import filter_unused_entries
+
+            entries = await filter_unused_entries(
+                session_manager, user_id, session_id, entries, persist=stamp_served
+            )
 
         selected = []
         if entries:
@@ -452,6 +460,11 @@ async def _apply_single_candidate(
         return None
     if float(candidate.confidence) < MIN_CANDIDATE_CONFIDENCE:
         return None
+    if context_profile == ContextProfile.AGENT.value:
+        from .context_quality import supported_project_candidate
+
+        if not supported_project_candidate(candidate, source_id):
+            return None
 
     normalized = normalize_content(content)
     source_field = (
@@ -511,6 +524,8 @@ async def _apply_single_candidate(
         content=content,
         normalized_content=normalized,
         confidence=float(candidate.confidence),
+        reason=clip_text(getattr(candidate, "reason", ""), MAX_CONTEXT_CONTENT_CHARS),
+        evidence=clip_text(getattr(candidate, "evidence", ""), MAX_CONTEXT_CONTENT_CHARS),
         created_at=datetime.now(timezone.utc).isoformat(),
         source_feedback_ids=linked_ids if source_field == "source_feedback_ids" else [],
         source_trace_ids=linked_ids if source_field == "source_trace_ids" else [],
