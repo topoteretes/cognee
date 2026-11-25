@@ -62,7 +62,6 @@ async def main() -> None:
         get_embedding_engine,
     )
     from cognee.infrastructure.llm.utils import resolve_chunk_size
-    from cognee.tasks.chunks.chunk_by_word import chunk_by_word
 
     text = " ".join(TEXT_PATH.read_text(encoding="utf-8").split()[:WORDS])
     await cognee.prune.prune_data()
@@ -123,20 +122,9 @@ async def main() -> None:
             problems.append(
                 f"chunk {chunk['chunk_index']}: fastembed truncates it ({truth} tokens, window {window})"
             )
-        # The chunker sizes a chunk by adding up its words' token counts. With a
-        # WordPiece tokenizer that is the chunk's own count. A BPE one (the default
-        # model's) counts the space after a word as a token of its own, so the sum
-        # is about twice the chunk's count: chunks come out smaller than the budget.
-        by_word = sum(len(oracle.tokenize(word)) for word, _ in chunk_by_word(text_))
-        if abs(believed - by_word) > max(2, by_word // 20):
+        if abs(believed - truth) > max(2, truth // 20):
             problems.append(
-                f"chunk {chunk['chunk_index']}: chunker counted {believed}, "
-                f"its words add up to {by_word}"
-            )
-        if believed < truth - max(2, truth // 20):
-            problems.append(
-                f"chunk {chunk['chunk_index']}: chunker counted {believed}, "
-                f"fewer than the {truth} tokens it holds"
+                f"chunk {chunk['chunk_index']}: chunker counted {believed}, tokenizer says {truth}"
             )
 
     # Every chunk must have been embedded: its id must come back from the vector store.
