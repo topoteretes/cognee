@@ -1,9 +1,9 @@
 """The shards of a pipeline run whose data items go to workers.
 
-Such a run (``cognee.modules.pipelines.execution``) cuts its data items into
-shards, one per worker. A row per shard and a row per data item of a shard are
-how a shard reaches its worker and how the worker's answer comes back, and they
-stay as the record of what the run handed out and how it ended.
+Such a run (``cognee.modules.pipelines.execution``) cuts its items into shards,
+one per worker. A row per shard and a row per item of a shard are how a shard
+reaches its worker and how the worker's answer comes back, and they stay as the
+record of what the run handed out and how it ended.
 
 The process that owns the run writes the rows. A shard's worker takes its row,
 and stores on it and on its item rows how the items ended. What the items
@@ -29,11 +29,11 @@ class ShardStatus(str, enum.Enum):
     # Its worker stored how each of its items ended.
     FINISHED = "finished"
     # Its worker could not run it, and stored why (``error_class``,
-    # ``error_message``). Its items are recorded as their completion stamps had
-    # them.
+    # ``error_message``). Its data rows are recorded as their completion stamps
+    # had them; an item that is no row has no stamp and is recorded errored.
     FAILED = "failed"
     # Its worker ended without storing anything, or never took it. Its items
-    # are recorded as their completion stamps had them.
+    # are recorded as for a failed shard.
     LOST = "lost"
     # The run ended while the shard was pending or running: it failed or was
     # cancelled, or its process died and the run was recovered. The shard's
@@ -43,7 +43,7 @@ class ShardStatus(str, enum.Enum):
 
 
 class ShardItemStatus(str, enum.Enum):
-    """How a data item of a shard ended. Its row holds the value."""
+    """How an item of a shard ended. Its row holds the value."""
 
     # Not answered for (yet).
     PENDING = "pending"
@@ -54,7 +54,7 @@ class ShardItemStatus(str, enum.Enum):
 
 
 class PipelineRunShard(Base):
-    """One shard of a pipeline run: the data items one worker is given."""
+    """One shard of a pipeline run: the items one worker is given."""
 
     __tablename__ = "pipeline_run_shards"
 
@@ -70,8 +70,8 @@ class PipelineRunShard(Base):
     # A ``ShardStatus`` value.
     status = Column(String(16), nullable=False)
     # The run as the worker needs it described (a ``PipelineRunSpec``): its
-    # settings and how to find its dataset, its user and its tasks. Which data
-    # items the shard holds is in its item rows.
+    # settings and how to find its dataset, its user and its tasks. Which items
+    # the shard holds is in its item rows.
     spec = Column(JSON, nullable=False)
     # What the worker reported using. NULL unless the shard finished.
     tokens_in = Column(Integer)
@@ -92,9 +92,11 @@ class PipelineRunShard(Base):
 
 
 class PipelineRunShardItem(Base):
-    """One data item of a shard, and how it ended.
+    """One item of a shard, and how it ended.
 
-    What the item is (its name, where it is stored) is on its ``data`` row.
+    An item is a row of ``data`` (``data_id``: what it is, its name and where it
+    is stored, is on that row) or a value the run was given that is no row
+    (``value``).
     """
 
     __tablename__ = "pipeline_run_shard_items"
@@ -102,7 +104,12 @@ class PipelineRunShardItem(Base):
     shard_id = Column(
         Uuid, ForeignKey("pipeline_run_shards.id", ondelete="CASCADE"), primary_key=True
     )
-    data_id = Column(Uuid, ForeignKey("data.id", ondelete="CASCADE"), primary_key=True, index=True)
+    # Position among the shard's items, from 0.
+    item_index = Column(Integer, primary_key=True)
+    # The ``data`` row the item is; NULL for an item that is a value.
+    data_id = Column(Uuid, ForeignKey("data.id", ondelete="CASCADE"), index=True)
+    # The item itself, when it is no ``data`` row.
+    value = Column(JSON)
     # A ``ShardItemStatus`` value.
     status = Column(String(32), nullable=False)
     # Set for an item that failed: the same class name and scrubbed message the

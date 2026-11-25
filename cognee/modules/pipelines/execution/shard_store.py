@@ -4,8 +4,8 @@
 The rows are how a shard reaches its worker and how the worker's answer comes
 back, and they stay as the record of the run:
 
-- the run's owner writes a row per shard and per data item when it hands the
-  run's shards out (:func:`hand_out`);
+- the run's owner writes a row per shard and per item when it hands shards
+  out (:func:`hand_out`);
 - a worker takes its shard (:func:`take_shard`) and stores how each item ended
   (:func:`store_result`), or why it could not run the shard at all
   (:func:`store_failure`);
@@ -47,6 +47,7 @@ from .messages import (
     ItemOutcome,
     PipelineRunSpec,
     Shard,
+    ShardItem,
     ShardResult,
 )
 
@@ -65,7 +66,7 @@ _ITEMS = PipelineRunShardItem.__table__
 # One statement for all of a shard's items.
 _SET_ITEM = (
     update(_ITEMS)
-    .where(_ITEMS.c.shard_id == bindparam("of_shard"), _ITEMS.c.data_id == bindparam("of_item"))
+    .where(_ITEMS.c.shard_id == bindparam("of_shard"), _ITEMS.c.item_index == bindparam("of_item"))
     .values(
         status=bindparam("ended"),
         error_class=bindparam("failed_with"),
@@ -99,7 +100,7 @@ def _item_values(shard_id: UUID, outcomes: list[ItemOutcome]) -> list[dict]:
     return [
         {
             "of_shard": shard_id,
-            "of_item": outcome.data_id,
+            "of_item": outcome.index,
             "ended": _ROW_STATUS[outcome.status].value,
             "failed_with": outcome.error_class,
             "failed_saying": outcome.error_message,
@@ -112,7 +113,7 @@ def _item_values(shard_id: UUID, outcomes: list[ItemOutcome]) -> list[dict]:
 
 
 async def hand_out(shards: list[Shard]) -> list[UUID]:
-    """Write a row for each of a run's shards and for each of their data items.
+    """Write a row for each of these shards of a run and for each of their items.
 
     Returns the shard ids, in the same order. A worker is started with one.
     """
@@ -134,10 +135,14 @@ async def hand_out(shards: list[Shard]) -> list[UUID]:
         await session.flush()
         session.add_all(
             PipelineRunShardItem(
-                shard_id=row.id, data_id=data_id, status=ShardItemStatus.PENDING.value
+                shard_id=row.id,
+                item_index=index,
+                data_id=item.data_id,
+                value=item.value,
+                status=ShardItemStatus.PENDING.value,
             )
             for row, shard in zip(rows, shards)
-            for data_id in shard.data_ids
+            for index, item in shard.items.items()
         )
         await session.commit()
     return [row.id for row in rows]
@@ -170,18 +175,24 @@ async def take_shard(shard_id: UUID) -> Shard:
                 f"Shard {shard_id} is {row.status!r}, not pending: it has had a worker, "
                 "and a shard is never run twice."
             )
-        data_ids = await session.scalars(
-            select(PipelineRunShardItem.data_id)
+        items = await session.scalars(
+            select(PipelineRunShardItem)
             .where(PipelineRunShardItem.shard_id == shard_id)
-            .order_by(PipelineRunShardItem.data_id)
+            .order_by(PipelineRunShardItem.item_index)
         )
-        shard = Shard(spec=PipelineRunSpec.from_json(row.spec), data_ids=list(data_ids))
+        # The row of an item whose data row was deleted since is gone with it.
+        shard = Shard(
+            spec=PipelineRunSpec.from_json(row.spec),
+            items={
+                item.item_index: ShardItem(data_id=item.data_id, value=item.value) for item in items
+            },
+        )
         await session.commit()
     return shard
 
 
 async def store_result(shard_id: UUID, result: ShardResult) -> None:
-    """Store how each data item of a running shard ended, and what the worker used.
+    """Store how each item of a running shard ended, and what the worker used.
 
     Refused once the shard is no longer running: its run has ended meanwhile,
     and what the run recorded for the shard stands.
@@ -272,6 +283,7 @@ async def read_answers(shard_ids: list[UUID]) -> list[ShardAnswer]:
             answered[item.shard_id].append(
                 ItemOutcome(
                     status=_OUTCOME_STATUS[item.status],
+                    index=item.item_index,
                     data_id=item.data_id,
                     error_class=item.error_class,
                     error_message=item.error_message,
@@ -298,9 +310,9 @@ def _answer(row: PipelineRunShard | None, outcomes: list[ItemOutcome]) -> ShardA
 async def record_unanswered(shard_id: UUID, outcomes: list[ItemOutcome]) -> None:
     """Note what became of the items of a shard its worker did not answer for.
 
-    ``outcomes`` is what the items' completion stamps say. A shard no worker
-    answered for at all is noted lost; one whose worker stored why it could not
-    run keeps saying so.
+    ``outcomes`` is what the completion stamps of its data rows say, and that
+    an item with no stamp was lost. A shard no worker answered for at all is
+    noted lost; one whose worker stored why it could not run keeps saying so.
     """
     async with get_relational_engine().get_async_session() as session:
         await session.execute(

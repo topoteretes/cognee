@@ -28,6 +28,7 @@ from cognee.modules.pipelines.execution import (
     WORKER_LOST,
     ItemOutcome,
     Shard,
+    ShardItem,
     ShardResult,
     sharded_executor,
 )
@@ -77,11 +78,20 @@ async def run(engine, run_spec):
         await session.commit()
     spec = run_spec(dataset_id=dataset.id, task_resolver_args={"chunk_size": 512})
     ids = [row.id for row in data]
-    return spec, [
-        Shard(spec=spec, data_ids=ids[:3]),
-        Shard(spec=spec, data_ids=ids[3:5]),
-        Shard(spec=spec, data_ids=ids[5:]),
-    ]
+    return spec, [_shard(spec, ids[:3]), _shard(spec, ids[3:5]), _shard(spec, ids[5:])]
+
+
+def _shard(spec, data_ids):
+    """The shard of these data rows, by their position in it."""
+    return Shard(
+        spec=spec,
+        items={index: ShardItem(data_id=data_id) for index, data_id in enumerate(data_ids)},
+    )
+
+
+def _ids(shard):
+    """The data rows of ``shard``, in their order in it."""
+    return [item.data_id for item in shard.items.values()]
 
 
 async def _shards(engine):
@@ -102,7 +112,10 @@ async def _items(engine, shard_id):
 
 def _all_completed(shard, **usage):
     return ShardResult(
-        outcomes=[ItemOutcome(status=COMPLETED, data_id=data_id) for data_id in shard.data_ids],
+        outcomes=[
+            ItemOutcome(status=COMPLETED, index=index, data_id=item.data_id)
+            for index, item in shard.items.items()
+        ],
         **usage,
     )
 
@@ -131,7 +144,12 @@ async def test_handing_shards_out_writes_each_with_its_run_and_its_data_items(en
     assert all(row.started_at is None and row.ended_at is None for row in rows)
     for shard_id, shard in zip(shard_ids, shards):
         items = await _items(engine, shard_id)
-        assert set(items) == set(shard.data_ids)
+        assert set(items) == set(_ids(shard))
+        # Each by its position in the shard, and no value: they are data rows.
+        assert {data_id: item.item_index for data_id, item in items.items()} == {
+            item.data_id: index for index, item in shard.items.items()
+        }
+        assert {item.value for item in items.values()} == {None}
         assert {item.status for item in items.values()} == {"pending"}
 
 
@@ -147,7 +165,7 @@ async def test_a_worker_takes_a_pending_shard_and_no_second_worker_can(engine, r
 
     # Read back from the rows: the same run description and the same items.
     assert taken.spec == spec
-    assert sorted(taken.data_ids, key=str) == sorted(shards[0].data_ids, key=str)
+    assert taken.items == shards[0].items
     row, untouched, _ = await _shards(engine)
     assert row.status == "running" and row.started_at is not None
     assert untouched.status == "pending" and untouched.started_at is None
@@ -164,14 +182,18 @@ async def test_a_workers_result_is_stored_on_its_shard_and_its_items(engine, run
     _spec, shards = run
     first, second, _third = await shard_store.hand_out(shards)
     await shard_store.take_shard(first)
-    done, failed, again = shards[0].data_ids
+    done, failed, again = _ids(shards[0])
     result = ShardResult(
         outcomes=[
-            ItemOutcome(status=COMPLETED, data_id=done),
+            ItemOutcome(status=COMPLETED, index=0, data_id=done),
             ItemOutcome(
-                status=ERRORED, data_id=failed, error_class="ValueError", error_message="bad file"
+                status=ERRORED,
+                index=1,
+                data_id=failed,
+                error_class="ValueError",
+                error_message="bad file",
             ),
-            ItemOutcome(status=ALREADY_COMPLETED, data_id=again),
+            ItemOutcome(status=ALREADY_COMPLETED, index=2, data_id=again),
         ],
         tokens_in=70,
         tokens_out=30,
@@ -194,6 +216,55 @@ async def test_a_workers_result_is_stored_on_its_shard_and_its_items(engine, run
     # The other shards of the run are as they were.
     assert untouched.status == "pending" and untouched.ended_at is None
     assert {item.status for item in (await _items(engine, second)).values()} == {"pending"}
+
+
+@pytest.mark.asyncio
+async def test_a_shard_of_values_reaches_its_worker_and_is_answered_by_position(engine, run):
+    """An item that is no data row is carried on its item row as its value, and
+    answered for by its position in the shard, like a row."""
+    spec, shards = run
+    row_id = _ids(shards[0])[0]
+    shard = Shard(
+        spec=spec,
+        items={
+            0: ShardItem(value={"data_id": "a source", "rows": [[0, 100]]}),
+            1: ShardItem(data_id=row_id),
+            2: ShardItem(value=["a", 1, None]),
+        },
+    )
+    [shard_id] = await shard_store.hand_out([shard])
+
+    taken = await shard_store.take_shard(shard_id)
+    assert taken.items == shard.items
+
+    await shard_store.store_result(
+        shard_id,
+        ShardResult(
+            outcomes=[
+                ItemOutcome(status=COMPLETED, index=0),
+                ItemOutcome(status=COMPLETED, index=1, data_id=row_id),
+                ItemOutcome(status=ERRORED, index=2, error_class="ValueError", error_message="no"),
+            ]
+        ),
+    )
+
+    async with engine.get_async_session() as session:
+        rows = await session.scalars(
+            select(PipelineRunShardItem)
+            .where(PipelineRunShardItem.shard_id == shard_id)
+            .order_by(PipelineRunShardItem.item_index)
+        )
+        assert [(row.item_index, row.data_id, row.value, row.status) for row in rows] == [
+            (0, None, {"data_id": "a source", "rows": [[0, 100]]}, "completed"),
+            (1, row_id, None, "completed"),
+            (2, None, ["a", 1, None], "errored"),
+        ]
+    [answer] = await shard_store.read_answers([shard_id])
+    assert {(outcome.index, outcome.status) for outcome in answer.result.outcomes} == {
+        (0, COMPLETED),
+        (1, COMPLETED),
+        (2, ERRORED),
+    }
 
 
 @pytest.mark.asyncio
@@ -255,7 +326,9 @@ async def test_the_owner_reads_what_each_worker_answered(engine, run):
         ShardStatus.LOST,
     ]
     first = answers[0].result
-    assert {outcome.data_id for outcome in first.outcomes} == set(shards[0].data_ids)
+    assert {(outcome.index, outcome.data_id) for outcome in first.outcomes} == {
+        (index, item.data_id) for index, item in shards[0].items.items()
+    }
     assert {outcome.status for outcome in first.outcomes} == {COMPLETED}
     assert (first.tokens_in, first.tokens_out, first.embedding_tokens) == (70, 30, 11)
     # No worker answered for any item of the others, and none reported usage.
@@ -273,16 +346,21 @@ async def test_items_no_worker_answered_for_are_noted_as_their_stamps_have_them(
     await shard_store.take_shard(died)
     await shard_store.take_shard(could_not_run)
     await shard_store.store_failure(could_not_run, "LookupError", "no such dataset")
-    done, lost_one, lost_two = shards[0].data_ids
+    done, lost_one, lost_two = _ids(shards[0])
 
-    def by_stamp(completed, lost):
-        return [ItemOutcome(status=COMPLETED, data_id=data_id) for data_id in completed] + [
-            ItemOutcome(status=ERRORED, data_id=data_id, error_class=WORKER_LOST)
-            for data_id in lost
+    def by_stamp(shard, completed, lost):
+        return [
+            ItemOutcome(status=COMPLETED, index=at, data_id=shard.items[at].data_id)
+            for at in completed
+        ] + [
+            ItemOutcome(
+                status=ERRORED, index=at, data_id=shard.items[at].data_id, error_class=WORKER_LOST
+            )
+            for at in lost
         ]
 
-    await shard_store.record_unanswered(died, by_stamp([done], [lost_one, lost_two]))
-    await shard_store.record_unanswered(could_not_run, by_stamp([], shards[1].data_ids))
+    await shard_store.record_unanswered(died, by_stamp(shards[0], [0], [1, 2]))
+    await shard_store.record_unanswered(could_not_run, by_stamp(shards[1], [], [0, 1]))
 
     first, second, _ = await _shards(engine)
     # A worker that stored nothing: lost. One that stored why it could not run
@@ -309,7 +387,7 @@ async def test_only_the_runs_shards_no_worker_answered_for_are_noted_interrupted
     await shard_store.take_shard(running)
     # Another run of the same dataset, still waiting for its worker.
     other_run = run_spec(dataset_id=spec.dataset_id)
-    await shard_store.hand_out([Shard(spec=other_run, data_ids=shards[0].data_ids)])
+    await shard_store.hand_out([Shard(spec=other_run, items=shards[0].items)])
 
     await shard_store.record_interrupted(spec.pipeline_run_id)
 
@@ -357,14 +435,14 @@ async def test_the_rows_go_with_the_data_item_and_with_the_dataset(engine, run):
     go with the dataset: the rows never point at something that is gone."""
     spec, shards = run
     first, second, _third = await shard_store.hand_out(shards)
-    gone = shards[0].data_ids[0]
+    gone = _ids(shards[0])[0]
 
     async with engine.get_async_session() as session:
         # SQLite enforces foreign keys per connection, and only when asked.
         await session.execute(text("PRAGMA foreign_keys = ON"))
         await session.execute(delete(Data).where(Data.id == gone))
         await session.commit()
-    assert set(await _items(engine, first)) == set(shards[0].data_ids[1:])
+    assert set(await _items(engine, first)) == set(_ids(shards[0])[1:])
 
     async with engine.get_async_session() as session:
         await session.execute(text("PRAGMA foreign_keys = ON"))
@@ -379,7 +457,7 @@ async def test_items_without_an_answer_are_completed_or_failed_by_their_stamp(en
     """Which of its items a worker had finished is read from their completion
     stamps, for this pipeline and this dataset."""
     spec, shards = run
-    finished, unfinished, elsewhere = shards[0].data_ids
+    finished, unfinished, elsewhere = _ids(shards[0])
     deleted_id = uuid4()
     completed = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED.value
     async with engine.get_async_session() as session:
@@ -393,14 +471,26 @@ async def test_items_without_an_answer_are_completed_or_failed_by_their_stamp(en
         }
         await session.commit()
 
-    outcomes = await sharded_executor.outcomes_by_stamp(
-        spec, [finished, unfinished, elsewhere, deleted_id]
+    # A value has no stamp: a lost worker's value is reported failed.
+    shard = Shard(
+        spec=spec,
+        items={
+            **_shard(spec, [finished, unfinished, elsewhere, deleted_id]).items,
+            4: ShardItem(value={"rows": [[0, 10]]}),
+        },
     )
 
-    assert [(outcome.data_id, outcome.status) for outcome in outcomes] == [
-        (finished, COMPLETED),
-        (unfinished, ERRORED),
-        (elsewhere, ERRORED),
-        (deleted_id, ERRORED),
+    outcomes = await sharded_executor.outcomes_of_unanswered(shard, [0, 1, 2, 3, 4])
+
+    assert [(outcome.index, outcome.data_id, outcome.status) for outcome in outcomes] == [
+        (0, finished, COMPLETED),
+        (1, unfinished, ERRORED),
+        (2, elsewhere, ERRORED),
+        (3, deleted_id, ERRORED),
+        (4, None, ERRORED),
     ]
     assert {outcome.error_class for outcome in outcomes[1:]} == {WORKER_LOST}
+    # Only the positions asked about.
+    assert [
+        outcome.index for outcome in await sharded_executor.outcomes_of_unanswered(shard, [4, 1])
+    ] == [4, 1]
