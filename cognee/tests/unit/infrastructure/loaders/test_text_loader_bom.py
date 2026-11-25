@@ -44,7 +44,7 @@ async def test_utf8_bom_is_kept_as_before(tmp_path):
     marked = tmp_path / "contact.txt"
     marked.write_bytes(codecs.BOM_UTF8 + TEXT.encode("utf-8"))
 
-    assert await TextLoader().load(str(marked), persist=False) == "﻿" + TEXT
+    assert await TextLoader().load(str(marked), persist=False) == "\ufeff" + TEXT
 
 
 @pytest.mark.asyncio
