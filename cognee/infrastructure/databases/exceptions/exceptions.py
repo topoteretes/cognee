@@ -296,7 +296,7 @@ class TursoDatabaseInUseError(CogneeConfigurationError):
     """
     Raised when a Turso database file is already open in another process.
 
-    The Turso engine (pyturso 0.7.x) locks a database file to the one process that
+    The Turso engine (pyturso 0.8.x) locks a database file to the one process that
     opened it, until that process exits, so a second cognee process on the same
     files cannot open them. Stock SQLite allows this; the Turso backend does not.
     """
