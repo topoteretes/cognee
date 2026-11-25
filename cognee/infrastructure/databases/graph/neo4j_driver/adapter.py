@@ -15,14 +15,18 @@ from neo4j.exceptions import Neo4jError
 from cognee.infrastructure.databases.exceptions import DatabaseCredentialsError
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
+    temporal_anchors_from_rows,
 )
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
     NodeDeleteData,
+    data_source_ref_key_selector,
     get_dataset_id_from_source_ref_key,
     get_pipeline_run_id_from_source_run_ref,
     get_source_ref_key_from_source_run_ref,
+    make_chunk_source_ref_key_prefix,
+    make_source_ref_key,
 )
 from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_after_attach,
@@ -30,7 +34,7 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_attach_inputs,
 )
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
@@ -41,13 +45,11 @@ from cognee.modules.observability.tracing import (
 )
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import ERROR, get_logger
-from cognee.tasks.temporal_graph.models import Timestamp
 
 from .deadlock_retry import deadlock_retry
 from .neo4j_metrics_utils import (
     count_self_loops,
     get_avg_clustering,
-    get_edge_density,
     get_num_connected_components,
     get_shortest_path_lengths,
     get_size_of_connected_components,
@@ -62,12 +64,11 @@ BASE_LABEL = "__Node__"
 # Graph provenance (COG-5522)
 #
 # The four provenance fields live in NATIVE list properties on the node /
-# relationship (Neo4j's graph-native analogue of the Postgres varchar[] columns;
-# no delimiter encoding like Ladybug/Kuzu needs). Every read normalizes a missing
-# property to []. Provenance is storage-internal, so it is stripped out of the
-# domain node/edge dicts returned to retrieval and DataPoint reconstruction —
-# the same hygiene Postgres/Ladybug get for free by holding provenance in
-# dedicated columns rather than the property blob.
+# relationship (no delimiter encoding like Ladybug/Kuzu needs). Every read
+# normalizes a missing property to []. Provenance is storage-internal, so it is
+# stripped out of the domain node/edge dicts returned to retrieval and DataPoint
+# reconstruction — the same hygiene Postgres/Ladybug get for free by holding
+# provenance outside the property blob.
 # ------------------------------------------------------------------
 PROVENANCE_COLUMNS = (
     "source_ref_keys",
@@ -201,7 +202,9 @@ class Neo4jAdapter(GraphDBInterface):
         # calls so two concurrent updates to the same artifact within this
         # adapter instance cannot overwrite each other (the atomic fold path in
         # add_nodes/add_edges does not need it).
-        self._source_ref_change_lock = asyncio.Lock()
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self._source_ref_change_lock = LoopAgnosticLock()
 
     async def close(self) -> None:
         """
@@ -325,12 +328,13 @@ class Neo4jAdapter(GraphDBInterface):
         # additive; this keeps the property consistent with them).
         query = dedent(
             f"""MERGE (node: `{BASE_LABEL}`{{id: $node_id}})
-                WITH node, apoc.coll.toSet(
+                WITH node, node.feedback_weight AS kept_feedback_weight, apoc.coll.toSet(
                     coalesce(node.belongs_to_set, [])
                     + coalesce($properties.belongs_to_set, [])
                 ) AS merged_belongs_to_set
                 SET node += $properties, node.updated_at = timestamp()
                 SET node.belongs_to_set = merged_belongs_to_set
+                SET node.feedback_weight = coalesce(kept_feedback_weight, node.feedback_weight)
                 WITH node, $node_label AS label
                 CALL apoc.create.addLabels(node, [label]) YIELD node AS labeledNode
                 RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId"""
@@ -349,6 +353,8 @@ class Neo4jAdapter(GraphDBInterface):
         nodes: list[DataPoint],
         source_ref_key: str | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """
         Add multiple nodes to the database in a single query.
@@ -358,6 +364,7 @@ class Neo4jAdapter(GraphDBInterface):
 
             - nodes (list[DataPoint]): A list of DataPoint instances representing the nodes to
               add.
+            - replace (bool): Ignored: every write stores the incoming properties.
 
         Returns:
         --------
@@ -381,12 +388,13 @@ class Neo4jAdapter(GraphDBInterface):
         query = f"""
         UNWIND $nodes AS node
         MERGE (n: `{BASE_LABEL}`{{id: node.node_id}})
-        WITH n, node, apoc.coll.toSet(
+        WITH n, node, n.feedback_weight AS kept_feedback_weight, apoc.coll.toSet(
             coalesce(n.belongs_to_set, [])
             + coalesce(node.properties.belongs_to_set, [])
         ) AS merged_belongs_to_set
         SET n += node.properties, n.updated_at = timestamp()
         SET n.belongs_to_set = merged_belongs_to_set
+        SET n.feedback_weight = coalesce(kept_feedback_weight, n.feedback_weight)
         {fold_clause}
         WITH n, node.label AS label
         CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode
@@ -982,6 +990,66 @@ class Neo4jAdapter(GraphDBInterface):
                 result[edge] = owned
         return result
 
+    @staticmethod
+    def _data_source_ref_parameters(dataset_id: str, data_id: str) -> dict[str, str]:
+        """What selects the keys of one dataset document: its v1 key and the start of
+        its v2 chunk keys."""
+        dataset, data = UUID(str(dataset_id)), UUID(str(data_id))
+        return {
+            "document_key": make_source_ref_key(dataset, data),
+            "chunk_key_prefix": make_chunk_source_ref_key_prefix(dataset, data),
+        }
+
+    async def find_node_source_refs_by_data(
+        self, dataset_id: str, data_id: str
+    ) -> dict[str, list[str]]:
+        """The source refs one dataset document owns on nodes. The database picks the
+        nodes that carry one, so only those reach Python."""
+        rows = await self.query(
+            f"""
+            MATCH (n:`{BASE_LABEL}`)
+            WHERE any(
+                key IN coalesce(n.source_ref_keys, [])
+                WHERE key = $document_key OR key STARTS WITH $chunk_key_prefix
+            )
+            RETURN n.id AS id, n.source_ref_keys AS keys
+            """,
+            self._data_source_ref_parameters(dataset_id, data_id),
+        )
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            owned = select(row["keys"])
+            if owned:
+                result[row["id"]] = owned
+        return result
+
+    async def find_edge_source_refs_by_data(
+        self, dataset_id: str, data_id: str
+    ) -> dict[EdgeIdentity, list[str]]:
+        """The source refs one dataset document owns on edges; see the node lookup."""
+        rows = await self.query(
+            f"""
+            MATCH (a:`{BASE_LABEL}`)-[r]->(b:`{BASE_LABEL}`)
+            WHERE any(
+                key IN coalesce(r.source_ref_keys, [])
+                WHERE key = $document_key OR key STARTS WITH $chunk_key_prefix
+            )
+            RETURN a.id AS s, b.id AS t, type(r) AS rel, r.source_ref_keys AS keys
+            """,
+            self._data_source_ref_parameters(dataset_id, data_id),
+        )
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
+        result: dict[EdgeIdentity, list[str]] = {}
+        for row in rows:
+            owned = select(row["keys"])
+            if owned:
+                edge = EdgeIdentity(
+                    source_id=row["s"], target_id=row["t"], relationship_name=row["rel"]
+                )
+                result[edge] = owned
+        return result
+
     async def find_node_source_refs_by_pipeline_run(
         self, pipeline_run_id: str
     ) -> dict[str, list[str]]:
@@ -1155,8 +1223,9 @@ class Neo4jAdapter(GraphDBInterface):
             MATCH (from_node :`{BASE_LABEL}`{{id: $from_node}}),
                   (to_node :`{BASE_LABEL}`{{id: $to_node}})
             MERGE (from_node)-[r:`{relationship_name}`]->(to_node)
-            ON CREATE SET r += $properties, r.updated_at = timestamp()
-            ON MATCH SET r += $properties, r.updated_at = timestamp()
+            WITH r, r.feedback_weight AS kept_feedback_weight
+            SET r += $properties, r.updated_at = timestamp()
+            SET r.feedback_weight = coalesce(kept_feedback_weight, r.feedback_weight)
             RETURN r
             """
         )
@@ -1248,9 +1317,11 @@ class Neo4jAdapter(GraphDBInterface):
                 {{}},
                 to_node
             ) YIELD rel
+            WITH rel, rel.feedback_weight AS kept_feedback_weight, edge
             SET rel += edge.properties,
                 rel.updated_at = timestamp(),
                 rel.created_at = coalesce(rel.created_at, timestamp())
+            SET rel.feedback_weight = coalesce(kept_feedback_weight, rel.feedback_weight)
             {fold_clause}
             RETURN rel"""
 
@@ -1518,6 +1589,36 @@ class Neo4jAdapter(GraphDBInterface):
         """
         results = await self.query(query, {"node_ids": node_ids})
         return [_strip_provenance(result["node"]) for result in results]
+
+    async def get_node_ids_by_property(
+        self, node_types: list[str], property_name: str, values: list[Any]
+    ) -> list[str]:
+        """Ids of typed nodes whose property is one of ``values``, filtered in Cypher."""
+        if not node_types or not values:
+            return []
+        query = f"""
+        MATCH (n:`{BASE_LABEL}`)
+        WHERE n.type IN $types AND toStringOrNull(n[$property]) IN $values
+        RETURN n.id AS id
+        """
+        params = {
+            "types": list(node_types),
+            "property": property_name,
+            "values": [str(value) for value in values],
+        }
+        return [str(record["id"]) for record in await self.query(query, params)]
+
+    async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
+        """Keys of the edges leaving ``source_ids``, each source matched by its id index."""
+        if not source_ids:
+            return []
+        query = f"""
+        UNWIND $ids AS source_id
+        MATCH (n:`{BASE_LABEL}` {{id: source_id}})-[r]->(m:`{BASE_LABEL}`)
+        RETURN n.id AS source, m.id AS target, type(r) AS relationship
+        """
+        records = await self.query(query, {"ids": [str(source_id) for source_id in source_ids]})
+        return [(str(r["source"]), str(r["target"]), r["relationship"]) for r in records]
 
     def _build_node_feedback_items(
         self, node_feedback_weights: dict[str, float]
@@ -1807,27 +1908,6 @@ class Neo4jAdapter(GraphDBInterface):
             serialized_properties[property_key] = property_value
 
         return serialized_properties
-
-    async def get_model_independent_graph_data(self):
-        """
-        Retrieve the basic graph data without considering the model specifics, returning nodes
-        and edges.
-
-        Returns:
-        --------
-
-            A tuple of nodes and edges data.
-        """
-        query_nodes = f"MATCH (n:`{BASE_LABEL}`) RETURN collect(n) AS nodes"
-        nodes = await self.query(query_nodes)
-
-        query_edges = (
-            f"MATCH (n:`{BASE_LABEL}`)-[r]->(m:`{BASE_LABEL}`) "
-            "RETURN collect([n, r, m]) AS elements"
-        )
-        edges = await self.query(query_edges)
-
-        return (nodes, edges)
 
     async def get_entity_type_names(self, entity_ids: list[str]) -> dict[str, str]:
         """One-hop ``is_a`` lookup: entity id to its EntityType name."""
@@ -2162,7 +2242,7 @@ class Neo4jAdapter(GraphDBInterface):
             logger.error(f"Error during nodeset subgraph retrieval: {e!s}")
             raise
 
-    async def get_filtered_graph_data(self, attribute_filters):
+    async def get_filtered_graph_data(self, attribute_filters, *, include_edges: bool = True):
         """
         Fetch nodes and edges filtered by specific attribute criteria.
 
@@ -2200,6 +2280,9 @@ class Neo4jAdapter(GraphDBInterface):
             )
             for record in result_nodes
         ]
+
+        if not include_edges:
+            return nodes, []
 
         query_edges = f"""
         MATCH (n)-[r]->(m)
@@ -2324,6 +2407,27 @@ class Neo4jAdapter(GraphDBInterface):
             drop_query = f"CALL gds.graph.drop('{graph_name}');"
             await self.query(drop_query)
 
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """
+        Count nodes and edges with aggregation queries.
+
+        Counting in Cypher keeps memory constant; collecting the nodes or edges to take
+        len() of them builds the whole graph inside one transaction and exhausts the
+        transaction memory pool on large graphs (#4832).
+
+        Returns:
+        --------
+
+            A ``(num_nodes, num_edges)`` tuple.
+        """
+        node_count = await self.query(f"MATCH (n:`{BASE_LABEL}`) RETURN count(n) AS count")
+        edge_count = await self.query(
+            f"MATCH (n:`{BASE_LABEL}`)-[r]->(m:`{BASE_LABEL}`) RETURN count(r) AS count"
+        )
+        num_nodes = node_count[0]["count"] if node_count else 0
+        num_edges = edge_count[0]["count"] if edge_count else 0
+        return num_nodes, num_edges
+
     async def get_graph_metrics(self, include_optional=False):
         """
         Retrieve metrics related to the graph such as number of nodes, edges, and connected
@@ -2342,19 +2446,16 @@ class Neo4jAdapter(GraphDBInterface):
             input flag.
         """
 
-        nodes, edges = await self.get_model_independent_graph_data()
+        num_nodes, num_edges = await self.get_graph_counts()
         graph_name = "myGraph"
         await self.drop_graph(graph_name)
         await self.project_entire_graph(graph_name)
-
-        num_nodes = len(nodes[0]["nodes"])
-        num_edges = len(edges[0]["elements"])
 
         mandatory_metrics = {
             "num_nodes": num_nodes,
             "num_edges": num_edges,
             "mean_degree": (2 * num_edges) / num_nodes if num_nodes != 0 else None,
-            "edge_density": await get_edge_density(self),
+            "edge_density": num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0,
             "num_connected_components": await get_num_connected_components(self, graph_name),
             "sizes_of_connected_components": await get_size_of_connected_components(
                 self, graph_name
@@ -2452,92 +2553,82 @@ class Neo4jAdapter(GraphDBInterface):
         result = await self.query(query)
         return [record["n"] for record in result] if result else []
 
-    async def collect_events(self, ids: list[str]) -> Any:
+    async def get_timestamps_in_range(
+        self, start: int | None, end: int | None
+    ) -> list[dict[str, Any]]:
+        """Timestamp nodes whose ``[time_at, time_until)`` overlaps ``[start, end)``."""
+        conditions = ["n.type = 'Timestamp'"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("n.time_at < $window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append("coalesce(n.time_until, n.time_at + 1000) > $window_start")
+            params["window_start"] = int(start)
+        cypher = f"""
+        MATCH (n:`{BASE_LABEL}`)
+        WHERE {" AND ".join(conditions)}
+        RETURN n.id AS id, n.timestamp_str AS timestamp_str, n.time_at AS time_at,
+               coalesce(n.time_until, n.time_at + 1000) AS time_until
+        ORDER BY time_at, id
         """
-        Collect all Event-type nodes reachable within 1..2 hops
-        from the given node IDs.
+        rows = await self.query(cypher, params)
+        return [
+            {
+                "id": row["id"],
+                "type": "Timestamp",
+                "timestamp_str": row["timestamp_str"],
+                "time_at": row["time_at"],
+                "time_until": row["time_until"],
+            }
+            for row in rows
+        ]
 
-        Args:
-            graph_engine: Object exposing an async .query(str) -> Any
-            ids: List of node IDs (strings)
-
-        Returns:
-            List of events
-        """
-
-        event_collection_cypher = """UNWIND [{quoted}] AS uid
-            MATCH (start {{id: uid}})
-            MATCH (start)-[*1..2]-(event)
-            WHERE event.type = 'Event'
-            WITH DISTINCT event
-            RETURN collect(event) AS events;
-        """
-
-        query = event_collection_cypher.format(quoted=ids)
-        return await self.query(query)
-
-    async def collect_time_ids(
+    async def get_temporal_anchors(
         self,
-        time_from: Timestamp | None = None,
-        time_to: Timestamp | None = None,
-    ) -> str:
-        """
-        Collect IDs of Timestamp nodes between time_from and time_to.
-
-        Args:
-            graph_engine: Object exposing an async .query(query, params) -> list[dict]
-            time_from: Lower bound int (inclusive), optional
-            time_to: Upper bound int (inclusive), optional
-
-        Returns:
-            A string of quoted IDs:  "'id1', 'id2', 'id3'"
-            (ready for use in a Cypher UNWIND clause).
-        """
-
-        ids: list[str] = []
-
-        if time_from and time_to:
-            time_from = date_to_int(time_from)
-            time_to = date_to_int(time_to)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at >= $time_from
-              AND n.time_at <= $time_to
-            RETURN n.id AS id
-            """
-            params = {"time_from": time_from, "time_to": time_to}
-
-        elif time_from:
-            time_from = date_to_int(time_from)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at >= $time_from
-            RETURN n.id AS id
-            """
-            params = {"time_from": time_from}
-
-        elif time_to:
-            time_to = date_to_int(time_to)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at <= $time_to
-            RETURN n.id AS id
-            """
-            params = {"time_to": time_to}
-
-        else:
-            return ids
-
-        time_nodes = await self.query(cypher, params)
-        time_ids_list = [item["id"] for item in time_nodes if "id" in item]
-
-        return ", ".join(f"'{uid}'" for uid in time_ids_list)
+        chunk_ids,
+        entity_ids,
+        start: int | None,
+        end: int | None,
+    ) -> dict[str, set[str]]:
+        """Candidates attached to a Timestamp overlapping ``[start, end)``: directly,
+        or (for chunks) through an entity they ``contains``. See the interface."""
+        chunk_list = sorted({str(node_id) for node_id in chunk_ids})
+        entity_list = sorted({str(node_id) for node_id in entity_ids})
+        if not chunk_list and not entity_list:
+            return temporal_anchors_from_rows([], [], [])
+        conditions = ["t.type = 'Timestamp'"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("t.time_at < $window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append("coalesce(t.time_until, t.time_at + 1000) > $window_start")
+            params["window_start"] = int(start)
+        where = " AND ".join(conditions)
+        direct_rows = await self.query(
+            f"""
+            MATCH (c:`{BASE_LABEL}`)-[]->(t:`{BASE_LABEL}`)
+            WHERE c.id IN $candidate_ids AND {where}
+            RETURN DISTINCT c.id AS candidate_id, t.id AS timestamp_id
+            """,
+            {**params, "candidate_ids": chunk_list + entity_list},
+        )
+        via_rows = []
+        if chunk_list:
+            via_rows = await self.query(
+                f"""
+                MATCH (c:`{BASE_LABEL}`)-[:contains]->(e:`{BASE_LABEL}`)-[]->(t:`{BASE_LABEL}`)
+                WHERE c.id IN $chunk_ids AND e.type = 'Entity' AND {where}
+                RETURN DISTINCT c.id AS chunk_id, e.id AS entity_id, t.id AS timestamp_id
+                """,
+                {**params, "chunk_ids": chunk_list},
+            )
+        return temporal_anchors_from_rows(
+            [(row["candidate_id"], row["timestamp_id"]) for row in direct_rows],
+            [(row["chunk_id"], row["entity_id"], row["timestamp_id"]) for row in via_rows],
+            chunk_list,
+        )
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """

@@ -325,6 +325,49 @@ def start_parent_liveness_watchdog(poll_interval: float = 1.0) -> None:
     t.start()
 
 
+def _windows_parent_exited(pid: int) -> bool:
+    """Confirm through a fresh handle that ``pid`` has exited. Unsure means False."""
+    import _winapi
+
+    try:
+        handle = _winapi.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    except OSError as error:
+        return getattr(error, "winerror", None) == 87  # ERROR_INVALID_PARAMETER: no such process
+    try:
+        return _winapi.GetExitCodeProcess(handle) != _winapi.STILL_ACTIVE
+    except OSError:
+        logger.debug("Could not read the parent's exit code", exc_info=True)
+        return False
+    finally:
+        _winapi.CloseHandle(handle)
+
+
+def start_windows_parent_watchdog() -> bool:
+    """Windows: exit when the launching process dies.
+
+    Windows never reparents, so ``os.getppid()`` keeps returning the dead parent's
+    PID and the ppid poll can never fire. multiprocessing's spawn bootstrap already
+    holds a SYNCHRONIZE handle to the parent (``parent_process().sentinel``), opened
+    before any worker code runs, so there is no window between spawn and arming.
+    """
+    if sys.platform != "win32":
+        return False
+    import multiprocessing
+
+    parent = multiprocessing.parent_process()
+    if parent is None:
+        return False
+
+    def _watch() -> None:
+        parent.join()
+        if _windows_parent_exited(parent.pid):
+            os._exit(0)
+        logger.debug("Parent sentinel signalled but the parent still looks alive")
+
+    threading.Thread(target=_watch, name="win32-parent-death-watchdog", daemon=True).start()
+    return True
+
+
 # Serializes all ``spawn_without_main`` enter/exit transitions. The
 # mutation is on a single, process-global object (``sys.modules["__main__"]``),
 # so two threads entering concurrently would race: thread B would capture
@@ -437,13 +480,17 @@ def run_worker_loop(
     """
     _enable_faulthandler()
     # pdeathsig is the authoritative parent-death signal on Linux. Only fall
-    # back to the portable polling watchdog when the kernel hook is
-    # unavailable (macOS, Windows) or failed to arm — that watchdog has no
-    # way to distinguish "legitimate parent happens to be pid 1" from
-    # "reparented to init", so we avoid running it whenever pdeathsig has
-    # us covered.
+    # back to a portable watchdog when the kernel hook is unavailable (macOS,
+    # Windows) or failed to arm — that watchdog has no way to distinguish
+    # "legitimate parent happens to be pid 1" from "reparented to init", so
+    # we avoid running it whenever pdeathsig has us covered. On Windows,
+    # prefer the HANDLE-based watchdog (event-driven, immune to PID reuse)
+    # over the portable ppid-polling one, which can never actually fire on
+    # Windows — see start_windows_parent_watchdog's docstring.
     if not set_pdeathsig():
-        start_parent_liveness_watchdog()
+        windows_watchdog_armed = start_windows_parent_watchdog()
+        if not windows_watchdog_armed:
+            start_parent_liveness_watchdog()
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -697,6 +744,14 @@ class SubprocessSession:
         self._consecutive_timeouts_lock = threading.Lock()
         self._terminate_lock = threading.Lock()
         self._respawn_lock = threading.Lock()
+        # Set by ``shutdown()`` and never cleared: the owner tore the session
+        # down on purpose, so a late RPC (a background task that outlived the
+        # owner's ``close()``) is refused instead of recovered. Respawning
+        # here would start a worker nobody will ever shut down, since the
+        # owner has already dropped the session. ``_closed_event`` cannot
+        # carry this: a crash or a timeout sets it too, and those must still
+        # respawn.
+        self._shutdown_requested = False
         # Set by ``wait_for_ready`` after the worker emits its READY
         # sentinel. Used to gate registration in the global ``_all_sessions``
         # set: a session that's still waiting for its sentinel must not be
@@ -1164,7 +1219,7 @@ class SubprocessSession:
                 await loop.run_in_executor(None, self._respawn)
 
     def _can_respawn(self) -> bool:
-        return self._respawn_factory is not None
+        return self._respawn_factory is not None and not self._shutdown_requested
 
     def _apply_remap(self, req: Request) -> Request:
         """After a successful respawn, previously-allocated handle ids are
@@ -1242,6 +1297,13 @@ class SubprocessSession:
             )
 
         with self._respawn_lock:
+            # ``_can_respawn`` was checked before taking the lock; a
+            # ``shutdown()`` that got the lock in between is final.
+            if self._shutdown_requested:
+                raise SubprocessTransportError(
+                    "Subprocess session was shut down; not respawning the worker"
+                )
+
             # Another concurrent retry may have already respawned successfully
             # between the moment the current caller's RPC failed and us
             # acquiring the lock. If the process is alive again, bail out —
@@ -1401,11 +1463,18 @@ class SubprocessSession:
         """
         t = timeout if timeout is not None else self._shutdown_timeout
 
-        already_closed = self._closed_event.is_set()
-        # Set closed under the registry lock so any caller about to add a
-        # new entry sees the closed state and bails before inserting.
-        with self._pending_lock:
-            self._closed_event.set()
+        # Serialize with a retry that is respawning. Either it finishes first
+        # and ``self._proc`` below is the new worker, which is then torn down
+        # like any other, or the flag is set first and the respawn refuses.
+        # Without this a shutdown racing a respawn reaps the dead worker and
+        # leaves the fresh one running.
+        with self._respawn_lock:
+            self._shutdown_requested = True
+            already_closed = self._closed_event.is_set()
+            # Set closed under the registry lock so any caller about to add a
+            # new entry sees the closed state and bails before inserting.
+            with self._pending_lock:
+                self._closed_event.set()
 
         # Try to stop the reader cleanly. If it joins within ``t`` we
         # own ``_resp_q`` exclusively and can drain the SHUTDOWN ack

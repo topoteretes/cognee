@@ -8,8 +8,10 @@ not wrap this call in ``set_database_global_context_variables`` (SDK-483).
 The actual work lives in ``cognee.tasks.memify.consolidate_entity_descriptions``.
 """
 
-from cognee import memify
+import warnings
+
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.memify import run_memify_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -51,6 +53,9 @@ async def consolidate_entity_descriptions_pipeline(
 ):
     """Rewrite Entity descriptions from their graph neighborhood, then summarize
     each EntityType from its member Entities and write is_a edge text.
+
+    Deprecated: ``improve()`` reviews facts instead (on by default) and leaves
+    descriptions as extracted.
 
     Every size/budget cap below is a defensive backstop against pathological
     inputs (an unusually long description, an over-connected entity, a huge
@@ -97,6 +102,12 @@ async def consolidate_entity_descriptions_pipeline(
     Returns:
         The ``memify`` pipeline result.
     """
+    warnings.warn(
+        "consolidate_entity_descriptions_pipeline is deprecated; "
+        "improve() reviews conflicts by default",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     extraction_tasks = [Task(get_entities_with_neighborhood)]
 
     enrichment_tasks = [
@@ -116,10 +127,11 @@ async def consolidate_entity_descriptions_pipeline(
             max_completion_tokens=type_description_max_completion_tokens,
             tokens_per_is_a_line=type_tokens_per_is_a_line,
         ),
-        Task(add_data_points),
+        # The descriptions are rewritten on purpose, so stored entities are replaced.
+        Task(add_data_points, replace_nodes=True),
     ]
 
-    result = await memify(
+    result = await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
         data=[{}],  # A placeholder to prevent fetching the entire graph

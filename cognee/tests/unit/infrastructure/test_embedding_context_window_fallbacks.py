@@ -7,6 +7,7 @@ from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
     EmbeddingException,
 )
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 
 
 @pytest.mark.asyncio
@@ -32,7 +33,8 @@ async def test_ollama_embedding_splits_batch_on_context_window_error():
             "ok 1": [1.0, 1.0],
             "ok 2": [2.0, 2.0],
         }
-        return mapping[prompt]
+        # _get_embedding returns the prompt's one vector with its token count.
+        return EmbeddingResult([mapping[prompt]], tokens=1)
 
     with patch.object(engine, "_get_embedding", side_effect=fake_get_embedding):
         result = await engine.embed_text(["too long", "ok 1", "ok 2"])

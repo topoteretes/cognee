@@ -21,9 +21,17 @@ Flow (only runs from the update endpoint):
    now — staging and validation done — is a pipeline run record created;
    refused updates leave no run-record noise.
 5. Write: extract ONLY the fresh chunks, in bounded batches, through the
-   standard graph-extraction and storage tasks (attributed to the same
-   ``data_id``), retire replaced chunk ownership through the shared deletion
-   planner, and renumber moved survivors.
+   same extract-and-summarize step cognify runs for the selected extractor
+   (the LLM, or the GLiNER demo with no LLM call) and the standard storage
+   task (attributed to the same ``data_id``), retire replaced chunk ownership
+   through the shared deletion planner, and renumber moved survivors. On the
+   LLM extractor, date context is part of "fresh": the graph prompt's date
+   hints are a function of the whole document in chunk order
+   (``document_temporal_hints``), so they are recomputed for the old and the
+   new text, fresh chunks get the new document's hints, and a surviving chunk
+   whose hints changed — it inferred a date from text that the edit touched —
+   is retired and re-extracted like a fresh one. GLiNER never reads the hints,
+   so under it nothing is re-dated.
 6. PUBLISH in one relational transaction: content location, hashes, size,
    token count, and the processed stamp flip together. A crash anywhere
    before the publish leaves the row on the old content; the stored chunks
@@ -50,6 +58,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.files.stored_file_claims import holding_stored_files
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
@@ -62,13 +71,14 @@ from cognee.modules.chunking.chunk_policy import (
     ChunkPlanRequest,
     ChunkPolicy,
     IncrementalPlanError,
-    stored_chunker_id,
 )
+from cognee.modules.chunking.Chunker import Chunker
+from cognee.modules.chunking.chunker_registry import stamps_every_chunk
 from cognee.modules.chunking.external_metadata import normalize_external_metadata
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.cognify.config import GLINER_DEMO_EXTRACTOR, LLM_EXTRACTOR, get_cognify_config
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
+from cognee.modules.conflicts.methods import retire_decisions_after_edit
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
     StagedContent,
@@ -80,8 +90,10 @@ from cognee.modules.data.methods import (
     publish_updated_data,
 )
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.modules.data.methods.remove_unreferenced_files import remove_unreferenced_files
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types.Document import Document
+from cognee.modules.engine.utils.temporal_hints import document_temporal_hints
 from cognee.modules.graph.methods.delete_chunks_incremental import (
     delete_chunks_incremental,
     edge_endpoints,
@@ -93,7 +105,10 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
 )
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
+from cognee.modules.operations.usage_accumulator import parent_run_scope
+from cognee.modules.pipelines.methods.get_pipeline_run import get_latest_pipeline_run
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
+from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.modules.pipelines.operations.log_pipeline_run_complete import (
     log_pipeline_run_complete,
 )
@@ -106,11 +121,11 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 from cognee.tasks.documents.classify_documents import document_class_for, update_node_set
-from cognee.tasks.graph.detect_contradictions import detect_contradictions
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
 from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
+from cognee.tasks.provenance.record_provenance import record_data_item_content
 from cognee.tasks.storage.add_data_points import add_data_points
 
 logger = get_logger("incremental_update")
@@ -229,6 +244,62 @@ async def _require_chunk_scoped_ownership(
                 f"stored chunk {chunk_id} has no chunk-scoped ownership baseline",
                 RefusalReason.NO_BASELINE,
             )
+    return delete_data
+
+
+async def _require_extraction_completed(data_id: UUID, dataset_id: UUID) -> None:
+    """Refuse a baseline whose entities were never extracted.
+
+    The indexing pipeline stores a document's chunks before the cognify
+    pipeline extracts its entities (SDK-397); between the two, or after an
+    extraction that failed and was rolled back, the chunks tile the text and
+    carry v2 ownership but have no entities. Treating them as a baseline would
+    re-extract only the edited regions and stamp the document complete, so the
+    untouched chunks would never get their entities. The chunks keep the
+    indexing run's id as their writer even after extraction rewrote them, so
+    the cognify completion stamp is the one proof extraction ran; without it
+    the full flow rebuilds the document.
+    """
+    if not await is_data_processed(data_id, dataset_id):
+        raise IncrementalUpdateNotPossible(
+            "the document's entities have not been extracted yet (no completed cognify "
+            "run has stamped it)",
+            RefusalReason.NO_BASELINE,
+        )
+
+
+async def _require_chunk_writers_completed(
+    delete_data: dict, data_id: UUID, dataset_id: UUID
+) -> None:
+    """Refuse a baseline whose chunks were written by a run that never finished them.
+
+    The indexing pipeline stores a document's chunks in a run of its own
+    (SDK-397). A run killed mid-way leaves a partial chunk set; one that ended
+    in an error rolls back per item, so it keeps the documents it completed.
+    Completion is therefore checked per document: a writer run that did not
+    complete is accepted when it stamped this document complete, and refused
+    otherwise. Chunks that carry no run ids (older graphs, adapters without
+    run stamping) keep the previous behaviour.
+    """
+    run_ids: set[str] = set()
+    for snapshot in delete_data.values():
+        run_ids.update(getattr(snapshot, "source_run_ids", None) or [])
+    for run_id in sorted(run_ids):
+        try:
+            run_uuid = UUID(run_id)
+        except ValueError:
+            continue
+        run = await get_latest_pipeline_run(run_uuid)
+        if run is None or run.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
+            continue
+        pipeline_name = getattr(run, "pipeline_name", None)
+        if pipeline_name and await is_data_processed(data_id, dataset_id, pipeline_name):
+            continue
+        raise IncrementalUpdateNotPossible(
+            f"stored chunks were written by pipeline run {run_id}, which did not "
+            f"complete ({getattr(run.status, 'value', run.status)})",
+            RefusalReason.NO_BASELINE,
+        )
 
 
 async def recorded_chunk_budget(data_id: UUID, dataset_id: UUID, user: User) -> int | None:
@@ -325,6 +396,75 @@ def _resolve_extraction_config() -> Config:
     return {"ontology_config": {"ontology_resolver": get_default_ontology_resolver()}}
 
 
+async def _extraction_step(
+    extractor: str,
+    document: Document,
+    chunker: type[Chunker],
+    graph_model: type[BaseModel],
+    custom_prompt: str | None,
+    cognify_config,
+):
+    """The ``(batch, ctx) -> summaries`` call cognify's pipeline makes for ``extractor``.
+
+    ``llm`` is ``extract_graph_and_summarize`` as ``get_default_tasks`` runs
+    it. ``gliner_demo`` is ``extract_graph_and_summarize_with_gliner`` as
+    ``get_gliner_demo_tasks`` runs it, after the per-document schema step that
+    pipeline places before chunking (``prepare_gliner_schema`` resolves the
+    schema from the configured ontology or a sketch of the new text, and
+    stores it on the document the chunks point to). No LLM call on that path.
+    With ``COGNEE_GLINER_TRANSPORT`` set, both model calls go to the remote
+    GLiNER worker, exactly as in cognify (``ensure_extractor_runtime`` installs
+    no local runtime then, so a local fallback would fail).
+    """
+    config = _resolve_extraction_config()
+    if extractor == LLM_EXTRACTOR:
+
+        async def extract_with_llm(batch, ctx):
+            return await extract_graph_and_summarize(
+                batch,
+                graph_model=graph_model,
+                config=config,
+                custom_prompt=custom_prompt,
+                ctx=ctx,
+                summary_method=cognify_config.summary_method,
+            )
+
+        return extract_with_llm
+    if extractor != GLINER_DEMO_EXTRACTOR:
+        raise ValueError(f"Unknown extractor {extractor!r}")
+
+    from cognee.tasks.graph.gliner_demo.remote import create_remote_adapter
+    from cognee.tasks.graph.gliner_demo.schema import resolve_schema
+    from cognee.tasks.graph.gliner_demo.tasks import (
+        GlinerOptions,
+        GlinerRunStats,
+        extract_graph_and_summarize_with_gliner,
+        prepare_gliner_schema,
+    )
+
+    schema = resolve_schema(
+        ontology_resolver=(config.get("ontology_config") or {}).get("ontology_resolver")
+    )
+    remote = create_remote_adapter()
+    if remote is not None:
+        await remote.ensure_ready()
+    await prepare_gliner_schema(
+        [document],
+        schema,
+        max_chunk_size=await get_max_chunk_tokens(),
+        chunker=chunker,
+        remote=remote,
+    )
+    stats, options = GlinerRunStats(), GlinerOptions()
+
+    async def extract_with_gliner(batch, ctx):
+        return await extract_graph_and_summarize_with_gliner(
+            batch, stats=stats, options=options, config=config, ctx=ctx, remote=remote
+        )
+
+    return extract_with_gliner
+
+
 def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> DocumentChunk:
     """Rebuild a stored chunk at a new position, preserving every model field.
 
@@ -339,6 +479,7 @@ def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> Docume
         id=UUID(str(node["id"])),
         text=text,
         chunk_size=int(node.get("chunk_size", 0)),
+        chunker_id=node.get("chunker_id"),
         content_hash=node.get("content_hash") or chunk_content_hash(text),
         max_chunk_tokens=node.get("max_chunk_tokens"),
         chunk_index=chunk_index,
@@ -393,6 +534,31 @@ async def _restore_repositioned_chunks(chunks: list[DocumentChunk], _context) ->
     await vector_engine.update_payload(
         "DocumentChunk_text",
         {str(chunk.id): {"chunk_index": chunk.chunk_index} for chunk in chunks},
+    )
+
+
+UPDATE_APPLIED = "The update was applied: the document holds its new content."
+UPDATE_NOT_APPLIED = "The update was not applied: the document keeps its previous content."
+
+
+async def _remove_unreferenced_files(*versions: Data | StagedContent, update_applied: bool) -> None:
+    """Remove the stored files of ``versions`` that no ``Data`` row points at.
+
+    A version is a row as it was, or content that was staged: both name a
+    processed text file and an original (see ``remove_unreferenced_files``).
+
+    A file that cannot be removed raises ``StoredFileNotRemovedError``, and no
+    caller catches it: a stored file cognee cannot delete is never an
+    acceptable outcome. ``update_applied`` is what that error tells the caller
+    first, because by then the update may already be in effect.
+    """
+    await remove_unreferenced_files(
+        [
+            location
+            for version in versions
+            for location in (version.raw_data_location, version.original_data_location)
+        ],
+        UPDATE_APPLIED if update_applied else UPDATE_NOT_APPLIED,
     )
 
 
@@ -490,6 +656,7 @@ def _unchanged_result(reindexed: int, kept: int) -> dict:
         "deleted_chunks": 0,
         "added_chunks": 0,
         "reused_chunks": 0,
+        "redated_chunks": 0,
         "kept_chunks": kept,
         "reindexed_chunks": reindexed,
         "total_chunks": kept,
@@ -531,15 +698,20 @@ async def incremental_update(
     preferred_loaders=None,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
-    chunker: type = TextChunker,
+    *,
+    chunker: type[Chunker],
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
+    extractor: str = LLM_EXTRACTOR,
 ) -> dict:
     """Perform a chunk-level incremental update of one document.
 
     ``policy`` decides which chunks exist afterwards and what happens to the
     old ones; it is replaceable without touching storage or this orchestration.
-    ``chunker`` must match the one that built the document's stored chunks —
-    a mismatch is refused rather than discovered as a tiling failure.
+    ``chunker`` is the one ``update()`` resolved (``resolve_chunker``). It must match
+    the one that built the document's stored chunks — a mismatch is refused rather
+    than discovered as a tiling failure.
+    ``extractor`` is the resolved cognify extractor (``resolve_extractor``)
+    that fills the extract-and-summarize step for the fresh chunks.
     """
     graph_engine = await get_graph_engine()
     if not getattr(graph_engine, "supports_incremental_chunk_updates", False):
@@ -626,19 +798,41 @@ async def incremental_update(
                 "the selected graph does not store ownership provenance in-graph",
                 RefusalReason.UNSUPPORTED_BACKEND,
             )
-        return await _run_incremental_update(
-            data_id,
-            data,
-            dataset,
-            user,
-            old_data,
-            node_set,
-            preferred_loaders,
-            graph_model,
-            custom_prompt,
-            chunker,
-            policy,
-        )
+        # The staged files are stored long before the row points at them (the
+        # publish comes after extraction): claimed until the update is over, so
+        # no removal in another dataset takes them. The update's own cleanup
+        # still removes the ones it did not use.
+        async with holding_stored_files():
+            return await _run_incremental_update(
+                data_id,
+                data,
+                dataset,
+                user,
+                old_data,
+                node_set,
+                preferred_loaders,
+                graph_model,
+                custom_prompt,
+                chunker,
+                policy,
+                extractor,
+            )
+
+
+async def _record_content_in_ledger(
+    content_hash: str, bundle: dict, dataset, user: User, pipeline_run_id: UUID | None = None
+) -> None:
+    """Tell the audit ledger which content the document holds (a no-op when it is off)."""
+    await record_data_item_content(
+        PipelineContext(
+            user=user,
+            data_item=bundle["data_item"],
+            dataset=dataset,
+            pipeline_run_id=pipeline_run_id,
+            pipeline_name=PIPELINE_NAME,
+        ),
+        content_hash,
+    )
 
 
 async def _run_incremental_update(
@@ -651,8 +845,9 @@ async def _run_incremental_update(
     preferred_loaders,
     graph_model: type[BaseModel],
     custom_prompt: str | None,
-    chunker: type,
+    chunker: type[Chunker],
     policy: ChunkPolicy,
+    extractor: str,
 ) -> dict:
     """Stage → validate → (record) → write → publish.
 
@@ -664,56 +859,102 @@ async def _run_incremental_update(
     bundle = await _stage_and_plan(
         data_id, data, dataset, user, node_set, preferred_loaders, chunker, policy
     )
-
-    # A no-op with nothing to repair is the only path that writes nothing, and
-    # so the only one that records no run.
-    if bundle.get("status") == "unchanged" and not bundle.get("repairs"):
-        return {**_unchanged_result(0, bundle["stored_count"]), "pipeline_run_id": None}
-
-    pipeline_id = generate_pipeline_id(user.id, dataset.id, RUN_PIPELINE_NAME)
-    pipeline_run = await log_pipeline_run_start(
-        pipeline_id, RUN_PIPELINE_NAME, dataset.id, [data_id]
-    )
-    send_telemetry(
-        "Incremental Update Run Started",
-        user.id,
-        additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id)},
-    )
+    update_applied = False
     try:
         if bundle.get("status") == "unchanged":
-            result = await _repair_unchanged(
-                bundle, data_id, dataset, user, pipeline_run.pipeline_run_id
-            )
-        else:
-            result = await _write_and_publish(
-                bundle,
-                data_id,
-                dataset,
-                user,
-                node_set,
-                graph_model,
-                custom_prompt,
-                pipeline_run.pipeline_run_id,
-            )
-    except Exception as error:
-        await log_pipeline_run_error(
-            pipeline_run.pipeline_run_id,
-            pipeline_id,
-            RUN_PIPELINE_NAME,
-            dataset.id,
-            [data_id],
-            error,
+            # The document already holds this content. The audit ledger is told so
+            # as well: an earlier update may have published it and then failed to
+            # record it, and this is the retry that completes it. A no-op when the
+            # ledger is off or already says so.
+            await _record_content_in_ledger(bundle["data_item"].content_hash, bundle, dataset, user)
+
+        # A no-op with nothing to repair is the only path that writes nothing, and
+        # so the only one that records no run.
+        if bundle.get("status") == "unchanged" and not bundle.get("repairs"):
+            return {**_unchanged_result(0, bundle["stored_count"]), "pipeline_run_id": None}
+
+        pipeline_id = generate_pipeline_id(user.id, dataset.id, RUN_PIPELINE_NAME)
+        pipeline_run = await log_pipeline_run_start(pipeline_id, RUN_PIPELINE_NAME, dataset.id)
+        send_telemetry(
+            "Incremental Update Run Started",
+            user,
+            additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id)},
         )
-        raise
-    await log_pipeline_run_complete(
-        pipeline_run.pipeline_run_id, pipeline_id, RUN_PIPELINE_NAME, dataset.id, result
-    )
-    send_telemetry(
-        "Incremental Update Run Completed",
-        user.id,
-        additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id), **result},
-    )
-    return {**result, "pipeline_run_id": pipeline_run.pipeline_run_id}
+        with parent_run_scope(pipeline_run.pipeline_run_id):
+            try:
+                if bundle.get("status") == "unchanged":
+                    result = await _repair_unchanged(
+                        bundle, data_id, dataset, user, pipeline_run.pipeline_run_id
+                    )
+                else:
+                    result = await _write_and_publish(
+                        bundle,
+                        data_id,
+                        dataset,
+                        user,
+                        node_set,
+                        graph_model,
+                        custom_prompt,
+                        pipeline_run.pipeline_run_id,
+                        chunker=chunker,
+                        extractor=extractor,
+                    )
+                    update_applied = True  # the publish is the last step of the write
+                    # An edit can remove the fact a user chose, or restate it under another
+                    # relationship; its decision must not outlive it. Read once the new
+                    # chunks' facts are written, so a fact the edit kept is still found.
+                    await retire_decisions_after_edit(dataset, user)
+                    # The audit ledger versions the data item on its new content hash
+                    # last, once the row holds it and the edit's decisions are retired:
+                    # a publish that fails must not leave the ledger recording an update
+                    # that did not happen. If this write fails the update raises with the
+                    # edit complete, and running it again records it (the unchanged
+                    # branch above), which is all that is left to do: that branch does
+                    # not retire decisions, so retiring them must not wait on the ledger.
+                    await _record_content_in_ledger(
+                        bundle["staged"].content_hash,
+                        bundle,
+                        dataset,
+                        user,
+                        pipeline_run.pipeline_run_id,
+                    )
+            except Exception as error:
+                await log_pipeline_run_error(
+                    pipeline_run.pipeline_run_id,
+                    pipeline_id,
+                    RUN_PIPELINE_NAME,
+                    dataset.id,
+                    error,
+                )
+                raise
+            await log_pipeline_run_complete(
+                pipeline_run.pipeline_run_id, pipeline_id, RUN_PIPELINE_NAME, dataset.id
+            )
+        send_telemetry(
+            "Incremental Update Run Completed",
+            user,
+            additional_properties={
+                "dataset_id": str(dataset.id),
+                "data_id": str(data_id),
+                **result,
+            },
+        )
+        return {**result, "pipeline_run_id": pipeline_run.pipeline_run_id}
+    finally:
+        # The update is over, published or not. A stored file that no row points
+        # at now is removed: the version the row left when it published, or
+        # the content staged for an update that did not publish (unchanged,
+        # failed). Left on disk, either would outlive forget(), which only
+        # removes the files a row points at.
+        #
+        # Deliberately not caught. A removal that fails raises from here even
+        # after a publish, and the error says which it is: the update was
+        # applied and an old file is left, or it was not and a staged file is
+        # left (after a failed write, that error stays in the chain). Returning
+        # success with a file still on disk would be the worse report.
+        await _remove_unreferenced_files(
+            bundle["data_item"], bundle["staged"], update_applied=update_applied
+        )
 
 
 async def _stage_and_plan(
@@ -723,7 +964,7 @@ async def _stage_and_plan(
     user: User,
     node_set: list[str] | None,
     preferred_loaders,
-    chunker: type,
+    chunker: type[Chunker],
     policy: ChunkPolicy,
 ) -> dict:
     """Everything that can be decided WITHOUT touching live state.
@@ -750,83 +991,106 @@ async def _stage_and_plan(
 
     old_text = await _read_processed_text(old_data.raw_data_location)
     stored_chunks = await _get_stored_chunks(data_id)
-    await _require_chunk_scoped_ownership(stored_chunks, dataset_id, data_id)
+    delete_data = await _require_chunk_scoped_ownership(stored_chunks, dataset_id, data_id)
     _require_stored_chunks_tile(stored_chunks, old_text)
+    await _require_chunk_writers_completed(delete_data, data_id, dataset_id)
+    await _require_extraction_completed(data_id, dataset_id)
 
     # Stage the new content through ingestion's own loader machinery. The Data
     # row is NOT written: readers keep resolving the old version until publish.
     staged = await _stage_new_content(data, preferred_loaders)
-    new_text = await _read_processed_text(staged.raw_data_location)
-    content_unchanged = staged.content_hash == old_data.content_hash and new_text == old_text
-
-    changed_metadata = _changed_staged_metadata(old_data, staged)
-    if changed_metadata:
-        raise IncrementalUpdateNotPossible(
-            f"replacement metadata changed ({', '.join(changed_metadata)})",
-            RefusalReason.UNSUPPORTED_METADATA,
-        )
-
-    document = _build_document(old_data, staged, node_set)
-
-    if content_unchanged:
-        # Same content re-submitted. Two things can still be stale, and both
-        # are reported rather than repaired here: chunk indexes left behind by
-        # a crash between an earlier delete and its renumbering, and a missing
-        # cognify-completion stamp (without which a later cognify would redo
-        # the whole document). A missing stamp counts as a repair so the
-        # self-heal keeps its reach — it is a write either way, and every write
-        # belongs under a run.
-        shifted = _misindexed_chunks(document, stored_chunks)
-        needs_stamp = not await is_data_processed(data_id, dataset_id)
-        repairs = ["indexes"] if shifted else []
-        if needs_stamp:
-            repairs.append("stamp")
-        return {
-            "status": "unchanged",
-            "repairs": repairs,
-            "data_item": old_data,
-            "shifted_chunks": shifted,
-            "stored_count": len(stored_chunks),
-        }
-
-    # Compatibility is a planning question, so answer it before planning. Every
-    # chunker cuts differently — an overlapping one's output cannot tile its
-    # input — and without this the mismatch would surface as a tiling failure,
-    # indistinguishable from a document that was never cognified.
-    stored_chunker = stored_chunker_id(stored_chunks)
-    if stored_chunker and stored_chunker != getattr(chunker, "chunker_id", ""):
-        raise IncrementalUpdateNotPossible(
-            f"document was chunked by {stored_chunker}, not {getattr(chunker, 'chunker_id', '')}",
-            RefusalReason.UNSUPPORTED_CHUNKER,
-        )
-
     try:
-        plan = await policy(
-            ChunkPlanRequest(
-                old_text=old_text,
-                new_text=new_text,
-                stored_chunks=stored_chunks,
-                document=document,
-                chunker_cls=chunker,
-                fallback_budget=await get_max_chunk_tokens(),
+        new_text = await _read_processed_text(staged.raw_data_location)
+        content_unchanged = staged.content_hash == old_data.content_hash and new_text == old_text
+
+        changed_metadata = _changed_staged_metadata(old_data, staged)
+        if changed_metadata:
+            raise IncrementalUpdateNotPossible(
+                f"replacement metadata changed ({', '.join(changed_metadata)})",
+                RefusalReason.UNSUPPORTED_METADATA,
             )
-        )
-    except IncrementalPlanError as error:
-        raise IncrementalUpdateNotPossible(str(error), RefusalReason.CHUNKS_NOT_TILING) from error
 
-    # Re-derive the document the plan describes and compare it to the text that
-    # was asked for. The policy checked its own arithmetic; this trusts none of
-    # it, and it is policy-agnostic — a policy with no notion of regions is
-    # validated by exactly the same check.
-    _validate_plan_reassembles(plan, stored_chunks, new_text)
+        document = _build_document(old_data, staged, node_set)
 
-    return {
-        "staged": staged,
-        "document": document,
-        "data_item": old_data,
-        "stored_chunks": stored_chunks,
-        "plan": plan,
-    }
+        if content_unchanged:
+            # Same content re-submitted. One thing can still be stale, and it is
+            # reported rather than repaired here: chunk indexes left behind by a
+            # crash between an earlier delete and its renumbering (a write, so it
+            # belongs under a run). The cognify stamp is proven present by the
+            # guard above.
+            shifted = _misindexed_chunks(document, stored_chunks)
+            repairs = ["indexes"] if shifted else []
+            return {
+                "status": "unchanged",
+                "staged": staged,
+                "repairs": repairs,
+                "data_item": old_data,
+                "shifted_chunks": shifted,
+                "stored_count": len(stored_chunks),
+            }
+
+        # Compatibility is a planning question, so answer it before planning. Every
+        # chunker cuts differently — an overlapping one's output cannot tile its
+        # input — and without this the mismatch would surface as a tiling failure,
+        # indistinguishable from a document that was never cognified.
+        # Any id other than this chunker's means another chunker cut part of the
+        # document. Chunks with no id were stored before chunks carried one (cognee
+        # before 1.5.4). TextChunker keeps updating those, as it always has. Every
+        # chunk any other chunker with an id cuts is stamped (``stamp_chunk``), so it
+        # did not cut them: patching them with it would leave two cuts in one document.
+        # getattr: a chunker passed per call need not subclass Chunker.
+        own_id = getattr(chunker, "chunker_id", "")
+        stored_ids = {node.get("chunker_id") or None for node in stored_chunks}
+        foreign = sorted(i for i in stored_ids if i is not None and i != own_id)
+        if foreign:
+            raise IncrementalUpdateNotPossible(
+                f"document was chunked by {', '.join(foreign)}, not {own_id}",
+                RefusalReason.UNSUPPORTED_CHUNKER,
+            )
+        if None in stored_ids and stamps_every_chunk(chunker):
+            raise IncrementalUpdateNotPossible(
+                f"document's chunks do not all carry {own_id}",
+                RefusalReason.UNSUPPORTED_CHUNKER,
+            )
+
+        try:
+            plan = await policy(
+                ChunkPlanRequest(
+                    old_text=old_text,
+                    new_text=new_text,
+                    stored_chunks=stored_chunks,
+                    document=document,
+                    chunker_cls=chunker,
+                    fallback_budget=await get_max_chunk_tokens(),
+                )
+            )
+        except IncrementalPlanError as error:
+            raise IncrementalUpdateNotPossible(
+                str(error), RefusalReason.CHUNKS_NOT_TILING
+            ) from error
+
+        # Re-derive the document the plan describes and compare it to the text that
+        # was asked for. The policy checked its own arithmetic; this trusts none of
+        # it, and it is policy-agnostic — a policy with no notion of regions is
+        # validated by exactly the same check.
+        _validate_plan_reassembles(plan, stored_chunks, new_text)
+
+        return {
+            "staged": staged,
+            "document": document,
+            "data_item": old_data,
+            "stored_chunks": stored_chunks,
+            "plan": plan,
+        }
+    except BaseException:
+        # Refused, or failed before there was a plan: no caller ever sees the
+        # staged files, so they are dropped here unless a row already uses them.
+        # Deliberately not caught: if a staged file cannot be removed, that
+        # error is raised in place of the refusal (which stays in the chain),
+        # so update() stops instead of falling back to the full rebuild.
+        # Nothing has changed yet, and the same update can be retried.
+        await _remove_unreferenced_files(staged, update_applied=False)
+        raise
 
 
 def _validate_plan_reassembles(plan: ChunkPlan, stored_chunks: list[dict], new_text: str) -> None:
@@ -867,6 +1131,57 @@ def _validate_plan_reassembles(plan: ChunkPlan, stored_chunks: list[dict], new_t
         )
 
 
+def _final_positions(plan: ChunkPlan, stored_chunks: list[dict]) -> dict[str, int]:
+    """Final chunk_index of every stored chunk that survives the edit."""
+    moved = set(plan.reused) | set(plan.kept_moves)
+    deleted = set(plan.deleted_ids)
+    positions = {**plan.reused, **plan.kept_moves}
+    for node in stored_chunks:
+        chunk_id = str(node["id"])
+        if chunk_id not in moved and chunk_id not in deleted:
+            positions[chunk_id] = int(node.get("chunk_index", -1))
+    return positions
+
+
+def _replan_temporal_hints(
+    plan: ChunkPlan, stored_chunks: list[dict]
+) -> tuple[dict[int, list[str]], list[str]]:
+    """Date hints for the new document, and the surviving chunks they re-date.
+
+    ``document_temporal_hints`` is a pure function of a document's chunk texts
+    in order, so the hints every stored chunk was extracted with are
+    recomputed from the stored text, never persisted. Running the same function
+    over the new text gives, per final position, the hints a chunk needs now.
+    A surviving chunk whose text is unchanged but whose hints differ inferred a
+    date ("27 April" → 1947-04-27) from text the edit changed; keeping its
+    subgraph would keep the old date, so it is reported for re-extraction.
+    Returns ``(new hints by final position, re-dated stored chunk ids)``.
+    """
+    old_order = sorted(stored_chunks, key=lambda node: int(node.get("chunk_index", -1)))
+    old_hints = dict(
+        zip(
+            (str(node["id"]) for node in old_order),
+            document_temporal_hints([node["text"] for node in old_order]),
+        )
+    )
+    stored_text_by_id = {str(node["id"]): node["text"] for node in stored_chunks}
+    positions = _final_positions(plan, stored_chunks)
+    placed = {chunk.chunk_index: chunk.text for chunk in plan.fresh}
+    placed.update((index, stored_text_by_id[chunk_id]) for chunk_id, index in positions.items())
+    new_hints = dict(
+        zip(
+            sorted(placed),
+            document_temporal_hints([placed[index] for index in sorted(placed)]),
+        )
+    )
+    redated = [
+        chunk_id
+        for chunk_id, index in positions.items()
+        if new_hints.get(index, []) != old_hints.get(chunk_id, [])
+    ]
+    return new_hints, redated
+
+
 async def _write_and_publish(
     bundle: dict,
     data_id: UUID,
@@ -876,6 +1191,8 @@ async def _write_and_publish(
     graph_model: type[BaseModel],
     custom_prompt: str | None,
     pipeline_run_id: UUID,
+    chunker: type[Chunker],
+    extractor: str = LLM_EXTRACTOR,
 ) -> dict:
     """The write phase, ending in the one-transaction publish.
 
@@ -909,39 +1226,59 @@ async def _write_and_publish(
     # carries every stored field across, and a field it drops is erased rather
     # than reset (adapters replace a node's whole property set on MERGE). The
     # plan names them; the writer knows how to rebuild them.
+    # Date context first: which hints every chunk needs now, and which kept
+    # chunks inferred a date from text this edit changed. Those are retired
+    # and written again like fresh content, at their final position and under
+    # their own id (identity is content-derived, and the text is unchanged).
+    # Only the LLM prompt reads the hints; GLiNER extracts a chunk the same
+    # way whatever surrounds it, so there is nothing to re-date under it.
+    if extractor == LLM_EXTRACTOR:
+        new_hints, redated_ids = _replan_temporal_hints(plan, stored_chunks)
+    else:
+        new_hints, redated_ids = {}, []
+    redated = set(redated_ids)
+    final_positions = _final_positions(plan, stored_chunks)
+    redated_chunks = [
+        _rehydrate_chunk(document, stored_by_id[chunk_id], final_positions[chunk_id])
+        for chunk_id in redated_ids
+    ]
+    to_extract = list(plan.fresh) + redated_chunks
+    for chunk in to_extract:
+        chunk._temporal_hints = new_hints.get(chunk.chunk_index, [])
     reused_chunks = [
         _rehydrate_chunk(document, stored_by_id[chunk_id], index)
         for chunk_id, index in plan.reused.items()
+        if chunk_id not in redated
     ]
 
     cognify_config = get_cognify_config()
-    # Same extraction + summarization the cognify pipeline runs, with the same
-    # ontology resolution, model, and prompt plumbing — and the same batch
-    # bound. Cognify gets its batching from the pipeline task machinery
-    # (task_config={"batch_size": ...}), which this path does not run through,
-    # so the slicing is explicit here. Unbounded, a rewrite of most of a large
-    # document becomes one oversized extraction step with no intermediate
-    # progress and a single all-or-nothing failure.
+    # Same extraction + summarization the cognify pipeline runs for this
+    # extractor, with the same ontology resolution, model, and prompt plumbing
+    # — and the same batch bound. Cognify gets its batching from the pipeline
+    # task machinery (task_config={"batch_size": ...}), which this path does
+    # not run through, so the slicing is explicit here. Unbounded, a rewrite
+    # of most of a large document becomes one oversized extraction step with
+    # no intermediate progress and a single all-or-nothing failure.
+    extract = await _extraction_step(
+        extractor, document, chunker, graph_model, custom_prompt, cognify_config
+    )
     batch_size = cognify_config.chunks_per_batch or DEFAULT_CHUNKS_PER_BATCH
-    for start in range(0, len(plan.fresh), batch_size):
-        batch = plan.fresh[start : start + batch_size]
+    # A re-dated chunk keeps its id, so its old subgraph must go BEFORE the new
+    # extraction lands — deleting afterwards would take the new one with it.
+    # A crash in between leaves a hole, which the tiling gate turns into a full
+    # rebuild on the next touch: the same self-heal every other crash here
+    # relies on.
+    if redated_ids:
+        await delete_chunks_incremental(redated_ids, dataset_id, data_id)
+    for start in range(0, len(to_extract), batch_size):
+        batch = to_extract[start : start + batch_size]
         # Match extract_chunks_from_documents: policies plan content, while
         # the writer carries document membership into graph and vector storage.
         for chunk in batch:
             chunk.belongs_to_set = document.belongs_to_set
             chunk.source_node_set = document.source_node_set
-        summaries = await extract_graph_and_summarize(
-            batch,
-            graph_model=graph_model,
-            config=_resolve_extraction_config(),
-            custom_prompt=custom_prompt,
-            ctx=context,
-        )
-        await add_data_points(
-            summaries, ctx=context, embed_triplets=cognify_config.triplet_embedding
-        )
-        if cognify_config.contradiction_detection:
-            await detect_contradictions(summaries)
+        summaries = await extract(batch, context)
+        await add_data_points(summaries, ctx=context)
     if reused_chunks:
         await _restore_repositioned_chunks(reused_chunks, context)
 
@@ -953,29 +1290,35 @@ async def _write_and_publish(
     shifted_chunks = [
         _rehydrate_chunk(document, stored_by_id[chunk_id], index)
         for chunk_id, index in plan.kept_moves.items()
+        if chunk_id not in redated
     ]
     if shifted_chunks:
         await _restore_repositioned_chunks(shifted_chunks, context)
 
     # -- PUBLISH: content + metadata + token count + stamp, atomically --------- #
-    replaced = set(plan.deleted_ids) | set(plan.reused)
+    replaced = set(plan.deleted_ids) | set(plan.reused) | redated
     surviving_tokens = sum(
         int(node.get("chunk_size", 0)) for node in stored_chunks if str(node["id"]) not in replaced
     )
-    new_tokens = sum(chunk.chunk_size for chunk in plan.fresh)
-    new_tokens += sum(int(stored_by_id[chunk_id].get("chunk_size", 0)) for chunk_id in plan.reused)
+    new_tokens = sum(chunk.chunk_size for chunk in to_extract)
+    new_tokens += sum(
+        int(stored_by_id[chunk_id].get("chunk_size", 0))
+        for chunk_id in plan.reused
+        if chunk_id not in redated
+    )
     await publish_updated_data(data_id, dataset_id, staged, surviving_tokens + new_tokens, node_set)
 
-    added_chunks = len(plan.fresh) + len(plan.reused)
+    added_chunks = len(to_extract) + len(reused_chunks)
     kept_count = len(stored_chunks) - len(replaced)
     logger.info(
         "incremental update: %d regions, kept %d chunks, deleted %d, added %d "
-        "(%d reused), reindexed %d",
+        "(%d reused, %d re-dated), reindexed %d",
         plan.regions,
         kept_count,
         len(plan.deleted_ids),
         added_chunks,
         len(reused_chunks),
+        len(redated_chunks),
         len(shifted_chunks),
     )
     return {
@@ -984,6 +1327,7 @@ async def _write_and_publish(
         "deleted_chunks": len(plan.deleted_ids),
         "added_chunks": added_chunks,
         "reused_chunks": len(reused_chunks),
+        "redated_chunks": len(redated_chunks),
         "kept_chunks": kept_count,
         "reindexed_chunks": len(shifted_chunks),
         "total_chunks": kept_count + added_chunks,

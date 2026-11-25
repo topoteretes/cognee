@@ -22,6 +22,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import (
     get_embedding_context_config,
     resolve_embedding_defaults,
 )
+from cognee.infrastructure.databases.vector.embeddings.vector_size import engine_vector_size
 from cognee.infrastructure.databases.vector.exceptions import EmbeddingDimensionMismatchError
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.modules.users.models import DatasetDatabase
@@ -64,6 +65,11 @@ async def ensure_embedding_model_matches(dataset_database: DatasetDatabase) -> N
     embedding_record = embedding_model_record()
     configured_model = embedding_record[MODEL_KEY]
     configured_dimensions = embedding_record[DIMENSIONS_KEY]
+    if configured_dimensions is None:
+        # No configured size (EMBEDDING_PROVIDER=embedding_worker without
+        # EMBEDDING_DIMENSIONS): the engine knows it from the worker.
+        configured_dimensions = await _engine_vector_size()
+        embedding_record = {**embedding_record, DIMENSIONS_KEY: configured_dimensions}
     info = dataset_database.vector_database_connection_info or {}
     stored_dimensions = info.get(DIMENSIONS_KEY)
 
@@ -91,6 +97,10 @@ async def ensure_embedding_model_matches(dataset_database: DatasetDatabase) -> N
         configured_model=configured_model,
         configured_dimensions=configured_dimensions,
     )
+
+
+async def _engine_vector_size() -> int:
+    return await engine_vector_size((await get_vector_engine_async()).embedding_engine)
 
 
 async def _record_embedding_model(dataset_database: DatasetDatabase, record: dict) -> None:

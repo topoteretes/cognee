@@ -29,6 +29,7 @@ import json
 import logging
 import mimetypes
 import re
+from collections.abc import Callable
 from typing import Any, cast
 
 import litellm
@@ -45,10 +46,9 @@ from tenacity import (
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
-    LLMPaymentRequiredError,
-    is_budget_exhausted_error,
+    raise_if_budget_exhausted,
 )
-from cognee.infrastructure.llm.retry_config import llm_retry_stop_condition
+from cognee.infrastructure.llm.retry_config import llm_retry_condition, llm_retry_stop_condition
 from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
 from cognee.infrastructure.llm.streaming.token_sink import get_active_token_sink
 from cognee.infrastructure.llm.types import TranscriptionReturnType
@@ -147,8 +147,9 @@ def _enrich_llm_span(model: str, name: str) -> None:
     try:
         from opentelemetry import trace as otel_trace  # ty:ignore[unresolved-import]
 
-        from cognee.context_global_variables import current_pipeline_stage
+        from cognee.context_global_variables import current_caller, current_pipeline_stage
         from cognee.modules.observability.tracing import (
+            COGNEE_LLM_CALLER,
             COGNEE_LLM_MODEL,
             COGNEE_LLM_PROVIDER,
             COGNEE_PIPELINE_STAGE,
@@ -161,6 +162,9 @@ def _enrich_llm_span(model: str, name: str) -> None:
             stage = current_pipeline_stage.get()
             if stage:
                 current_span.set_attribute(COGNEE_PIPELINE_STAGE, stage)
+            caller = current_caller.get()
+            if caller:
+                current_span.set_attribute(COGNEE_LLM_CALLER, caller)
     except Exception:
         logger.debug("Ignoring exception in _enrich_llm_span", exc_info=True)
 
@@ -176,7 +180,11 @@ class NativeLiteLLMAdapter:
     Instance variables:
         - model, api_key, endpoint, api_version, max_completion_tokens,
           fallback_model, fallback_api_key, fallback_endpoint, llm_args, name,
-          transcription_model, image_transcribe_model
+          transcription_model, image_transcribe_model, azure_ad_token_provider
+
+    ``azure_ad_token_provider`` authenticates the primary model to Azure OpenAI
+    with an Entra ID token instead of an API key (managed identity). It applies to
+    every call on the primary model; the content-policy fallback keeps its own key.
     """
 
     # The default framework's answer path, so this is the one that decides
@@ -189,7 +197,7 @@ class NativeLiteLLMAdapter:
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None,
         model: str,
         max_completion_tokens: int,
         name: str = "LiteLLM-Native",
@@ -201,6 +209,7 @@ class NativeLiteLLMAdapter:
         llm_args: dict[str, Any] | None = None,
         transcription_model: str | None = None,
         image_transcribe_model: str | None = None,
+        azure_ad_token_provider: Callable[[], str] | None = None,
     ) -> None:
         self.name = name
         self.model = model
@@ -217,6 +226,13 @@ class NativeLiteLLMAdapter:
         # points them at a vision model when it is not.
         self.transcription_model = transcription_model or model
         self.image_transcribe_model = image_transcribe_model or model
+        self.azure_ad_token_provider = azure_ad_token_provider
+
+    def _primary_auth_kwargs(self) -> dict[str, Any]:
+        """Credentials the primary model needs besides ``api_key``, as litellm kwargs."""
+        if self.azure_ad_token_provider is None:
+            return {}
+        return {"azure_ad_token_provider": self.azure_ad_token_provider}
 
     async def _acreate_str_output(
         self,
@@ -261,6 +277,9 @@ class NativeLiteLLMAdapter:
                 api_version=api_version,
                 **merged_kwargs,
             )
+            # litellm types acompletion() as ModelResponse | CustomStreamWrapper whatever
+            # `stream` is; a call without stream=True returns a ModelResponse.
+            response = cast(litellm.ModelResponse, response)
         if not response.choices:
             raise ValueError("litellm_native returned no choices for a plain-text completion")
         return response.choices[0].message.content or ""
@@ -294,6 +313,7 @@ class NativeLiteLLMAdapter:
                 api_version=api_version,
                 **merged_kwargs,
             )
+            response = cast(litellm.ModelResponse, response)
         raw_content = response.choices[0].message.content or "{}"
         return _attach_raw_response(response_model.model_validate_json(raw_content), response)
 
@@ -346,6 +366,7 @@ class NativeLiteLLMAdapter:
                     api_version=api_version,
                     **merged_kwargs,
                 )
+                response = cast(litellm.ModelResponse, response)
 
             raw_content = _strip_json_fence(response.choices[0].message.content or "{}")
             try:
@@ -452,17 +473,10 @@ class NativeLiteLLMAdapter:
     @retry(
         stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                # Quota/billing exhaustion is terminal (#3643); transient rate
-                # limits still retry with backoff, matching the legacy adapters.
-                LLMPaymentRequiredError,
-                # A cancelled task must propagate, not be retried.
-                asyncio.CancelledError,
-            )
-        ),
+        # The retry policy every other adapter uses: auth/not-found, cancellation,
+        # and budget and quota exhaustion (#3643) are terminal on both the plain-text
+        # and the structured path; transient rate limits still retry with backoff.
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -475,24 +489,34 @@ class NativeLiteLLMAdapter:
     ) -> BaseModel | str:
         """Return a validated instance of *response_model* (or a plain ``str``).
 
-        Auth errors and quota/budget exhaustion (surfaced as
+        Auth errors, quota exhaustion and budget exhaustion (surfaced as
         ``LLMPaymentRequiredError``) are terminal; transient errors incl. rate
         limits retry with backoff. A content-policy violation retries once on the
         fallback model before raising ``ContentPolicyFilterError``.
         """
         merged_kwargs = {**self.llm_args, **kwargs}
+        primary_kwargs = {**merged_kwargs, **self._primary_auth_kwargs()}
 
         # A plain string needs no schema — skip structured output entirely.
         if response_model is str:
-            return await self._acreate_str_output(
-                text_input,
-                system_prompt,
-                model=self.model,
-                api_key=self.api_key,
-                endpoint=self.endpoint,
-                api_version=self.api_version,
-                **merged_kwargs,
-            )
+            try:
+                text = await self._acreate_str_output(
+                    text_input,
+                    system_prompt,
+                    model=self.model,
+                    api_key=self.api_key,
+                    endpoint=self.endpoint,
+                    api_version=self.api_version,
+                    **primary_kwargs,
+                )
+                _enrich_llm_span(self.model, self.name)
+                return text
+            except Exception as error:
+                # A budget error on the plain-text path must also surface as
+                # LLMPaymentRequiredError (terminal, not retried), same as the
+                # structured path below (#6185).
+                raise_if_budget_exhausted(error)
+                raise
 
         structured_model = cast(type[BaseModel], response_model)
         try:
@@ -504,7 +528,7 @@ class NativeLiteLLMAdapter:
                 api_key=self.api_key,
                 endpoint=self.endpoint,
                 api_version=self.api_version,
-                **merged_kwargs,
+                **primary_kwargs,
             )
             _enrich_llm_span(self.model, self.name)
             return result
@@ -523,7 +547,7 @@ class NativeLiteLLMAdapter:
                 self.fallback_model,
             )
             try:
-                return await self._acreate_structured(
+                result = await self._acreate_structured(
                     text_input,
                     system_prompt,
                     structured_model,
@@ -533,6 +557,8 @@ class NativeLiteLLMAdapter:
                     api_version=self.api_version,
                     **merged_kwargs,
                 )
+                _enrich_llm_span(self.fallback_model, self.name)
+                return result
             except ContentPolicyViolationError as fallback_error:
                 raise ContentPolicyFilterError(
                     "The provided input contains content that is not aligned "
@@ -542,8 +568,7 @@ class NativeLiteLLMAdapter:
         except Exception as error:
             # Surface quota/budget exhaustion as an actionable, non-retryable
             # error, matching the legacy adapters.
-            if is_budget_exhausted_error(error):
-                raise LLMPaymentRequiredError() from error
+            raise_if_budget_exhausted(error)
             raise
 
     @observe(as_type="transcription")
@@ -575,6 +600,7 @@ class NativeLiteLLMAdapter:
                 api_base=self.endpoint,
                 api_version=self.api_version,
                 max_retries=self.MAX_RETRIES,
+                **self._primary_auth_kwargs(),
                 **kwargs,
             )
 
@@ -618,7 +644,7 @@ class NativeLiteLLMAdapter:
             raise ValueError(
                 f"Could not determine MIME type for image file: {input}. Is the extension correct?"
             )
-        response: litellm.ModelResponse = await litellm.acompletion(
+        response = await litellm.acompletion(
             model=self.image_transcribe_model,
             messages=[
                 {
@@ -640,5 +666,6 @@ class NativeLiteLLMAdapter:
             # drop_params ignores reasoning_effort on models that don't support it.
             reasoning_effort=reasoning_effort,
             drop_params=True,
+            **self._primary_auth_kwargs(),
         )
-        return response
+        return cast(litellm.ModelResponse, response)

@@ -1,4 +1,4 @@
-"""Engine-agnostic SQL cache adapter (Postgres via asyncpg, SQLite via aiosqlite)."""
+"""Engine-agnostic SQL cache adapter (Postgres via asyncpg, SQLite via aiosqlite, Turso via pyturso)."""
 
 import asyncio
 import json
@@ -33,11 +33,17 @@ from cognee.infrastructure.databases.exceptions.exceptions import (
     SessionQAEntryValidationError,
     SharedLadybugLockRequiresRedisError,
 )
+from cognee.infrastructure.databases.postgres.deadlock import is_deadlock
 from cognee.infrastructure.databases.relational import get_relational_config
+from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+    DEFAULT_POOL_TIMEOUT,
+)
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 
 from .tables import (
+    CAPTURE_RECEIPT_RETENTION_DAYS,
+    cache_capture_receipts,
     cache_kv,
     cache_metadata,
     cache_qa_entries,
@@ -64,21 +70,10 @@ _PURGE_LOCK_ID = int.from_bytes(sha256(b"cognee_cache_ttl_sweep").digest()[:8], 
 # and 1.0 of the TTL after the session's last write.
 _TTL_REFRESH_FRACTION = 0.05
 
+# Ids per IN list in a batch delete, under every backend's bind-parameter cap.
+_IDS_PER_STATEMENT = 500
 
-def _is_deadlock_error(error: Exception) -> bool:
-    """Best-effort detection of a Postgres deadlock without importing asyncpg."""
-    if not isinstance(error, DBAPIError):
-        return False
-    orig = getattr(error, "orig", None)
-    seen = set()
-    while orig is not None and id(orig) not in seen:
-        seen.add(id(orig))
-        if type(orig).__name__ == "DeadlockDetectedError":
-            return True
-        if getattr(orig, "sqlstate", None) == "40P01":
-            return True
-        orig = getattr(orig, "__cause__", None)
-    return "deadlock detected" in str(error).lower()
+_SESSION_TABLES = (cache_qa_entries, cache_trace_entries, cache_session_context)
 
 
 class _SqlAdvisoryLockHandle:
@@ -110,9 +105,10 @@ class _SqlAdvisoryLockHandle:
 class SqlCacheAdapter(CacheDBInterface):
     """SQL-backed cache adapter for session QA, trace, usage-log, and KV storage.
 
-    Runs on any SQLAlchemy async URL — production Postgres (``postgresql+asyncpg``)
-    and serverless SQLite (``sqlite+aiosqlite``) share the same code paths; Postgres
-    extras (``FOR UPDATE``, advisory locks) degrade gracefully on SQLite.
+    Runs on any SQLAlchemy async URL — production Postgres (``postgresql+asyncpg``),
+    serverless SQLite (``sqlite+aiosqlite``) and the Turso rewrite engine
+    (``sqlite+cognee_turso``) share the same code paths; Postgres extras
+    (``FOR UPDATE``, advisory locks) degrade gracefully on the SQLite-family engines.
 
     Note: the factory caches one adapter per ``lock_key`` (Ladybug per-db lock_key
     instantiation pattern), so several instances may share one database.
@@ -142,6 +138,15 @@ class SqlCacheAdapter(CacheDBInterface):
             self._is_postgres = url.get_backend_name() == "postgresql"
 
             is_sqlite = url.get_backend_name() == "sqlite"
+            # Turso uses the sqlite dialect through cognee's own driver; it needs its
+            # PRAGMAs and connect args. The journal mode is pinned to wal: a cache
+            # write that hit an mvcc write-write conflict would be lost, not retried.
+            is_turso = url.get_driver_name() == "cognee_turso"
+            turso_config = None
+            if is_turso:
+                from cognee.infrastructure.databases.turso import get_turso_config
+
+                turso_config = get_turso_config().wal_only()
 
             relational_config = get_relational_config()
             pool_args: dict = (
@@ -152,11 +157,19 @@ class SqlCacheAdapter(CacheDBInterface):
             # same value must work here — SQLAlchemy itself needs the class.
             if pool_args.get("poolclass", "").lower() == "nullpool":
                 pool_args["poolclass"] = NullPool
+            elif not is_sqlite:
+                # The Postgres cache waits for a pooled connection as long as cognee's
+                # other Postgres pools do.
+                pool_args.setdefault("pool_timeout", DEFAULT_POOL_TIMEOUT)
             if is_sqlite:
                 # Concurrency tuning: wait out writer locks instead of failing
                 # with SQLITE_BUSY when several processes share one cache.db.
                 connect_args = dict(pool_args.pop("connect_args", None) or {})
                 connect_args.setdefault("timeout", 30)
+                if is_turso:
+                    from cognee.infrastructure.databases.turso import connect_args_for_mode
+
+                    connect_args.update(connect_args_for_mode(turso_config))
                 pool_args["connect_args"] = connect_args
 
             self.engine = create_async_engine(
@@ -164,7 +177,11 @@ class SqlCacheAdapter(CacheDBInterface):
                 json_serializer=lambda obj: json.dumps(obj, cls=JSONEncoder),
                 **pool_args,
             )
-            if is_sqlite:
+            if is_turso:
+                from cognee.infrastructure.databases.turso import configure_engine
+
+                configure_engine(self.engine, config=turso_config)
+            elif is_sqlite:
 
                 @event.listens_for(self.engine.sync_engine, "connect")
                 def _set_sqlite_pragmas(dbapi_connection, connection_record):
@@ -177,7 +194,8 @@ class SqlCacheAdapter(CacheDBInterface):
         except ModuleNotFoundError as error:
             raise CacheConnectionError(
                 "SQL cache backend driver is not installed "
-                "(CACHE_BACKEND=postgres requires cognee[postgres]): " + str(error)
+                "(CACHE_BACKEND=postgres requires cognee[postgres], "
+                "CACHE_BACKEND=turso requires cognee[turso]): " + str(error)
             ) from error
         except Exception as error:
             raise CacheConnectionError(
@@ -203,6 +221,12 @@ class SqlCacheAdapter(CacheDBInterface):
             try:
                 async with self.engine.begin() as connection:
                     await connection.run_sync(cache_metadata.create_all, checkfirst=True)
+                    # create_all skips indexes for pre-existing tables. Upgrade
+                    # installations that already have capture receipts as well.
+                    for index in cache_capture_receipts.indexes:
+                        await connection.run_sync(
+                            lambda conn, idx=index: idx.create(conn, checkfirst=True)
+                        )
             except Exception as error:
                 error_msg = f"Failed to connect to SQL cache database: {error}"
                 logger.error(error_msg)
@@ -325,6 +349,13 @@ class SqlCacheAdapter(CacheDBInterface):
                             table.c.expires_at.isnot(None), table.c.expires_at <= cutoff
                         )
                     )
+                await session.execute(
+                    delete(cache_capture_receipts).where(
+                        cache_capture_receipts.c.created_at
+                        < cutoff - timedelta(days=CAPTURE_RECEIPT_RETENTION_DAYS),
+                        cache_capture_receipts.c.index_lease_until <= time.time(),
+                    )
+                )
         except Exception as error:
             logger.debug(
                 "SQL cache TTL sweep failed (will retry next interval): %s", error, exc_info=True
@@ -341,14 +372,17 @@ class SqlCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        time: str | None = None,
+        prompt_time: str | None = None,
     ) -> dict:
         """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
-            time=datetime.now(timezone.utc).isoformat(),
+            time=time or datetime.now(timezone.utc).isoformat(),
             question=question,
             context=context,
             answer=answer,
             qa_id=qa_id or str(uuid.uuid4()),
+            prompt_time=prompt_time or "",
             feedback_text=feedback_text,
             feedback_score=feedback_score,
             used_graph_element_ids=used_graph_element_ids,
@@ -368,6 +402,7 @@ class SqlCacheAdapter(CacheDBInterface):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        time: str | None = None,
     ) -> dict:
         """Serialize one agent-trace step into the normalized cache payload shape."""
         entry = SessionAgentTraceEntry(
@@ -380,6 +415,7 @@ class SqlCacheAdapter(CacheDBInterface):
             method_return_value=method_return_value,
             error_message=error_message,
             session_feedback=session_feedback,
+            time=time or datetime.now(timezone.utc).isoformat(),
         )
         return entry.model_dump()
 
@@ -516,6 +552,8 @@ class SqlCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        time: str | None = None,
+        prompt_time: str | None = None,
     ) -> None:
         """Append one QA entry to the session. Creates the session if it doesn't exist."""
         await self._ensure_initialized()
@@ -530,6 +568,8 @@ class SqlCacheAdapter(CacheDBInterface):
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
                 used_session_context_ids=used_session_context_ids,
+                time=time,
+                prompt_time=prompt_time,
             )
             async with self.sessionmaker() as session, session.begin():
                 await self._lock_session_writes(session, cache_qa_entries, user_id, session_id)
@@ -540,6 +580,9 @@ class SqlCacheAdapter(CacheDBInterface):
                         session_id=session_id,
                         qa_id=qa_entry["qa_id"],
                         payload=qa_entry,
+                        # The same instant as the payload's ``time``, so a time filter
+                        # on the column agrees with one on the payload.
+                        created_at=datetime.fromisoformat(qa_entry["time"]),
                         expires_at=self._session_expiry(),
                     )
                 )
@@ -587,6 +630,36 @@ class SqlCacheAdapter(CacheDBInterface):
                     .order_by(cache_qa_entries.c.seq.asc())
                 )
                 rows = result.scalars().all()
+            return [SessionQAEntry.model_validate(payload) for payload in rows]
+        except Exception as error:
+            error_msg = f"Unexpected error while reading Q&A from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
+    async def get_qa_entries_since(
+        self, user_id: str, session_id: str, since: datetime, lead_in: int = 0
+    ) -> list[SessionQAEntry]:
+        """Filter on the ``created_at`` column, so only the wanted rows are read."""
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session:
+                scoped = select(cache_qa_entries.c.payload).where(
+                    self._session_filter(cache_qa_entries, user_id, session_id),
+                    self._not_expired(cache_qa_entries),
+                )
+                result = await session.execute(
+                    scoped.where(cache_qa_entries.c.created_at >= since).order_by(
+                        cache_qa_entries.c.seq.asc()
+                    )
+                )
+                rows = list(result.scalars().all())
+                if lead_in:
+                    result = await session.execute(
+                        scoped.where(cache_qa_entries.c.created_at < since)
+                        .order_by(cache_qa_entries.c.seq.desc())
+                        .limit(lead_in)
+                    )
+                    rows = list(reversed(result.scalars().all())) + rows
             return [SessionQAEntry.model_validate(payload) for payload in rows]
         except Exception as error:
             error_msg = f"Unexpected error while reading Q&A from SQL cache: {error}"
@@ -654,7 +727,7 @@ class SqlCacheAdapter(CacheDBInterface):
                     return True
             except DBAPIError as error:
                 attempt += 1
-                if _is_deadlock_error(error) and attempt < _DEADLOCK_ATTEMPTS:
+                if is_deadlock(error) and attempt < _DEADLOCK_ATTEMPTS:
                     await asyncio.sleep(0.05 * (2**attempt))
                     continue
                 raise
@@ -769,6 +842,63 @@ class SqlCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 
+    async def delete_sessions(self, sessions: list[tuple[str, str]]) -> list[bool]:
+        """Delete many sessions whole, one transaction per chunk of an owner's sessions.
+
+        Each chunk takes the same per-session write locks as ``delete_session``,
+        in table order and then session order, so it never cycles with another
+        writer. A session existed if any of its rows was still live.
+        """
+        await self._ensure_initialized()
+        owners: dict[str, list[str]] = {}
+        for user_id, session_id in dict.fromkeys(sessions):
+            owners.setdefault(user_id, []).append(session_id)
+        existed: set[tuple[str, str]] = set()
+        try:
+            for user_id, session_ids in owners.items():
+                session_ids.sort()
+                for start in range(0, len(session_ids), _IDS_PER_STATEMENT):
+                    chunk = session_ids[start : start + _IDS_PER_STATEMENT]
+                    async with self.sessionmaker() as session, session.begin():
+                        for table in _SESSION_TABLES:
+                            for session_id in chunk:
+                                await self._lock_session_writes(session, table, user_id, session_id)
+                        now = self._now()
+                        for table in _SESSION_TABLES:
+                            scope = (table.c.user_id == user_id) & table.c.session_id.in_(chunk)
+                            live = await session.execute(
+                                select(table.c.session_id)
+                                .where(
+                                    scope,
+                                    or_(table.c.expires_at.is_(None), table.c.expires_at > now),
+                                )
+                                .distinct()
+                            )
+                            existed.update((user_id, session_id) for session_id in live.scalars())
+                            await session.execute(delete(table).where(scope))
+        except Exception as error:
+            error_msg = f"Unexpected error while deleting sessions from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+        return [pair in existed for pair in sessions]
+
+    async def list_session_ids(self, user_id: str) -> list[str]:
+        """Every session id with QA, trace or session-context rows for the user."""
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session:
+                session_ids: set[str] = set()
+                for table in (cache_qa_entries, cache_trace_entries, cache_session_context):
+                    rows = await session.execute(
+                        select(table.c.session_id).where(table.c.user_id == user_id).distinct()
+                    )
+                    session_ids.update(rows.scalars())
+                return list(session_ids)
+        except Exception as error:
+            error_msg = f"Unexpected error while listing sessions from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
     # --------------------------------------------------------------------- #
     # Agent traces
     # --------------------------------------------------------------------- #
@@ -786,6 +916,7 @@ class SqlCacheAdapter(CacheDBInterface):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        time: str | None = None,
     ) -> None:
         """Append one trace step to the stored trace list for this session."""
         await self._ensure_initialized()
@@ -800,6 +931,7 @@ class SqlCacheAdapter(CacheDBInterface):
                 method_return_value=method_return_value,
                 error_message=error_message,
                 session_feedback=session_feedback,
+                time=time,
             )
             async with self.sessionmaker() as session, session.begin():
                 await self._lock_session_writes(session, cache_trace_entries, user_id, session_id)
@@ -820,7 +952,12 @@ class SqlCacheAdapter(CacheDBInterface):
         await self._maybe_purge_expired()
 
     async def get_agent_trace_session(
-        self, user_id: str, session_id: str, last_n: int | None = None
+        self,
+        user_id: str,
+        session_id: str,
+        last_n: int | None = None,
+        start: int | None = None,
+        end: int | None = None,
     ) -> list[SessionAgentTraceEntry]:
         """Retrieve stored trace steps for the given session (reads don't refresh TTL)."""
         await self._ensure_initialized()
@@ -835,6 +972,13 @@ class SqlCacheAdapter(CacheDBInterface):
                         query.order_by(cache_trace_entries.c.seq.desc()).limit(last_n)
                     )
                     rows = list(reversed(result.scalars().all()))
+                elif start is not None:
+                    result = await session.execute(
+                        query.order_by(cache_trace_entries.c.seq.asc())
+                        .offset(start)
+                        .limit(end - start)
+                    )
+                    rows = result.scalars().all()
                 else:
                     result = await session.execute(query.order_by(cache_trace_entries.c.seq.asc()))
                     rows = result.scalars().all()
@@ -988,7 +1132,7 @@ class SqlCacheAdapter(CacheDBInterface):
                     return True
             except DBAPIError as error:
                 attempt += 1
-                if _is_deadlock_error(error) and attempt < _DEADLOCK_ATTEMPTS:
+                if is_deadlock(error) and attempt < _DEADLOCK_ATTEMPTS:
                     await asyncio.sleep(0.05 * (2**attempt))
                     continue
                 error_msg = f"Unexpected error while updating session context in SQL cache: {error}"
@@ -1189,19 +1333,45 @@ class SqlCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 
+    async def delete_values(self, keys: list[str]) -> None:
+        """Delete the values stored under the given keys, in one transaction."""
+        if not keys:
+            return
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session, session.begin():
+                for start in range(0, len(keys), _IDS_PER_STATEMENT):
+                    chunk = keys[start : start + _IDS_PER_STATEMENT]
+                    await session.execute(delete(cache_kv).where(cache_kv.c.key.in_(chunk)))
+        except Exception as error:
+            error_msg = f"Unexpected error while deleting key/values from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
     # --------------------------------------------------------------------- #
     # Maintenance
     # --------------------------------------------------------------------- #
 
+    async def delete_capture_receipts_for_user(self, user_id) -> None:
+        """Remove receipt metadata on account deletion, including standalone caches."""
+        await self._ensure_initialized()
+        async with self.sessionmaker() as session, session.begin():
+            await session.execute(
+                delete(cache_capture_receipts).where(
+                    cache_capture_receipts.c.user_id == str(user_id)
+                )
+            )
+
     async def prune(self) -> None:
         """
-        Empty the cache. Scoped to the four cognee cache tables only — a deliberate,
+        Empty the cache. Scoped to the cognee cache tables only — a deliberate,
         safer divergence from Redis FLUSHDB (which nukes co-tenant keys).
         """
         await self._ensure_initialized()
         try:
             async with self.sessionmaker() as session, session.begin():
                 for table in (
+                    cache_capture_receipts,
                     cache_qa_entries,
                     cache_trace_entries,
                     cache_session_context,

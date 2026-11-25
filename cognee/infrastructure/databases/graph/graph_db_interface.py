@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from typing import Any
 from uuid import UUID
 
@@ -15,6 +15,7 @@ from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
     NodeDeleteData,
+    data_source_ref_key_selector,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger
@@ -31,13 +32,114 @@ Node = tuple[str, NodeData]  # (node_id, properties)
 
 _warned_degree_fallbacks: set[type] = set()
 _warned_neighborhood_fallbacks: set[type] = set()
+_warned_graph_counts_fallbacks: set[type] = set()
+_warned_data_source_ref_fallbacks: set[type] = set()
+_warned_edge_text_fallbacks: set[type] = set()
+
+
+def timestamp_overlaps(node: dict, start: int | None, end: int | None) -> bool:
+    """Whether a Timestamp node's period ``[time_at, time_until)`` meets ``[start, end)``.
+
+    ``time_until`` defaults to one second after ``time_at`` for nodes written
+    before the field existed.
+    """
+    try:
+        time_at = int(node["time_at"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    time_until = node.get("time_until")
+    time_until = int(time_until) if time_until not in (None, "") else time_at + 1000
+    return (end is None or time_at < end) and (start is None or time_until > start)
+
+
+def empty_temporal_anchors() -> dict:
+    return {
+        "timestamp_ids": set(),
+        "chunk_ids": set(),
+        "entity_ids": set(),
+        "chunk_timestamps": {},
+    }
+
+
+def temporal_anchors_from_rows(
+    direct_rows: Iterable[tuple[str, str]],
+    via_rows: Iterable[tuple[str, str, str]],
+    chunk_ids: Iterable[str],
+) -> dict[str, set[str]]:
+    """Assemble ``get_temporal_anchors``' result from the two row shapes the
+    adapters produce: ``(candidate_id, timestamp_id)`` for an edge straight into a
+    matching timestamp, and ``(chunk_id, entity_id, timestamp_id)`` for a candidate
+    chunk that ``contains`` an entity with such an edge. A directly anchored
+    candidate is a chunk when the caller passed it as one (``chunk_ids``), not by
+    its node type: DLT rows are chunks of their own graph type (``DltRow``).
+
+    ``chunk_timestamps`` maps each anchored chunk to the matching timestamp ids
+    it reached, directly or through an entity. The retriever ranks anchored
+    chunks by how tightly the best of those timestamps fits the window: a chunk
+    dated "1965-03-18" is about that day, a chunk that says "1965" merely
+    overlaps it."""
+    chunk_set = {str(node_id) for node_id in chunk_ids}
+    anchors = empty_temporal_anchors()
+    for candidate_id, timestamp_id in direct_rows:
+        anchors["timestamp_ids"].add(str(timestamp_id))
+        if str(candidate_id) in chunk_set:
+            anchors["chunk_ids"].add(str(candidate_id))
+            anchors["chunk_timestamps"].setdefault(str(candidate_id), set()).add(str(timestamp_id))
+        else:
+            anchors["entity_ids"].add(str(candidate_id))
+    for chunk_id, entity_id, timestamp_id in via_rows:
+        anchors["timestamp_ids"].add(str(timestamp_id))
+        anchors["chunk_ids"].add(str(chunk_id))
+        anchors["chunk_timestamps"].setdefault(str(chunk_id), set()).add(str(timestamp_id))
+        anchors["entity_ids"].add(str(entity_id))
+    return anchors
 
 
 class GraphDBInterface(ABC):
     """
     Interface every graph backend implements (Ladybug/Kuzu, Neo4j, Neptune, Turso, Postgres demo).
 
-    Get an instance with ``get_graph_engine()``; never construct adapters directly.
+    Cognify's ``add_data_points``, the retrievers, ``improve()`` stages, ``forget()`` and
+    the graph view all talk to the engine through these methods, so a backend's graph code
+    lives in its adapter and one that satisfies the contract below plugs into the
+    remember → recall flow (with access control on, it also needs the dataset-database
+    handler described at the end). Get an instance with ``get_graph_engine()``;
+    never construct adapters directly. A community backend is registered with
+    ``use_graph_adapter(provider_name, AdapterClass)`` and selected by
+    ``GRAPH_DATABASE_PROVIDER``; ``get_graph_engine`` then constructs it with the
+    ``graph_database_url`` / ``_username`` / ``_password`` / ``_port`` / ``_key`` and
+    ``database_name`` keyword arguments.
+
+    What an adapter provides, in layers:
+
+    * **Required** (``@abstractmethod``): node and edge upserts, node and whole-graph
+      deletes, reads by id, edge checks, whole-graph, neighbourhood, node-set and
+      filtered reads, metrics, and raw ``query()``.
+    * **Inherited defaults** that work on any adapter but read more than they need
+      (``get_top_degree_node_ids``, ``iter_bounded_neighborhood``,
+      ``get_entity_type_names``, ``get_graph_counts``, ``get_timestamps_in_range``,
+      ``get_temporal_anchors``): override them with native queries to keep graph views,
+      graph summaries and ``TEMPORAL`` search bounded on large graphs.
+    * **Optional capabilities** whose defaults raise; callers check for them and take
+      another path, so leaving them out narrows features but never breaks ingestion:
+
+      - Graph provenance (``set_graph_metadata`` / ``get_graph_metadata`` plus the
+        ``attach_*`` / ``remove_*`` / ``find_*`` source-ref methods,
+        ``get_*_delete_data`` and ``delete_edge_triples``): ``add_data_points`` marks an
+        empty graph through ``set_graph_metadata``, and a marked graph keeps document
+        ownership in the graph itself, which ``forget()`` and failed-run rollback use to
+        remove one document's nodes and edges. Where these raise
+        ``UnsupportedProvenanceCapability`` the graph is never marked and ownership is
+        tracked in the relational ledger instead.
+      - Feedback weights and truth state (``get_/set_node_feedback_weights``,
+        ``get_/set_edge_feedback_weights``, ``get_/set_node_truth_state``): the
+        ``improve()`` loop probes once per run whether the adapter overrides the
+        setters and truth-state methods (or declares ``supports_feedback_weights`` /
+        ``supports_truth_state``) and skips the stages that need them with
+        ``backend_unsupported`` when it does not.
+      - ``update_chunk_index`` (chunk-level ``update()``), ``update_node`` (user
+        preference patching) and ``remove_belongs_to_set_tags`` (node-set cleanup on
+        delete; the default is a no-op).
 
     Contract shared by all adapters:
 
@@ -57,11 +159,23 @@ class GraphDBInterface(ABC):
       graph source-refs in the same statement so ``forget()`` can delete or roll back by
       document; see ``cognee.infrastructure.databases.provenance``.
 
-    Capability flags (class attributes, checked by callers on the engine instance):
-    ``supports_cypher_queries``, ``supports_per_row_source_refs``,
-    ``supports_incremental_chunk_updates``. A new backend also needs a
-    ``DatasetDatabaseHandlerInterface`` registration to work with
-    ``ENABLE_BACKEND_ACCESS_CONTROL`` (see ``dataset_database_handler/``).
+    Capability flags (class attributes, read by callers on the engine instance they
+    already hold, so no optional backend package is imported to check them):
+
+    * ``supports_cypher_queries`` (default True): ``CYPHER`` and ``NATURAL_LANGUAGE``
+      search raise ``SearchTypeNotSupported`` when False.
+    * ``supports_per_row_source_refs`` (default False): when True and the graph is
+      provenance-marked, ``add_data_points`` passes ``add_nodes`` / ``add_edges`` one
+      mapping of row → owner key and writes a batch in a single call; otherwise it makes
+      one call per owner key.
+    * ``supports_incremental_chunk_updates`` (default False): chunk-level ``update()``
+      requires this to be True, along with a provenance-marked graph and a vector store
+      that supports payload updates; when any is missing it rebuilds the whole document.
+      Declare it only with a working ``update_chunk_index``.
+
+    A new backend also needs a ``DatasetDatabaseHandlerInterface`` registration (see
+    ``dataset_database_handler/``) to give each dataset its own database; without one,
+    cognee raises while ``ENABLE_BACKEND_ACCESS_CONTROL`` is on (its default).
     """
 
     # Whether this backend executes raw Cypher through ``query()``. Declared on
@@ -127,6 +241,8 @@ class GraphDBInterface(ABC):
         nodes: list[Node] | list[DataPoint],
         source_ref_key: str | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """
         Add multiple nodes to the graph in a single operation.
@@ -139,10 +255,17 @@ class GraphDBInterface(ABC):
 
             - nodes (Union[List[Node], List[DataPoint]]): A list of Node objects or DataPoint objects to be added to the graph.
             - source_ref_key (Optional[str]): Graph provenance source ref to stamp
-              atomically as part of this write. Backends that support graph-provenance
-              provenance fold it into the same statement; others may ignore it. (default None)
+              atomically as part of this write. Backends that support graph provenance
+              fold it into the same statement, so no node is written without its owner;
+              others may ignore it. Adapters declaring ``supports_per_row_source_refs``
+              also receive a mapping of node id -> ref key here. (default None)
             - pipeline_run_id (Optional[str]): Run id recorded with the provenance stamp so
               the write is rollbackable by run. Ignored when source_ref_key is None. (default None)
+            - replace (bool): When True, every node that already exists is stored with the
+              incoming properties, even where the adapter would otherwise keep the stored
+              node. An adapter that always replaces may ignore it, but must accept it:
+              entity consolidation and the consolidate_entity_descriptions pipeline pass
+              it, and fail with TypeError on an adapter that does not. (default False)
         """
         raise NotImplementedError
 
@@ -191,8 +314,9 @@ class GraphDBInterface(ABC):
         membership in one dataset without disturbing unrelated nodes that
         legitimately still carry the tag.
 
-        Default no-op; only Neo4j overrides this today. Other
-        list-property-storing adapters are free to implement it later.
+        Default no-op; Ladybug, postgres_demo, Neo4j, and Turso override this
+        today. Other list-property-storing adapters are free to implement it
+        later.
         """
         return
 
@@ -433,6 +557,127 @@ class GraphDBInterface(ABC):
         """
         raise UnsupportedProvenanceCapability()
 
+    async def find_node_source_refs_by_data(
+        self,
+        dataset_id: str,
+        data_id: str,
+    ) -> dict[str, list[str]]:
+        """
+        Find the node source refs one data item of a dataset owns: its v1
+        document key and every v2 chunk key of that data item.
+
+        This default reads every ref of the dataset and keeps the data item's,
+        so its cost follows the dataset. An adapter that can select the rows in
+        its store overrides it, and deleting or replacing one document then
+        costs what that document holds.
+
+        Parameters:
+        -----------
+
+            - dataset_id (str): Dataset id to match.
+            - data_id (str): Data item id to match.
+
+        Returns:
+        --------
+
+            - dict[str, list[str]]: The data item's source refs keyed by node id.
+        """
+        self._warn_data_source_ref_fallback()
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
+        refs_by_node = await self.find_node_source_refs_by_dataset(dataset_id)
+        return {
+            node_id: data_refs
+            for node_id, refs in refs_by_node.items()
+            if (data_refs := select(refs))
+        }
+
+    async def find_edge_source_refs_by_data(
+        self,
+        dataset_id: str,
+        data_id: str,
+    ) -> dict[EdgeIdentity, list[str]]:
+        """
+        Find the edge source refs one data item of a dataset owns: its v1
+        document key and every v2 chunk key of that data item.
+
+        Same default and same reason to override as
+        ``find_node_source_refs_by_data``.
+
+        Parameters:
+        -----------
+
+            - dataset_id (str): Dataset id to match.
+            - data_id (str): Data item id to match.
+
+        Returns:
+        --------
+
+            - dict[EdgeIdentity, list[str]]: The data item's source refs keyed by
+              edge identity.
+        """
+        self._warn_data_source_ref_fallback()
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
+        refs_by_edge = await self.find_edge_source_refs_by_dataset(dataset_id)
+        return {
+            edge: data_refs for edge, refs in refs_by_edge.items() if (data_refs := select(refs))
+        }
+
+    def _warn_data_source_ref_fallback(self) -> None:
+        adapter_type = type(self)
+        if adapter_type not in _warned_data_source_ref_fallbacks:
+            _warned_data_source_ref_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native find_node_source_refs_by_data / "
+                "find_edge_source_refs_by_data; deleting one document reads every source "
+                "ref of its dataset. This is O(dataset) in memory.",
+                adapter_type.__name__,
+            )
+
+    async def find_edge_texts_in_use(self, edge_texts: list[str]) -> set[str]:
+        """
+        Find which of the given retrieval texts a stored edge still has.
+
+        An edge's retrieval text is ``get_edge_retrieval_text`` of its
+        ``edge_text`` property and its relationship name. Graph-provenance
+        delete asks this after removing edges, to drop the EdgeType of a text no
+        edge uses any more.
+
+        This default reads every edge of the graph. An adapter that can ask its
+        store overrides it.
+
+        Parameters:
+        -----------
+
+            - edge_texts (list[str]): Retrieval texts to look for.
+
+        Returns:
+        --------
+
+            - set[str]: The given texts that at least one stored edge has.
+        """
+        from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+
+        wanted = set(edge_texts)
+        if not wanted:
+            return set()
+
+        adapter_type = type(self)
+        if adapter_type not in _warned_edge_text_fallbacks:
+            _warned_edge_text_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native find_edge_texts_in_use; a delete that removes edges "
+                "reads the whole graph. This is O(graph) in memory.",
+                adapter_type.__name__,
+            )
+        _, edges = await self.get_graph_data()
+        in_use: set[str] = set()
+        for edge in edges:
+            properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
+            edge_text = get_edge_retrieval_text(properties.get("edge_text"), edge[2])
+            if edge_text in wanted:
+                in_use.add(edge_text)
+        return in_use
+
     async def find_node_source_refs_by_pipeline_run(
         self,
         pipeline_run_id: str,
@@ -558,8 +803,10 @@ class GraphDBInterface(ABC):
 
             - edges (Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]): A list of EdgeData objects or tuples representing edges to be added.
             - source_ref_key (Optional[str]): Graph provenance source ref to stamp
-              atomically as part of this write. Backends that support graph-provenance
-              provenance fold it into the same statement; others may ignore it. (default None)
+              atomically as part of this write. Backends that support graph provenance
+              fold it into the same statement, so no edge is written without its owner;
+              others may ignore it. Adapters declaring ``supports_per_row_source_refs``
+              also receive a mapping of edge identity -> ref key here. (default None)
             - pipeline_run_id (Optional[str]): Run id recorded with the provenance stamp so
               the write is rollbackable by run. Ignored when source_ref_key is None. (default None)
         """
@@ -578,6 +825,37 @@ class GraphDBInterface(ABC):
         Retrieve all nodes and edges within the graph.
         """
         raise NotImplementedError
+
+    async def get_node_ids_by_property(
+        self, node_types: list[str], property_name: str, values: list[Any]
+    ) -> list[str]:
+        """Ids of the nodes of one of ``node_types`` whose ``property_name`` is one of ``values``.
+
+        Values compare as text: a stored value matches when its text equals
+        ``str(value)`` of a wanted one, and a missing or null property never
+        matches. Only string and integer values are supported: booleans and
+        floats have no text form every backend agrees on (``str(True)`` is
+        "True", a database prints "true").
+
+        Filter in the database; the code graph load calls this to find one
+        repository's nodes, so it must not read the whole graph.
+
+        Required for the code graph, but not abstract: an adapter without it
+        still serves everything else, and only a code graph load fails.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no get_node_ids_by_property")
+
+    async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
+        """``(source_id, target_id, relationship_name)`` of every edge leaving ``source_ids``.
+
+        Ids that are not in the graph have no edges. Look the sources up by
+        index; the code graph load calls this once per batch of edges, so it
+        must not read the whole graph.
+
+        Required for the code graph, but not abstract: an adapter without it
+        still serves everything else, and only a code graph load fails.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no get_outgoing_edge_keys")
 
     async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
         """Ids of up to ``top_k`` well-connected nodes, to seed a graph view.
@@ -742,6 +1020,26 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError
 
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """
+        Return ``(num_nodes, num_edges)`` and nothing else.
+
+        For callers that only need the two counts (the graph-summary endpoints), so they
+        do not pay for the component and density work ``get_graph_metrics`` also does.
+        In-tree adapters override this with two count queries. This default derives the
+        counts from ``get_graph_metrics`` so adapters that predate the method keep working.
+        """
+        adapter_type = type(self)
+        if adapter_type not in _warned_graph_counts_fallbacks:
+            _warned_graph_counts_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native get_graph_counts; falling back to get_graph_metrics, "
+                "which also computes connected components.",
+                adapter_type.__name__,
+            )
+        metrics = await self.get_graph_metrics(include_optional=False) or {}
+        return metrics.get("num_nodes") or 0, metrics.get("num_edges") or 0
+
     @abstractmethod
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
         """
@@ -822,6 +1120,107 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError
 
+    async def get_timestamps_in_range(self, start: int | None, end: int | None) -> list[NodeData]:
+        """
+        Return the ``Timestamp`` nodes whose period overlaps the half-open window
+        ``[start, end)``, both in milliseconds since the epoch (UTC); ``None``
+        leaves that side open. A timestamp's period is ``[time_at, time_until)``
+        (see ``cognee.modules.engine.models.Timestamp``), so the test is
+        ``time_at < end`` and ``time_until > start``. Each result carries at
+        least ``id``, ``timestamp_str``, ``time_at`` and ``time_until``.
+
+        This default scans ``get_graph_data``; adapters with a native query
+        override it (Ladybug, Neo4j, Postgres demo).
+
+        Parameters:
+        -----------
+
+            - start (Optional[int]): Inclusive window start in ms, or None.
+            - end (Optional[int]): Exclusive window end in ms, or None.
+        """
+        nodes, _edges = await self.get_graph_data()
+        matches: list[NodeData] = []
+        for node_id, properties in nodes:
+            if (properties or {}).get("type") != "Timestamp":
+                continue
+            node = {**properties, "id": str(node_id)}
+            if timestamp_overlaps(node, start, end):
+                matches.append(node)
+        return matches
+
+    async def get_temporal_anchors(
+        self,
+        chunk_ids: Iterable[str],
+        entity_ids: Iterable[str],
+        start: int | None,
+        end: int | None,
+    ) -> dict[str, set[str]]:
+        """
+        Which of the given candidates are attached to a ``Timestamp`` inside the
+        half-open window ``[start, end)`` (ms since the epoch, UTC; ``None`` leaves
+        a side open).
+
+        A chunk is anchored when it ``contains`` a matching timestamp, or
+        ``contains`` an entity that has any edge into one — an entity anchored to
+        a time carries it into every chunk that mentions it. An entity is anchored
+        when any of its edges points at a matching timestamp; the relationship
+        name is not inspected. Returns ``{"timestamp_ids", "chunk_ids",
+        "entity_ids", "chunk_timestamps"}``: the matched timestamps, the anchored
+        candidate chunks, the anchored entities (candidates and the ones reached
+        through chunks), and per anchored chunk the matched timestamp ids it
+        reached.
+
+        Reading from the candidate side keeps the cost proportional to the
+        candidate count whatever the window matches — the retriever's reason for
+        asking this instead of listing every timestamp in the window. This
+        default walks ``get_neighborhood`` and filters in Python; adapters with a
+        native query override it (Ladybug, Neo4j, Postgres demo).
+        """
+        chunk_set = {str(node_id) for node_id in chunk_ids}
+        entity_set = {str(node_id) for node_id in entity_ids}
+        if not chunk_set and not entity_set:
+            return empty_temporal_anchors()
+
+        nodes, edges = await self.get_neighborhood(sorted(chunk_set | entity_set), depth=1)
+        properties_by_id = {str(node_id): dict(props or {}) for node_id, props in nodes}
+
+        def _in_window(node_id: str) -> bool:
+            props = properties_by_id.get(node_id)
+            return (
+                props is not None
+                and props.get("type") == "Timestamp"
+                and timestamp_overlaps({**props, "id": node_id}, start, end)
+            )
+
+        direct_rows: list[tuple[str, str]] = []
+        contained: dict[str, set[str]] = {}  # candidate chunk -> entities it contains
+        for source, target, relationship, _props in edges:
+            source_id, target_id = str(source), str(target)
+            if (
+                source_id in chunk_set
+                and relationship == "contains"
+                and properties_by_id.get(target_id, {}).get("type") == "Entity"
+            ):
+                contained.setdefault(source_id, set()).add(target_id)
+            if _in_window(target_id) and (source_id in chunk_set or source_id in entity_set):
+                direct_rows.append((source_id, target_id))
+
+        via_rows: list[tuple[str, str, str]] = []
+        reached = set().union(*contained.values()) if contained else set()
+        if reached:
+            via_nodes, via_edges = await self.get_neighborhood(sorted(reached), depth=1)
+            via_properties = {str(node_id): dict(props or {}) for node_id, props in via_nodes}
+            for source, target, _relationship, _props in via_edges:
+                source_id, target_id = str(source), str(target)
+                props = via_properties.get(target_id)
+                if source_id not in reached or props is None or props.get("type") != "Timestamp":
+                    continue
+                if timestamp_overlaps({**props, "id": target_id}, start, end):
+                    for chunk_id, entities in contained.items():
+                        if source_id in entities:
+                            via_rows.append((chunk_id, source_id, target_id))
+        return temporal_anchors_from_rows(direct_rows, via_rows, chunk_set)
+
     @abstractmethod
     async def get_neighborhood(
         self,
@@ -848,7 +1247,7 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def get_filtered_graph_data(
-        self, attribute_filters: list[dict[str, list[str | int]]]
+        self, attribute_filters: list[dict[str, list[str | int]]], *, include_edges: bool = True
     ) -> tuple[list[Node], list[EdgeData]]:
         """
         Retrieve nodes and edges filtered by the provided attribute criteria.
@@ -858,6 +1257,7 @@ class GraphDBInterface(ABC):
 
             - attribute_filters: A list of dictionaries where keys are attribute names and values
               are lists of attribute values to filter by.
+            - include_edges: False reads only nodes; no edge query is performed.
         """
         raise NotImplementedError
 
@@ -896,8 +1296,8 @@ class GraphDBInterface(ABC):
     async def update_node(self, node_id: str, values: dict[str, Any]) -> bool:
         """
         Merge *values* into an existing node's properties, leaving every field not
-        named in *values* untouched. Used to patch a single scalar (e.g. stamping
-        ``valid_to`` when a fact is superseded) without rewriting the whole node.
+        named in *values* untouched. Used to patch user preferences without
+        rewriting the whole node.
 
         Optional extension — implemented by LadybugAdapter (the default backend).
         Other adapters may not support partial node updates yet and raise here.

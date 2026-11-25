@@ -112,36 +112,28 @@ class MistralAdapter(GenericAPIAdapter):
             - BaseModel: An instance of BaseModel containing the structured response.
         """
         try:
-            messages = [
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": f"""Use the given format to extract information
-                from the following input: {text_input}""",
-                },
-            ]
             merged_kwargs = {**self.llm_args, **kwargs}
             try:
                 async with llm_rate_limiter_context_manager():
-                    response = await self.aclient.chat.completions.create(
+                    # instructor validates the answer against response_model and returns
+                    # the parsed model, not the raw completion.
+                    return await self.aclient.chat.completions.create(
                         model=self.model,
                         max_retries=2,
-                        messages=messages,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": system_prompt,
+                            },
+                            {
+                                "role": "user",
+                                "content": f"""Use the given format to extract information
+                from the following input: {text_input}""",
+                            },
+                        ],
                         response_model=response_model,
                         **merged_kwargs,
                     )
-                if (
-                    response.choices
-                    and response.choices[0].message is not None
-                    and response.choices[0].message.content
-                ):
-                    content = response.choices[0].message.content
-                    return response_model.model_validate_json(content)
-                else:
-                    raise ValueError("Failed to get valid response after retries")
             except litellm.exceptions.BadRequestError as e:
                 logger.error(f"Bad request error: {e!s}")
                 raise ValueError(f"Invalid request: {e!s}")

@@ -9,6 +9,7 @@ import pytest
 
 from cognee.modules.chunking.chunk_policy import ChunkPlan
 from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
 from cognee.tasks.documents.classify_documents import update_node_set
 
@@ -49,13 +50,16 @@ async def test_fresh_chunks_reach_extraction_with_document_membership(monkeypatc
 
     async def extract(batch, **kwargs):
         observed.extend(batch)
+        assert kwargs["summary_method"] == config.summary_method
         for chunk in batch:
             assert chunk.belongs_to_set == document.belongs_to_set
             assert chunk.source_node_set == document.source_node_set
         return []
 
     config = SimpleNamespace(
-        chunks_per_batch=1, triplet_embedding=False, contradiction_detection=False
+        chunks_per_batch=1,
+        triplet_embedding=False,
+        summary_method="llm",
     )
     publish = AsyncMock()
     monkeypatch.setattr(incremental, "get_cognify_config", lambda: config)
@@ -65,7 +69,7 @@ async def test_fresh_chunks_reach_extraction_with_document_membership(monkeypatc
     monkeypatch.setattr(incremental, "publish_updated_data", publish)
     result = await incremental._write_and_publish(
         {
-            "staged": object(),
+            "staged": SimpleNamespace(content_hash="staged-hash"),
             "document": document,
             "stored_chunks": [],
             "plan": ChunkPlan(fresh=fresh),
@@ -77,6 +81,7 @@ async def test_fresh_chunks_reach_extraction_with_document_membership(monkeypatc
         object,
         None,
         uuid4(),
+        TextChunker,
     )
     assert observed == fresh
     assert result["added_chunks"] == 2

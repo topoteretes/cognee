@@ -58,6 +58,7 @@ class TestCliConfig:
             "SUMMARIES",
             "CODE",
             "CYPHER",
+            "TEMPORAL",
         ]
 
         for expected_type in expected_types:

@@ -73,29 +73,29 @@ def create_relational_engine(
             )
 
     elif db_provider == "turso":
-        try:
-            # libsql-experimental keeps the local replica in sync with a remote
-            # Turso database; the query path itself is plain aiosqlite.
-            import libsql_experimental
-        except ImportError:
-            raise ImportError(
-                "Turso/libSQL dependencies are not installed. Please install with 'pip install cognee\"[turso]\"' to use Turso functionality."
+        from cognee.infrastructure.databases.turso import require_turso
+
+        # Probe the driver here: the adapter module imports it lazily, so importing
+        # the module alone would not surface a missing turso extra.
+        require_turso()
+
+        if db_turso_url or db_turso_auth_token:
+            raise OSError(
+                "Remote Turso databases are not supported by the local Turso backend in this "
+                "version (DB_TURSO_URL / DB_TURSO_AUTH_TOKEN are set). Unset them to use a "
+                "local Turso database file under DB_PATH, or pick another DB_PROVIDER. These "
+                "settings are deprecated leftovers of the former libSQL replica adapter and "
+                "will be removed in a future release."
             )
 
         from .sqlalchemy.TursoAdapter import TursoAdapter
 
-        # A libSQL file is a SQLite file, so Turso is driven through the same
-        # aiosqlite dialect and migrations as the SQLite backend — a drop-in.
-        # For remote Turso the same file is a local replica kept in sync with
-        # the hosted primary (db_turso_url/db_turso_auth_token).
-        connection_string = f"sqlite+aiosqlite:///{db_path}/{db_name}"
-
+        # The Turso rewrite engine (pyturso) drives the query path, migrations and
+        # the sqlite-dialect code paths through cognee's own SQLAlchemy dialect.
         return TursoAdapter(
-            connection_string,
+            f"{db_path}/{db_name}",
             connect_args=database_connect_args,
             pool_args=pool_args,
-            sync_url=db_turso_url,
-            auth_token=db_turso_auth_token,
         )
 
     else:

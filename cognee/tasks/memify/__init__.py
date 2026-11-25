@@ -1,9 +1,10 @@
 """
-Memory and subgraph extraction tasks.
+Memory enrichment tasks.
 
-This module provides tasks for extracting subgraphs, document chunks, and
-user session data, as well as initiating session cognification workflows,
-to support memory enrichment and downstream knowledge graph processing.
+This module provides tasks for extracting subgraphs, document chunks, user
+session data and agent traces, as well as initiating session cognification
+workflows, to support memory enrichment and downstream knowledge graph
+processing.
 """
 
 from .extract_subgraph import extract_subgraph

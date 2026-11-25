@@ -1,28 +1,28 @@
 import argparse
-import asyncio
 
 import cognee.cli.echo as fmt
 from cognee.cli import DEFAULT_DOCS_URL
-from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.cli.reference import SupportsCliCommand
+
+# Shared with the --api-url dispatch, which behaves the same.
+MEMIFY_CLI_DEPRECATION_MESSAGE = (
+    "cognee-cli memify is deprecated and will be removed in the next release. "
+    "It has nothing left to run: its default tasks built triplet embeddings, which were "
+    "removed. Use `cognee-cli improve` to enrich a dataset."
+)
 
 
 class MemifyCommand(SupportsCliCommand):
     command_string = "memify"
-    help_string = "Run the memory enrichment pipeline on a dataset"
+    help_string = "Deprecated: does nothing (use improve)"
     docs_url = DEFAULT_DOCS_URL
     description = """
-Run the Cognee memify (memory enrichment) pipeline.
+Deprecated: removed in the next release. Use `cognee-cli improve` to enrich
+a dataset.
 
-Enriches an existing knowledge graph with additional context, triplet
-embeddings, and coding rules. Requires data to have been added and
-cognified first.
-
-Examples:
-  cognee-cli memify -d my_dataset
-  cognee-cli memify --dataset-id 550e8400-e29b-41d4-a716-446655440000
-  cognee-cli memify -d my_dataset --node-name "Python" "FastAPI"
-  cognee-cli memify -d my_dataset --background
+Triplet embeddings were removed, and with them the tasks this command ran, so
+it no longer runs anything: it prints this notice and exits. Its options are
+still accepted so existing scripts keep working.
 """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -31,68 +31,30 @@ Examples:
             "-d",
             "--dataset-name",
             default=None,
-            help="Dataset name to memify",
+            help="Ignored (deprecated)",
         )
         group.add_argument(
             "--dataset-id",
             default=None,
-            help="Dataset UUID to memify",
+            help="Ignored (deprecated)",
         )
         parser.add_argument(
             "--node-name",
             nargs="*",
             default=None,
-            help="Filter to specific named entities in the graph",
+            help="Ignored (deprecated)",
         )
         parser.add_argument(
             "--data",
             default=None,
-            help="Optional text data to feed into the pipeline instead of using the existing graph",
+            help="Ignored (deprecated)",
         )
         parser.add_argument(
             "-b",
             "--background",
             action="store_true",
-            help="Run in background (non-blocking)",
+            help="Ignored (deprecated)",
         )
 
     def execute(self, args: argparse.Namespace) -> None:
-        try:
-
-            async def run():
-                from uuid import UUID
-
-                import cognee
-                from cognee.cli.user_resolution import resolve_cli_user
-
-                user = await resolve_cli_user(getattr(args, "user_id", None))
-
-                dataset = args.dataset_name
-                if args.dataset_id:
-                    dataset = UUID(args.dataset_id)
-
-                label = args.dataset_id or args.dataset_name
-                fmt.echo(f"Running memify on '{label}'...")
-
-                result = await cognee.memify(
-                    dataset=dataset,
-                    user=user,
-                    data=args.data,
-                    node_name=args.node_name,
-                    run_in_background=args.background,
-                )
-
-                if args.background:
-                    fmt.success("Memify started in background.")
-                else:
-                    fmt.success("Memify completed.")
-
-                if result:
-                    fmt.echo(str(result))
-
-            asyncio.run(run())
-
-        except Exception as e:
-            if isinstance(e, CliCommandInnerException):
-                raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Memify failed: {e!s}", error_code=1) from e
+        fmt.warning(MEMIFY_CLI_DEPRECATION_MESSAGE)

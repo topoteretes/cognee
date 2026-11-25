@@ -20,8 +20,8 @@ print(estimate)  # per-stage token counts and approximate cost; no LLM calls
 ```
 
 The estimate covers graph extraction and summarization only, not
-`improve()`, embeddings, or contradiction detection. Not available with
-GLiNER, `temporal_cognify`, or a remote instance.
+`improve()` or embeddings. Not available with
+GLiNER or a remote instance.
 
 ### 2. Ingestion knobs
 
@@ -30,14 +30,16 @@ All are `remember()` arguments (and `cognify()` ones):
 | Knob | Default | What it controls |
 |---|---|---|
 | `data_per_batch` | 20 | How many documents are processed **at the same time** (a concurrency limit, not a batch). Lower it to reduce load; raise it for many small files. |
-| `chunks_per_batch` | 2000 (env `CHUNKS_PER_BATCH`) | How many chunks each extraction/storage call receives. Lower it to spread load and fail smaller. The DLT pipeline defaults to 100, temporal to 10. |
+| `chunks_per_batch` | 2000 (env `CHUNKS_PER_BATCH`) | How many chunks each extraction/storage call receives. Lower it to spread load and fail smaller. The DLT pipeline defaults to 100. |
 | `chunk_size` | min(embedding max tokens, LLM max tokens / 2); about 8191 tokens with default OpenAI models | Max tokens per chunk. Fewer, bigger chunks mean fewer LLM calls; smaller chunks mean finer-grained graphs. |
 | `run_in_background` | `False` | Return immediately (`status="running"`); `await result` later. |
 | `self_improvement` | `True` | `improve()` after the graph is built. `False` (or `IMPROVE_AUTO_ENABLED=false`) skips that extra work. |
 
 Worst-case concurrent LLM calls are about
-`data_per_batch × min(chunks per document, chunks_per_batch) × 2`, and there
-is no separate concurrency cap. The rate limiter below is the brake.
+`data_per_batch × min(chunks per document, chunks_per_batch) × 2`, all in
+flight at once unless `LLM_MAX_CONCURRENT_REQUESTS` is set (below). The rate
+limiter only spaces out when calls start; the concurrency cap bounds how many
+run at the same time.
 
 Several datasets in one `cognify(datasets=[...])` call run one after
 another, not in parallel.
@@ -49,6 +51,7 @@ another, not in parallel.
 | `LLM_RATE_LIMIT_ENABLED` | `false` | Turn on a requests-per-interval limit |
 | `LLM_RATE_LIMIT_REQUESTS` / `LLM_RATE_LIMIT_INTERVAL` | 60 / 60 s | 10 requests for local providers (Ollama, llama.cpp, LM Studio) |
 | `AUTO_RATE_LIMIT` | `true` | On a 429/503/529 or timeout, switches the limiter on for 15 minutes (extended while errors continue) |
+| `LLM_MAX_CONCURRENT_REQUESTS` | `0` (unlimited) | Max LLM requests in flight at once, per model and per process. Off for every provider until set. For a serial local server (Ollama, llama.cpp) match what it runs in parallel (Ollama's `OLLAMA_NUM_PARALLEL`), usually 1 to 4 |
 | `LLM_EXTRACTION_MODEL` / `_PROVIDER` / `_ENDPOINT` / `_API_KEY` / `_API_VERSION` | the main model | Use a cheaper or faster model just for graph extraction |
 | `LLM_SUMMARIZATION_*`, `LLM_QUERY_*` | the main model | Same, for summaries and for answering queries |
 | `LLM_MAX_COMPLETION_TOKENS` | 16384 | Also caps the default chunk size (half of it) |
@@ -66,8 +69,9 @@ a local model does not get the local default of 10 requests; set
 
 | Env var | Default |
 |---|---|
-| `EMBEDDING_BATCH_SIZE` | 36 texts per request |
-| `EMBEDDING_MAX_CONCURRENT_DATA_POINTS` | 150 (so 150 / 36 = 4 concurrent requests) |
+| `EMBEDDING_BATCH_SIZE` | 32 texts per request |
+| `EMBEDDING_MAX_CONCURRENT_DATA_POINTS` | 150 (so 150 / 32 = 4 concurrent requests) |
+| `VECTOR_WRITE_BATCH_SIZE` | 128 rows per vector write, embedded in 32-text requests under the shared request concurrency limit |
 | `EMBEDDING_RATE_LIMIT_ENABLED` / `_REQUESTS` / `_INTERVAL` | off / 60 / 60 s |
 
 Embedding calls retry transient errors, rate-limit 429s included, with
@@ -161,7 +165,9 @@ the task chain (classify, chunk, extract graph + summarize, store). Tasks
 receive their input in batches of `chunks_per_batch`.
 `extract_graph_and_summarize` runs extraction and summarization together,
 each gathering one LLM call per chunk in the batch. Every LLM call passes
-through one process-wide rate limiter.
+through one process-wide rate limiter and, when `LLM_MAX_CONCURRENT_REQUESTS`
+is set, waits for a free slot of its model's concurrency cap (a streamed
+answer holds its slot until the stream ends).
 
 - Cognify task list and defaults: `cognee/api/v1/cognify/cognify.py`
 - Concurrency (`data_per_batch` semaphore): `cognee/modules/pipelines/operations/run_tasks.py`

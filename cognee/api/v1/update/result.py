@@ -48,8 +48,15 @@ class UpdateResult(BaseModel):
     The chunk counters are work done by the chunk-level path — ``added`` can
     exceed the net change when a re-cut chunk with unchanged content is
     re-extracted in place — and ``total_chunks`` is the count after the
-    update. They are ``None`` on a rebuild, which has no diff. The document
-    keeps its ``data_id`` on every path.
+    update. ``redated_chunks`` are kept chunks whose text did not change but
+    whose date context did (an edit upstream changed the year a year-less
+    date inherits), so they were re-extracted at their final position under
+    their own id; they are included in ``added_chunks`` and excluded from
+    ``reindexed_chunks``, which counts only kept chunks renumbered in place.
+    The counters are ``None`` on a rebuild, which has no diff. The document
+    keeps its ``data_id`` on every path. ``after_run_error`` names a failed step
+    after a rebuild's completed cognify run (``AfterRunHookError``: vector store
+    compaction or the document structure pass); the rebuild itself succeeded.
     """
 
     status: Literal["incremental", "unchanged", "full_rebuild", "failed"]
@@ -57,6 +64,7 @@ class UpdateResult(BaseModel):
     deleted_chunks: int | None = None
     added_chunks: int | None = None
     reused_chunks: int | None = None
+    redated_chunks: int | None = None
     kept_chunks: int | None = None
     reindexed_chunks: int | None = None
     total_chunks: int | None = None
@@ -66,3 +74,4 @@ class UpdateResult(BaseModel):
     pipeline_run_id: UUID | None = None
     fallback: Fallback | None = None
     error: UpdateError | None = None
+    after_run_error: str | None = None

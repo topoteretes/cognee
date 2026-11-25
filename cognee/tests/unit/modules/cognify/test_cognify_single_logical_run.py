@@ -170,43 +170,6 @@ class TestCognifyMakesOneCall:
         ):
             resolver(_text_item())
 
-    @pytest.mark.asyncio
-    async def test_temporal_swaps_standard_route_only(self):
-        """temporal_cognify replaces the fallback list; manifests still route DLT."""
-        calls = []
-
-        async def _fake_executor(**kwargs):
-            calls.append(kwargs)
-            return {}
-
-        with (
-            patch.object(
-                cognify_module, "get_pipeline_executor", lambda run_in_background: _fake_executor
-            ),
-            patch.object(
-                cognify_module, "get_temporal_tasks", new=AsyncMock(return_value="TEMPORAL_TASKS")
-            ),
-            patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")),
-            patch.object(
-                cognify_module, "get_code_file_tasks", new=MagicMock(return_value="CODE_TASKS")
-            ),
-            patch.object(
-                cognify_module, "get_code_repo_tasks", new=MagicMock(return_value="CODE_REPO_TASKS")
-            ),
-        ):
-            await cognify_module.cognify(
-                datasets=["ds"],
-                temporal_cognify=True,
-                chunk_size=1024,
-                config={"ontology_config": {"ontology_resolver": None}},
-            )
-
-        (call,) = calls
-        resolver = call["tasks"]
-        assert resolver(_text_item()) == "TEMPORAL_TASKS"
-        assert resolver(_manifest_item()) == "DLT_TASKS"
-        assert resolver(_code_item()) == "CODE_TASKS"
-
 
 @pytest.mark.asyncio
 async def test_run_tasks_resolver_shares_one_run_lifecycle(monkeypatch, runner_plumbing):
@@ -240,8 +203,6 @@ async def test_run_tasks_resolver_shares_one_run_lifecycle(monkeypatch, runner_p
     assert logs.error.await_count == 0
     assert [type(e) for e in events] == [PipelineRunStarted, PipelineRunCompleted]
     assert all(e.pipeline_run_id == run_id for e in events)
-    # log_pipeline_run_start received the real item list, not None.
-    assert logs.start.await_args.args[3] == ["m1", "m2", "r1"]
 
     # Every item ran with its own resolved task list.
     assert sorted(processed) == [

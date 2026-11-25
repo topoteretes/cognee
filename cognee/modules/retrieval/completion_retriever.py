@@ -3,15 +3,23 @@ from typing import Any
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.completion import SessionPrompt, generate_completion
+from cognee.modules.retrieval.utils.conflict_context import (
+    attach_chunk_conflicts,
+    render_chunk_context,
+)
+from cognee.modules.retrieval.utils.document_sources import name_chunk_documents
 from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
 from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
 from cognee.modules.retrieval.utils.references import append_chunk_evidence
+from cognee.modules.retrieval.utils.scoped_chunk_search import search_scoped_chunks
 from cognee.modules.retrieval.utils.used_graph_elements import extract_from_scored_results
 from cognee.modules.user_preferences import (
     load_preference_text,
@@ -99,11 +107,17 @@ class CompletionRetriever(BaseRetriever):
         session_id: str | None = None,
         response_model: type = str,
         include_references: bool = False,
+        node_type: type | None = NodeSet,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
         wide_search_top_k: int | None = 100,
     ):
-        """Initialize retriever with optional custom prompt paths."""
+        """Initialize retriever with optional custom prompt paths.
+
+        ``node_name`` means node-set tags for ``node_type=NodeSet`` (the default) and
+        the chunks one hop from the named nodes for any other graph node type; see
+        ``ChunksRetriever``.
+        """
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 1
@@ -112,6 +126,7 @@ class CompletionRetriever(BaseRetriever):
         self.session_id = session_id
         self.response_model = response_model
         self.include_references = include_references
+        self.node_type = node_type
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
 
@@ -131,14 +146,26 @@ class CompletionRetriever(BaseRetriever):
         limit = max(self.top_k, self.wide_search_top_k or 0) if weights else self.top_k
 
         try:
-            found_chunks = await vector_engine.search(
-                "DocumentChunk_text",
-                query,
-                limit=limit,
-                include_payload=True,
-                node_name=self.node_name,
-                node_name_filter_operator=self.node_name_filter_operator,
-            )
+            node_type = self.node_type
+            if self.node_name and node_type is not None and node_type is not NodeSet:
+                found_chunks = await search_scoped_chunks(
+                    vector_engine,
+                    await get_graph_engine(),
+                    query,
+                    node_type=node_type,
+                    node_name=self.node_name,
+                    node_name_filter_operator=self.node_name_filter_operator,
+                    limit=limit,
+                )
+            else:
+                found_chunks = await vector_engine.search(
+                    "DocumentChunk_text",
+                    query,
+                    limit=limit,
+                    include_payload=True,
+                    node_name=self.node_name,
+                    node_name_filter_operator=self.node_name_filter_operator,
+                )
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
@@ -152,6 +179,9 @@ class CompletionRetriever(BaseRetriever):
                 : self.top_k
             ]
 
+        await attach_chunk_conflicts(found_chunks)
+        if self.include_references:
+            await name_chunk_documents(found_chunks)
         return found_chunks
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
@@ -192,10 +222,7 @@ class CompletionRetriever(BaseRetriever):
               empty string if none are found.
         """
         if retrieved_objects:
-            # Combine all chunks text returned from vector search (number of chunks is determined by top_k)
-            chunks_payload = [found_chunk.payload["text"] for found_chunk in retrieved_objects]
-            combined_context = "\n".join(chunks_payload)
-            return combined_context
+            return render_chunk_context([chunk.payload for chunk in retrieved_objects])
         return ""
 
     def _completion_kwargs(self, context: str) -> dict:

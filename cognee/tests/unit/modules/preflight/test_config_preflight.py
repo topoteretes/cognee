@@ -104,8 +104,8 @@ class TestOnlyEmbeddingsConfiguredTrap:
         assert "LLM_API_KEY" in problems[0]
 
     def test_missing_llm_key_is_fine_when_the_pipeline_needs_no_llm(self):
-        # needs_llm=False (e.g. the gliner extractor with contradiction
-        # detection off): ingestion needs embeddings, not an LLM.
+        # needs_llm=False (e.g. the gliner extractor): ingestion needs
+        # embeddings, not an LLM.
         problems = check_provider_config(
             llm(provider="openai", api_key=None),
             embeddings(provider="fastembed", model="BAAI/bge-small-en-v1.5"),

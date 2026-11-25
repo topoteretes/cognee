@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 from cognee.modules.visualization.preprocessor import SEMANTIC_TYPE_KEY
 from cognee.modules.visualization.subgraph_data import (
     DEFAULT_NEIGHBORHOOD_DEPTH,
@@ -81,9 +82,8 @@ async def test_resolve_seeds_from_query_orders_by_distance_and_is_deterministic(
     # Same node "a" appears in two collections with different scores; "a" has
     # the best (lowest) score so it must rank first, and the top-k must be the
     # nearest hits in distance order — not an arbitrary set slice.
-    fake = MagicMock()
+    fake = NodeEdgeVectorSearch(vector_engine=AsyncMock())
     fake.embed_and_retrieve_distances = AsyncMock()
-    fake.has_results = MagicMock(return_value=True)
     fake.node_distances = {
         "Entity_name": [
             SimpleNamespace(id="c", score=0.9),

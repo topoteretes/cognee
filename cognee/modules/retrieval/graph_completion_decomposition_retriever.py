@@ -3,7 +3,6 @@ from typing import Any
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.unified import get_unified_engine
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError, QueryValidationError
@@ -12,11 +11,10 @@ from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.query_decomposition import (
     DecompositionMode,
     DecompositionRunState,
-    QueryDecomposition,
     SubqueryRunState,
     build_subquery_answer_context,
+    decompose_query,
     merge_deduplicated_edges,
-    normalize_subqueries,
 )
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.shared.logging_utils import get_logger
@@ -88,26 +86,10 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
     async def _decompose_query(self, query: str) -> list[str]:
         """Decompose the original query into focused subqueries."""
 
-        system_prompt = read_query_prompt("graph_completion_decomposition_system_prompt.txt")
-        if not system_prompt:
-            logger.warning("Decomposition prompt not found, falling back to original query.")
-            return [query]
-
-        try:
-            decomposition = await LLMGateway.acreate_structured_output(
-                text_input=query,
-                system_prompt=system_prompt,
-                response_model=QueryDecomposition,
-            )
-        except Exception as error:
-            logger.warning(
-                "Query decomposition failed, falling back to original query: %s",
-                error,
-                exc_info=True,
-            )
-            return [query]
-
-        return normalize_subqueries(query, getattr(decomposition, "subqueries", None))
+        return await decompose_query(
+            query,
+            system_prompt=read_query_prompt("graph_completion_decomposition_system_prompt.txt"),
+        )
 
     async def _ensure_state(self, query: str | None) -> DecompositionRunState:
         """Return cached run state or initialize it from the query."""

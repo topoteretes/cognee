@@ -1,0 +1,34 @@
+/* Generated from @topoteretes/cognee-design-system by scripts/sync-design-system-theme.js.
+   Do not edit it by hand: when the design system changes, run
+   `npm run sync:design-system-theme` and commit the result.
+   designSystemTheme.test.js fails while this file and the package differ. */
+
+/* The design system builds its components from Tailwind classes; scanning its
+   package makes our Tailwind generate them. node_modules is skipped by default.
+   A path that does not exist (the public repo has no design system) is ignored. */
+@source "../../node_modules/@topoteretes/cognee-design-system/dist";
+
+@theme {
+  --color-cognee-purple-light: #6c5ce7;
+  --color-cognee-plate: #eee;
+  --color-cognee-scrim: #2a2a2e;
+  --color-cognee-chrome: #ffffff0f;
+  --color-cognee-chrome-solid: #0f0f0f;
+  --color-cognee-chrome-alt: #ffffff0a;
+  --color-cognee-chrome-strong: #ffffff1f;
+  --color-cognee-frame: #edecea1a;
+  --color-cognee-frame-strong: #edecea61;
+  --color-cognee-subtle: #edecea94;
+  --color-cognee-faint: #edecea5c;
+  --color-cognee-ghost: #edecea33;
+  --color-cognee-live: #8cff86;
+  --color-cognee-reconnect: #e6b24d;
+  --color-cognee-offline: #f0808a;
+  --color-cognee-purple-soft: #bc9bff24;
+  --color-cognee-recall: #dcf;
+  --color-cognee-remember: #c4f5c1;
+  --color-cognee-improve: #9a78de;
+  --color-cognee-forget: #9ca3a1;
+  --animate-cognee-live-pulse: cognee-live-pulse 1.8s ease-in-out infinite;
+  @keyframes cognee-live-pulse{0%,to{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.8)}}
+}

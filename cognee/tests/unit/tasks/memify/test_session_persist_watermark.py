@@ -53,7 +53,7 @@ class FakeSessionManager:
     async def get_session(self, *, user_id, session_id=None, formatted=False, **_):
         return list(self.qa.get((user_id, session_id), []))
 
-    async def get_session_context_entries(self, *, user_id, session_id=None):
+    async def get_session_context_entries(self, *, user_id, session_id=None, raise_on_error=False):
         return list(self.context.get((user_id, session_id), []))
 
     async def update_session_context_entry(self, *, user_id, entry_id, merge, session_id=None):
@@ -285,8 +285,9 @@ async def test_multi_run_completeness_without_reingestion(user, manager, monkeyp
     user_id = str(user.id)
     ingested_texts: list[str] = []
 
-    async def fake_add(text, *args, **kwargs):
-        ingested_texts.append(text)
+    async def fake_add(content, *args, **kwargs):
+        # A window with a known last entry time is added as a dated DataItem.
+        ingested_texts.append(getattr(content, "data", content))
 
     async def fake_cognify(*args, **kwargs):
         return None

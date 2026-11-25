@@ -47,7 +47,7 @@ enough locally. CI supplies the same variables from secrets; the workflows under
 - `unit/` and `cli_tests/cli_unit_tests/` never call a provider.
 - Elsewhere, tests guard themselves with `pytest.mark.skipif`: on `LLM_API_KEY`
   being unset (`has_llm_api_key()` helpers), and on optional extras being importable
-  (`HAS_LANCEDB`, `HAS_NEO4J`, `HAS_PGVECTOR`, `HAS_LADYBUG`, `HAS_LIBSQL`). A missing
+  (`HAS_LANCEDB`, `HAS_NEO4J`, `HAS_PGVECTOR`, `HAS_LADYBUG`, `HAS_TURSO`). A missing
   key or extra skips, it does not fail.
 - `MOCK_EMBEDDING=true` and `MOCK_CODE_SUMMARY=true` replace the embedding and code
   summary calls with deterministic stand-ins in the tests that support them.

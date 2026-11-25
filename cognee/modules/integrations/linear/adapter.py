@@ -47,6 +47,7 @@ from cognee.modules.integrations.base import (
     OAuthInstallation,
     OAuthIntegration,
     WebhookVerifier,
+    refuse_parent,
 )
 from cognee.modules.integrations.credentials import (
     CredentialInactiveError,
@@ -55,12 +56,22 @@ from cognee.modules.integrations.credentials import (
     revoke_credential_if_current,
     update_refreshed_credential,
 )
+from cognee.modules.integrations.ingestion import sync_is_paused
 from cognee.modules.integrations.linear.client import LinearUnauthorizedError, graphql
 from cognee.modules.integrations.linear.handle_linear_event import handle_linear_event
 from cognee.modules.integrations.linear.linear_settings import LinearSettings, require
-from cognee.modules.integrations.linear.sync import sync_recent_issues
+from cognee.modules.integrations.linear.sync import (
+    LEGACY_CLEANED_KEY,
+    RESUME_KEY,
+    SEEDED_KEY,
+    SELECTION_KEY,
+    dataset_name_for_credential,
+    list_teams,
+    request_sync,
+)
 from cognee.modules.integrations.linear.verify_linear_signature import LinearWebhookVerifier
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
+from cognee.modules.integrations.outbound import client_session
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +210,7 @@ async def refresh_access_token(
     code so neither the request nor the response body can reach a log.
     """
     async with (
-        aiohttp.ClientSession(timeout=_REFRESH_TIMEOUT) as session,
+        client_session("linear", timeout=_REFRESH_TIMEOUT) as session,
         session.post(
             _TOKEN_URL,
             data={
@@ -539,6 +550,7 @@ async def _refresh_expiring(
 class LinearIntegration(OAuthIntegration):
     provider = "linear"
     settings_cls = LinearSettings
+    resource_selection_key = SELECTION_KEY
 
     def authorize_url(self, state: str) -> str:
         params = {
@@ -556,7 +568,7 @@ class LinearIntegration(OAuthIntegration):
     async def exchange_code(self, code: str) -> dict[str, Any]:
         """Exchange the OAuth code for the workspace's agent token."""
         async with (
-            aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+            client_session("linear", timeout=_TIMEOUT) as session,
             session.post(
                 _TOKEN_URL,
                 data={
@@ -618,6 +630,12 @@ class LinearIntegration(OAuthIntegration):
                 "organization_name": organization.get("name"),
                 "organization_url_key": organization.get("urlKey"),
                 "scope": token_response.get("scope"),
+                # A (re)install starts from nothing: the stored metadata is merged
+                # into the existing row, so these are written explicitly or a
+                # reconnect would inherit the previous install's sync markers.
+                SEEDED_KEY: False,
+                LEGACY_CLEANED_KEY: False,
+                RESUME_KEY: None,
             },
             account_label=organization.get("name"),
             scopes=token_response.get("scope"),
@@ -632,9 +650,6 @@ class LinearIntegration(OAuthIntegration):
             auth_type="oauth2",
         )
 
-    def state_signing_secret(self) -> str:
-        return require("webhook_secret")
-
     def frontend_base_url(self) -> str:
         return require("frontend_base_url")
 
@@ -645,18 +660,42 @@ class LinearIntegration(OAuthIntegration):
         await handle_linear_event(raw_body, headers)
 
     async def on_installed(self, credential: IntegrationCredential) -> None:
-        """Seed memory with the workspace's recently active issues.
+        """Seed memory with the teams the app was granted.
 
-        Issue webhooks only cover changes from now on — and any delivery
-        racing ahead of the OAuth callback storing the credential is dropped
-        as unknown (same race as GitHub's ``installation.created``). This
-        hook, firing after the upsert, is what gives the agent something to
-        recall from on day one.
+        Issue webhooks only cover changes from now on, and any delivery racing
+        ahead of the OAuth callback storing the credential is dropped as
+        unknown (same race as GitHub's ``installation.created``). This hook,
+        firing after the upsert, gives the agent something to recall from on
+        day one. The admin chose the teams on Linear's install screen, so the
+        default is every granted team until the user narrows it. An owner's paused
+        default holds it.
         """
-        await sync_recent_issues(credential)
+        if await sync_is_paused(self.provider, credential, "install sync"):
+            return
+        await request_sync(credential)
 
     async def sync_now(self, credential: IntegrationCredential) -> None:
-        await sync_recent_issues(credential)
+        await request_sync(credential)
+
+    async def list_resources(
+        self, credential: IntegrationCredential, *, parent: str | None = None
+    ) -> list[dict[str, Any]]:
+        refuse_parent(self.provider, parent)
+        return [
+            {
+                "id": str(team["id"]),
+                "name": str(team.get("name") or team["id"]),
+                "description": team.get("description"),
+                "attributes": {
+                    "key": team.get("key"),
+                    "private": team.get("visibility") != "public",
+                },
+            }
+            for team in await list_teams(credential)
+        ]
+
+    def dataset_name(self, credential: IntegrationCredential) -> str:
+        return dataset_name_for_credential(credential)
 
     async def revoke_remote(self, credential: IntegrationCredential) -> None:
         """Best-effort remote revoke of the workspace's agent token.
@@ -686,7 +725,7 @@ class LinearIntegration(OAuthIntegration):
                 continue
             try:
                 async with (
-                    aiohttp.ClientSession(timeout=_REVOKE_TIMEOUT) as session,
+                    client_session("linear", timeout=_REVOKE_TIMEOUT) as session,
                     session.post(
                         _REVOKE_URL,
                         data={"token": token, "token_type_hint": token_type},

@@ -11,6 +11,7 @@ Covers the scenarios that used to silently hang or leak:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import multiprocessing as mp
 import sys
@@ -911,3 +912,118 @@ def test_concurrent_shutdown_with_inflight_call_does_not_hang():
         assert not session._proc.is_alive()
 
     assert not errors, f"unexpected exceptions across {n_iterations} iterations: {errors!r}"
+
+
+# --- intentional shutdown is terminal ------------------------------------
+#
+# The retry path treats every transport error as a crash and respawns. A
+# session its owner shut down must be the exception: a late RPC (a
+# background task that outlived ``close()``) is refused, never recovered,
+# because nothing will ever close the worker a respawn would start.
+
+
+def _count_respawns(session):
+    """Wrap the session's respawn factory; returns the list of spawned procs."""
+    real_spawn = session._respawn_factory
+    spawned = []
+
+    def counting_spawn():
+        procs = real_spawn()
+        spawned.append(procs[0])
+        return procs
+
+    session._respawn_factory = counting_spawn
+    return spawned
+
+
+def _reap(procs):
+    for proc in procs:
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=5.0)
+
+
+def test_call_after_intentional_shutdown_is_refused_without_respawn():
+    session = _start_retryable_session(max_retries=2)
+    spawned = _count_respawns(session)
+    try:
+        session.shutdown()
+
+        with pytest.raises(SubprocessTransportError):
+            session.call(Request(op=OP_ECHO, args=("late",)))
+
+        assert spawned == [], "a call after shutdown() must not respawn the worker"
+        assert session._closed
+    finally:
+        _reap(spawned)
+        session.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_call_async_after_intentional_shutdown_is_refused_without_respawn():
+    session = _start_retryable_session(max_retries=2)
+    spawned = _count_respawns(session)
+    try:
+        await asyncio.to_thread(session.shutdown)
+
+        with pytest.raises(SubprocessTransportError):
+            await session.call_async(Request(op=OP_ECHO, args=("late",)))
+
+        assert spawned == [], "a call after shutdown() must not respawn the worker"
+        assert session._closed
+    finally:
+        _reap(spawned)
+        session.shutdown()
+
+
+def test_shutdown_during_a_respawn_leaves_no_worker_alive():
+    """``shutdown()`` that arrives while a retry is respawning must end with the
+    new worker torn down as well, not with the dead worker reaped and the new
+    one left running."""
+    import threading
+
+    session = _start_retryable_session(max_retries=2)
+    real_spawn = session._respawn_factory
+    gate = threading.Event()
+    spawning = threading.Event()
+    spawned = []
+
+    def gated_spawn():
+        spawning.set()
+        assert gate.wait(timeout=10.0), "test did not release the respawn gate"
+        procs = real_spawn()
+        spawned.append(procs[0])
+        return procs
+
+    session._respawn_factory = gated_spawn
+    outcomes = []
+
+    def caller():
+        try:
+            outcomes.append(session.call(Request(op=OP_ECHO, args=("after",))).result)
+        except SubprocessTransportError as exc:
+            outcomes.append(exc)
+
+    try:
+        session._proc.kill()
+        _wait_for_worker_exit(session)
+
+        caller_thread = threading.Thread(target=caller)
+        caller_thread.start()
+        assert spawning.wait(timeout=10.0), "the retry never reached the respawn factory"
+
+        shutter = threading.Thread(target=session.shutdown)
+        shutter.start()
+        time.sleep(0.2)  # let shutdown() get as far as it will before the respawn completes
+        gate.set()
+
+        caller_thread.join(timeout=30.0)
+        shutter.join(timeout=30.0)
+        assert not caller_thread.is_alive() and not shutter.is_alive(), "shutdown vs respawn hung"
+        assert len(spawned) == 1
+        assert not spawned[0].is_alive(), "the respawned worker outlived shutdown()"
+        assert not session._proc.is_alive()
+        assert session._closed
+    finally:
+        _reap(spawned)
+        session.shutdown()

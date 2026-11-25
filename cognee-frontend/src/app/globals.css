@@ -1,4 +1,9 @@
 @layer tailwind, mantine;
+/* The design system's tokens, so our Tailwind can build the utilities its
+   components use. One Tailwind, one cascade: a second stylesheet from the
+   design system would fight ours for order (a reset in one beats a utility
+   in the other). Generated; see scripts/designSystemTheme.js. */
+@import "./design-system-theme.css";
 @layer tailwind {
   @import "tailwindcss";
 }
@@ -50,6 +55,8 @@
   --color-cognee-danger-fg: #FF8A8A;
 
   /* ── Typography ── */
+  --text-2xs: 0.625rem;
+  --text-2xs--line-height: 0.875rem;
   --font-sans: "TWKLausanne", sans-serif;
   --font-mono: ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace;
 }
@@ -61,14 +68,14 @@
 }
 
 body {
-  /* Dark base with the 33px grid so route-transition loading states,
-     overscroll, and error boundaries match the app shell instead of
+  /* Same base and grid as the app shell (CustomAppShell) so route-transition
+     loading states, overscroll, and error boundaries match it instead of
      flashing the old light design. */
-  background-color: #000000;
+  background-color: #111111;
   background-image:
     linear-gradient(rgba(244, 244, 244, 0.10) 1px, transparent 1px),
     linear-gradient(90deg, rgba(244, 244, 244, 0.10) 1px, transparent 1px);
-  background-size: 33px 33px;
+  background-size: 16px 16px;
 }
 
 html,
@@ -96,4 +103,13 @@ body {
   font-weight: 700;
   font-style: normal;
   font-display: swap;
+}
+
+/* Skeleton placeholder pulse. Declared once here rather than in SkeletonBar,
+   which emitted its own inline <style> per instance: the Analytics skeleton
+   alone instantiates 68 of them, so one loading state produced 68 identical
+   keyframe blocks and 195 nodes, torn down and rebuilt on every re-render. */
+@keyframes skpulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.7; }
 }

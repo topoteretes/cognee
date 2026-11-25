@@ -1,4 +1,4 @@
-"""Tests for LLMConfig.default_local_rate_limit_budget (provider-aware RPM default)."""
+"""Tests for the provider-aware RPM default and the opt-in in-flight cap."""
 
 import pytest
 
@@ -17,7 +17,14 @@ def _isolate_llm_env(monkeypatch):
     ollama case here, while CI (which sets all three) passes. Clearing all
     three makes the file hermetic either way.
     """
-    for var in ("LLM_PROVIDER", "LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY"):
+    for var in (
+        "LLM_PROVIDER",
+        "LLM_MODEL",
+        "LLM_ENDPOINT",
+        "LLM_API_KEY",
+        "LLM_RATE_LIMIT_REQUESTS",
+        "LLM_MAX_CONCURRENT_REQUESTS",
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -42,12 +49,14 @@ def _build(**kwargs):
 def test_local_providers_default_to_small_budget(provider, model):
     config = _build(llm_provider=provider, llm_model=model)
     assert config.llm_rate_limit_requests == LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
+    # The in-flight cap is opt-in: local servers are not capped by default.
+    assert config.llm_max_concurrent_requests == 0
 
 
 @pytest.mark.parametrize(
     ("provider", "model"),
     [
-        ("openai", "openai/gpt-5.6-luna"),
+        ("openai", "openai/gpt-6-luna"),
         ("custom", "hosted_vllm/meta-llama/Llama-3-70B"),  # vLLM batches like a cloud endpoint
         ("custom", "vllm/some-model"),
     ],
@@ -55,6 +64,7 @@ def test_local_providers_default_to_small_budget(provider, model):
 def test_regular_providers_keep_regular_default(provider, model):
     config = _build(llm_provider=provider, llm_model=model)
     assert config.llm_rate_limit_requests == 60
+    assert config.llm_max_concurrent_requests == 0  # 0 = unlimited
 
 
 def test_explicit_setting_wins_over_local_default():
@@ -69,7 +79,7 @@ def test_explicit_setting_wins_over_local_default():
         ("llama_cpp", "some-model", True),
         ("custom", "lm_studio/qwen2.5-7b", True),
         ("custom", "hosted_vllm/meta-llama/Llama-3-70B", False),
-        ("openai", "openai/gpt-5.6-luna", False),
+        ("openai", "openai/gpt-6-luna", False),
         (None, None, False),
     ],
 )

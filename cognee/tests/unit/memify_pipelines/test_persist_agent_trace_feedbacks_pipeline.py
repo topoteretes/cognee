@@ -24,7 +24,7 @@ async def test_persist_agent_trace_feedbacks_pipeline_wires_memify_tasks():
             new=AsyncMock(return_value=[authorized_dataset]),
         ) as get_authorized_dataset,
         patch(
-            "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.memify",
+            "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.run_memify_tasks",
             new=AsyncMock(return_value={"status": "ok"}),
         ) as memify_mock,
     ):

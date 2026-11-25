@@ -176,3 +176,23 @@ def test_resolve_facts_top_k_keeps_facts_top_k_when_entities_or_scoped():
         resolve_facts_top_k(entities, node_scoped=False, facts_top_k=5, entity_edge_budget=40) == 5
     )
     assert resolve_facts_top_k([], node_scoped=True, facts_top_k=5, entity_edge_budget=40) == 5
+
+
+def test_select_facts_from_candidates_follows_the_entities_it_is_given():
+    from cognee.modules.retrieval.hybrid.facts import FactCandidates, select_facts_from_candidates
+
+    hits = [
+        {"id": "f_atlas", "text": "Atlas was founded in 1950"},
+        {"id": "f_helios", "text": "Helios launched in 1898"},
+    ]
+    atlas = {"id": "atlas", "edges": [{"edge_type_id": "f_atlas"}]}
+    helios = {"id": "helios", "edges": [{"edge_type_id": "f_helios"}]}
+    candidates = FactCandidates(edge_hits=hits, facts_top_k=5)
+
+    # Both facts shown under entities: nothing standalone.
+    assert select_facts_from_candidates(candidates, [atlas, helios]) == []
+    # Helios cut from the shown entities: its fact comes back as a standalone fact.
+    assert [f["id"] for f in select_facts_from_candidates(candidates, [atlas])] == ["f_helios"]
+    # No entities and unscoped: the edge budget is spent on facts instead.
+    budget = FactCandidates(edge_hits=hits, facts_top_k=1, entity_edge_budget=5)
+    assert len(select_facts_from_candidates(budget, [])) == 2

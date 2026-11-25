@@ -15,7 +15,7 @@ blocking path raises — is a bug here, not a quirk of streaming.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import litellm
 
@@ -64,9 +64,9 @@ async def stream_text_completion(
     sink.begin_attempt()
 
     # The iteration stays inside the rate limiter so a mid-stream failure is
-    # still seen by the overload policy. Note this does NOT bound how many
-    # generations run at once: AsyncLimiter caps request *rate* and releases
-    # nothing on exit, so concurrency here is unbounded either way.
+    # still seen by the overload policy. The RPM limiter only caps how many
+    # requests start; with LLM_MAX_CONCURRENT_REQUESTS set, the stream holds
+    # one of its model's slots until it ends, so a long answer occupies it.
     async with llm_rate_limiter_context_manager():
         stream = await litellm.acompletion(
             model=model,
@@ -81,6 +81,9 @@ async def stream_text_completion(
             stream_options=stream_options,
             **merged_kwargs,
         )
+        # litellm types acompletion() as ModelResponse | CustomStreamWrapper whatever
+        # `stream` is; with stream=True it is the wrapper.
+        stream = cast(litellm.CustomStreamWrapper, stream)
         try:
             async for chunk in stream:
                 # Some providers still send a trailing usage chunk with

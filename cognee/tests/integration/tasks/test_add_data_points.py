@@ -118,12 +118,10 @@ async def test_add_data_points_comprehensive(clean_test_environment):
 
     person5 = Person(name="Frank", age=40)
     person6 = Person(name="Grace", age=38)
-    triplet_edge = (str(person5.id), str(person6.id), "married_to", {"edge_text": "is married to"})
+    custom_edge = (str(person5.id), str(person6.id), "married_to", {"edge_text": "is married to"})
 
-    result_triplet = await add_data_points(
-        [person5, person6], custom_edges=[triplet_edge], embed_triplets=True
-    )
-    assert len(result_triplet) == 2
+    result_custom_edge = await add_data_points([person5, person6], custom_edges=[custom_edge])
+    assert len(result_custom_edge) == 2
 
     nodes, edges = await graph_engine.get_graph_data()
     # 6 + 2 Persons = 8

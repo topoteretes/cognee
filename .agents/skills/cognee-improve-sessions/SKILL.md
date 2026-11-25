@@ -1,6 +1,6 @@
 ---
 name: cognee-improve-sessions
-description: Use when working with cognee's session memory or improve() — storing conversation turns, agent traces and feedback with session_id, bridging sessions into the permanent graph, reading an ImproveResult, understanding why an improve stage was skipped, already_completed or lock_held, or tuning the IMPROVE_* settings.
+description: Use when working with cognee's session memory or improve() — storing conversation turns, agent traces and feedback with session_id, bridging sessions into the permanent graph, reading an ImproveResult, understanding why an improve stage was skipped or already_completed, or tuning the IMPROVE_* settings.
 ---
 
 # Session memory and improve()
@@ -41,11 +41,12 @@ await cognee.wait_for_background_tasks()  # before a script exits
 | A fact or note | `remember(text, session_id=...)` (stored as a Q&A entry with the text as the answer) |
 | A Q&A turn | `recall(query, session_id=...)` with a completion search type saves the turn itself; or `remember(cognee.QAEntry(question=..., answer=...), session_id=...)` |
 | An agent step | `remember(cognee.TraceEntry(origin_function=..., status="success", ...), session_id=...)`, or the `@cognee.agent_memory(save_session_traces=True)` decorator |
+| Pin a session to a project / node set | `node_set=[...]` on the first `QAEntry`/`TraceEntry` (or as a kwarg on any session `remember`) pins it; later writes repeat or omit it, a different set raises `cognee.SessionNodeSetConflictError` (HTTP 409). `improve()` keeps the set on everything it bridges, so `recall(node_name=[...])` scopes to the project |
 | Feedback on an answer | `remember(cognee.FeedbackEntry(qa_id=..., feedback_score=...), session_id=...)` or `cognee.session.add_feedback(session_id, qa_id, feedback_text=..., feedback_score=...)` |
 | Read a session | `cognee.session.get_session(session_id, last_n=...)` |
 
 Requirements: `CACHING=true` (default). The cache backend is
-`CACHE_BACKEND`, one of `sqlite` (default), `postgres`, `redis`, `fs`,
+`CACHE_BACKEND`, one of `sqlite` (default), `postgres`, `redis`,
 `tapes`. Sessions expire after `SESSION_TTL_SECONDS` (default 7 days).
 
 ### What improve() does: nine stages, in order
@@ -63,11 +64,17 @@ spends any LLM or embedding cost, and reports one `StageResult`.
 | 5 | `distill_sessions` | Distills session learnings into the graph | `session_ids`, an LLM |
 | 6 | `update_user_preferences` | Folds rated turns into per-user preferences | `session_ids`, `PERSONALIZATION_ENABLED=true` (default false) |
 | 7 | `build_truth_subspace` | Builds the truth subspace from distilled learnings | `session_ids`, `build_truth_subspace=True`, a Ladybug graph |
-| 8 | `triplet_enrichment` | Triplet embeddings over the graph (memify) | `TRIPLET_EMBEDDING=true` (**default false**), or custom tasks/data passed |
-| 9 | `global_context_index` | Bucket and root summaries for global questions | `build_global_context_index=True`, an LLM |
+| 8 | `review_conflicts` | Reviews dated source facts and stores conflicts | on by default (`review_conflicts=False` or `IMPROVE_REVIEW_CONFLICTS=false` turns it off), an LLM, edge evidence |
+| 9 | `global_context_index` | Bucket and root summaries for global questions; also the rows dataset routing scores an unscoped search on | on by default (`build_global_context_index=False` or `IMPROVE_GLOBAL_CONTEXT_INDEX=false` turns it off) |
 
-Stages 1–7 need `session_ids`; 8 and 9 work on the graph alone. The order
+Stages 1–7 need `session_ids`; 8–9 work on the graph alone. The order
 matters: 4 feeds 5, 5 feeds 7, and 7 runs before 8.
+
+`extraction_tasks` / `enrichment_tasks` are deprecated and removed in the next
+release: they still run, as a `custom_tasks` stage after the others, scoped by
+`node_name`, `data`, `node_type`, `vector_db_config` and `graph_db_config`.
+Without custom tasks those options are ignored. Both cases warn with a
+`FutureWarning`; use `run_custom_pipeline()` instead.
 
 ### Reading the result
 
@@ -79,8 +86,7 @@ CLI, and `RememberResult.improve`.
 - `result.stages`: one `StageResult` per stage, with `stage`, `status`
   (`completed` / `already_completed` / `skipped` / `errored`), `reason`,
   `error`, `counts`, `duration_ms`.
-- `result.stage("distill_sessions")`, `result.stage_summary()`,
-  `result.lock_held`, `result.rerun_requested`, `result.rerun_passes`.
+- `result.stage("distill_sessions")`, `result.stage_summary()`.
 - `await result.wait()` finishes a background run (no-op otherwise).
 
 **Skip and no-op reasons:**
@@ -89,17 +95,17 @@ CLI, and `RememberResult.improve`.
 |---|---|
 | `no_session_ids` | Session stage, no `session_ids` passed |
 | `disabled_by_config` | Listed in `IMPROVE_STAGES_DISABLED` |
-| `triplet_embedding_disabled` | Set `TRIPLET_EMBEDDING=true` to enable stage 8 |
-| `opt_in_disabled` | Pass `build_truth_subspace=True` / `build_global_context_index=True` |
+| `opt_in_disabled` | Pass `build_truth_subspace=True` |
+| `turned_off` | An on-by-default stage was switched off: conflict review by `review_conflicts=False` or `IMPROVE_REVIEW_CONFLICTS=false`, the global context index by `build_global_context_index=False` or `IMPROVE_GLOBAL_CONTEXT_INDEX=false` |
 | `personalization_disabled` | Set `PERSONALIZATION_ENABLED=true` |
 | `auto_feedback_disabled` | Stage 4 needs `CACHING=true` and `AUTO_FEEDBACK=true` |
-| `no_llm_configured` | Stages 4, 5, 9 draft text with an LLM; none configured |
+| `no_llm_configured` | Stages 4, 5, 8 draft text with an LLM; none configured |
+| `edge_evidence_disabled` | Conflict review needs `EDGE_EVIDENCE_ENABLED=true` |
 | `backend_unsupported` | The graph adapter lacks the feature (feedback weights, truth subspace) |
 | `session_manager_unavailable` | The session cache is not reachable |
-| `lock_held` | Another improve for the same dataset or session is running (below) |
 | `aborted_by_fatal_stage` | Stage 2 failed, so the rest did not run |
 | `budget_exhausted` | An earlier stage failed because the LLM budget is exhausted (a 402); the rest would fail the same way. Top up, then run improve again |
-| `no_new_entries`, `no_new_trace_steps`, `no_writes_since_last_improve` | With status `already_completed`: nothing new since the last run |
+| `no_new_entries`, `no_new_trace_steps`, `no_new_facts`, `no_writes_since_last_improve` | With status `already_completed`: nothing new since the last run |
 
 ### How remember() triggers improve
 
@@ -128,6 +134,8 @@ CLI, and `RememberResult.improve`.
 | `IMPROVE_DEBOUNCE_SECONDS` | `0` | ...or this many seconds since the last one. Seconds alone (entries left at 1) means time-only |
 | `IMPROVE_STAGES_DISABLED` | empty | CSV of stage names to skip |
 | `IMPROVE_FEEDBACK_ALPHA` | `0.1` | Feedback learning rate, in (0, 1] |
+| `IMPROVE_REVIEW_CONFLICTS` | `true` | Review fact conflicts, including automatic improve; an explicit `review_conflicts` argument overrides it |
+| `IMPROVE_EFFECTIVE_DATE_KEY` | `effective_date` | Document metadata key holding the source date |
 
 There is no debounce timer: held-back entries wait for the next
 `remember()` with that session, or an explicit `improve()`.
@@ -135,18 +143,38 @@ There is no debounce timer: held-back entries wait for the next
 ## Pitfalls
 
 - **A plain `improve(dataset)` often does nothing.** Without `session_ids`,
-  only stages 8 and 9 can run, and both are off by default. Result: every
+  only stages 8–9 can run, and both are off by default. Result: every
   stage `skipped`. That is expected, not an error.
+- **A session's node set is pinned once.** The first write carrying
+  `node_set` fixes it for the session; a different set is a 409, start a
+  new session instead. Bridged Q&A, traces and lessons carry the set, user
+  preferences never do. The guarantee holds within one worker process (an
+  in-process lock); with several workers, send a session's writes to one.
+  Example: `examples/guides/session_node_sets.py`.
+- **A session belongs to one dataset.** Its first write (plain text, a
+  typed entry, or a recall that records a turn) binds it to that write's
+  dataset. Every later `remember(..., session_id=...)` goes to the bound
+  dataset; naming another one (`dataset_id`, or a `dataset_name` other than
+  the `main_dataset` default) raises `ValueError` (HTTP 409 on
+  `POST /api/v1/remember`, 400 on `/remember/entry`). Start a new session
+  for another dataset. The turn's Q&A vector is written to that dataset's own
+  vector store, where its recalls read it.
+- **Session writes go through the dataset's databases.** With backend
+  access control on, a session write enters its dataset's database context,
+  like a recall turn: it takes a dataset queue slot
+  (`DATASET_QUEUE_MAX_CONCURRENT`, default 6, per process), so it waits
+  while that many datasets are busy, and the first write to a new dataset
+  provisions the dataset's databases (one database per dataset on
+  pgvector/Postgres, a container with `neo4j_community`). If those
+  databases cannot be bound, the write raises instead of storing the turn.
 - **Typed entries do not auto-improve.** `remember(QAEntry/TraceEntry/
   FeedbackEntry, session_id=...)` stores the entry but never starts an
   improve. Call `improve(session_ids=[...])` yourself.
-- **`lock_held` does not wait.** Improves for the same dataset or session
-  run one at a time: a second call returns at once with every stage
-  `skipped: lock_held`. If it shares a session with the running one, it sets
-  `rerun_requested=True` and the holder runs up to 2 extra passes (3 passes
-  in total; see `rerun_passes`). The bound is `IMPROVE_MAX_RERUN_PASSES`, a
-  constant in `cognee/api/v1/improve/improve.py`, not an env var. The lock is per process only; multiple API workers do not
-  share it.
+- **Improves queue.** An improve holds the dataset's lock for its whole
+  run, like `cognify()`: improves, cognify, add and forget on one dataset
+  run one at a time, and improves sharing a session also wait for each
+  other. A background call returns at once and waits inside its task. The
+  lock is per process only; multiple API workers do not share it.
 - **Sessions bridge once.** Q&A and trace persistence are tracked per user
   and session, not per dataset, so bridging a session into dataset A and
   then into dataset B persists no new Q&A/traces into B. Distillation is
@@ -171,8 +199,8 @@ There is no debounce timer: held-back entries wait for the next
 ## How it works
 
 `improve()` resolves the dataset once (creating it if the name is new),
-claims the improve lock for `dataset:<id>` plus every
-`session:<user>:<session_id>`, probes the graph adapter's capabilities, and
+waits for the dataset's lock and then for every
+`session:<user>:<session_id>` claim, probes the graph adapter's capabilities, and
 runs the stages with one frozen `ImproveRunInputs`. Each stage is a gate
 plus a call into existing pipelines plus a result mapping. Stages never own
 retries or ordering.
@@ -181,9 +209,10 @@ Watermarks keep repeat runs cheap:
 
 - Session stages track how many entries were already persisted, per user
   and session.
-- Stage 8 compares the last completed enrichment against later write
-  pipelines for the dataset. A `node_name` or custom-task run bypasses that
-  check.
+- Conflict review uses its last succeeded stamp to select touched entities,
+  and retries conflicts with missing citations or pending writes. Source dates
+  come from document metadata; session windows use their last entry time.
+  Fixed attributes remain disputed even when one document is newer.
 
 The improve operation row is written when the run finishes: `failed` if any
 stage errored (a retry is never gated off), `noop` if nothing ran.
@@ -192,7 +221,7 @@ stage errored (a retry is never gated off), `noop` if nothing ran.
   `routers/get_improve_router.py`; CLI: `cognee/cli/commands/improve_command.py`)
 - Stages, registry, results: `cognee/modules/improve/` (`stages.py`,
   `registry.py`, `stage.py`, `result.py`, `inputs.py`, `capabilities.py`,
-  `config.py`, `graph_changes.py`, `constants.py`)
+  `config.py`, `watermarks.py`, `constants.py`)
 - Lock: `cognee/infrastructure/locks/session_lock.py`
 - Session store and watermarks: `cognee/infrastructure/session/`
   (`session_manager.py`, `session_persist_watermark.py`,
@@ -204,7 +233,7 @@ stage errored (a retry is never gated off), `noop` if nothing ran.
 - Background tasks: `cognee/infrastructure/background_tasks.py`
 
 Examples: `examples/guides/improve_quickstart.py`, `sessions.py`,
-`session_distillation.py`, `global_context_index.py`,
+`session_distillation.py`, `review_conflicts.py`, `global_context_index.py`,
 `agent_memory_quickstart.py`, and
 `examples/advanced_guides/remember_recall_improve_example.py`.
 
@@ -221,9 +250,7 @@ Adding a stage:
    The order is pinned by `cognee/tests/unit/modules/improve/test_registry_order.py`;
    update it deliberately.
 3. If it can re-run cheaply, give it a watermark so a repeat run reports
-   `already_completed`.
-4. If it writes graph data under a new pipeline name, add that name to
-   `WRITE_PIPELINE_NAMES` in `graph_changes.py`, or stage 8 will not notice
-   the change.
-5. Tests: `cognee/tests/unit/modules/improve/` (gates, results, config) and
-   `cognee/tests/unit/api/v1/improve/` (orchestration, rerun, router).
+   `already_completed` (graph-wide stages can stamp the improve row with the
+   helpers in `watermarks.py`, as conflict review does).
+4. Tests: `cognee/tests/unit/modules/improve/` (gates, results, config) and
+   `cognee/tests/unit/api/v1/improve/` (orchestration, queue, router).

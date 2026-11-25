@@ -1,9 +1,9 @@
-"""Combine node sets, an ontology, memify() and filtered recall over three data sources.
+"""Combine node sets, an ontology and filtered recall over three data sources.
 
 A developer intro, a bundled conversation JSON and a Zen-of-Python markdown file are remembered
-under node sets with ONTOLOGY_FILE_PATH pointing at data/basic_ontology.owl. Graphs before and
-after memify() are written to .artifacts/, then a cross-document GRAPH_COMPLETION recall and a
-node_name-filtered recall are printed.
+under node sets with ONTOLOGY_FILE_PATH pointing at data/basic_ontology.owl. The graph is written
+to .artifacts/, then a cross-document GRAPH_COMPLETION recall and a node_name-filtered recall are
+printed.
 
 Requires: LLM_API_KEY -- edit the placeholder assigned to os.environ["LLM_API_KEY"] below.
 Run: uv run python examples/demos/comprehensive_example/cognee_comprehensive_example.py
@@ -67,15 +67,6 @@ async def main():
         os.path.dirname(__file__), artifacts_path, "graph_visualization_nodesets_and_ontology.html"
     )
     await cognee.visualize_graph(initial_graph_visualization_path)
-
-    # enhance the knowledge graph with memory consolidation for improved connections
-    await cognee.memify()
-
-    # generate the second graph visualization after memory enhancement
-    enhanced_graph_visualization_path = os.path.join(
-        os.path.dirname(__file__), artifacts_path, "graph_visualization_after_memify.html"
-    )
-    await cognee.visualize_graph(enhanced_graph_visualization_path)
 
     # demonstrate cross-document knowledge retrieval from multiple data sources
     results = await cognee.recall(

@@ -454,7 +454,9 @@ async def test_pipeline_wires_memify_tasks_and_config():
             f"{module}.get_authorized_existing_datasets",
             new=AsyncMock(return_value=[dataset]),
         ),
-        patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock,
+        patch(
+            f"{module}.run_memify_tasks", new=AsyncMock(return_value={"status": "ok"})
+        ) as memify_mock,
     ):
         result = await consolidate_entities_pipeline(
             similarity_threshold=0.9, dry_run=True, top_k=5, protect_node_types=["City"]

@@ -2,7 +2,6 @@ from cognee.modules.tools.text_to_sql.engine import TOOL_NAME, TextToSqlResult, 
 from cognee.modules.tools.text_to_sql.write_proposals import (
     apply_write_proposal,
     list_write_proposals,
-    propose_corrections_from_contradictions,
     propose_sql_write,
     reject_write_proposal,
 )
@@ -12,7 +11,6 @@ __all__ = [
     "TextToSqlResult",
     "apply_write_proposal",
     "list_write_proposals",
-    "propose_corrections_from_contradictions",
     "propose_sql_write",
     "reject_write_proposal",
     "run_text_to_sql",

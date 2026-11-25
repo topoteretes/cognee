@@ -21,10 +21,18 @@ from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from cognee.modules.engine.utils.timestamp_from_text import timestamp_from_text
 from cognee.shared.data_models import Edge, KnowledgeGraph, Node
 
 _WHITESPACE = re.compile(r"\s+")
 _TRAILING_PUNCTUATION = ".,;:!?'\")]}"
+# GLiNER labels whose spans are points in time. A span under one of these that
+# parses (see ``timestamp_from_text``) becomes a "Timestamp" node named by the
+# normalized string, which graph construction turns into a real Timestamp
+# datapoint — the same route the LLM prompt's Timestamp nodes take. A span that
+# does not parse ("the 1960s", "last spring") keeps its GLiNER label.
+_TIME_LABELS = frozenset({"date", "year", "time_period"})
+TIMESTAMP_TYPE = "Timestamp"
 
 
 def normalize_name(name: Any) -> str:
@@ -107,13 +115,36 @@ def iter_relations(result: Mapping[str, Any]) -> Iterator[tuple[str, str, str]]:
                 yield str(relation), head, tail
 
 
-class _EndpointIndex:
-    """Offset-free resolution of relation endpoints to node ids."""
+def _timestamp_node(type_label: str, name: str) -> tuple[str, str] | None:
+    """``(type, normalized name)`` when a time-labelled span parses as a timestamp."""
+    if normalize_key(type_label) not in _TIME_LABELS:
+        return None
+    timestamp = timestamp_from_text(name)
+    if timestamp is None:
+        return None
+    return TIMESTAMP_TYPE, timestamp.timestamp_str
 
-    def __init__(self, nodes: Iterable[Node]):
+
+class _EndpointIndex:
+    """Offset-free resolution of relation endpoints to node ids.
+
+    ``aliases`` maps a node id to the mention texts it was built from, so a
+    relation whose endpoint is the span GLiNER saw ("7 November 1867") still
+    resolves to the node named by its normalized form ("1867-11-07").
+    """
+
+    def __init__(self, nodes: Iterable[Node], aliases: Mapping[str, Iterable[str]] | None = None):
         self._by_key: dict[str, list[str]] = {}
+        aliases = aliases or {}
         for node in nodes:
-            self._by_key.setdefault(normalize_key(node.name), []).append(node.id)
+            self._add(node.name, node.id)
+            for alias in aliases.get(node.id, ()):
+                self._add(alias, node.id)
+
+    def _add(self, name: str, node_id: str) -> None:
+        ids = self._by_key.setdefault(normalize_key(name), [])
+        if node_id not in ids:
+            ids.append(node_id)
 
     def resolve(self, endpoint: str) -> str | None:
         key = normalize_key(endpoint)
@@ -138,11 +169,17 @@ class _EndpointIndex:
 def map_gliner_result(result: Mapping[str, Any]) -> MappedChunk:
     """Build one chunk's ``KnowledgeGraph`` from a GLiNER result and count edge loss."""
     nodes: dict[str, Node] = {}
+    aliases: dict[str, list[str]] = {}
     for type_name, mention in iter_entities(result):
         name = normalize_name(mention)
         type_label = normalize_name(type_name)
         if not normalize_key(name) or not type_label:
             continue
+        as_timestamp = _timestamp_node(type_label, name)
+        if as_timestamp is not None:
+            type_label, normalized = as_timestamp
+            aliases.setdefault(node_id_for(type_label, normalized), []).append(name)
+            name = normalized
         node_id = node_id_for(type_label, name)
         if node_id not in nodes:
             # ``label`` only exists on the Gemini variant of ``Node``; the other
@@ -151,7 +188,7 @@ def map_gliner_result(result: Mapping[str, Any]) -> MappedChunk:
                 id=node_id, name=name, type=type_label, description=name, label=type_label
             )
 
-    index = _EndpointIndex(nodes.values())
+    index = _EndpointIndex(nodes.values(), aliases)
     candidates: set[tuple[str, str, str]] = set()
     edges: dict[tuple[str, str, str], Edge] = {}
     for relation, head, tail in iter_relations(result):

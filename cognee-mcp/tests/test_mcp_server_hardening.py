@@ -290,6 +290,67 @@ async def test_cognee_client_api_remember_uploads_file_path_under_original_basen
 
 
 @pytest.mark.asyncio
+async def test_cognee_client_api_upload_honours_allowed_local_file_roots(monkeypatch, tmp_path):
+    """A file outside COGNEE_ALLOWED_LOCAL_FILE_ROOTS is stored as text, as in direct mode.
+
+    API mode reads the file on the MCP host, so skipping the allowlist here would
+    send a file the operator fenced off to the remote server.
+    """
+    outside = tmp_path / "outside" / "id_rsa"
+    outside.parent.mkdir()
+    outside.write_bytes(b"PRIVATE KEY MATERIAL")
+    allowed_root = tmp_path / "allowed"
+    allowed_root.mkdir()
+    inside = allowed_root / "notes.md"
+    inside.write_text("allowed notes", encoding="utf-8")
+    monkeypatch.setenv("COGNEE_ALLOWED_LOCAL_FILE_ROOTS", str(allowed_root))
+
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+
+    try:
+        await client.add(str(outside), dataset_name="ds")
+        await client.remember(str(outside), dataset_name="ds")
+        await client.add(str(inside), dataset_name="ds")
+    finally:
+        await client.close()
+
+    digest = hashlib.md5(str(outside).encode("utf-8")).hexdigest()
+    for request in requests[:2]:
+        assert b"PRIVATE KEY MATERIAL" not in request.content
+        assert _multipart_filenames(request) == [f"text_{digest}.txt"]
+    # A file inside an allowed root is still uploaded as a file.
+    assert _multipart_filenames(requests[2]) == ["notes.md"]
+    assert b"allowed notes" in requests[2].content
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_api_upload_refuses_local_files_when_disabled(monkeypatch, tmp_path):
+    """ACCEPT_LOCAL_FILE_PATH=false refuses a local file before anything is sent."""
+    save_module = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
+    ingestion_error = importlib.import_module("cognee.modules.ingestion.exceptions").IngestionError
+    monkeypatch.setattr(save_module.settings, "accept_local_file_path", False)
+    local_file = tmp_path / "id_rsa"
+    local_file.write_bytes(b"PRIVATE KEY MATERIAL")
+
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+
+    try:
+        with pytest.raises(ingestion_error, match="not accepted"):
+            await client.add(str(local_file), dataset_name="ds")
+        with pytest.raises(ingestion_error, match="not accepted"):
+            await client.remember(str(local_file), dataset_name="ds")
+        # Plain text is untouched by the setting.
+        await client.remember("just a note", dataset_name="ds")
+    finally:
+        await client.close()
+
+    assert len(requests) == 1
+    assert b"PRIVATE KEY MATERIAL" not in requests[0].content
+
+
+@pytest.mark.asyncio
 async def test_cognee_client_api_remember_base64_upload_preserves_and_sanitizes_filename():
     """The MCP file-upload path keeps the caller's name but never a directory."""
     requests: list[httpx.Request] = []
@@ -343,21 +404,16 @@ class FakeCogneeModule:
     def __init__(self, result=None, error=None):
         self.calls: list[dict] = []
         self.seen_payloads: list[bytes] = []
-        self.seen_paths: list[str] = []
+        self.seen_filenames: list[str] = []
         self._result = result
         self._error = error
 
     async def remember(self, **kwargs):
         self.calls.append(kwargs)
         data = kwargs.get("data")
-        # Read through the handed-off path while it is still on disk: the
-        # client deletes it as soon as remember() returns.
-        if isinstance(data, str) and os.path.isfile(data):
-            self.seen_paths.append(data)
-            # A blocking read is fine in a test double: no event loop to
-            # starve, and the file is a few bytes on tmpfs.
-            with open(data, "rb") as handle:
-                self.seen_payloads.append(handle.read())
+        if hasattr(data, "file"):
+            self.seen_filenames.append(data.filename)
+            self.seen_payloads.append(data.file.read())
         if self._error is not None:
             raise self._error
         return self._result
@@ -371,8 +427,9 @@ def _local_client(fake_cognee: FakeCogneeModule) -> CogneeClient:
 
 
 @pytest.mark.asyncio
-async def test_cognee_client_local_remember_writes_upload_to_a_temp_file():
-    """Direct mode materializes the upload on disk under its original name."""
+async def test_cognee_client_local_remember_hands_off_an_upload():
+    """Direct mode passes the upload as one, never as a path on this server: over
+    sse/http a path would be refused as a network caller's server path."""
     fake = FakeCogneeModule()
     client = _local_client(fake)
     raw_bytes = b"%PDF-1.4\n\x00\x80\xff quarterly report"
@@ -386,9 +443,8 @@ async def test_cognee_client_local_remember_writes_upload_to_a_temp_file():
     )
 
     assert len(fake.calls) == 1
-    handed_off = fake.calls[0]["data"]
-    assert Path(handed_off).name == "q3-report.pdf"
-    # Bytes survive the base64 -> disk round trip untouched.
+    assert fake.seen_filenames == ["q3-report.pdf"]
+    # Bytes survive the base64 round trip untouched.
     assert fake.seen_payloads == [raw_bytes]
     assert fake.calls[0]["dataset_name"] == "ds"
     # File uploads are permanent-memory only, so no session_id is forwarded.
@@ -413,43 +469,9 @@ async def test_cognee_client_local_remember_sanitizes_upload_filename():
             data=None, dataset_name="ds", filename=supplied, content_base64=payload
         )
 
-        written = Path(fake.calls[0]["data"])
-        assert written.name == expected
-        # The traversal segments must not survive into the staged path.
-        assert ".." not in written.parts
-
-
-@pytest.mark.asyncio
-async def test_cognee_client_local_remember_cleans_up_the_temp_upload():
-    """The staged file and its directory are removed once ingestion returns."""
-    fake = FakeCogneeModule()
-    client = _local_client(fake)
-    payload = base64.b64encode(b"transient").decode("ascii")
-
-    await client.remember(
-        data=None, dataset_name="ds", filename="scratch.md", content_base64=payload
-    )
-
-    staged = Path(fake.seen_paths[0])
-    assert not staged.exists()
-    assert not staged.parent.exists()
-
-
-@pytest.mark.asyncio
-async def test_cognee_client_local_remember_cleans_up_when_ingestion_fails():
-    """A failing cognify must not leak the staged upload onto disk."""
-    fake = FakeCogneeModule(error=RuntimeError("cognify exploded"))
-    client = _local_client(fake)
-    payload = base64.b64encode(b"transient").decode("ascii")
-
-    with pytest.raises(RuntimeError, match="cognify exploded"):
-        await client.remember(
-            data=None, dataset_name="ds", filename="scratch.md", content_base64=payload
-        )
-
-    staged = Path(fake.seen_paths[0])
-    assert not staged.exists()
-    assert not staged.parent.exists()
+        assert fake.seen_filenames == [expected]
+        # The traversal segments must not survive into the stored filename.
+        assert ".." not in fake.seen_filenames[0]
 
 
 @pytest.mark.asyncio
@@ -471,7 +493,7 @@ async def test_cognee_client_local_remember_passes_text_through_untouched():
         "session_id": "s-1",
         "custom_prompt": "extract carefully",
     }
-    assert fake.seen_paths == []
+    assert fake.seen_filenames == []
 
 
 @pytest.mark.asyncio
@@ -629,6 +651,7 @@ async def test_mcp_remember_forwards_file_uploads(monkeypatch):
             "custom_prompt": "extract carefully",
             "ontology_key": None,
             "self_improvement": True,
+            "node_set": None,
         }
     ]
     # The confirmation names the file and its decoded size, not the base64 length.
@@ -750,6 +773,7 @@ async def test_mcp_recall_forwards_system_prompt(monkeypatch):
         "top_k": 5,
         "scope": None,
         "code_query": None,
+        "include_references": False,
     }
 
 
@@ -1276,3 +1300,71 @@ async def test_api_pipeline_status_omits_an_empty_pipeline_name():
     status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
     assert status_calls[0].url.params.get_list("pipeline") == []
     assert status_calls[0].url.params.get_list("dataset") == [dataset_id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["stdio", "sse", "http"])
+async def test_mcp_origin_stays_mcp_and_stdio_keeps_paths(monkeypatch, transport):
+    """The origin stays "mcp" on every transport: it feeds pipeline_runs and telemetry.
+
+    stdio has no network caller, so its paths stay accepted; the network transports
+    are closed by the app itself (see test_network_transports_wrap_the_app below).
+    """
+    from src import server
+
+    operations = importlib.import_module("cognee.modules.operations")
+    save_module = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
+    monkeypatch.setattr(save_module.settings, "accept_local_file_path", None)
+    monkeypatch.delenv("COGNEE_SERVICE_URL", raising=False)
+    monkeypatch.setattr(
+        sys, "argv", ["cognee-mcp", "--transport", transport, "--no-migration", "--api-url", ""]
+    )
+    seen = []
+
+    async def record(*args, **kwargs):
+        # Where the transport would run tool calls, outside any app wrapper.
+        seen.append((save_module.local_file_paths_accepted(), operations.get_operation_origin()))
+
+    monkeypatch.setattr(server.uvicorn.Server, "serve", record)
+    monkeypatch.setattr(server.mcp, "run_stdio_async", record)
+
+    await asyncio.create_task(server.main())  # its own context: main() sets the origin
+
+    assert seen == [(True, operations.ORIGIN_MCP)]
+
+
+@pytest.mark.parametrize("transport", ["sse", "http"])
+def test_network_transports_wrap_the_app(transport):
+    """Both network apps run every scope as a remote caller's, closing the gates."""
+    from src import server
+
+    app = server._build_http_app(transport, "127.0.0.1")
+
+    assert server.RemoteCallerMiddleware in [m.cls for m in app.user_middleware]
+
+
+@pytest.mark.asyncio
+async def test_remote_caller_middleware_covers_requests_and_lifespan_tasks(monkeypatch):
+    """A request, and a task started from the lifespan (where streamable http runs
+    tool calls), both see the gate closed; outside the app it stays open."""
+    from src import server
+
+    save_module = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
+    monkeypatch.setattr(save_module.settings, "accept_local_file_path", None)
+    seen = {}
+
+    async def gate_in_task():
+        return save_module.local_file_paths_accepted()
+
+    async def inner(scope, receive, send):
+        if scope["type"] == "lifespan":
+            seen["lifespan task"] = await asyncio.create_task(gate_in_task())
+        else:
+            seen["request"] = save_module.local_file_paths_accepted()
+
+    app = server.RemoteCallerMiddleware(inner)
+    for scope_type in ("lifespan", "http"):
+        await app({"type": scope_type}, None, None)
+
+    assert seen == {"lifespan task": False, "request": False}
+    assert save_module.local_file_paths_accepted() is True

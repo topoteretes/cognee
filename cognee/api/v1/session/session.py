@@ -173,3 +173,32 @@ async def delete_feedback(
         session_id=session_id,
         qa_id=qa_id,
     )
+
+
+async def delete_session(session_id: str, user: User | None = None) -> bool:
+    """Delete one session and everything cognee keeps for it.
+
+    Removes the session's Q&A turns, agent-trace steps, session context and
+    improve() watermarks from the session cache, its Q&A vectors, and its
+    dashboard and per-model usage rows, so it no longer appears in recall,
+    improve() or the sessions API. Only the caller's own sessions: the cache
+    is keyed by the owning user.
+
+    Lessons already distilled from the session into a dataset are ordinary
+    documents and stay; remove them with ``forget(data_id=...)``.
+
+    Args:
+        session_id: The session to delete. Required: there is no default.
+        user: User that owns the session. If None, uses session/context user or default user.
+
+    Returns:
+        True if the session existed and was deleted, False if nothing was
+        stored under it. Raises when session memory is disabled
+        (``CACHING=false``) and on any cache or database failure.
+    """
+    from cognee.modules.session_lifecycle.delete_session import (
+        delete_session as delete_session_everywhere,
+    )
+
+    resolved_user = await _resolve_user(user)
+    return await delete_session_everywhere(cast(UUID, resolved_user.id), session_id)

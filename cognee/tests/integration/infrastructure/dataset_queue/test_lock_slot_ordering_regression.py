@@ -42,7 +42,7 @@ from cognee.modules.users.methods import get_default_user
 
 DATASET = "sdk483_dataset"
 
-_real_memify = afw_module.memify
+_real_memify = afw_module.run_memify_tasks
 
 
 async def delayed_memify(**kwargs):
@@ -74,7 +74,7 @@ async def run_locked_pipeline(user):
 async def main():
     await cognee.add("regression seed", dataset_name=DATASET)
     user = await get_default_user()
-    afw_module.memify = delayed_memify
+    afw_module.run_memify_tasks = delayed_memify
 
     improve_task = asyncio.create_task(
         afw_module.apply_feedback_weights_pipeline(

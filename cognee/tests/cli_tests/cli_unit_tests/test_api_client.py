@@ -235,11 +235,11 @@ class TestImproveEndpoint:
 
         result = client.improve(
             dataset_name="docs",
-            node_name=["Alice"],
             session_ids=["s1"],
             run_in_background=True,
             build_global_context_index=True,
             build_truth_subspace=True,
+            review_conflicts=True,
             feedback_alpha=0.2,
         )
 
@@ -249,10 +249,10 @@ class TestImproveEndpoint:
         assert kwargs["json"] == {
             "run_in_background": True,
             "dataset_name": "docs",
-            "node_name": ["Alice"],
             "session_ids": ["s1"],
             "build_global_context_index": True,
             "build_truth_subspace": True,
+            "review_conflicts": True,
             "feedback_alpha": 0.2,
         }
 
@@ -265,3 +265,10 @@ class TestImproveEndpoint:
             "run_in_background": False,
             "dataset_id": "11111111-1111-1111-1111-111111111111",
         }
+
+    def test_explicit_review_conflicts_false_is_sent(self):
+        client, http = self._client_with_mock({})
+
+        client.improve(dataset_name="docs", review_conflicts=False)
+
+        assert http.post.call_args[1]["json"]["review_conflicts"] is False

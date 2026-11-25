@@ -16,12 +16,47 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
+from cognee.shared.event_time import normalize_event_time
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("memory.entries")
 
 
-class QAEntry(BaseModel):
+class SessionNodeSetEntry(BaseModel):
+    """Base for the session entries that can carry a ``node_set``.
+
+    The first entry that carries one pins it on the session, later entries must
+    repeat it or omit it, and a different set is rejected with HTTP 409
+    (``SessionNodeSetConflictError``). ``improve()`` appends the pinned set to
+    the node set of everything it bridges from the session into the graph, so a
+    ``node_name``-scoped recall sees it. Like the call-level ``node_set`` on
+    ``remember()``, ``add()`` and ``update()``, the list is not size-limited.
+
+    Validation and normalization are ``normalize_node_set``'s, the rule every
+    session node-set input shares: a list of non-blank names, stored sorted
+    and deduplicated; a bare string or a blank name is refused.
+    """
+
+    node_set: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional node set pinned on the session; kept on the graph nodes "
+            "improve() builds from it. Immutable once set for a session. A list of "
+            "non-empty names, stored sorted and deduplicated."
+        ),
+    )
+
+    @field_validator("node_set", mode="before")
+    @classmethod
+    def _normalize_node_set(cls, value):
+        # Imported here: entries.py is loaded by ``import cognee`` before the
+        # session infrastructure, and the rule must stay in one place.
+        from cognee.infrastructure.session.session_node_set import normalize_node_set
+
+        return normalize_node_set(value)
+
+
+class QAEntry(SessionNodeSetEntry):
     """A Q&A turn stored in the session cache.
 
     Represents a user question + assistant answer with optional
@@ -35,9 +70,32 @@ class QAEntry(BaseModel):
     feedback_text: str | None = None
     feedback_score: int | None = None
     used_graph_element_ids: dict | None = None
+    time: str | None = Field(
+        default=None,
+        examples=["2026-11-05T09:30:12+00:00"],
+        description=(
+            "When the turn ended, as an ISO-8601 timestamp with a timezone, from the "
+            "client's clock. Stored as the entry's time; omitted, the store time is used."
+        ),
+    )
+
+    prompt_time: str | None = Field(
+        default=None,
+        examples=["2026-11-05T09:28:40+00:00"],
+        description=(
+            "When the user submitted the prompt, as an ISO-8601 timestamp with a timezone, "
+            "from the client's clock. With time, it bounds the turn the coding distillation "
+            "pairs traces to."
+        ),
+    )
+
+    @field_validator("time", "prompt_time")
+    @classmethod
+    def time_is_an_aware_timestamp(cls, value: str | None) -> str | None:
+        return normalize_event_time(value) if value is not None else None
 
 
-class TraceEntry(BaseModel):
+class TraceEntry(SessionNodeSetEntry):
     """One step of an agent trace.
 
     Structured representation of a tool/function call — origin,
@@ -57,6 +115,19 @@ class TraceEntry(BaseModel):
     memory_context: str = ""
     error_message: str = ""
     generate_feedback_with_llm: bool = False
+    time: str | None = Field(
+        default=None,
+        examples=["2026-11-05T09:29:58+00:00"],
+        description=(
+            "When the tool call finished, as an ISO-8601 timestamp with a timezone, from "
+            "the client's clock. Stored as the step's time; omitted, the store time is used."
+        ),
+    )
+
+    @field_validator("time")
+    @classmethod
+    def time_is_an_aware_timestamp(cls, value: str | None) -> str | None:
+        return normalize_event_time(value) if value is not None else None
 
 
 class FeedbackEntry(BaseModel):

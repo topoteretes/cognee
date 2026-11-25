@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types import AudioDocument, ImageDocument, TextDocument
 from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
@@ -195,6 +196,39 @@ def _edges(result):
     )
 
 
+def test_mapping_time_labels_become_timestamp_nodes_when_they_parse():
+    """SDK-827: GLiNER dates take the same route as the LLM prompt's Timestamp nodes."""
+    graph = knowledge_graph_from_gliner_result(
+        {
+            "entities": {
+                "date": ["7 November 1867", "1867-11-07", "November 7"],
+                "year": ["1969"],
+                "time_period": ["1891", "the 1960s"],
+                "organization": ["1984"],
+            }
+        }
+    )
+    assert sorted((node.type, node.name, node.id) for node in graph.nodes) == [
+        ("Timestamp", "1867-11-07", "timestamp:1867-11-07"),  # both mentions, one node
+        ("Timestamp", "1891", "timestamp:1891"),
+        ("Timestamp", "1969", "timestamp:1969"),
+        ("date", "November 7", "date:november 7"),  # year-less: stays a date entity
+        ("organization", "1984", "organization:1984"),  # not a time label
+        ("time_period", "the 1960s", "time_period:the 1960s"),
+    ]
+
+
+def test_edge_to_a_timestamp_resolves_through_the_original_mention():
+    mapped, edges = _edges(
+        {
+            "entities": {"event": ["Curie's birth"], "date": ["7 November 1867"]},
+            "relation_extraction": {"occurred_on": [["Curie's birth", "7 November 1867"]]},
+        }
+    )
+    assert edges == [("event:curie's birth", "occurred_on", "timestamp:1867-11-07")]
+    assert (mapped.candidate_edges, mapped.kept_edges) == (1, 1)
+
+
 def test_edge_exact_match_is_case_and_punctuation_insensitive():
     mapped, edges = _edges(
         {
@@ -365,7 +399,9 @@ async def test_gliner_demo_tasks_reuse_configured_ontology_resolver():
             chunk_size=512,
         )
     schema = tasks[1].default_params["kwargs"]["schema"]
-    extraction_config = tasks[3].default_params["kwargs"]["config"]
+    extraction_config = next(
+        t for t in tasks if t.executable.__name__ == "extract_graph_and_summarize_with_gliner"
+    ).default_params["kwargs"]["config"]
 
     assert set(schema.entity_types) == {"person", "software_company"}
     assert extraction_config["ontology_config"]["ontology_resolver"] is resolver
@@ -612,6 +648,7 @@ async def test_schema_is_prepared_once_per_document():
             documents,
             schema=GlinerSchema(),
             max_chunk_size=512,
+            chunker=TextChunker,
         )
 
     assert result is documents
@@ -641,7 +678,7 @@ async def test_schema_sketch_is_bounded_while_reading_document():
         ) as make_sketch,
     ):
         await tasks_module.prepare_gliner_schema(
-            [document], schema=GlinerSchema(), max_chunk_size=512
+            [document], schema=GlinerSchema(), max_chunk_size=512, chunker=TextChunker
         )
 
     assert make_sketch.call_count == len(parts)
@@ -659,7 +696,9 @@ async def test_explicit_schema_is_attached_without_reading_or_probing():
         name="people.txt", raw_data_location="people.txt", external_metadata=None
     )
     with patch.object(tasks_module, "get_extractor", side_effect=AssertionError):
-        await tasks_module.prepare_gliner_schema([document], schema=schema, max_chunk_size=512)
+        await tasks_module.prepare_gliner_schema(
+            [document], schema=schema, max_chunk_size=512, chunker=TextChunker
+        )
     assert document._gliner_schema is schema
     assert "_gliner_schema" not in document.model_dump()
 
@@ -676,7 +715,7 @@ async def test_schema_preparation_rejects_raw_media(document_class, mime_type):
 
     with pytest.raises(ValueError, match="requires stored text"):
         await tasks_module.prepare_gliner_schema(
-            [document], schema=GlinerSchema({"person": ""}), max_chunk_size=512
+            [document], schema=GlinerSchema({"person": ""}), max_chunk_size=512, chunker=TextChunker
         )
 
 
@@ -717,13 +756,14 @@ async def test_get_gliner_demo_tasks_shape():
         patch.object(tasks_module, "resolve_chunk_size", AsyncMock(return_value=512)),
     ):
         tasks = await get_gliner_demo_tasks(
-            ["person"], ["works_for"], chunks_per_batch=7, stats=stats
+            ["person"], ["works_for"], chunks_per_batch=7, stats=stats, early_chunk_indexing=True
         )
 
     assert [t.executable.__name__ for t in tasks] == [
         "classify_documents",
         "prepare_gliner_schema",
         "extract_chunks_from_documents",
+        "find_indexed_chunks",
         "extract_graph_and_summarize_with_gliner",
         "add_data_points",
     ]
@@ -731,30 +771,28 @@ async def test_get_gliner_demo_tasks_shape():
     assert schema_task.default_params["kwargs"]["max_chunk_size"] == 512
     assert schema_task.default_params["kwargs"]["schema"].entity_types == {"person": ""}
     assert tasks[2].default_params["kwargs"]["max_chunk_size"] == 512
-    extraction = tasks[3]
+    assert tasks[3].task_config["batch_size"] == 7
+    extraction = tasks[4]
     assert extraction.task_config["batch_size"] == 7
     assert extraction.default_params["kwargs"]["stats"] is stats
-    assert tasks[4].task_config["batch_size"] == 7
+    assert tasks[5].task_config["batch_size"] == 7
     # No task in this list calls an LLM, so run_pipeline derives needs_llm=False.
     assert all(t.needs_llm is False for t in tasks)
 
 
 @pytest.mark.asyncio
-async def test_get_gliner_demo_tasks_appends_optional_graph_tasks_in_order():
+async def test_get_gliner_demo_tasks_ledger_is_never_a_task():
     with patch.object(tasks_module, "require_gliner2"):
         tasks = await get_gliner_demo_tasks(
             ["person"],
             track_provenance=True,
-            check_contradictions=True,
-            functional_relationships={"ceo_of"},
             chunk_size=512,
         )
 
-    assert [task.executable.__name__ for task in tasks][-3:] == [
-        "record_provenance",
-        "detect_contradictions",
-        "resolve_temporal_contradictions",
-    ]
+    names = [task.executable.__name__ for task in tasks]
+    assert names[-1] == "add_data_points"
+    # The ledger is written by add_data_points itself, never as a task.
+    assert "record_provenance" not in names
 
 
 @pytest.mark.asyncio
@@ -817,11 +855,21 @@ async def _cognify_standard_tasks(**kwargs):
     async def execute_pipeline(**pipeline_kwargs):
         data_item = SimpleNamespace(extension="txt", system_metadata=None)
         captured["tasks"] = pipeline_kwargs["tasks"](data_item)
+        # Telemetry must use the chosen task path, including explicit overrides.
+        expected = (
+            "gliner_demo"
+            if "extract_graph_and_summarize_with_gliner" in _task_names(captured["tasks"])
+            else "llm"
+        )
+        assert pipeline_kwargs["extras"]["graph_extractor"] == expected
         return {}
 
     with (
         patch.object(migrations, "run_migrations_and_block", AsyncMock()),
+        patch.object(cognify_module, "ensure_extractor_runtime", AsyncMock()),
         patch.object(cognify_module, "get_pipeline_executor", return_value=execute_pipeline),
+        # These tests select task lists; runtime installation has its own suite.
+        patch.object(cognify_module, "ensure_extractor_runtime", AsyncMock()),
     ):
         await cognify_module.cognify(chunk_size=512, **kwargs)
 
@@ -833,10 +881,11 @@ async def test_cognify_extractor_argument_selects_the_gliner_task_list():
     with patch.object(tasks_module, "require_gliner2"):
         tasks = await _cognify_standard_tasks(extractor="gliner_demo")
     names = _task_names(tasks)
-    assert names[:5] == [
+    assert names[:6] == [
         "classify_documents",
         "prepare_gliner_schema",
         "extract_chunks_from_documents",
+        "find_indexed_chunks",
         "extract_graph_and_summarize_with_gliner",
         "add_data_points",
     ]
@@ -901,7 +950,7 @@ async def test_gliner_extractor_rejects_unknown_kwargs_instead_of_swallowing():
 
 # The branches that cannot honour the extractor must raise before doing any
 # work — never silently run something other than what the caller selected.
-# All three checks sit at the top of cognify(), before any DB or span setup.
+# Both checks sit at the top of cognify(), before any DB or span setup.
 
 
 @pytest.mark.asyncio
@@ -910,17 +959,6 @@ async def test_cognify_extractor_conflicts_raise_before_any_work(monkeypatch):
 
     with pytest.raises(ValueError, match="Unknown extractor"):
         await cognify_module.cognify(extractor="spacy")
-    with pytest.raises(ValueError, match="temporal"):
-        await cognify_module.cognify(temporal_cognify=True, extractor="gliner_demo")
-    with (
-        patch.object(
-            cognify_module,
-            "get_cognify_config",
-            return_value=_config_with_extractor("gliner_demo"),
-        ),
-        pytest.raises(ValueError, match="temporal"),
-    ):
-        await cognify_module.cognify(temporal_cognify=True)
     with pytest.raises(ValueError, match="dry_run"):
         await cognify_module.cognify(dry_run=True, extractor="gliner_demo")
 
@@ -1062,13 +1100,8 @@ def test_resolve_extractor_never_installs_the_gliner_runtime():
 def test_default_pipeline_needs_llm_formula():
     from cognee.modules.cognify.config import default_pipeline_needs_llm
 
-    assert default_pipeline_needs_llm("llm", _config_with_extractor("llm")) is True
-    assert default_pipeline_needs_llm("gliner_demo", _config_with_extractor("gliner_demo")) is False
-    # The opt-in contradiction pass is an LLM task appended to the gliner list too.
-    contradiction_config = _config_with_extractor("gliner_demo").model_copy(
-        update={"contradiction_detection": True}
-    )
-    assert default_pipeline_needs_llm("gliner_demo", contradiction_config) is True
+    assert default_pipeline_needs_llm("llm") is True
+    assert default_pipeline_needs_llm("gliner_demo") is False
 
 
 @pytest.mark.asyncio
@@ -1085,15 +1118,9 @@ async def test_default_task_list_llm_need_is_derived_from_the_tasks():
         llm_tasks = await cognify_module.get_default_tasks(
             graph_model=KnowledgeGraph, chunk_size=512
         )
-        gliner_with_contradictions = await get_gliner_demo_tasks(
-            chunk_size=512, check_contradictions=True
-        )
 
     assert pipeline_needs_llm(gliner_tasks) is False
     assert pipeline_needs_llm(llm_tasks) is True
-    # detect_contradictions defaults to needs_llm=True, so the union flags the
-    # gliner list without any formula involved.
-    assert pipeline_needs_llm(gliner_with_contradictions) is True
 
 
 def test_needs_llm_survives_with_config():
@@ -1186,11 +1213,13 @@ def _patch_recall(monkeypatch, available: bool):
     serve_state = importlib.import_module("cognee.api.v1.serve.state")
     search_methods = importlib.import_module("cognee.modules.search.methods.search")
     search_operations = importlib.import_module("cognee.modules.search.operations")
+    preflight = importlib.import_module("cognee.modules.preflight")
 
     captured = {}
 
     async def fake_authorized_search(**kwargs):
         captured["query_type"] = kwargs.get("query_type")
+        captured["only_context"] = kwargs.get("only_context")
         captured["search_llm_config"] = kwargs.get("llm_config")
         return []
 
@@ -1205,25 +1234,25 @@ def _patch_recall(monkeypatch, available: bool):
     monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
     monkeypatch.setattr(search_methods, "authorized_search", fake_authorized_search)
     monkeypatch.setattr(search_operations, "log_search_history", noop)
-    monkeypatch.setattr(recall_module, "llm_available", fake_llm_available)
+    monkeypatch.setattr(preflight, "llm_available", fake_llm_available)
     user = SimpleNamespace(id=uuid4(), tenant_id=None)
     return recall_module, captured, user
 
 
-# recall's CHUNKS default keys on LLM availability, never on the extractor that
+# recall's no-LLM default keys on LLM availability, never on the extractor that
 # built the graph: a gliner-built graph with a key present answers completions,
-# and an LLM-built graph without one degrades to CHUNKS instead of failing.
+# and an LLM-built graph without one returns the HYBRID prompt instead of failing.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "available, auto_route, expected",
+    "available, auto_route, only_context",
     [
-        (False, True, SearchType.CHUNKS),
-        (False, False, SearchType.CHUNKS),
-        (True, False, SearchType.HYBRID_COMPLETION),
+        (False, True, True),
+        (False, False, True),
+        (True, False, False),
     ],
 )
-async def test_recall_default_query_type_is_chunks_without_a_usable_llm(
-    monkeypatch, available, auto_route, expected
+async def test_recall_default_is_hybrid_only_context_without_a_usable_llm(
+    monkeypatch, available, auto_route, only_context
 ):
     from uuid import uuid4
 
@@ -1235,7 +1264,8 @@ async def test_recall_default_query_type_is_chunks_without_a_usable_llm(
         auto_route=auto_route,
         user=user,
     )
-    assert captured["query_type"] == expected
+    assert captured["query_type"] == SearchType.HYBRID_COMPLETION
+    assert captured["only_context"] is only_context
 
 
 @pytest.mark.asyncio

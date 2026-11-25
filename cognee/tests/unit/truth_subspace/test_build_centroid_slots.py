@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.modules.truth_subspace.build import build_truth_subspace
 
 
@@ -14,7 +15,7 @@ class _EmbeddingEngine:
             "beta": [0.0, 1.0],
             "alpha corpus": [1.0, 0.0],
         }
-        return [vectors_by_text[text] for text in texts]
+        return EmbeddingResult(vectors=[vectors_by_text[text] for text in texts], tokens=0)
 
 
 async def _run_build(monkeypatch, session_ids=None):

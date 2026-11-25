@@ -82,6 +82,8 @@ class TripletSearchContextProvider(BaseContextProvider):
             return "No entities provided for context search."
 
         memory_fragment = await get_memory_fragment(self.properties_to_project)
+        # Search and format the same entities so skipped ones cannot shift results.
+        entities = [entity for entity in entities if self._get_entity_text(entity) is not None]
         search_tasks = self._get_search_tasks(entities, query, memory_fragment)
 
         if not search_tasks:

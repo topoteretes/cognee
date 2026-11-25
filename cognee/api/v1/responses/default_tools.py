@@ -17,7 +17,6 @@ DEFAULT_TOOLS = [
                         "CODE",
                         "GRAPH_COMPLETION",
                         "HYBRID_COMPLETION",
-                        "NATURAL_LANGUAGE",
                     ],
                 },
                 "top_k": {
@@ -45,7 +44,21 @@ DEFAULT_TOOLS = [
                                 "insights",
                                 "architecture",
                                 "delta",
+                                "capabilities",
+                                "search",
+                                "neighbors",
+                                "subgraph",
+                                "flows",
+                                "hubs",
+                                "ask",
                             ],
+                            "description": (
+                                "ask answers a natural-language question with seeds, flows, "
+                                "a one-hop neighbourhood and file:line citations; search ranks "
+                                "symbols, routes and flows by name, docstring and path; "
+                                "neighbors, subgraph, flows and hubs navigate from there; "
+                                "capabilities reports what the graph and server support"
+                            ),
                         },
                         "diagram": {
                             "type": "string",
@@ -89,6 +102,63 @@ DEFAULT_TOOLS = [
                         "target": {"type": "string"},
                         "max_depth": {"type": "integer"},
                         "max_nodes": {"type": "integer"},
+                        "text": {
+                            "type": "string",
+                            "description": "search: the free text to rank code by",
+                        },
+                        "question": {
+                            "type": "string",
+                            "description": "ask: the natural-language question about the code",
+                        },
+                        "seeds": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "subgraph: seed names (at most 20)",
+                        },
+                        "seed_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "subgraph: seed node ids or enola fact ids",
+                        },
+                        "depth": {
+                            "type": "integer",
+                            "description": "subgraph: hops from the seeds (default 1, max 3)",
+                        },
+                        "max_edges": {
+                            "type": "integer",
+                            "description": "subgraph: edge limit (default 300, max 1000)",
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["list", "show", "through"],
+                            "description": (
+                                "flows: list the ranked flows, show one flow with its stages, "
+                                "or list the flows through a symbol"
+                            ),
+                        },
+                        "symbol": {
+                            "type": "string",
+                            "description": "flows (mode through): the symbol the flows reach",
+                        },
+                        "include_tests": {
+                            "type": "boolean",
+                            "description": "search, ask, hubs: include test code (default false)",
+                        },
+                        "include_side": {
+                            "type": "boolean",
+                            "description": (
+                                "flows: include side flows such as scripts and tooling "
+                                "(default false)"
+                            ),
+                        },
+                        "max_seeds": {
+                            "type": "integer",
+                            "description": "ask: search hits to start from (default 5, max 10)",
+                        },
+                        "max_citations": {
+                            "type": "integer",
+                            "description": "ask: citations to return (default 25, max 60)",
+                        },
                     },
                     "additionalProperties": True,
                 },

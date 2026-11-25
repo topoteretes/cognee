@@ -38,6 +38,13 @@ CODE_OPERATIONS = (
     "insights",
     "architecture",
     "delta",
+    "capabilities",
+    "search",
+    "neighbors",
+    "subgraph",
+    "flows",
+    "hubs",
+    "ask",
 )
 _DOT_EXTENSIONS = {".dot", ".gv"}
 _GRAPHVIZ_RENDER_EXTENSIONS = {".svg", ".png", ".pdf"}
@@ -79,7 +86,9 @@ def add_code_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Structured code-graph query for --query-type CODE, as JSON: "
             '\'{"operation": "architecture"}\', \'{"operation": "impact_analysis", '
-            '"name": "pkg.Symbol", "max_depth": 3}\'. Operations: ' + ", ".join(CODE_OPERATIONS)
+            '"name": "pkg.Symbol", "max_depth": 3}\', \'{"operation": "ask", '
+            '"question": "where are auth tokens validated?"}\'. Operations: '
+            + ", ".join(CODE_OPERATIONS)
         ),
     )
     parser.add_argument(
@@ -182,6 +191,11 @@ def _summary_line(result: dict) -> str:
         parts.append("path found" if result["found"] else "no path")
     if "summary" in result:
         parts.append(str(result["summary"]))
+    # The navigation operations (neighbors, subgraph, flows, ask) report cuts
+    # at the top level.
+    if isinstance(result.get("truncated"), bool):
+        reason = result.get("truncation_reason")
+        parts.append(f"truncated={result['truncated']}" + (f" ({reason})" if reason else ""))
     return f"{operation}" + (f" ({', '.join(parts)})" if parts else "")
 
 

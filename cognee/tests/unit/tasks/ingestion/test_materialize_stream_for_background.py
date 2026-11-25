@@ -21,6 +21,7 @@ async def test_every_data_item_field_survives_materialization():
         external_metadata={"k": "v"},
         system_metadata={"source": "notion"},
         data_id=data_id,
+        node_set=["notion:ws:root"],
         literal_text=True,
     )
 
@@ -31,7 +32,15 @@ async def test_every_data_item_field_survives_materialization():
     assert materialized.external_metadata == {"k": "v"}
     assert materialized.system_metadata == {"source": "notion"}
     assert materialized.data_id == data_id
+    assert materialized.node_set == ["notion:ws:root"]
     assert materialized.literal_text is True
+
+
+@pytest.mark.asyncio
+async def test_node_set_defaults_to_none_when_absent():
+    original = DataItem(data="plain text")
+    materialized = await materialize_stream_for_background(original)
+    assert materialized.node_set is None
 
 
 @pytest.mark.asyncio

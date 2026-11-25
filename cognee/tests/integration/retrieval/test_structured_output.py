@@ -18,7 +18,7 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
 )
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
-from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 from cognee.tasks.storage import add_data_points
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ async def _test_get_structured_graph_completion():
 
 
 async def _test_get_structured_graph_completion_temporal():
-    retriever = TemporalRetriever()
+    retriever = TemporalHybridRetriever()
     query = "When did Steve start working at Figma?"
 
     # Test with string response model (default)

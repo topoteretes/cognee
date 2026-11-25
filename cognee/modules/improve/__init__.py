@@ -16,7 +16,7 @@ from .admission import (
     register_auto_improve_admission,
 )
 from .capabilities import GraphCapabilities, probe_graph_capabilities, resolve_graph_capabilities
-from .config import ImproveConfig, get_improve_config
+from .config import ImproveConfig, coding_distillation_enabled, get_improve_config
 from .constants import (
     AGENT_TRACE_FEEDBACKS_NODE_SET,
     DEFAULT_FEEDBACK_ALPHA,
@@ -25,7 +25,7 @@ from .constants import (
     USER_PREFERENCES_NODE_SET,
     USER_SESSIONS_NODE_SET,
 )
-from .inputs import MEMIFY_PASSTHROUGH_KEYS, ImproveRunInputs
+from .inputs import ImproveRunInputs
 from .registry import (
     DEFAULT_STAGES,
     stage_names,
@@ -38,7 +38,6 @@ from .result import (
     REASON_BACKEND_UNSUPPORTED,
     REASON_BUDGET_EXHAUSTED,
     REASON_DISABLED_BY_CONFIG,
-    REASON_LOCK_HELD,
     REASON_NO_SESSION_IDS,
     ImproveResult,
     StageResult,
@@ -49,12 +48,10 @@ __all__ = [
     "AGENT_TRACE_FEEDBACKS_NODE_SET",
     "DEFAULT_FEEDBACK_ALPHA",
     "DEFAULT_STAGES",
-    "MEMIFY_PASSTHROUGH_KEYS",
     "REASON_ABORTED_BY_FATAL_STAGE",
     "REASON_BACKEND_UNSUPPORTED",
     "REASON_BUDGET_EXHAUSTED",
     "REASON_DISABLED_BY_CONFIG",
-    "REASON_LOCK_HELD",
     "REASON_NO_SESSION_IDS",
     "SESSION_LEARNINGS_NODE_SET",
     "SKILLS_NODE_SET",
@@ -69,6 +66,7 @@ __all__ = [
     "StageResult",
     "auto_improve_skip_reason",
     "clear_auto_improve_admission",
+    "coding_distillation_enabled",
     "evaluate_gate",
     "execute_stage",
     "get_improve_config",

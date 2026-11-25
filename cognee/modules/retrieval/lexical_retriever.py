@@ -7,6 +7,11 @@ from typing import Any
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.retrieval.utils.conflict_context import (
+    attach_chunk_conflicts,
+    public_chunk_payload,
+    render_chunk_context,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("LexicalRetriever")
@@ -133,10 +138,13 @@ class LexicalRetriever(BaseRetriever):
             len(query_tokens),
         )
 
+        # Copy: these payload dicts are this retriever's cache, shared across
+        # queries, and conflict annotation writes into the hits it is handed.
+        scored_hits = [(dict(self.payloads[chunk_id]), score) for chunk_id, score in top_results]
+        await attach_chunk_conflicts(scored_hits)
         if self.with_scores:
-            return [(self.payloads[chunk_id], score) for chunk_id, score in top_results]
-        else:
-            return [self.payloads[chunk_id] for chunk_id, _ in top_results]
+            return scored_hits
+        return [hit_payload for hit_payload, _ in scored_hits]
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
         """
@@ -154,11 +162,8 @@ class LexicalRetriever(BaseRetriever):
             - str: A string containing the combined text of the retrieved chunk payloads, or an
               empty string if none are found.
         """
-        if retrieved_objects:
-            payload_texts = [payload["text"] for payload in retrieved_objects]
-            return "\n".join(payload_texts)
-        else:
-            return ""
+        # render_chunk_context reads the payload out of either hit shape.
+        return render_chunk_context(retrieved_objects) if retrieved_objects else ""
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
@@ -182,4 +187,8 @@ class LexicalRetriever(BaseRetriever):
             - List[dict]: The retrieved objects, i.e. the scored payloads.
         """
         # TODO: Do we want to generate a completion using LLM here?
-        return retrieved_objects
+        if not retrieved_objects:
+            return retrieved_objects
+        if self.with_scores:
+            return [(public_chunk_payload(payload), score) for payload, score in retrieved_objects]
+        return [public_chunk_payload(payload) for payload in retrieved_objects]

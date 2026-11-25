@@ -4,7 +4,6 @@ from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.session_aware_completion import can_run_as_turn
-from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.types import SearchType
 
 
@@ -26,7 +25,6 @@ def is_eligible_for_turn(retriever_type: type, **overrides):
         CompletionRetriever,
         GraphCompletionRetriever,
         HybridRetriever,
-        TripletRetriever,
     ],
 )
 def test_only_designated_retriever_types_are_eligible(retriever_type):

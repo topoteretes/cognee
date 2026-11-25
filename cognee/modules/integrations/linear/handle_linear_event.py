@@ -13,26 +13,36 @@ Deliberately narrow event coverage for the first cut:
 
 * ``AgentSessionEvent`` created/prompted -> answer the session from cognee
   memory (the agent loop, the point of this integration).
-* ``Issue`` create/update -> remember the issue's text, so the workspace's
-  issue history flows into memory as it changes.
+* ``Issue`` / ``Comment`` / ``Project`` create/update/remove -> sync the teams
+  the delivery names through the DLT source, once the connection has finished
+  a full sync. Linear must be set to send these categories as well as the
+  agent session events.
 * ``OAuthApp`` revoked -> revoke the stored credential; the workspace
   removed the app on Linear's side, so the local token must stop being used.
 
-Everything else — issue deletions included — is logged and dropped:
-deleting indexed data on a webhook would be a silent, destructive surprise;
-``forget()`` stays a human decision (same stance as the GitHub handler).
+Everything else is logged and dropped. A ``remove`` delivery only triggers a
+sync: deleting indexed data on a webhook would be a silent, destructive
+surprise, and the source does not tombstone deletions yet.
 """
 
 import json
 import logging
 
 from cognee.modules.integrations.credentials import (
+    REVOKED_BY_PROVIDER,
     STATUS_ACTIVE,
     get_credential_by_account,
     revoke_credential_by_account,
 )
+from cognee.modules.integrations.ingestion import sync_is_paused
 from cognee.modules.integrations.linear.agent_session import handle_agent_session
-from cognee.modules.integrations.linear.sync import sync_issue
+from cognee.modules.integrations.linear.sync import (
+    SEEDED_KEY,
+    SELECTION_KEY,
+    is_team_event,
+    request_sync,
+    team_ids_from_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +68,9 @@ async def handle_linear_event(raw_body: bytes, headers: dict[str, str]) -> None:
         # The workspace revoked the app on Linear's side — the local
         # credential must stop being used. Idempotent, so redelivery is
         # harmless.
-        await revoke_credential_by_account(_PROVIDER, organization_id)
+        await revoke_credential_by_account(
+            _PROVIDER, organization_id, revoked_by=REVOKED_BY_PROVIDER
+        )
         logger.info("Linear app revoked for organization %s; credential revoked", organization_id)
         return
 
@@ -78,10 +90,36 @@ async def handle_linear_event(raw_body: bytes, headers: dict[str, str]) -> None:
         await handle_agent_session(credential, payload)
         return
 
-    if event_type == "Issue" and action in ("create", "update"):
-        await sync_issue(credential, payload.get("data") or {})
+    if is_team_event(payload):
+        await _sync_teams_named_by(credential, payload)
         return
 
     logger.debug(
         "Linear %s/%s delivery for organization %s ignored", event_type, action, organization_id
     )
+
+
+async def _sync_teams_named_by(credential, payload: dict) -> None:
+    """Sync the teams an Issue, Comment or Project delivery is about.
+
+    Skipped until the connection has finished a full pass, so an upgraded
+    install never starts a backfill from a webhook, and for teams the user did
+    not select, and while a pause holds the connection. A delivery that arrives while
+    a sync runs is queued.
+    """
+    if await sync_is_paused(_PROVIDER, credential, f"{payload.get('type')} delivery"):
+        return
+    metadata = credential.provider_metadata or {}
+    if not metadata.get(SEEDED_KEY):
+        logger.info(
+            "Linear %s delivery for organization %s before its first full sync; ignoring",
+            payload.get("type"),
+            credential.provider_account_id,
+        )
+        return
+    team_ids = team_ids_from_event(payload)
+    selected = metadata.get(SELECTION_KEY)
+    if selected is not None:
+        team_ids = [team_id for team_id in team_ids if team_id in selected]
+    if team_ids:
+        await request_sync(credential, team_ids)

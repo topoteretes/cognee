@@ -12,11 +12,14 @@ class CodeRepository(DataPoint):
     loaded (and swept) ingestion; extract_code_graph skips re-loading when the
     current snapshot carries the same id. It is stamped only after a load
     completes, so a crashed run can never be mistaken for an up-to-date one.
+    last_mapping_version records the CODE_GRAPH_MAPPING_VERSION that load ran
+    with: an unchanged snapshot mapped by an older cognee is loaded again.
     """
 
     name: str
     path: str
     last_snapshot_id: str | None = None
+    last_mapping_version: int | None = None
     last_delta: dict | None = None
     # Projection of the snapshot's receipt.json (format_version, enola version,
     # git provenance, counts and the extraction-quality block) stamped with
@@ -36,6 +39,10 @@ class CodeGraphEntity(DataPoint):
     name and file; enola >= 0.4.10). Cognee's node identity stays (repo, kind,
     name) — see fact_node_id — so several enola ids can land on one node; the
     first occurrence's id is kept. Historical snapshots carry none.
+
+    doc is the comment the author wrote on the symbol (enola's descriptive
+    ``doc`` prop: the first paragraph, cut near 300 bytes), set only when the
+    extractor read one; it is also the description.
     """
 
     name: str
@@ -46,6 +53,7 @@ class CodeGraphEntity(DataPoint):
     repo: str | None = None
     enola_id: str | None = None
     description: str | None = None
+    doc: str | None = None
     fact_properties: dict[str, Any] = Field(default_factory=dict)
     fact_hash: str | None = None
     part_of: CodeRepository | None = None
@@ -101,6 +109,20 @@ class CodeInsight(CodeGraphEntity):
     when the writer supplied one). The explainer name, confidence, the
     machine-readable ``metrics`` block and the ``informational`` flag live in
     fact_properties.
+    """
+
+
+class CodeFlow(CodeGraphEntity):
+    """A way into the program and the code its calls reach (synthesized kind: flow).
+
+    enola's flows renderer ranks the entry points (a served route's handler,
+    a ``main``, a symbol a framework invokes) by what the calls from each
+    reach, and writes them to flows.json. Each flow is linked to its entry
+    symbol (``flow_entry``), its stages (``flow_stage``) and the routes it
+    serves (``flow_route``), resolved through the writer's fact ids when
+    present. Mechanism, rank, metrics, modules, the ``side`` flag and the
+    entry/stage/route refs live in fact_properties; the summary prose is also
+    the description. file_path and line are the entry's.
     """
 
 

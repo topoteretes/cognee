@@ -6,10 +6,10 @@ detect (extraction) task followed by a single merge (enrichment) task. The share
 both tasks so detection and merge agree on thresholds and on ``dry_run``.
 """
 
-from cognee import memify
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.memify import run_memify_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -97,7 +97,7 @@ async def consolidate_entities_pipeline(
     # enters it itself under the dataset lock. Holding the scope's queue slot
     # while memify waits on that lock inverts the canonical order
     # (dataset lock -> queue slot) and can deadlock the process (SDK-483).
-    result = await memify(
+    result = await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
         data=[{}],  # placeholder seed; the tasks read entities from the graph

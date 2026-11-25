@@ -14,6 +14,9 @@ class GlobalContextSummary(DataPoint):
     dataset_id: str
     level: int
     is_root: bool = False
+    # Flat id of the document a bucket summarizes; None on the dataset root. Not
+    # embedded (index_fields stays ["text"]), so it only travels in the vector payload.
+    document_id: str | None = None
     graph_bucket_entity_ids: list[str] | None = None
     summarized_in: GlobalContextSummary | None = None
     metadata: dict = {"index_fields": ["text"]}

@@ -8,7 +8,7 @@ Tests cover:
 
 import importlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -19,7 +19,6 @@ from cognee.api.v1.add.routers.get_add_router import get_add_router
 from cognee.api.v1.cognify.routers.get_cognify_router import get_cognify_router
 from cognee.api.v1.datasets.routers.get_datasets_router import get_datasets_router
 from cognee.api.v1.improve.routers.get_improve_router import get_improve_router
-from cognee.api.v1.memify.routers.get_memify_router import get_memify_router
 from cognee.api.v1.recall.routers.get_recall_router import get_recall_router
 from cognee.api.v1.remember.routers.get_remember_router import get_remember_router
 from cognee.api.v1.search.routers.get_search_router import get_search_router
@@ -39,10 +38,10 @@ MOCK_PIPELINE_RUN_ID = uuid4()
 # process-global, so without restoration the stubs leak into every later
 # test module in the same pytest session — a leaked payment-error mock on
 # cognify() made unrelated remember() tests fail with a bogus 402.
-_STUBBED_API_FUNCTIONS = ("add", "cognify", "search", "memify", "update", "remember")
+_STUBBED_API_FUNCTIONS = ("add", "cognify", "search", "update", "remember")
 
 
-_MISSING = object()  # some packages (memify) gain the attribute only via the stub
+_MISSING = object()  # a package may gain the attribute only via the stub
 
 
 @pytest.fixture(autouse=True)
@@ -90,7 +89,6 @@ def app():
     app.include_router(get_cognify_router(), prefix="/cognify")
     app.include_router(get_datasets_router(), prefix="/datasets")
     app.include_router(get_improve_router(), prefix="/improve")
-    app.include_router(get_memify_router(), prefix="/memify")
     app.include_router(get_recall_router(), prefix="/recall")
     app.include_router(get_remember_router(), prefix="/remember")
     app.include_router(get_search_router(), prefix="/search")
@@ -135,14 +133,9 @@ def _restore_api_package_functions():
     import cognee.api.v1.search as search_pkg
     import cognee.api.v1.update as update_pkg
 
-    # The memify router imports from cognee.modules.memify (not cognee.api.v1.memify),
-    # so that is the package the memify tests patch and the one that must be restored.
-    import cognee.modules.memify as memify_pkg
-
     targets = [
         (add_pkg, "add"),
         (cognify_pkg, "cognify"),
-        (memify_pkg, "memify"),
         (search_pkg, "search"),
         (update_pkg, "update"),
     ]
@@ -393,56 +386,6 @@ class TestSearchEndpoint:
         )
         assert resp.status_code == 402
         assert "budget" in resp.json()["detail"]
-
-
-# ---------------------------------------------------------------------------
-# Memify endpoint
-# ---------------------------------------------------------------------------
-
-
-class TestMemifyEndpoint:
-    def test_memify_missing_dataset_returns_400(self, client):
-        resp = client.post("/memify", json={})
-        assert resp.status_code == 400
-
-    def test_memify_pipeline_errored_returns_500(self, client):
-        import cognee.modules.memify as memify_pkg
-
-        memify_pkg.memify = AsyncMock(return_value=_make_errored(error="memify failed"))
-
-        resp = client.post(
-            "/memify",
-            json={"dataset_name": "test_dataset", "run_in_background": False},
-        )
-        assert resp.status_code == 500
-        body = resp.json()
-        assert body["error"] == "Pipeline run errored"
-
-    def test_memify_success_returns_200(self, client):
-        import cognee.modules.memify as memify_pkg
-
-        completed = _make_completed()
-        memify_pkg.memify = AsyncMock(return_value=completed.model_dump())
-
-        resp = client.post(
-            "/memify",
-            json={"dataset_name": "test_dataset", "run_in_background": False},
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["status"] == "completed"
-
-    def test_memify_internal_error_returns_500(self, client):
-        import cognee.modules.memify as memify_pkg
-
-        memify_pkg.memify = AsyncMock(side_effect=RuntimeError("unexpected"))
-
-        resp = client.post(
-            "/memify",
-            json={"dataset_name": "test_dataset"},
-        )
-        assert resp.status_code == 500
-        assert resp.json()["error"] == "Internal server error"
 
 
 class TestAddExistingDocument:
@@ -724,27 +667,40 @@ class TestRecallPermissionDenied:
 
 
 class TestCognifyExternalSchemaRef:
-    """A ``graph_model`` whose ``$ref`` points outside the document is a 400, never fetched."""
+    """A ``graph_model`` whose ``$ref`` points outside the document is a 400, never fetched.
+
+    The route forwards the schema and the real ``cognify()`` refuses it: the guard runs
+    before the code generator (which would fetch a URL or read a path) and before any
+    pipeline run is created for the dataset."""
 
     @pytest.mark.parametrize(
         "ref", ["http://169.254.169.254/latest/meta-data/", "/etc/passwd", "../.env"]
     )
     def test_external_ref_is_a_400_and_cognify_never_runs(self, client, ref):
-        cognify_pkg = importlib.import_module("cognee.api.v1.cognify")
-        cognify_pkg.cognify = AsyncMock()
-
-        resp = client.post(
-            "/cognify",
-            json={
-                "datasets": ["ds"],
-                "graph_model": {
-                    "title": "Graph",
-                    "type": "object",
-                    "properties": {"nodes": {"type": "array", "items": {"$ref": ref}}},
+        cognify_module = importlib.import_module("cognee.api.v1.cognify.cognify")
+        with (
+            patch("cognee.shared.graph_model_utils.generate") as generate,
+            patch(
+                "cognee.modules.migrations.startup.run_migrations_and_block",
+                new_callable=AsyncMock,
+            ) as migrations,
+            patch.object(cognify_module, "get_pipeline_executor") as executor,
+        ):
+            resp = client.post(
+                "/cognify",
+                json={
+                    "datasets": ["ds"],
+                    "graph_model": {
+                        "title": "Graph",
+                        "type": "object",
+                        "properties": {"nodes": {"type": "array", "items": {"$ref": ref}}},
+                    },
                 },
-            },
-        )
+            )
 
         assert resp.status_code == 400
         assert "ExternalSchemaReferenceError" in resp.json()["detail"]
-        cognify_pkg.cognify.assert_not_awaited()
+        # The generator is what resolves $ref (fetches URLs, reads paths): never reached.
+        generate.assert_not_called()
+        migrations.assert_not_awaited()
+        executor.assert_not_called()

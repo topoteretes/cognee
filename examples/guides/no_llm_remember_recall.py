@@ -3,9 +3,11 @@
 Nothing to configure: with no LLM key and no embedding settings, cognee
 extracts the graph and chunk summaries with the local GLiNER demo model
 (GRAPH_EXTRACTOR=auto resolves to gliner_demo) and embeds with fastembed on CPU.
-With no usable LLM key, recall() defaults to CHUNKS (vector search, no LLM),
-and a pipeline with no LLM task skips the first-run LLM connection probe.
-Anything ending in *_COMPLETION still needs an LLM to write the answer.
+With no usable LLM key, recall() routes only to search types that run without an
+LLM: the default is HYBRID_COMPLETION with only_context=True, which returns the
+assembled prompt (retrieved context, question, session layer) instead of an
+answer, and a pipeline with no LLM task skips the first-run LLM connection probe.
+Writing an answer still needs an LLM.
 
 Requirements::
 
@@ -44,7 +46,8 @@ async def main():
     # embeddings, no LLM — so it is safe to leave self_improvement on.
     await cognee.remember(TEXT, dataset_name="no_llm")
 
-    # No query_type: with no usable LLM key this resolves to CHUNKS.
+    # No query_type: with no usable LLM key this resolves to HYBRID_COMPLETION with
+    # only_context=True, so item.text is the prompt an LLM would receive.
     results = await cognee.recall("Where was Marie Curie born?", datasets=["no_llm"], top_k=3)
     print(f"\ndefault ({results[0].search_type}): {len(results)} result(s)")
     for item in results:

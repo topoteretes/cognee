@@ -149,6 +149,28 @@ class EmbeddingContextWindowTooSmallError(EmbeddingException):
         super().__init__(message, name, status_code)
 
 
+class EmbeddingEncodingError(EmbeddingException):
+    """Raised when base64 vectors were requested but the server answered otherwise.
+
+    The route does not support base64, whether picked by default for OpenAI's API or
+    set via EMBEDDING_ENCODING_FORMAT: a provider or proxy translated the request into
+    its own format (Bedrock answers with 1-bit binary vectors, as a list), the payload
+    does not decode as little-endian float32, or the server refused the parameter. Only
+    the openai_compatible engine raises this for a refusal; the LiteLLM engine re-raises
+    litellm's 400/422 and logs ENCODING_FORMAT_HINT. Terminal: the same request gets the
+    same answer, so the engines never retry it.
+    """
+
+    def __init__(self, detail: str):
+        super().__init__(
+            f"The embedding server did not return base64 vectors ({detail}). This "
+            "provider or route does not support base64 embeddings. Fix: set "
+            "EMBEDDING_ENCODING_FORMAT=float in your .env file or environment, or "
+            "remove the setting if you set it to base64.",
+            name="EmbeddingEncodingError",
+        )
+
+
 class EmbeddingCredentialsError(EmbeddingException):
     """
     Raised when the embedding endpoint rejects the request's credentials.
@@ -270,6 +292,32 @@ class SharedLadybugLockRequiresRedisError(CogneeConfigurationError):
 SharedKuzuLockRequiresRedisError = SharedLadybugLockRequiresRedisError
 
 
+class TursoDatabaseInUseError(CogneeConfigurationError):
+    """
+    Raised when a Turso database file is already open in another process.
+
+    The Turso engine (pyturso 0.7.x) locks a database file to the one process that
+    opened it, until that process exits, so a second cognee process on the same
+    files cannot open them. Stock SQLite allows this; the Turso backend does not.
+    """
+
+    def __init__(
+        self,
+        database_path: str = "",
+        name: str = "TursoDatabaseInUseError",
+        status_code: int = status.HTTP_409_CONFLICT,
+    ):
+        where = f" '{database_path}'" if database_path else ""
+        message = (
+            f"The Turso database file{where} is already open in another process. "
+            "The Turso backend allows one process per database file, and the lock is held "
+            "until that process exits. Stop the other cognee process using these files (an "
+            "API server, CLI command, or script), or give each process its own "
+            "SYSTEM_ROOT_DIRECTORY. See docs/turso-local.md."
+        )
+        super().__init__(message, name, status_code)
+
+
 class DatabaseCredentialsError(CogneeConfigurationError):
     """
     Raised when database credentials are incomplete or invalid.
@@ -307,3 +355,27 @@ class Neo4jMultiDatabaseSupportError(CogneeConfigurationError):
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)
+
+
+class PostgresGraphLayoutError(CogneeConfigurationError):
+    """A Postgres graph still keeps its source refs in the array columns of an earlier release."""
+
+    def __init__(
+        self,
+        name: str = "PostgresGraphLayoutError",
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ):
+        super().__init__(
+            message=(
+                "This Postgres graph is stored in an earlier layout: its source refs are in "
+                "the source_ref_keys columns of graph_node and graph_edge, which this "
+                "release of cognee neither reads nor writes."
+            ),
+            name=name,
+            status_code=status_code,
+            remediation=(
+                "Run cognee's migrations (cognee.run_migrations() or cognee-cli upgrade). "
+                "If an older migration raised this, upgrade to cognee 1.6.8 first, then to "
+                "the current release."
+            ),
+        )

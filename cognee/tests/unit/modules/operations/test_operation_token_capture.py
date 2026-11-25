@@ -94,3 +94,32 @@ async def test_session_only_path_unchanged_without_operation_scope(monkeypatch):
     accumulate_usage.assert_awaited_once()
     assert accumulate_usage.await_args.kwargs["tokens_in"] == 10
     assert accumulate_usage.await_args.kwargs["tokens_out"] == 5
+
+
+@pytest.mark.asyncio
+async def test_embedding_tokens_feed_only_the_embedding_counter():
+    with operation_usage_scope() as usage:
+        await usage_tracking.record_embedding_call(model="text-embedding-3-large", tokens=1000)
+
+    assert (usage.tokens_in, usage.tokens_out, usage.embedding_tokens) == (0, 0, 1000)
+
+
+@pytest.mark.asyncio
+async def test_embedding_tokens_reach_the_session_as_embedding_usage(monkeypatch):
+    from cognee.modules.session_lifecycle.metrics import UsageKind
+
+    accumulate_usage = AsyncMock()
+    monkeypatch.setattr(
+        "cognee.modules.session_lifecycle.metrics.accumulate_usage", accumulate_usage
+    )
+
+    async with usage_tracking.track_session_usage("session-3", uuid4()):
+        await usage_tracking.record_embedding_call(
+            model="openai/text-embedding-3-large", tokens=1_000_000
+        )
+
+    kwargs = accumulate_usage.await_args.kwargs
+    assert kwargs["kind"] == UsageKind.EMBEDDING
+    assert kwargs["embedding_tokens"] == 1_000_000
+    assert kwargs["embedding_cost_usd"] == pytest.approx(0.13)
+    assert "tokens_in" not in kwargs and "cost_usd" not in kwargs

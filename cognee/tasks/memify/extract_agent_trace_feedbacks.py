@@ -3,6 +3,10 @@ import json
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.session_node_set import (
+    node_set_from_rows,
+    read_session_context_strict,
+)
 from cognee.infrastructure.session.session_persist_watermark import (
     TRACE_PERSIST_WATERMARK,
     TracePersistWindow,
@@ -60,6 +64,7 @@ def resolve_trace_window(
     last_n_steps: int | None,
     *,
     session_id: str = "",
+    step_limit: int | None = None,
 ) -> tuple[int, int]:
     """The pending trace window as ``(start index, size)``.
 
@@ -70,11 +75,17 @@ def resolve_trace_window(
     so a backlog drains across bounded triggers instead of being sealed —
     capping at the newest N would leave the older pending steps below an
     advanced watermark forever, unreachable even for ``improve()``.
+
+    ``step_limit`` bounds how far the window may reach (a run draining the
+    backlog it started with). It never feeds the stale check: that compares
+    the watermark with the LIVE count, ``total_trace_count``, so a watermark
+    another persister moved past the limit meanwhile reads as done, not stale.
     """
     effective = TRACE_PERSIST_WATERMARK.resolve_effective(
         persisted_trace_count, total_trace_count, session_id=session_id
     )
-    pending = max(0, total_trace_count - effective)
+    reach = total_trace_count if step_limit is None else min(total_trace_count, step_limit)
+    pending = max(0, reach - effective)
     if last_n_steps is not None:
         pending = min(pending, max(0, int(last_n_steps)))
     return effective, pending
@@ -103,6 +114,7 @@ async def extract_agent_trace_feedbacks(
     session_ids: list[str] | None = None,
     raw_trace_content: bool = False,
     last_n_steps: int | None = None,
+    persist_up_to: dict[str, int] | None = None,
 ):
     """
     Extract not-yet-persisted agent trace steps for the current user.
@@ -129,6 +141,10 @@ async def extract_agent_trace_feedbacks(
         last_n_steps: Optional cap on the number of most recent pending trace
             steps to extract per session. ``None`` means every step above the
             watermark — never "everything stored".
+        persist_up_to: Optional step count per session that the window must not
+            pass. Steps from that index on are left for a later run, so a caller
+            draining a fixed backlog never takes steps a live agent wrote after
+            it started. Sessions not in the mapping are unbounded.
 
     Yields:
         TracePersistWindow covering the session's unpersisted steps.
@@ -172,15 +188,23 @@ async def extract_agent_trace_feedbacks(
                     if not total_trace_count:
                         continue
 
-                    persisted_count = await TRACE_PERSIST_WATERMARK.read_count(
+                    # One strict snapshot of the session's context rows holds both
+                    # the trace watermark and the pinned node set. Strict: an
+                    # unreadable session is skipped for this run (the except below),
+                    # never bridged from watermark 0 or untagged.
+                    context_rows = await read_session_context_strict(
                         session_manager, user_id, session_id
                     )
+                    persisted_count = TRACE_PERSIST_WATERMARK.count_from_rows(context_rows)
+                    counted_trace_count = total_trace_count
+                    step_limit = (persist_up_to or {}).get(session_id)
                     if (
                         resolve_trace_window(
                             total_trace_count,
                             persisted_count,
                             last_n_steps,
                             session_id=session_id,
+                            step_limit=step_limit,
                         )[1]
                         <= 0
                     ):
@@ -208,11 +232,22 @@ async def extract_agent_trace_feedbacks(
                         trace_values = [entry.method_return_value for entry in trace_session]
 
                     total_trace_count = len(trace_values)
+                    if total_trace_count != counted_trace_count:
+                        # Steps arrived between the count and the fetch. A first
+                        # pin written with one of them may postdate the snapshot,
+                        # so read the pin again; otherwise every fetched step was
+                        # written before the snapshot, after any pin it carries.
+                        context_rows = await read_session_context_strict(
+                            session_manager, user_id, session_id
+                        )
+                    # The whole fetch stays: the stale check needs the live count.
+                    # step_limit only bounds how far the window reaches.
                     window_start, window_size = resolve_trace_window(
                         total_trace_count,
                         persisted_count,
                         last_n_steps,
                         session_id=session_id,
+                        step_limit=step_limit,
                     )
                     if window_size <= 0:
                         continue
@@ -255,6 +290,7 @@ async def extract_agent_trace_feedbacks(
                         session_id=session_id,
                         text=f"Session ID: {session_id}\n\n" + "\n".join(normalized_trace_values),
                         persisted_trace_count=window_end,
+                        node_set=node_set_from_rows(context_rows),
                     )
                 except Exception as error:
                     logger.warning(

@@ -100,8 +100,54 @@ class _NoOpAsyncContext:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def routing_removals(monkeypatch):
+    """Record the dataset routing rows the memory-only helpers remove (the real
+    functions would open the default vector store)."""
+    routing = importlib.import_module("cognee.modules.search.dataset_routing")
+    calls = []
+
+    async def remove_dataset_routes(dataset_id, document_ids):
+        calls.append((dataset_id, list(document_ids)))
+
+    monkeypatch.setattr(routing, "remove_dataset_routes", remove_dataset_routes)
+    return calls
+
+
+@pytest.fixture(autouse=True)
+def index_removals(monkeypatch):
+    """Record the documents the memory-only helpers remove from the index (the
+    real function opens the dataset's engines). ``had_index`` is what the fake
+    reports: whether the dataset had an index to remove from."""
+    index = importlib.import_module("cognee.tasks.memify.global_context_index")
+    removals = SimpleNamespace(calls=[], had_index=True)
+
+    async def remove_document_index(dataset_id, data_ids):
+        removals.calls.append((dataset_id, list(data_ids)))
+        return removals.had_index
+
+    monkeypatch.setattr(index, "remove_document_index", remove_document_index)
+    return removals
+
+
+@pytest.fixture(autouse=True)
+def root_rebuilds(monkeypatch):
+    """Record the datasets whose index root the memory-only helpers rebuild (the
+    real function reads the dataset's graph and embeds the root)."""
+    index = importlib.import_module("cognee.tasks.memify.global_context_index")
+    calls = []
+
+    async def rebuild_document_index_root(dataset_id, user):
+        calls.append((dataset_id, user))
+
+    monkeypatch.setattr(index, "rebuild_document_index_root", rebuild_document_index_root)
+    return calls
+
+
 @pytest.mark.asyncio
-async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatch):
+async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(
+    monkeypatch, routing_removals, root_rebuilds
+):
     """memory_only=True with dataset clears graph/vector and resets pipeline_status."""
     other_dataset_id = str(uuid4())
     pipeline_status_a = {
@@ -173,6 +219,10 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
     assert len(data_a.pipeline_status["cognify"]) == 1
 
     assert session.committed
+    # Every routing row of the dataset goes with its memory, and no root is
+    # written again: nothing of the dataset's memory is left to describe.
+    assert routing_removals == [(DATASET_ID, [DATA_ID_A, DATA_ID_B])]
+    assert root_rebuilds == []
 
 
 @pytest.mark.asyncio
@@ -220,8 +270,12 @@ async def test_forget_dataset_memory_skips_records_without_pipeline_status(monke
 
 
 @pytest.mark.asyncio
-async def test_forget_data_memory_clears_graph_and_resets_pipeline(monkeypatch):
+@pytest.mark.parametrize("had_index", [True, False])
+async def test_forget_data_memory_clears_graph_and_resets_pipeline(
+    monkeypatch, routing_removals, index_removals, root_rebuilds, had_index
+):
     """memory_only=True with dataset+data_id clears graph/vector for the item."""
+    index_removals.had_index = had_index
     other_dataset_id = str(uuid4())
     pipeline_status = {
         "add_pipeline": {str(DATASET_ID): "COMPLETE"},
@@ -273,6 +327,14 @@ async def test_forget_data_memory_clears_graph_and_resets_pipeline(monkeypatch):
     # add pipeline status should remain untouched
     assert str(DATASET_ID) in data_record.pipeline_status["add_pipeline"]
     assert session.committed
+    # The item's bucket and the dataset's root, whose text named the item, go
+    # with its memory, in the graph and in the routing collection.
+    assert routing_removals == [(DATASET_ID, [DATA_ID_A])]
+    assert index_removals.calls == [(DATASET_ID, [DATA_ID_A])]
+    # The root is then written again from the documents that keep their memory,
+    # so a broad query still routes to the dataset before the next improve. A
+    # dataset that had no index gets none: routing searches it always.
+    assert root_rebuilds == ([(DATASET_ID, USER)] if had_index else [])
 
 
 @pytest.mark.asyncio
@@ -308,6 +370,109 @@ async def test_forget_data_memory_no_record_found(monkeypatch):
         result = await forget_module._forget_data_memory(DATA_ID_A, str(DATASET_ID), USER)
 
     assert result["status"] == "success"
+
+
+# ---------------------------------------------------------------------------
+# Routing rows go before the irreversible memory delete
+# ---------------------------------------------------------------------------
+
+
+def _stub_context(monkeypatch):
+    monkeypatch.setattr(forget_module, "_resolve_dataset_id", AsyncMock(return_value=DATASET_ID))
+    monkeypatch.setattr(
+        forget_module,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: _NoOpAsyncContext(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_forget_dataset_memory_removes_routing_rows_before_deleting_memory(monkeypatch):
+    """The routing store can be unreachable; its rows go while the memory is intact."""
+    steps = []
+    routing = importlib.import_module("cognee.modules.search.dataset_routing")
+
+    async def remove_dataset_routes(dataset_id, document_ids):
+        steps.append(("routing", list(document_ids)))
+
+    async def delete_memory(dataset_id, user_id):
+        steps.append(("memory",))
+        return DeletedGraphElements()
+
+    monkeypatch.setattr(routing, "remove_dataset_routes", remove_dataset_routes)
+    _stub_context(monkeypatch)
+    session = _FakeSession([_make_data_record(DATA_ID_A, {}), _make_data_record(DATA_ID_B, {})])
+
+    with (
+        patch.object(
+            delete_dataset_nodes_and_edges_module, "delete_dataset_nodes_and_edges", delete_memory
+        ),
+        patch(
+            "cognee.infrastructure.databases.relational.get_relational_engine",
+            return_value=_FakeEngine(session),
+        ),
+    ):
+        await forget_module._forget_dataset_memory(str(DATASET_ID), USER)
+
+    assert steps == [("routing", [DATA_ID_A, DATA_ID_B]), ("memory",)]
+
+
+@pytest.mark.asyncio
+async def test_forget_dataset_memory_keeps_memory_when_the_routing_store_fails(monkeypatch):
+    routing = importlib.import_module("cognee.modules.search.dataset_routing")
+
+    async def remove_dataset_routes(dataset_id, document_ids):
+        raise ConnectionError("default store down")
+
+    monkeypatch.setattr(routing, "remove_dataset_routes", remove_dataset_routes)
+    _stub_context(monkeypatch)
+    delete_memory = AsyncMock(return_value=DeletedGraphElements())
+    session = _FakeSession([_make_data_record(DATA_ID_A, {"cognify": {str(DATASET_ID): "x"}})])
+
+    with (
+        patch.object(
+            delete_dataset_nodes_and_edges_module, "delete_dataset_nodes_and_edges", delete_memory
+        ),
+        patch(
+            "cognee.infrastructure.databases.relational.get_relational_engine",
+            return_value=_FakeEngine(session),
+        ),
+        pytest.raises(ConnectionError),
+    ):
+        await forget_module._forget_dataset_memory(str(DATASET_ID), USER)
+
+    delete_memory.assert_not_awaited()
+    assert not session.committed, "pipeline statuses must not be reset while the memory stays"
+
+
+@pytest.mark.asyncio
+async def test_forget_data_memory_removes_the_routing_row_before_deleting_memory(monkeypatch):
+    steps = []
+    routing = importlib.import_module("cognee.modules.search.dataset_routing")
+
+    async def remove_dataset_routes(dataset_id, document_ids):
+        steps.append(("routing", list(document_ids)))
+
+    async def delete_memory(dataset_id, data_id, user_id):
+        steps.append(("memory", data_id))
+        return DeletedGraphElements()
+
+    monkeypatch.setattr(routing, "remove_dataset_routes", remove_dataset_routes)
+    _stub_context(monkeypatch)
+    session = _FakeSession([_make_data_record(DATA_ID_A, {})])
+
+    with (
+        patch.object(
+            delete_data_nodes_and_edges_module, "delete_data_nodes_and_edges", delete_memory
+        ),
+        patch(
+            "cognee.infrastructure.databases.relational.get_relational_engine",
+            return_value=_FakeEngine(session),
+        ),
+    ):
+        await forget_module._forget_data_memory(DATA_ID_A, str(DATASET_ID), USER)
+
+    assert steps == [("routing", [DATA_ID_A]), ("memory", DATA_ID_A)]
 
 
 # ---------------------------------------------------------------------------

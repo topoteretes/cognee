@@ -1,0 +1,115 @@
+{
+  "In 1998 the project launched": {
+    "knowledge_graph": {
+      "summary": "A project timeline: launched 1998, v1.0 shipped 2001, team merged 2004, v1 support ended 2010.",
+      "description": "A project timeline: launched 1998, v1.0 shipped 2001, team merged 2004, v1 support ended 2010.",
+      "nodes": [
+        {
+          "id": "project",
+          "name": "the project",
+          "type": "Project",
+          "description": "The software project the timeline follows.",
+          "label": "Project"
+        },
+        {
+          "id": "version_1_0",
+          "name": "version 1.0",
+          "type": "Release",
+          "description": "The project's first major release.",
+          "label": "Release"
+        },
+        {
+          "id": "team",
+          "name": "the team",
+          "type": "Organization",
+          "description": "The team behind the project.",
+          "label": "Organization"
+        },
+        {
+          "id": "other_group",
+          "name": "another group",
+          "type": "Organization",
+          "description": "The group the team merged with.",
+          "label": "Organization"
+        },
+        {
+          "id": "v1_support",
+          "name": "support for v1",
+          "type": "Service",
+          "description": "Maintenance of the 1.x release line.",
+          "label": "Service"
+        },
+        {
+          "id": "1998",
+          "name": "1998",
+          "type": "Timestamp",
+          "description": "The year 1998.",
+          "label": "Timestamp"
+        },
+        {
+          "id": "2001",
+          "name": "2001",
+          "type": "Timestamp",
+          "description": "The year 2001.",
+          "label": "Timestamp"
+        },
+        {
+          "id": "2004",
+          "name": "2004",
+          "type": "Timestamp",
+          "description": "The year 2004.",
+          "label": "Timestamp"
+        },
+        {
+          "id": "2010",
+          "name": "2010",
+          "type": "Timestamp",
+          "description": "The year 2010.",
+          "label": "Timestamp"
+        }
+      ],
+      "edges": [
+        {
+          "source_node_id": "project",
+          "target_node_id": "1998",
+          "relationship_name": "launched_at",
+          "description": "The project launched in 1998."
+        },
+        {
+          "source_node_id": "version_1_0",
+          "target_node_id": "2001",
+          "relationship_name": "shipped_at",
+          "description": "Version 1.0 shipped in 2001."
+        },
+        {
+          "source_node_id": "version_1_0",
+          "target_node_id": "project",
+          "relationship_name": "is_release_of",
+          "description": "Version 1.0 is a release of the project."
+        },
+        {
+          "source_node_id": "team",
+          "target_node_id": "other_group",
+          "relationship_name": "merged_with",
+          "description": "The team merged with another group."
+        },
+        {
+          "source_node_id": "team",
+          "target_node_id": "2004",
+          "relationship_name": "merged_at",
+          "description": "The team merged with another group in 2004."
+        },
+        {
+          "source_node_id": "v1_support",
+          "target_node_id": "2010",
+          "relationship_name": "ended_at",
+          "description": "Support for v1 ended in 2010."
+        }
+      ]
+    },
+    "summary": {
+      "summary": "A project timeline: launched 1998, v1.0 shipped 2001, team merged 2004, v1 support ended 2010.",
+      "description": "A project timeline: launched 1998, v1.0 shipped 2001, team merged 2004, v1 support ended 2010."
+    }
+  }
+}

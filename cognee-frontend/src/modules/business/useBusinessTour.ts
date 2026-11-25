@@ -9,8 +9,8 @@ const STEP_DWELL_MS = 5000;
 
 const STEP_TEXTS: Array<(brain: BrainState | null) => string> = [
   (brain) => (brain
-    ? `this is your business — ${brain.typeNodes.length} kind${brain.typeNodes.length === 1 ? "" : "s"} of things across ${brain.sourceNames.length} source${brain.sourceNames.length === 1 ? "" : "s"}, one connected model`
-    : "this is your business — one connected model"),
+    ? `this is your business — ${brain.typeNodes.length} kind${brain.typeNodes.length === 1 ? "" : "s"} of things across ${brain.sourceNames.length} source${brain.sourceNames.length === 1 ? "" : "s"} in this graph`
+    : "this is your business — explore your records and their connections"),
   () => "zoom in, and the people, accounts, and records behind each kind take shape",
   () => "every line here is a real connection — how one record relates to another",
   () => "at the deepest level: every record your agents can actually search",

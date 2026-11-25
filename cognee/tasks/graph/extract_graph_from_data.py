@@ -9,12 +9,17 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.engine.utils.temporal_hints import (
+    chunk_temporal_hints,
+    document_temporal_hints,
+)
 from cognee.modules.graph.utils import (
     attach_new_edges_to_data_points,
     collect_stored_data_points,
     construct_data_points_and_edges,
     find_existing_edge_identities,
 )
+from cognee.modules.observability.llm_calls import chunk_scope
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
     construct_data_points_and_edges_with_ontology,
@@ -56,6 +61,30 @@ def _remove_duplicate_extracted_nodes_by_id(
 
         if len(nodes_by_id) != len(extracted_graph.nodes):
             extracted_graph.nodes = list(nodes_by_id.values())
+
+
+def _temporal_hints_for(data_chunks: list) -> list[list[str]]:
+    """The date hints extraction renders for each chunk of ``data_chunks``.
+
+    The pipeline's chunker attaches them per document (``attach_temporal_hints``),
+    so normally they are read off the chunks. Chunks that arrive without them —
+    built by a caller that never ran that pass — get the same computation over
+    this batch, per document in batch order; batch-local and side-effect free,
+    so a repeat call yields the same hints.
+    """
+    attached = [chunk_temporal_hints(chunk) for chunk in data_chunks]
+    if all(hints is not None for hints in attached):
+        return attached
+    by_document: dict = {}
+    for index, chunk in enumerate(data_chunks):
+        by_document.setdefault(id(getattr(chunk, "is_part_of", None)), []).append(index)
+    computed: list = list(attached)
+    for indexes in by_document.values():
+        hints = document_temporal_hints([data_chunks[index].text for index in indexes])
+        for index, lines in zip(indexes, hints):
+            if computed[index] is None:
+                computed[index] = lines
+    return computed
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -182,8 +211,16 @@ async def integrate_chunk_graphs(
 
     if constructed_data_points:
         if pipeline_name or task_name:
+            # This walk is the only stamp these DataPoints get: the runner's own pass
+            # (run_tasks_base._stamp_provenance) skips the chunks they hang off, which it
+            # already visited at the chunking stage, so it never descends into them.
+            # One visited set for the whole batch: attach_new_edges_to_data_points has
+            # cross-linked the DataPoints, so a fresh set per DataPoint re-walked the
+            # whole reachable graph every time (quadratic, GH #6498). The set is local on
+            # purpose: ids added to ctx._provenance_visited would be skipped by the runner.
+            visited: set[int] = set()
             for data_point in constructed_data_points:
-                _stamp_provenance_deep(data_point, pipeline_name, task_name)
+                _stamp_provenance_deep(data_point, pipeline_name, task_name, visited)
 
         cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
         if callable(cache_entity_embeddings):
@@ -221,13 +258,23 @@ async def extract_graph_from_data(
         extracted = calculate_chunk_graphs(data_chunks, graph_model, custom_prompt, **kwargs)
         chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
+        temporal_hints = _temporal_hints_for(data_chunks)
+
+        async def extract_chunk_graph(chunk, hints):
+            with chunk_scope(chunk.id):
+                return await extract_content_graph(
+                    chunk.text,
+                    graph_model,
+                    custom_prompt=custom_prompt,
+                    temporal_hints=hints,
+                    **kwargs,
+                )
+
         with pipeline_stage("extraction"):
             chunk_graphs = await asyncio.gather(
                 *[
-                    extract_content_graph(
-                        chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
-                    )
-                    for chunk in data_chunks
+                    extract_chunk_graph(chunk, hints)
+                    for chunk, hints in zip(data_chunks, temporal_hints)
                 ]
             )
     cache_entity_embeddings = kwargs.get("cache_entity_embeddings")

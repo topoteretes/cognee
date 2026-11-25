@@ -13,7 +13,7 @@ Known approximations:
   transcription of audio/image items) and embedding costs are not included.
 - Input tokens use the real tokenizer, prompt templates, and response-model
   JSON schema; output tokens use fixed heuristics.
-- Reasoning models (gpt-5 / o-series) bill hidden reasoning tokens as output;
+- Reasoning models (gpt-5 / gpt-6 / o-series) bill hidden reasoning tokens as output;
   their output/cost is scaled by a rough allowance and flagged approximate.
 """
 
@@ -33,8 +33,8 @@ from pydantic import BaseModel
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.infrastructure.llm.utils import get_llm_tokenizer
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -62,7 +62,7 @@ SUMMARY_OUTPUT_TOKENS_PER_CHUNK = 150
 GRAPH_OUTPUT_TOKEN_RATIO = 0.5
 MIN_GRAPH_OUTPUT_TOKENS_PER_CHUNK = 256
 
-# Reasoning models (gpt-5 / o-series and future reasoning families) emit hidden
+# Reasoning models (gpt-5 / gpt-6 / o-series and future reasoning families) emit hidden
 # reasoning tokens that are billed as output. On a real gpt-5-mini run the actual
 # completion tokens were ~20x the visible-output heuristics above (graph ~28x,
 # summary ~14x the base). Since the amount varies with reasoning effort and task,
@@ -70,7 +70,7 @@ MIN_GRAPH_OUTPUT_TOKENS_PER_CHUNK = 256
 # so it is a plausible central figure, not a hard bound) and flag the estimate as
 # approximate for these models rather than pretend to predict it precisely.
 REASONING_OUTPUT_MULTIPLIER = 20
-_REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+_REASONING_MODEL_PREFIXES = ("gpt-5", "gpt-6", "o1", "o3", "o4")
 
 
 def _is_reasoning_model(model: str) -> bool:
@@ -178,16 +178,6 @@ class DryRunEstimate:
         return "\n".join(lines)
 
 
-def _llm_tokenizer() -> TikTokenTokenizer:
-    model = get_llm_config().llm_model.split("/", 1)[-1]
-    try:
-        return TikTokenTokenizer(model=model)
-    except Exception:
-        # Model unknown to tiktoken — fall back to its default encoding.
-        logger.debug("Falling back after error in _llm_tokenizer", exc_info=True)
-        return TikTokenTokenizer(model=None)
-
-
 def _count_tokens(text: str, tokenizer: TikTokenTokenizer) -> int:
     return tokenizer.count_tokens(text) if text else 0
 
@@ -226,6 +216,7 @@ def estimate_chunks(
     operation: str,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
+    summary_method: str | None = None,
     skipped_items: int = 0,
     skipped_dlt_chunks: int = 0,
     skipped_code_items: int = 0,
@@ -237,14 +228,18 @@ def estimate_chunks(
     before any document is read, and reports them via ``skipped_dlt_chunks``
     and ``skipped_code_items``.
     """
-    tokenizer = _llm_tokenizer()
+    tokenizer = get_llm_tokenizer()
     model = get_llm_config().llm_model
-    summarization_model = get_cognify_config().summarization_model
+    cognify_config = get_cognify_config()
+    summarization_model = cognify_config.summarization_model
 
     llm_chunks = chunks
 
     chunk_token_counts = [_count_tokens(chunk.text, tokenizer) for chunk in llm_chunks]
     chunk_tokens = sum(chunk_token_counts)
+    # Summaries from extraction make no LLM call, so the summary stage counts no chunks.
+    summary_method = summary_method or cognify_config.summary_method
+    summary_chunk_token_counts = [] if summary_method == "from_extraction" else chunk_token_counts
 
     graph_overhead = _count_tokens(_graph_prompt(custom_prompt), tokenizer) + _schema_tokens(
         _simplify_graph_model(graph_model), tokenizer
@@ -262,8 +257,10 @@ def estimate_chunks(
         max(MIN_GRAPH_OUTPUT_TOKENS_PER_CHUNK, int(tokens * GRAPH_OUTPUT_TOKEN_RATIO))
         for tokens in chunk_token_counts
     )
-    summary_input = sum(tokens + summary_overhead for tokens in chunk_token_counts)
-    summary_output = output_multiplier * len(llm_chunks) * SUMMARY_OUTPUT_TOKENS_PER_CHUNK
+    summary_input = sum(tokens + summary_overhead for tokens in summary_chunk_token_counts)
+    summary_output = (
+        output_multiplier * len(summary_chunk_token_counts) * SUMMARY_OUTPUT_TOKENS_PER_CHUNK
+    )
 
     stages = [
         DryRunStageEstimate(
@@ -275,7 +272,7 @@ def estimate_chunks(
         ),
         DryRunStageEstimate(
             name="chunk_summarization",
-            calls=len(llm_chunks),
+            calls=len(summary_chunk_token_counts),
             input_tokens=summary_input,
             output_tokens=summary_output,
             cost_usd=estimate_cost_usd(model, summary_input, summary_output),
@@ -335,13 +332,6 @@ def _require_text_like(name: str) -> None:
         raise ValueError(f"dry_run supports text-like file inputs only, got {name!r}.")
 
 
-def _accept_local_file_path() -> bool:
-    """The same ACCEPT_LOCAL_FILE_PATH gate real ingestion applies."""
-    from cognee.tasks.ingestion.save_data_item_to_storage import settings
-
-    return settings.accept_local_file_path
-
-
 def _path_candidate(value: str) -> Path | None:
     """The local path this string refers to, or None when it is raw text.
 
@@ -350,9 +340,9 @@ def _path_candidate(value: str) -> Path | None:
     when it points at one that exists. An absolute-looking string that is not an
     existing file (e.g. a "/"-prefixed text note) is raw text, exactly as a real
     run now ingests it. Scheme is checked before the newline guard so a
-    trailing-newline URL cannot slip through as text. When
-    ``ACCEPT_LOCAL_FILE_PATH`` is disabled, an existing *absolute* file path is
-    rejected while relative paths and non-existent strings stay raw text.
+    trailing-newline URL cannot slip through as text. With the server-path gate
+    closed nothing is looked up: ``screen_server_paths`` has refused explicit
+    paths at the estimate's entry, and anything else is text.
     """
     scheme = urlparse(value).scheme.lower()
     if scheme in _UNSUPPORTED_SCHEMES:
@@ -360,9 +350,11 @@ def _path_candidate(value: str) -> Path | None:
             f"dry_run supports local text inputs only, got {value!r}. "
             "A real run would fetch and ingest this URL."
         )
+    from cognee.tasks.ingestion.save_data_item_to_storage import local_file_paths_accepted
+
+    if not local_file_paths_accepted():
+        return None  # gate closed: the disk is never asked, so it is text
     if scheme == "file":
-        if not _accept_local_file_path():
-            raise ValueError(f"Local files are not accepted, got {value!r}.")
         return Path(url2pathname(urlparse(value).path))
 
     if "\n" in value or "\r" in value or len(value) > 4096:
@@ -375,19 +367,6 @@ def _path_candidate(value: str) -> Path | None:
         return None
 
     if exists:
-        if not _accept_local_file_path():
-            # Mirror the ACCEPT_LOCAL_FILE_PATH gate: an existing *absolute* file
-            # path is rejected, while an existing *relative* path falls through to
-            # raw text (save_data_item_to_storage has no reject branch for it).
-            # Absolute-path detection matches save_data_item_to_storage exactly,
-            # including Windows drive-letter paths (C:\...), which "/"-prefix
-            # checking alone misses.
-            is_absolute_path = (
-                value.startswith("/") or (os.name == "nt" and len(value) > 1 and value[1] == ":")
-            ) and Path(os.path.normpath(value)).is_absolute()
-            if is_absolute_path:
-                raise ValueError(f"Local files are not accepted, got {value!r}.")
-            return None
         return path
 
     # A non-existent path — absolute or relative — is raw text. A real run no
@@ -435,6 +414,8 @@ async def _input_to_texts(data: Any) -> list[str]:
     if data is None:
         return []
     if isinstance(data, DataItem):
+        if data.literal_text and isinstance(data.data, str):
+            return [data.data]  # stored verbatim, never read as a path or URL
         # save_data_item_to_storage recurses into the wrapped payload.
         return await _input_to_texts(data.data)
     if isinstance(data, list):
@@ -534,17 +515,27 @@ async def _chunks_from_data_items(
 async def estimate_remember_dry_run(
     data: Any,
     *,
-    chunker: type[Any] = TextChunker,
+    chunker: type[Any],
     chunk_size: int,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
+    summary_method: str | None = None,
 ) -> DryRunEstimate:
     """Estimate ``remember(data)`` for permanent add+cognify inputs."""
+    from cognee.tasks.ingestion.screen_server_paths import screen_server_paths
+
+    # The same entry decision add() makes, so a closed gate refuses what a real
+    # run refuses and never looks a caller string up.
+    data = screen_server_paths(data)
     chunks = await _chunks_from_texts(
         await _input_to_texts(data), chunker=chunker, chunk_size=chunk_size
     )
     return estimate_chunks(
-        chunks, operation="remember", graph_model=graph_model, custom_prompt=custom_prompt
+        chunks,
+        operation="remember",
+        graph_model=graph_model,
+        custom_prompt=custom_prompt,
+        summary_method=summary_method,
     )
 
 
@@ -552,10 +543,11 @@ async def estimate_cognify_dry_run(
     datasets,
     *,
     user=None,
-    chunker: type[Any] = TextChunker,
+    chunker: type[Any],
     chunk_size: int,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
+    summary_method: str | None = None,
 ) -> DryRunEstimate:
     """Estimate ``cognify(datasets)`` over all data in the authorized datasets.
 
@@ -594,6 +586,7 @@ async def estimate_cognify_dry_run(
         operation="cognify",
         graph_model=graph_model,
         custom_prompt=custom_prompt,
+        summary_method=summary_method,
         skipped_items=skipped,
         skipped_dlt_chunks=skipped_dlt,
         skipped_code_items=skipped_code,

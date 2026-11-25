@@ -96,6 +96,8 @@ async def delete_from_graph_and_vector(
 
         await vector_engine.delete_data_points("EdgeType_relationship_name", edge_type_ids)
 
+        # Legacy: cognee no longer writes Triplet_text (SDK-1115), but databases
+        # built before then may still hold it, so deleted edges drop their rows.
         triplet_ids = [
             str(
                 generate_node_id(
@@ -110,7 +112,7 @@ async def delete_from_graph_and_vector(
             try:
                 await vector_engine.delete_data_points("Triplet_text", triplet_ids)
             except Exception:
-                # Triplet collection might not exist if triplet embedding was never enabled
+                # The collection exists only where triplet embedding was once enabled
                 logger.debug("Ignoring exception in delete_from_graph_and_vector", exc_info=True)
 
     # Clean up orphaned EdgeType nodes from the graph.

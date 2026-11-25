@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from cognee.modules.integrations.gmail.adapter import GoogleGmailIntegration
 from cognee.modules.integrations.google.ingestion import dataset_summary
+from cognee.modules.integrations.google_calendar.adapter import GoogleCalendarIntegration
 from cognee.modules.integrations.google_drive.adapter import GoogleDriveIntegration
 
 
@@ -56,6 +57,7 @@ async def test_summary_counts_only_the_connected_owners_dataset():
     [
         (GoogleGmailIntegration(), "gmail", "sync_gmail"),
         (GoogleDriveIntegration(), "google_drive", "sync_drive"),
+        (GoogleCalendarIntegration(), "google_calendar", "sync_google_calendar"),
     ],
 )
 async def test_reconnect_does_not_implicitly_start_an_import(integration, module, function):

@@ -43,7 +43,7 @@ async def _read_stream_bytes(stream: Any) -> bytes:
 async def materialize_stream_for_background(data_item: Any, index: int = 0) -> Any:
     if isinstance(data_item, DataItem):
         # dataclasses.replace copies every other field (label, external_metadata,
-        # system_metadata, data_id, literal_text, ...) so a new DataItem field can
+        # system_metadata, data_id, node_set, literal_text, ...) so a new DataItem field can
         # never be silently dropped from the background path again.
         return replace(
             data_item,

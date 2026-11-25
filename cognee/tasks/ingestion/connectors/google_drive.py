@@ -20,28 +20,15 @@ to :func:`cognee.remember`::
 
 Design
 ------
-* **Auth** — service account (default, non-interactive) or OAuth installed-app.
-  Point ``credentials_path`` at the service-account key or OAuth client-secret
-  JSON; scope is read-only (``drive.readonly``).
-* **Primary key** — the Drive file ``id``.  With ``write_disposition="merge"``
-  this gives idempotent upserts.
-* **Incremental cursor** — the Drive Changes API page token.  The first run
-  captures a start token, does a full folder listing, and records the token;
-  later runs call ``changes().list(pageToken=...)`` and emit only added/changed
-  files plus hard-delete tombstones for removed/trashed/out-of-scope files.  The
-  cursor is persisted in dlt's per-resource state, so re-running ``remember``
-  resumes where it left off.
-* **Forget-on-delete** — removed files are emitted with the ``deleted``
-  hard-delete marker; dlt drops them from its destination on ``merge`` and
-  cognee's existing ``orphan_cleanup`` purges them from the graph, vector, and
-  relational stores.
-* **Content** — Google Docs/Sheets export to text/CSV, PDFs are parsed with the
-  core ``pypdf`` dependency, and plain text/markdown/CSV is downloaded as-is.  A
-  file that can't be parsed is skipped with a warning rather than failing the
-  whole sync.
-* **Self-describing** — the resource declares its content column, so a plain
-  ``remember()`` call routes file content through normal chunking + LLM graph
-  extraction; no ``dlt_content_column`` kwarg is required.
+* **Auth**: service account (default) or OAuth installed-app, read-only scope.
+* **Rows**: one per Drive file, keyed by the file ``id``, upserted with ``merge``.
+* **Cursor**: the first run captures a Changes API token and lists the folder; later runs
+  read the changes feed and emit only added/changed files plus ``_deleted`` tombstones.
+* **State**: ``versions`` (file id to ``modifiedTime``, kept only for files that produced a
+  row) lets a rerun fetch just what failed or changed. A run stopped by a rate limit or an
+  expired token keeps its progress and resumes.
+* **Content**: see ``google_drive.md`` for the formats, the limits and every reason a file
+  is not ingested.
 
 Limitations
 -----------
@@ -52,12 +39,23 @@ Limitations
   headless / CI use, pre-authorize a token file and point ``token_path`` at it.
 """
 
+import asyncio
+import codecs
+import hashlib
 import io
 import os
+import shutil
+import tempfile
+import threading
+from collections import deque
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
+from importlib import metadata
 from typing import Any
 
+from cognee.modules.integrations.google.api_retry import is_host_stop, with_google_retries
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import dlt_utils
 from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR
@@ -71,17 +69,78 @@ GOOGLE_DOC_MIME_TYPE = "application/vnd.google-apps.document"
 GOOGLE_SHEET_MIME_TYPE = "application/vnd.google-apps.spreadsheet"
 GOOGLE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 PDF_MIME_TYPE = "application/pdf"
-PLAIN_TEXT_MIME_TYPES = {"text/plain", "text/markdown", "text/csv"}
+GOOGLE_SLIDES_MIME_TYPE = "application/vnd.google-apps.presentation"
+# Read as UTF-8 text: every ``text/*`` type except those cognee's loaders parse (HTML), and
+# the structured text types below.
+PLAIN_TEXT_MIME_TYPES = {"application/json", "application/xml"}
+
+# Office and document files cognee's loader engine converts to text (the same loaders
+# ``add()`` uses), with the extension the loader picks its parser by.
+_LOADER_EXTENSIONS = {
+    "application/msword": ".doc",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.ms-powerpoint": ".ppt",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.oasis.opendocument.text": ".odt",
+    "application/vnd.oasis.opendocument.spreadsheet": ".ods",
+    "application/vnd.oasis.opendocument.presentation": ".odp",
+    "application/rtf": ".rtf",
+    "text/html": ".html",
+    "application/epub+zip": ".epub",
+}
+
+# The binary formats are converted to Open XML by LibreOffice before they are parsed,
+# whichever loader reads them.
+_LEGACY_OFFICE_EXTENSIONS = {".doc", ".xls", ".ppt"}
 
 # Native Google formats we know how to export as text.  Other native types
-# (Slides, Drawings, Forms, ...) are skipped with a warning rather than failing
-# the whole sync.
+# (Drawings, Forms, ...) are counted as unsupported rather than failing the whole sync.
 _EXPORT_MIME_MAP = {
     GOOGLE_DOC_MIME_TYPE: "text/plain",
     # Drive's export only returns the first sheet as CSV — a documented
     # limitation; multi-sheet extraction would require the Sheets API.
     GOOGLE_SHEET_MIME_TYPE: "text/csv",
+    GOOGLE_SLIDES_MIME_TYPE: "text/plain",
 }
+
+# Increment when supported formats expand (2: legacy .doc, .xls, .ppt). A completed scan
+# records this in the folder's DLT state so unchanged files skipped by an older connector
+# are discovered.
+FORMAT_SUPPORT_VERSION = 2
+
+# Retries per request on 429, 5xx, rate-limit 403 answers and dropped connections (api_retry.py,
+# googleapiclient's policy), sleeping a random time of up to 2**n seconds before retry n: about
+# 31 s in expectation and 62 s at most before a rate limit cuts the run short.
+API_RETRIES = 5
+# files.list returns at most 1000 entries per page.
+LIST_PAGE_SIZE = 1000
+# A handful of threads: each fetch is one or two requests, and a rate limit that outlasts the
+# retries cuts the run short instead of failing it, so the count does not need to be exact.
+DEFAULT_MAX_WORKERS = 8
+# Files fetched at once are also bounded by their reported size, because each result holds
+# its whole extracted text, and the staging load needs about twelve times that in memory
+# (measured 12 to 17 times with 25 to 300 MB of text). 256 MB of files in flight is then 3 to
+# 4 GB of staging memory at the worst. A file over the bound is not skipped: it is fetched
+# alone, and the pool refills behind it.
+INFLIGHT_FETCH_BYTES = 256 * 1024 * 1024
+# A file that produced no row for one of these reasons is forgotten if an earlier run
+# ingested it. ``failed_loader_unavailable`` is not here: it depends on the environment (a
+# missing extra), and a file must not lose its memory because a package is not installed.
+_FORGET_REASONS = (
+    "skipped_too_large",
+    "skipped_empty_content",
+    "skipped_unsupported_type",
+    "failed_export_too_large",
+    "failed_unreadable",
+)
+# A download stays in memory up to this size and spills to a temporary file beyond it, so
+# the memory of a fetch depends on the extracted text, not on the size of the file. Most
+# Docs, PDFs and text files are smaller, so they never touch the disk. The chunk size is
+# the unit of retry.
+DOWNLOAD_SPOOL_BYTES = 8 * 1024 * 1024
+DOWNLOAD_CHUNK_BYTES = 8 * 1024 * 1024
 
 FILE_FIELDS = "id, name, mimeType, modifiedTime, webViewLink, parents, driveId, trashed, size"
 
@@ -93,20 +152,21 @@ class _DriveConfig:
     credentials_path: str | None
     token_path: str | None
     include_subfolders: bool
-    max_file_size_mb: int
+    max_file_size_mb: int | None = None
     shared_drive_id: str | None = None
+    max_workers: int = DEFAULT_MAX_WORKERS
 
 
 # ---------------------------------------------------------------------------
 # Auth / service construction
 # ---------------------------------------------------------------------------
-def build_drive_service(
+def load_drive_credentials(
     *,
     auth_mode: str = "service_account",
     credentials_path: str | None = None,
     token_path: str | None = None,
 ) -> Any:
-    """Build an authenticated Drive v3 API client.
+    """Load Google credentials for the Drive API (service account or OAuth user token).
 
     The Google client libraries are imported lazily so they remain an optional
     dependency (``pip install "cognee[google-drive]"``).
@@ -116,7 +176,6 @@ def build_drive_service(
         from google.oauth2 import service_account
         from google.oauth2.credentials import Credentials as UserCredentials
         from google_auth_oauthlib.flow import InstalledAppFlow
-        from googleapiclient.discovery import build
     except ImportError as exc:  # pragma: no cover - depends on optional extra
         raise ImportError(
             'The Google Drive connector requires the "google-drive" extra. '
@@ -142,7 +201,32 @@ def build_drive_service(
             "Must be 'service_account' or 'oauth'."
         )
 
+    return credentials
+
+
+def _build_client(credentials: Any) -> Any:
+    try:
+        from googleapiclient.discovery import build
+    except ImportError as exc:  # pragma: no cover - depends on optional extra
+        raise ImportError(
+            'The Google Drive connector requires the "google-drive" extra. '
+            'Install it with: pip install "cognee[google-drive]"'
+        ) from exc
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
+
+
+def build_drive_service(
+    *,
+    auth_mode: str = "service_account",
+    credentials_path: str | None = None,
+    token_path: str | None = None,
+) -> Any:
+    """Build an authenticated Drive v3 API client."""
+    return _build_client(
+        load_drive_credentials(
+            auth_mode=auth_mode, credentials_path=credentials_path, token_path=token_path
+        )
+    )
 
 
 def build_drive_service_from_access_token(access_token: str) -> Any:
@@ -197,38 +281,310 @@ def _load_oauth_credentials(
 # ---------------------------------------------------------------------------
 # Content extraction (mime-type dispatch)
 # ---------------------------------------------------------------------------
+def _is_plain_text(mime_type: str) -> bool:
+    return mime_type.startswith("text/") or mime_type in PLAIN_TEXT_MIME_TYPES
+
+
 def is_supported_mime_type(mime_type: str) -> bool:
     return (
         mime_type in _EXPORT_MIME_MAP
         or mime_type == PDF_MIME_TYPE
-        or mime_type in PLAIN_TEXT_MIME_TYPES
+        or mime_type in _LOADER_EXTENSIONS
+        or _is_plain_text(mime_type)
     )
 
 
-def extract_file_content(service: Any, file_id: str, mime_type: str, name: str) -> str | None:
-    """Return extracted text for a Drive file, or None to skip it.
+class DriveAuthError(Exception):
+    """Drive rejected the access token (HTTP 401) before the run produced anything."""
 
-    A file that can't be parsed (corrupt PDF, export error, transient per-file
-    hiccup) is logged and skipped rather than aborting the whole folder sync.
-    Genuine auth / connectivity failures surface from the listing calls instead.
+
+class _CutShort(Exception):
+    """Internal: stop the run here, keeping the state reached so far."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+_RATE_LIMIT_REASONS = (
+    "rateLimitExceeded",
+    "userRateLimitExceeded",
+    "dailyLimitExceeded",
+    "sharingRateLimitExceeded",
+)
+
+
+def _cut_reason(exc: Exception) -> str | None:
+    """``rate_limit`` or ``auth`` for a Drive error that outlasted the retries, else None."""
+    status = getattr(getattr(exc, "resp", None), "status", None)
+    if status == 429:
+        return "rate_limit"
+    if status == 401:
+        return "auth"
+    if status == 403 and any(reason in str(exc) for reason in _RATE_LIMIT_REASONS):
+        return "rate_limit"
+    return None
+
+
+def _raise_if_cut(exc: Exception) -> None:
+    # Every blanket handler around a request calls this first, so the host's revoked
+    # connection is re-raised as it is instead of becoming a failed request.
+    if is_host_stop(exc):
+        raise exc
+    reason = _cut_reason(exc)
+    if reason:
+        raise _CutShort(reason) from exc
+
+
+def _record_cut(stats: dict[str, int], cut: _CutShort, *, emitted: bool) -> None:
+    """Report a run that stopped early; it resumes on the next run.
+
+    A token refused before anything came out is raised instead: the caller must reconnect.
+    """
+    if cut.reason == "auth" and not emitted:
+        raise DriveAuthError("Google Drive rejected the access token (HTTP 401).") from cut
+    stats["failed"] += 1
+    stats[f"failed_{cut.reason}"] = 1
+    logger.warning("Google Drive sync stopped early (%s); it resumes on the next run.", cut.reason)
+
+
+class ExportTooLargeError(Exception):
+    """Drive refused to export a Google Doc or Sheet because it is over Google's export limit."""
+
+
+def _is_export_too_large(exc: Exception) -> bool:
+    return getattr(getattr(exc, "resp", None), "status", None) == 403 and (
+        "exportSizeLimitExceeded" in str(exc)
+    )
+
+
+def _execute(request: Any, check_active: Callable[[], None] | None) -> Any:
+    """Run one Drive request with ``API_RETRIES`` retries, checking the host before each retry."""
+    return with_google_retries(
+        lambda: request.execute(num_retries=0),
+        num_retries=API_RETRIES,
+        check_active=check_active,
+    )
+
+
+def _stream_media(
+    request: Any, buffer: Any, *, check_active: Callable[[], None] | None = None
+) -> None:
+    """Download ``request`` into ``buffer`` chunk by chunk, retrying each chunk."""
+    from googleapiclient.http import MediaIoBaseDownload
+
+    downloader = MediaIoBaseDownload(buffer, request, chunksize=DOWNLOAD_CHUNK_BYTES)
+    done = False
+    while not done:
+        _, done = with_google_retries(
+            lambda: downloader.next_chunk(num_retries=0),
+            num_retries=API_RETRIES,
+            check_active=check_active,
+        )
+
+
+@contextmanager
+def _download_media(service: Any, file_id: str, *, check_active: Callable[[], None] | None = None):
+    """Yield the file's bytes as a rewound spooled temporary file, closed on exit."""
+    with tempfile.SpooledTemporaryFile(max_size=DOWNLOAD_SPOOL_BYTES) as buffer:
+        _stream_media(
+            service.files().get_media(fileId=file_id, supportsAllDrives=True),
+            buffer,
+            check_active=check_active,
+        )
+        buffer.seek(0)
+        yield buffer
+
+
+class LoaderUnavailableError(Exception):
+    """The format's loader or a system dependency of it (LibreOffice) is not installed."""
+
+
+class UnreadableFileError(Exception):
+    """pypdf could not read the downloaded PDF (password protected, corrupt, or a feature it lacks).
+
+    The same bytes give the same answer, so a rerun cannot cure it until the file changes.
+    """
+
+
+# Failures a rerun in the same environment cannot cure, so they must not hold the Changes
+# cursor back. A full scan retries the files of a format without a loader, or of a legacy
+# Office format without LibreOffice, once it can be read, so installing it is enough to
+# pick up unchanged files on the next sync.
+_PERMANENT_REASONS = {
+    ExportTooLargeError: "failed_export_too_large",
+    LoaderUnavailableError: "failed_loader_unavailable",
+    UnreadableFileError: "failed_unreadable",
+}
+_PERMANENT_FAILURES = tuple(_PERMANENT_REASONS.values())
+
+
+def _read_pdf(media) -> str:
+    """pypdf works on bytes already downloaded, with no network and no state between calls, so
+    what it raises it raises again. What may pass is the environment: memory, the disk under the
+    spool, and ``cryptography`` for an AES file (pypdf's ``DependencyError``)."""
+    from pypdf.errors import DependencyError
+
+    try:
+        return _extract_pdf_text(media)
+    except (MemoryError, OSError, DependencyError):
+        raise
+    except Exception as exc:
+        raise UnreadableFileError(f"{type(exc).__name__}: {exc}") from exc
+
+
+@contextmanager
+def _download_file(
+    service: Any, file_id: str, suffix: str, *, check_active: Callable[[], None] | None = None
+):
+    """Yield the path of a temporary file holding the download, removed on exit.
+
+    The extension is one of the signals the loader engine picks its parser by, with the
+    file's content.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        path = os.path.join(directory, "drive_file" + suffix)
+        with open(path, "wb") as target:
+            _stream_media(
+                service.files().get_media(fileId=file_id, supportsAllDrives=True),
+                target,
+                check_active=check_active,
+            )
+        yield path
+
+
+def _no_loader_error(extension: str) -> LoaderUnavailableError:
+    return LoaderUnavailableError(
+        f"No cognee loader for '{extension}' files; they need the docling "
+        'or unstructured extra (pip install "cognee[docling]").'
+    )
+
+
+def _loader_registered(extension: str) -> bool:
+    """Whether a registered loader lists ``extension``, known before downloading the file."""
+    from cognee.infrastructure.loaders.get_loader_engine import get_loader_engine
+
+    engine = get_loader_engine()
+    wanted = extension.lstrip(".").lower()
+    return any(
+        wanted in (ext.lstrip(".").lower() for ext in engine.get_loader_info(name)["extensions"])
+        for name in engine.get_available_loaders()
+    )
+
+
+# Where the macOS installer puts LibreOffice, off PATH; Docling looks there too.
+_MACOS_LIBREOFFICE = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+
+
+def _libreoffice_available() -> bool:
+    """Whether LibreOffice is on PATH or installed as a macOS application."""
+    return (
+        shutil.which("soffice") is not None
+        or shutil.which("libreoffice") is not None
+        or os.path.isfile(_MACOS_LIBREOFFICE)
+    )
+
+
+def _registered_loader_extensions() -> list[str]:
+    """The extensions of ``_LOADER_EXTENSIONS`` that can be read right now.
+
+    A registered loader lists the extension and, for the binary Office formats, LibreOffice
+    is on PATH, so installing LibreOffice is a change a later sync scans again for.
+    """
+    libreoffice = _libreoffice_available()
+    return sorted(
+        ext
+        for ext in set(_LOADER_EXTENSIONS.values())
+        if _loader_registered(ext) and (libreoffice or ext not in _LEGACY_OFFICE_EXTENSIONS)
+    )
+
+
+def _installed_packages_fingerprint() -> str:
+    """A hash of the name and version of every installed package.
+
+    A loader that is registered can still fail on a dependency it cannot import. Installing
+    the package registers nothing new, so a change here is the only sign that it may now work.
+    """
+    packages = sorted(f"{dist.name}=={dist.version}" for dist in metadata.distributions())
+    return hashlib.sha256("\n".join(packages).encode()).hexdigest()
+
+
+def _load_with_loader_engine(path: str) -> str:
+    """Convert a downloaded file to text with the loader ``add()`` would use."""
+    from cognee.infrastructure.loaders.get_loader_engine import get_loader_engine
+
+    engine = get_loader_engine()
+    if engine.get_loader(path, None) is None:
+        raise _no_loader_error(os.path.splitext(path)[1])
+    # dlt extracts on a worker thread, which has no event loop; a loop already running here
+    # (the inline path called from async code) fails the file as a transient error.
+    coroutine = engine.load_file(path, persist=False)
+    try:
+        return asyncio.run(coroutine)
+    except ImportError as exc:
+        raise LoaderUnavailableError(str(exc)) from exc
+    finally:
+        coroutine.close()  # a loop already running on this thread leaves it unawaited
+
+
+def extract_file_content(
+    service: Any,
+    file_id: str,
+    mime_type: str,
+    name: str,
+    *,
+    check_active: Callable[[], None] | None = None,
+) -> str | None:
+    """Return a Drive file's text, or None when reading it failed for a reason that may pass.
+
+    The causes a rerun cannot cure are raised, so the caller can name them:
+    :class:`ExportTooLargeError`, :class:`LoaderUnavailableError` (the format's loader needs an
+    extra, or a legacy Office file needs LibreOffice) and :class:`UnreadableFileError` (a PDF
+    that pypdf cannot read).
     """
     try:
         if mime_type in _EXPORT_MIME_MAP:
-            data = (
-                service.files()
-                .export(fileId=file_id, mimeType=_EXPORT_MIME_MAP[mime_type])
-                .execute()
+            data = _execute(
+                service.files().export(fileId=file_id, mimeType=_EXPORT_MIME_MAP[mime_type]),
+                check_active,
             )
             return _decode(data)
 
         if mime_type == PDF_MIME_TYPE:
-            data = service.files().get_media(fileId=file_id, supportsAllDrives=True).execute()
-            return _extract_pdf_text(data)
+            with _download_media(service, file_id, check_active=check_active) as media:
+                return _read_pdf(media)
 
-        if mime_type in PLAIN_TEXT_MIME_TYPES:
-            data = service.files().get_media(fileId=file_id, supportsAllDrives=True).execute()
-            return _decode(data)
+        if mime_type in _LOADER_EXTENSIONS:
+            extension = _LOADER_EXTENSIONS[mime_type]
+            # A missing loader repeats on every full scan, so it must cost no download.
+            if not _loader_registered(extension):
+                raise _no_loader_error(extension)
+            if extension in _LEGACY_OFFICE_EXTENSIONS and not _libreoffice_available():
+                raise LoaderUnavailableError(
+                    f"'{extension}' files are converted with LibreOffice; install it and "
+                    "make sure soffice is on PATH."
+                )
+            with _download_file(service, file_id, extension, check_active=check_active) as path:
+                return _load_with_loader_engine(path)
+
+        if _is_plain_text(mime_type):
+            with _download_media(service, file_id, check_active=check_active) as media:
+                # Not io.TextIOWrapper: before Python 3.11 a SpooledTemporaryFile has no
+                # readable(), which TextIOWrapper needs.
+                return codecs.getreader("utf-8")(media, errors="replace").read()
+    except LoaderUnavailableError:
+        logger.warning("No loader for Drive file '%s' (%s).", name, file_id)
+        raise
+    except UnreadableFileError as exc:
+        logger.warning("Drive file '%s' (%s) cannot be read: %s", name, file_id, exc)
+        raise
     except Exception as exc:
+        _raise_if_cut(exc)
+        if _is_export_too_large(exc):
+            logger.warning(
+                "Drive file '%s' (%s) is over Google's export size limit.", name, file_id
+            )
+            raise ExportTooLargeError(file_id) from exc
         logger.warning(
             "Skipping Drive file '%s' (%s): content extraction failed: %s",
             name,
@@ -249,63 +605,235 @@ def _decode(data) -> str:
     return str(data)
 
 
-def _extract_pdf_text(data: bytes) -> str:
+def _extract_pdf_text(stream) -> str:
     from pypdf import PdfReader
 
-    reader = PdfReader(io.BytesIO(data), strict=False)
+    reader = PdfReader(stream, strict=False)
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
 # ---------------------------------------------------------------------------
 # Sync state machine (pure given a service + state dict — unit-testable)
 # ---------------------------------------------------------------------------
-def _iter_rows(service, config: _DriveConfig, state: dict, stats: dict[str, int] | None = None):
-    """Yield one row per in-scope file (full listing on the first run, deltas
-    thereafter), plus hard-delete tombstones for removed files.
+def _ordered_map(fn, items, service, service_factory, workers, weight=None):
+    """Yield ``(item, fn(client, item))`` in input order, ``fn`` running on ``workers`` threads.
 
-    Decoupled from dlt's resource-state machinery (which needs an active
-    pipeline context) so it is directly unit-testable with a fake Drive service
-    and a plain dict standing in for dlt's resource state.
+    Each thread builds its own client with ``service_factory`` (googleapiclient clients are not
+    thread-safe), and all are closed at the end; without a factory ``fn`` runs inline on
+    ``service``. At most ``workers`` items are in flight, results not yet yielded included, and
+    ``weight(item)`` bytes of them at most ``INFLIGHT_FETCH_BYTES`` (a heavier item runs alone).
+    """
+    if service_factory is None or workers == 1:
+        for item in items:
+            yield item, fn(service, item)
+        return
+
+    local = threading.local()
+    clients = []
+    lock = threading.Lock()
+
+    def call(item):
+        if not hasattr(local, "client"):
+            client = service_factory()
+            with lock:
+                clients.append(client)
+            local.client = client
+        return fn(local.client, item)
+
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="google-drive")
+    pending = deque()
+    held = 0
+    try:
+        for item in items:
+            size = weight(item) if weight else 0
+            while pending and (len(pending) >= workers or held + size > INFLIGHT_FETCH_BYTES):
+                head, future, head_size = pending.popleft()
+                held -= head_size
+                yield head, future.result()
+            pending.append((item, pool.submit(call, item), size))
+            held += size
+        while pending:
+            head, future, _ = pending.popleft()
+            yield head, future.result()
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+        for client in clients:
+            client.close()
+
+
+def _blocks_cursor(stats: dict[str, int]) -> bool:
+    """True when a failure a rerun can cure keeps the Changes cursor where it was."""
+    return stats["failed"] > sum(stats.get(key, 0) for key in _PERMANENT_FAILURES)
+
+
+def _merge_stats(stats: dict[str, int], local: dict[str, int]) -> None:
+    for key, value in local.items():
+        stats[key] = stats.get(key, 0) + value
+
+
+def _over_limit(config: _DriveConfig, file_meta: dict[str, Any]) -> bool:
+    size = file_meta.get("size")
+    return (
+        config.max_file_size_mb is not None
+        and bool(size)
+        and int(size) > config.max_file_size_mb * 1024 * 1024
+    )
+
+
+def _is_unchanged(versions: dict[str, str], file_meta: dict[str, Any], config) -> bool:
+    """True when this exact version of the file already produced a row and is still allowed.
+
+    A file over the size limit is never unchanged, so a limit lowered after the fetch
+    reaches ``_file_to_row`` and forgets it.
+    """
+    modified = file_meta.get("modifiedTime")
+    return (
+        bool(modified)
+        and versions.get(file_meta["id"]) == modified
+        and not _over_limit(config, file_meta)
+    )
+
+
+def _left_out(local: dict[str, int]) -> bool:
+    return any(local.get(reason) for reason in _FORGET_REASONS)
+
+
+def _iter_rows(
+    service,
+    config: _DriveConfig,
+    state: dict,
+    stats: dict[str, int] | None = None,
+    *,
+    service_factory: Callable[[], Any] | None = None,
+    check_active: Callable[[], None] | None = None,
+):
+    """Yield one row per in-scope file (full listing on the first run, deltas after) and tombstones.
+
+    Files are fetched on ``config.max_workers`` threads with ``service_factory`` (one client per
+    thread), else one by one on ``service``. ``state["versions"]`` maps a file id to the
+    ``modifiedTime`` that produced its row, so a repeated run fetches only what failed or changed.
+    Driven by tests with a plain dict as state and a fake Drive service. ``check_active`` is the
+    host checkpoint: it runs before every retry and backoff wait, on the fetch threads too.
     """
     if stats is None:
         stats = {}
     stats.clear()
-    stats.update(scanned=0, skipped=0, failed=0, deleted=0)
+    stats.update(scanned=0, skipped=0, failed=0, deleted=0, unchanged=0)
+    format_version = state.get("format_version", 0)
+    if type(format_version) is not int or not 0 <= format_version <= FORMAT_SUPPORT_VERSION:
+        raise ValueError(
+            "Unsupported Google Drive format_version in sync state; check SDK version."
+        )
     page_token = state.get("page_token")
     known_ids = set(state.get("known_ids", []))
+    versions = dict(state.get("versions", {}))
+    # Files in a format no loader handled were skipped, not read. A full scan retries them
+    # once a loader for that format gets registered (an extra was installed), and not before:
+    # a format no installed extra can load must not keep the folder in full-scan mode.
+    loadable = _registered_loader_extensions()
+    newly_loadable = not set(loadable) <= set(state.get("loader_extensions", []))
+    # A registered loader that failed on a missing dependency is retried when the installed
+    # packages change. Only a folder that has such files carries the fingerprint, so any
+    # other folder pays nothing for a change.
+    packages_changed = (
+        "loader_fingerprint" in state
+        and state["loader_fingerprint"] != _installed_packages_fingerprint()
+    )
 
-    if page_token is None:
-        # Capture the changes cursor BEFORE the full listing, so a file edited
-        # during a slow initial sync is caught on the next incremental run
-        # rather than missed. Re-processing such a file is idempotent under
-        # write_disposition="merge".
-        start_token = _get_start_page_token(service, config.shared_drive_id)
+    def fetch_row(client, file_meta):
+        local: dict[str, int] = {}
+        return _file_to_row(client, file_meta, config, local, check_active=check_active), local
+
+    if (
+        page_token is None
+        or format_version < FORMAT_SUPPORT_VERSION
+        or newly_loadable
+        or packages_changed
+    ):
         yielded = 0
         present_ids = set()
-        for file_meta in _list_files_in_scope(service, config):
-            # Extraction failure does not mean the file disappeared.
-            present_ids.add(file_meta["id"])
-            row = _file_to_row(service, file_meta, config, stats)
-            if row is not None:
-                yielded += 1
-                yield row
+        fetched_versions = {}
+        forgotten = set()
+
+        def files_to_fetch():
+            for file_meta in _list_files_in_scope(service, config, check_active=check_active):
+                # Extraction failure does not mean the file disappeared.
+                present_ids.add(file_meta["id"])
+                if _is_unchanged(versions, file_meta, config):
+                    stats["scanned"] += 1
+                    stats["unchanged"] += 1
+                    fetched_versions[file_meta["id"]] = file_meta["modifiedTime"]
+                    continue
+                yield file_meta
+
+        try:
+            # Capture the changes cursor BEFORE the full listing, so a file edited
+            # during a slow initial sync is caught on the next incremental run
+            # rather than missed. Re-processing such a file is idempotent under
+            # write_disposition="merge".
+            start_token = _get_start_page_token(
+                service, config.shared_drive_id, check_active=check_active
+            )
+            for file_meta, (row, local) in _ordered_map(
+                fetch_row,
+                files_to_fetch(),
+                service,
+                service_factory,
+                config.max_workers,
+                weight=lambda file_meta: int(file_meta.get("size") or 0),
+            ):
+                _merge_stats(stats, local)
+                if row is not None:
+                    yielded += 1
+                    if file_meta.get("modifiedTime"):
+                        fetched_versions[file_meta["id"]] = file_meta["modifiedTime"]
+                    yield row
+                elif _left_out(local) and file_meta["id"] in versions:
+                    # An earlier run ingested it; it now yields nothing to keep, so its old
+                    # content must not go on answering queries.
+                    forgotten.add(file_meta["id"])
+                    stats["deleted"] += 1
+                    yield {"id": file_meta["id"], "_deleted": True}
+        except _CutShort as cut:
+            _record_cut(stats, cut, emitted=bool(yielded or stats["deleted"]))
+            # The listing is incomplete, so nothing is reconciled as absent; what was
+            # fetched stays fetched, and the next run goes on from there.
+            state["known_ids"] = sorted(known_ids | present_ids)
+            kept = {**versions, **fetched_versions}
+            state["versions"] = {
+                file_id: version for file_id, version in kept.items() if file_id not in forgotten
+            }
+            return
         for file_id in sorted(known_ids - present_ids):
             stats["deleted"] += 1
             yield {"id": file_id, "_deleted": True}
         state["known_ids"] = sorted(present_ids)
-        if not stats["failed"]:
+        state["versions"] = fetched_versions
+        if not _blocks_cursor(stats):
             state["page_token"] = start_token
-        logger.info("Google Drive: initial sync yielded %d file(s).", yielded)
+            state["format_version"] = FORMAT_SUPPORT_VERSION
+            state["loader_extensions"] = loadable
+            if stats.get("failed_loader_unavailable"):
+                state["loader_fingerprint"] = _installed_packages_fingerprint()
+            else:
+                state.pop("loader_fingerprint", None)
+        logger.info("Google Drive: full scan yielded %d file(s).", yielded)
         return
 
-    changed_ids, deleted_ids, new_page_token = _list_changed_file_ids(
-        service, page_token, config.shared_drive_id
-    )
+    try:
+        sizes: dict[str, int] = {}
+        changed_ids, deleted_ids, new_page_token = _list_changed_file_ids(
+            service, page_token, config.shared_drive_id, sizes, check_active=check_active
+        )
+    except _CutShort as cut:
+        _record_cut(stats, cut, emitted=False)
+        return
 
     yielded = 0
     tombstoned = 0
     for file_id in deleted_ids:
         known_ids.discard(file_id)
+        versions.pop(file_id, None)
         tombstoned += 1
         stats["deleted"] += 1
         yield {"id": file_id, "_deleted": True}
@@ -313,21 +841,19 @@ def _iter_rows(service, config: _DriveConfig, state: dict, stats: dict[str, int]
     # The scope set is only needed to check whether changed files are still in
     # the folder, so skip the subfolder walk entirely when nothing changed.
     if changed_ids:
-        scope_folder_ids = _get_scope_folder_ids(service, config)
-        for file_id in changed_ids:
+
+        def fetch_changed(client, file_id):
+            """Return ``(file_meta, row, local_stats)``; ``file_meta`` is None for a file
+            that is gone, trashed or out of scope, and ``row`` None when nothing is emitted."""
             try:
-                file_meta = (
-                    service.files()
-                    .get(fileId=file_id, fields=FILE_FIELDS, supportsAllDrives=True)
-                    .execute()
+                file_meta = _execute(
+                    client.files().get(fileId=file_id, fields=FILE_FIELDS, supportsAllDrives=True),
+                    check_active,
                 )
             except Exception as e:
+                _raise_if_cut(e)
                 if _is_not_found(e):
-                    known_ids.discard(file_id)
-                    tombstoned += 1
-                    stats["deleted"] += 1
-                    yield {"id": file_id, "_deleted": True}
-                    continue
+                    return None, None, {}
                 raise RuntimeError(
                     f"Google Drive: failed to fetch metadata for file '{file_id}': {e}"
                 ) from e
@@ -337,22 +863,64 @@ def _iter_rows(service, config: _DriveConfig, state: dict, stats: dict[str, int]
                 scope_folder_ids,
                 config.shared_drive_id if config.include_subfolders else None,
             ):
-                known_ids.discard(file_id)
-                tombstoned += 1
-                stats["deleted"] += 1
-                yield {"id": file_id, "_deleted": True}
-                continue
+                return None, None, {}
+            if _is_unchanged(versions, file_meta, config):
+                return file_meta, None, {"scanned": 1, "unchanged": 1}
+            row, local = fetch_row(client, file_meta)
+            return file_meta, row, local
 
-            row = _file_to_row(service, file_meta, config, stats)
-            known_ids.add(file_id)
-            if row is not None:
-                yielded += 1
-                yield row
+        try:
+            scope_folder_ids = _get_scope_folder_ids(service, config, check_active=check_active)
+            if not config.shared_drive_id:
+                # Drive reports a file's parents by real id, never by the "root" alias the
+                # scope may hold, so a file directly in the folder would read as out of scope.
+                scope_folder_ids = scope_folder_ids | {
+                    _resolve_folder_id(service, config.folder_id, check_active=check_active)
+                }
+            for file_id, (file_meta, row, local) in _ordered_map(
+                fetch_changed,
+                sorted(changed_ids),
+                service,
+                service_factory,
+                config.max_workers,
+                weight=lambda file_id: sizes.get(file_id, 0),
+            ):
+                if file_meta is None:
+                    known_ids.discard(file_id)
+                    versions.pop(file_id, None)
+                    tombstoned += 1
+                    stats["deleted"] += 1
+                    yield {"id": file_id, "_deleted": True}
+                    continue
+                _merge_stats(stats, local)
+                known_ids.add(file_id)
+                if row is not None:
+                    yielded += 1
+                    if file_meta.get("modifiedTime"):
+                        versions[file_id] = file_meta["modifiedTime"]
+                    yield row
+                elif _left_out(local) and file_id in versions:
+                    del versions[file_id]
+                    stats["deleted"] += 1
+                    yield {"id": file_id, "_deleted": True}
+                elif not local.get("unchanged"):
+                    # No row and nothing forgotten (a failure): no version, as on a full scan.
+                    versions.pop(file_id, None)
+        except _CutShort as cut:
+            # The cursor stays: what was fetched is kept by its version, and the changes
+            # feed is read again from the same token on the next run.
+            _record_cut(stats, cut, emitted=bool(yielded or tombstoned))
 
     # Retry transient extraction failures on the next run instead of losing
     # them behind a successfully advanced changes cursor.
     state["known_ids"] = sorted(known_ids)
-    if not stats["failed"]:
+    state["versions"] = versions
+    if stats.get("failed_loader_unavailable"):
+        # These files were skipped with the loaders registered now, so a later install must
+        # scan again even if an earlier run had registered more.
+        state["loader_extensions"] = loadable
+        state["loader_fingerprint"] = _installed_packages_fingerprint()
+    if not _blocks_cursor(stats):
         state["page_token"] = new_page_token
     logger.info(
         "Google Drive: incremental sync yielded %d changed file(s), %d deletion(s).",
@@ -361,7 +929,9 @@ def _iter_rows(service, config: _DriveConfig, state: dict, stats: dict[str, int]
     )
 
 
-def _get_scope_folder_ids(service, config: _DriveConfig) -> set[str]:
+def _get_scope_folder_ids(
+    service, config: _DriveConfig, *, check_active: Callable[[], None] | None = None
+) -> set[str]:
     root = config.folder_id
     if config.shared_drive_id:
         # Incremental scope checks use ``driveId`` below; do not walk a shared
@@ -377,22 +947,22 @@ def _get_scope_folder_ids(service, config: _DriveConfig) -> set[str]:
         page_token = None
         while True:
             try:
-                response = (
-                    service.files()
-                    .list(
+                response = _execute(
+                    service.files().list(
                         q=(
                             f"'{current}' in parents and "
                             f"mimeType='{GOOGLE_FOLDER_MIME_TYPE}' and trashed=false"
                         ),
                         fields="nextPageToken, files(id)",
-                        pageSize=100,
+                        pageSize=LIST_PAGE_SIZE,
                         pageToken=page_token,
                         supportsAllDrives=True,
                         includeItemsFromAllDrives=True,
-                    )
-                    .execute()
+                    ),
+                    check_active,
                 )
             except Exception as e:
+                _raise_if_cut(e)
                 raise RuntimeError(
                     f"Google Drive: failed to list subfolders of folder '{current}': {e}"
                 ) from e
@@ -409,7 +979,9 @@ def _get_scope_folder_ids(service, config: _DriveConfig) -> set[str]:
     return scope_ids
 
 
-def _list_files_in_scope(service, config: _DriveConfig):
+def _list_files_in_scope(
+    service, config: _DriveConfig, *, check_active: Callable[[], None] | None = None
+):
     if config.shared_drive_id and config.include_subfolders:
         # A shared-drive root is a corpus, not a normal My Drive folder. The
         # Drive API can enumerate that corpus directly, which also includes
@@ -419,10 +991,13 @@ def _list_files_in_scope(service, config: _DriveConfig):
             config.folder_id,
             shared_drive_id=config.shared_drive_id,
             all_files=True,
+            check_active=check_active,
         )
         return
-    for folder_id in _get_scope_folder_ids(service, config):
-        yield from _list_files_in_folder(service, folder_id, shared_drive_id=config.shared_drive_id)
+    for folder_id in _get_scope_folder_ids(service, config, check_active=check_active):
+        yield from _list_files_in_folder(
+            service, folder_id, shared_drive_id=config.shared_drive_id, check_active=check_active
+        )
 
 
 def _list_files_in_folder(
@@ -431,6 +1006,7 @@ def _list_files_in_folder(
     *,
     shared_drive_id: str | None = None,
     all_files: bool = False,
+    check_active: Callable[[], None] | None = None,
 ):
     page_token = None
     while True:
@@ -440,7 +1016,7 @@ def _list_files_in_folder(
                 if all_files
                 else f"'{folder_id}' in parents and trashed=false",
                 "fields": f"nextPageToken, files({FILE_FIELDS})",
-                "pageSize": 100,
+                "pageSize": LIST_PAGE_SIZE,
                 "pageToken": page_token,
                 "includeItemsFromAllDrives": True,
                 "supportsAllDrives": True,
@@ -454,8 +1030,9 @@ def _list_files_in_folder(
                         "supportsAllDrives": True,
                     }
                 )
-            response = service.files().list(**params).execute()
+            response = _execute(service.files().list(**params), check_active)
         except Exception as e:
+            _raise_if_cut(e)
             raise RuntimeError(
                 f"Google Drive: failed to list files in folder '{folder_id}': {e}"
             ) from e
@@ -469,22 +1046,38 @@ def _list_files_in_folder(
             break
 
 
-def _get_start_page_token(service, shared_drive_id: str | None = None) -> str:
+def _get_start_page_token(
+    service,
+    shared_drive_id: str | None = None,
+    *,
+    check_active: Callable[[], None] | None = None,
+) -> str:
     try:
         params = {"supportsAllDrives": True}
         if shared_drive_id:
             params["driveId"] = shared_drive_id
-        response = service.changes().getStartPageToken(**params).execute()
+        response = _execute(service.changes().getStartPageToken(**params), check_active)
     except Exception as e:
+        _raise_if_cut(e)
         raise RuntimeError(f"Google Drive: failed to get changes start page token: {e}") from e
     return response["startPageToken"]
 
 
 def _list_changed_file_ids(
-    service, page_token: str, shared_drive_id: str | None = None
+    service,
+    page_token: str,
+    shared_drive_id: str | None = None,
+    sizes: dict[str, int] | None = None,
+    *,
+    check_active: Callable[[], None] | None = None,
 ) -> tuple[set[str], set[str], str]:
-    changed_ids: set[str] = set()
-    deleted_ids: set[str] = set()
+    """Return the changed and the deleted file ids since ``page_token``, and the next token.
+
+    ``sizes`` is filled with the size the feed reports for each changed file, if given.
+    """
+    # The feed is chronological and may report one file several times (trashed, then
+    # restored), so the last change of a file decides its state.
+    gone_by_id: dict[str, bool] = {}
     current_token = page_token
     new_start_token = page_token
     params = {"supportsAllDrives": True, "includeItemsFromAllDrives": True}
@@ -493,18 +1086,19 @@ def _list_changed_file_ids(
 
     while True:
         try:
-            response = (
-                service.changes()
-                .list(
+            response = _execute(
+                service.changes().list(
                     pageToken=current_token,
                     fields=(
-                        "nextPageToken, newStartPageToken, changes(fileId, removed, file(trashed))"
+                        "nextPageToken, newStartPageToken, "
+                        "changes(fileId, removed, file(trashed, size))"
                     ),
                     **params,
-                )
-                .execute()
+                ),
+                check_active,
             )
         except Exception as e:
+            _raise_if_cut(e)
             raise RuntimeError(f"Google Drive: failed to list changes: {e}") from e
 
         for change in response.get("changes", []):
@@ -512,10 +1106,10 @@ def _list_changed_file_ids(
             if not file_id:
                 # The account feed also includes shared-drive membership events.
                 continue
-            if change.get("removed") or (change.get("file") or {}).get("trashed"):
-                deleted_ids.add(file_id)
-            else:
-                changed_ids.add(file_id)
+            file_resource = change.get("file") or {}
+            gone_by_id[file_id] = bool(change.get("removed") or file_resource.get("trashed"))
+            if sizes is not None:
+                sizes[file_id] = int(file_resource.get("size") or 0)
 
         current_token = response.get("nextPageToken")
         if response.get("newStartPageToken"):
@@ -523,7 +1117,23 @@ def _list_changed_file_ids(
         if not current_token:
             break
 
-    return changed_ids - deleted_ids, deleted_ids, new_start_token
+    changed_ids = {file_id for file_id, gone in gone_by_id.items() if not gone}
+    deleted_ids = {file_id for file_id, gone in gone_by_id.items() if gone}
+    return changed_ids, deleted_ids, new_start_token
+
+
+def _resolve_folder_id(
+    service, folder_id: str, *, check_active: Callable[[], None] | None = None
+) -> str:
+    try:
+        response = _execute(
+            service.files().get(fileId=folder_id, fields="id", supportsAllDrives=True),
+            check_active,
+        )
+    except Exception as e:
+        _raise_if_cut(e)
+        raise RuntimeError(f"Google Drive: failed to resolve folder '{folder_id}': {e}") from e
+    return response["id"]
 
 
 def _is_in_scope(
@@ -539,7 +1149,12 @@ def _is_not_found(e: Exception) -> bool:
 
 
 def _file_to_row(
-    service, file_meta: dict[str, Any], config: _DriveConfig, stats: dict[str, int] | None = None
+    service,
+    file_meta: dict[str, Any],
+    config: _DriveConfig,
+    stats: dict[str, int] | None = None,
+    *,
+    check_active: Callable[[], None] | None = None,
 ) -> dict | None:
     if stats is None:
         stats = {}
@@ -550,13 +1165,12 @@ def _file_to_row(
 
     if not is_supported_mime_type(mime_type):
         _count_skip(stats, "unsupported_type")
-        logger.warning(
+        logger.debug(
             "Skipping unsupported Drive file '%s' (%s): mime type '%s'.", name, file_id, mime_type
         )
         return None
 
-    size = file_meta.get("size")
-    if size and int(size) > config.max_file_size_mb * 1024 * 1024:
+    if _over_limit(config, file_meta):
         _count_skip(stats, "too_large")
         logger.warning(
             "Skipping Drive file '%s' (%s): size exceeds max_file_size_mb=%d.",
@@ -566,7 +1180,13 @@ def _file_to_row(
         )
         return None
 
-    content = extract_file_content(service, file_id, mime_type, name)
+    try:
+        content = extract_file_content(service, file_id, mime_type, name, check_active=check_active)
+    except (ExportTooLargeError, LoaderUnavailableError, UnreadableFileError) as exc:
+        reason = _PERMANENT_REASONS[type(exc)]
+        stats["failed"] = stats.get("failed", 0) + 1
+        stats[reason] = stats.get(reason, 0) + 1
+        return None
     if content is None:
         stats["failed"] = stats.get("failed", 0) + 1
         stats["failed_content_extraction"] = stats.get("failed_content_extraction", 0) + 1
@@ -594,6 +1214,20 @@ def _count_skip(stats: dict[str, int], reason: str) -> None:
     stats[key] = stats.get(key, 0) + 1
 
 
+def _first_set(*values):
+    return next(value for value in values if value is not None)
+
+
+def _env_int(name: str) -> int | None:
+    value = os.getenv(name)
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        raise ValueError(f"{name} must be an integer, got {value!r}.") from None
+
+
 # ---------------------------------------------------------------------------
 # Public factory
 # ---------------------------------------------------------------------------
@@ -608,7 +1242,9 @@ def google_drive_source(
     include_subfolders: bool | None = None,
     max_file_size_mb: int | None = None,
     shared_drive_id: str | None = None,
+    max_workers: int | None = None,
     service: Any = None,
+    service_factory: Callable[[], Any] | None = None,
 ):
     """Return a ``dlt`` resource yielding one row per in-scope Google Drive file.
 
@@ -626,10 +1262,19 @@ def google_drive_source(
         credentials_path: Path to the service-account key or OAuth client-secret JSON.
         token_path: Where the cached OAuth user token is read/written (oauth mode).
         include_subfolders: Recurse into subfolders (default True).
-        max_file_size_mb: Skip files larger than this (default 25).
+        max_file_size_mb: Leave out files larger than this. Default: no limit. A file over
+            an explicit limit is counted as ``skipped_too_large`` and forgotten if it was
+            ingested before, like a file that left the folder.
         shared_drive_id: Shared-drive id when ``folder_id`` is a shared-drive root.
-        service: Pre-built Drive API client. Mainly an injection point for tests;
-            when omitted a client is built from the auth settings above.
+        max_workers: Threads fetching file content in parallel (default 8). Each thread
+            uses its own Drive client, so values above 1 need ``service_factory`` or the
+            auth settings above; a bare ``service`` is used one file at a time.
+        service: Pre-built Drive API client, used for listing (and for fetching when no
+            ``service_factory`` is given). When omitted a client is built from the auth
+            settings above.
+        service_factory: Zero-argument callable returning a fresh Drive client. Called
+            once per fetch thread, because googleapiclient clients are not thread-safe.
+            Hosts that supply their own credentials pass this instead of ``service``.
     """
     try:
         import dlt
@@ -671,10 +1316,23 @@ def google_drive_source(
         max_file_size_mb=(
             max_file_size_mb
             if max_file_size_mb is not None
-            else int(os.getenv("GOOGLE_DRIVE_MAX_FILE_SIZE_MB", "25"))
+            else _env_int("GOOGLE_DRIVE_MAX_FILE_SIZE_MB")
         ),
         shared_drive_id=shared_drive_id,
+        max_workers=_first_set(
+            max_workers, _env_int("GOOGLE_DRIVE_MAX_WORKERS"), DEFAULT_MAX_WORKERS
+        ),
     )
+    if config.max_workers < 1:
+        raise ValueError(
+            f"max_workers must be at least 1, got {config.max_workers} "
+            "(the max_workers argument or GOOGLE_DRIVE_MAX_WORKERS)."
+        )
+    if config.max_file_size_mb is not None and config.max_file_size_mb < 1:
+        raise ValueError(
+            f"max_file_size_mb must be at least 1, got {config.max_file_size_mb} "
+            "(the max_file_size_mb argument or GOOGLE_DRIVE_MAX_FILE_SIZE_MB)."
+        )
 
     stats: dict[str, int] = {}
 
@@ -688,14 +1346,32 @@ def google_drive_source(
         columns={"_deleted": {"data_type": "bool", "hard_delete": True}},
     )
     def google_drive_files():
-        client = service or build_drive_service(
-            auth_mode=config.auth_mode,
-            credentials_path=config.credentials_path,
-            token_path=config.token_path,
-        )
-        yield from dlt_utils.guarded_rows(
-            _iter_rows(client, config, dlt.current.resource_state(), stats), check_active
-        )
+        factory = service_factory
+        if service is None and factory is None:
+
+            def factory():
+                return build_drive_service(
+                    auth_mode=config.auth_mode,
+                    credentials_path=config.credentials_path,
+                    token_path=config.token_path,
+                )
+
+        client = service or factory()
+        try:
+            yield from dlt_utils.guarded_rows(
+                _iter_rows(
+                    client,
+                    config,
+                    dlt.current.resource_state(),
+                    stats,
+                    service_factory=factory,
+                    check_active=check_active,
+                ),
+                check_active,
+            )
+        finally:
+            if service is None:
+                client.close()
 
     resource = google_drive_files()
     # Opt into the document ingestion path: each file row (id/title/content/url)

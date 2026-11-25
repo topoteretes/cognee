@@ -104,6 +104,7 @@ def get_responses_router() -> APIRouter:
         ## Notes
         - Compatible with OpenAI API format
         - Supports function calling with Cognee tools
+        - Tool calls run as the authenticated caller, never as another user
         - Uses default tools if none provided
         """
         # Use default tools if none provided
@@ -143,7 +144,7 @@ def get_responses_router() -> APIRouter:
 
                 # Dispatch the function
                 try:
-                    function_result = await dispatch_function(tool_call)
+                    function_result = await dispatch_function(tool_call, user)
                     output_status = "success"
                 except Exception as e:
                     logger.exception(f"Error executing function {function_name}")

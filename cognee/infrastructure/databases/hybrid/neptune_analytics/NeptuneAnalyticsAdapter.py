@@ -11,7 +11,9 @@ from cognee.infrastructure.databases.exceptions import (
     MutuallyExclusiveQueryParametersError,
 )
 from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import (
+    EmbeddingGateway,
+)
 from cognee.infrastructure.databases.vector.models.PayloadSchema import PayloadSchema
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
@@ -69,11 +71,12 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
     _COLLECTION_PREFIX = "VECTOR_COLLECTION"
     _TOPK_LOWER_BOUND = 0
     _TOPK_UPPER_BOUND = 10
+    _SCORE_ID_BATCH_SIZE = 1000
 
     def __init__(
         self,
         graph_id: str,
-        embedding_engine: EmbeddingEngine | None = None,
+        embedding_engine: EmbeddingGateway | None = None,
         region: str | None = None,
         aws_access_key_id: str | None = None,
         aws_secret_access_key: str | None = None,
@@ -85,7 +88,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         Parameters:
         -----------
             - graph_id (str): The Neptune Analytics graph identifier
-            - embedding_engine(Optional[EmbeddingEngine]): The embedding engine instance to translate text to vector.
+            - embedding_engine(Optional[EmbeddingGateway]): The embedding engine instance to translate text to vector.
             - region (Optional[str]): AWS region where the graph is located (default: us-east-1)
             - aws_access_key_id (Optional[str]): AWS access key ID
             - aws_secret_access_key (Optional[str]): AWS secret access key
@@ -222,7 +225,9 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 )
                 self._na_exception_handler(e, query_string)
 
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
+    async def retrieve(
+        self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
+    ):
         """
         Retrieve data points from a collection using their IDs.
 
@@ -231,7 +236,13 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             - collection_name (str): The name of the collection from which to retrieve data
               points.
             - data_point_ids (list[str]): A list of IDs of the data points to retrieve.
+            - include_vector (bool): Not supported by this adapter; True raises
+              NotImplementedError.
         """
+        if include_vector:
+            raise NotImplementedError(
+                "NeptuneAnalyticsAdapter.retrieve does not return stored vectors"
+            )
         # Do the fetch for each node
         params = {"node_ids": data_point_ids, "collection_name": collection_name}
         query_string = (
@@ -254,6 +265,34 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         except Exception as e:
             logger.debug("Ignoring exception in NeptuneAnalyticsAdapter.retrieve", exc_info=True)
             self._na_exception_handler(e, query_string)
+
+    async def score_by_ids(
+        self, collection_name: str, data_point_ids: list[str], query_vector: list[float]
+    ) -> list[ScoredResult]:
+        """Score every requested vector using server-side cosine distance, without ANN."""
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids:
+            return []
+        query = (
+            f"MATCH (n:{self._VECTOR_NODE_LABEL}) "
+            f"WHERE id(n) IN $node_ids AND n.{self._COLLECTION_PREFIX} = $collection_name "
+            "CALL neptune.algo.vectors.distance.byEmbedding("
+            "n, {embedding: $embedding, metric: 'CosineDistance'}) "
+            "YIELD distance RETURN id(n) AS node_id, distance"
+        )
+        scores = []
+        for start in range(0, len(ids), self._SCORE_ID_BATCH_SIZE):
+            params = {
+                "node_ids": ids[start : start + self._SCORE_ID_BATCH_SIZE],
+                "collection_name": collection_name,
+                "embedding": query_vector,
+            }
+            rows = await asyncio.to_thread(self._client.query, query, params)
+            scores.extend(
+                ScoredResult(id=row["node_id"], score=float(row["distance"]), payload=None)
+                for row in rows
+            )
+        return scores
 
     async def search(
         self,

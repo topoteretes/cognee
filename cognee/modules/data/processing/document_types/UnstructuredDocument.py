@@ -1,3 +1,4 @@
+import builtins
 from collections.abc import AsyncGenerator
 from io import StringIO
 from typing import Any
@@ -12,7 +13,9 @@ from .Document import Document
 class UnstructuredDocument(Document):
     type: str = "unstructured"
 
-    async def read(self, chunker_cls: Chunker, max_chunk_size: int) -> AsyncGenerator[Any, Any]:
+    async def read(
+        self, chunker_cls: builtins.type[Chunker], max_chunk_size: int
+    ) -> AsyncGenerator[Any, Any]:
         async def get_text():
             try:
                 from unstructured.partition.auto import partition

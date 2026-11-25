@@ -1,13 +1,12 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import Link from "next/link";
 import { useNavbar } from "../NavbarContext";
-import NavbarIconLink from "./NavbarIconLink";
-import { ReactNode, useState } from "react";
+import NavbarFooter from "./NavbarFooter";
+import NavbarNavItem from "./NavbarNavItem";
+import NavbarSectionLabel from "./NavbarSectionLabel";
 import { useTenant } from "@/modules/tenant/TenantContext";
-import FeedbackModal from "@/ui/layout/FeedbackModal";
-import isCloudEnvironment from "@/utils/isCloudEnvironment";
+import type { NavItem } from "./NavbarNavItem";
 
 // Sidebar widths (px). The rail shows icons only; collapsing only applies on
 // desktop, matching the Tailwind `sm` breakpoint (640px) used below.
@@ -101,12 +100,6 @@ const POD_DEPENDENT_LINKS = new Set([
   "/knowledge-graph",
 ]);
 
-interface NavItem {
-  text: string;
-  link: string;
-  icon: (props: { active: boolean }) => ReactNode;
-}
-
 interface NavSection {
   label: string;
   items: NavItem[];
@@ -114,23 +107,26 @@ interface NavSection {
 
 const NAV_SECTIONS: NavSection[] = [
   {
-    label: "DATA",
+    label: "General",
     items: [
       { text: "Overview", link: "/dashboard", icon: HouseIcon },
-      { text: "Sessions", link: "/sessions", icon: SessionsIcon },
-      { text: "Brain", link: "/datasets", icon: DatabaseIcon },
-    ],
-  },
-  {
-    label: "EXPLORE",
-    items: [
+      {
+        text: "Datasets",
+        link: "/datasets",
+        icon: DatabaseIcon,
+        // Both live inside datasets: skills are scoped to one, and sessions
+        // become dataset data. The submenu only unfolds inside the subtree.
+        children: [
+          { text: "Sessions", link: "/sessions", icon: SessionsIcon },
+          { text: "Skills", link: "/skills", icon: SkillsIcon },
+        ],
+      },
+      { text: "Graph", link: "/knowledge-graph", icon: GraphIcon },
       { text: "Search", link: "/search", icon: SearchIcon },
-      { text: "Skills", link: "/skills", icon: SkillsIcon },
-      { text: "Mindmap", link: "/knowledge-graph", icon: GraphIcon },
     ],
   },
   {
-    label: "CONNECT",
+    label: "Connect",
     items: [
       { text: "Integrations", link: "/integrations", icon: IntegrationsIcon },
       { text: "API Keys", link: "/api-keys", icon: KeyIcon },
@@ -142,7 +138,6 @@ export default function CustomAppShellNavbar() {
   const pathname = usePathname();
   const { isOpen, close, collapsed, toggleCollapsed } = useNavbar();
   const { tenantReady } = useTenant();
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   // Collapsing to an icon rail only applies on desktop. On mobile the sidebar
   // is a full-width drawer toggled by the hamburger (isOpen), so whenever the
@@ -203,149 +198,21 @@ export default function CustomAppShellNavbar() {
         <nav className="flex-1 overflow-y-auto px-3 py-2">
           {NAV_SECTIONS.map((section) => (
             <div key={section.label} className="mb-4">
-              {railed ? (
-                <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "0 8px 8px" }} />
-              ) : (
-                <div
-                  className="px-3 mb-1"
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    letterSpacing: 0.5,
-                    color: "rgba(255,255,255,0.3)",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {section.label}
-                </div>
-              )}
-              {section.items.map((item) => {
-                const isActive = pathname === item.link || pathname.startsWith(item.link + "/");
-                const locked = !tenantReady && POD_DEPENDENT_LINKS.has(item.link);
-                if (locked) {
-                  return (
-                    <div
-                      key={item.link}
-                      title={railed ? `${item.text} — available once your workspace is ready` : "Available once your workspace is ready"}
-                      className={`flex items-center gap-[10px] rounded-[6px] px-3 py-2 text-[14px] ${railed ? "justify-center" : ""}`}
-                      style={{ color: "rgba(237,236,234,0.3)", cursor: "not-allowed", userSelect: "none" }}
-                      aria-disabled="true"
-                    >
-                      {item.icon({ active: false })}
-                      {!railed && item.text}
-                    </div>
-                  );
-                }
-                return (
-                  <NavbarIconLink
-                    key={item.link}
-                    text={item.text}
-                    link={item.link}
-                    isActive={isActive}
-                    collapsed={railed}
-                    icon={item.icon({ active: isActive })}
-                  />
-                );
-              })}
+              <NavbarSectionLabel label={section.label} railed={railed} />
+              {section.items.map((item) => (
+                <NavbarNavItem
+                  key={item.link}
+                  item={item}
+                  pathname={pathname}
+                  railed={railed}
+                  isLocked={(link) => !tenantReady && POD_DEPENDENT_LINKS.has(link)}
+                />
+              ))}
             </div>
           ))}
         </nav>
-
-        {/* Feedback + Billing pinned to the bottom-left of the sidebar */}
-        <div style={{ padding: 12, borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", gap: 8 }}>
-          <button
-            onClick={() => setFeedbackOpen(true)}
-            title={railed ? "Give feedback" : undefined}
-            className="cursor-pointer"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 7,
-              width: "100%",
-              padding: "7px 12px",
-              background: "transparent",
-              border: "none",
-              borderRadius: 8,
-              fontFamily: "inherit",
-              fontSize: 12.5,
-              fontWeight: 500,
-              color: "rgba(237,236,234,0.35)",
-              transition: "color 120ms ease, background 120ms ease",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = "#EDECEA"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(237,236,234,0.35)"; e.currentTarget.style.background = "transparent"; }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-            {!railed && "Give feedback"}
-          </button>
-          <Link
-            href="https://calendly.com/luca-topoteretes/new-meeting"
-            target="_blank"
-            rel="noopener noreferrer"
-            title={railed ? "Book a call" : undefined}
-            className="cursor-pointer"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 7,
-              width: "100%",
-              padding: "7px 12px",
-              background: "transparent",
-              border: "none",
-              borderRadius: 8,
-              fontFamily: "inherit",
-              fontSize: 12.5,
-              fontWeight: 500,
-              color: "rgba(237,236,234,0.35)",
-              textDecoration: "none",
-              transition: "color 120ms ease, background 120ms ease",
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#EDECEA"; (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "rgba(237,236,234,0.35)"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-              <line x1="16" y1="2" x2="16" y2="6" />
-              <line x1="8" y1="2" x2="8" y2="6" />
-              <line x1="3" y1="10" x2="21" y2="10" />
-              <path d="M10 14l2 2 4-4" />
-            </svg>
-            {!railed && "Book a call"}
-          </Link>
-          {/* Paid plans and credits are a cloud-only concept, and app/(app)/billing/
-              is excluded from the public sync — without this gate the button 404s
-              for every self-hosted user. */}
-          {isCloudEnvironment() && (
-            <Link
-              href="/billing"
-              title={railed ? "Billing / Pricing" : undefined}
-              className="flex items-center justify-center rounded-[8px] w-full"
-              style={{
-                padding: "10px 12px",
-                background: "#BC9BFF",
-                color: "#1e1e1c",
-                fontSize: 14,
-                fontWeight: 500,
-                textDecoration: "none",
-              }}
-              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = "#A988F0")}
-              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = "#BC9BFF")}
-            >
-              {railed ? (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1e1e1c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" />
-                </svg>
-              ) : "Billing / Pricing"}
-            </Link>
-          )}
-        </div>
+        <NavbarFooter railed={railed} />
       </aside>
-
-      {feedbackOpen && <FeedbackModal onClose={() => setFeedbackOpen(false)} />}
     </>
   );
 }

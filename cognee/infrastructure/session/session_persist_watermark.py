@@ -13,7 +13,9 @@ and the concrete watermarks built on it:
 * ``SESSION_PERSIST_WATERMARK`` — stage 2, persisted Q&A entry count;
 * ``TRACE_PERSIST_WATERMARK`` — stage 3, persisted agent-trace step count;
 * ``TRACE_EXTRACTION_WATERMARK`` (declared in ``agent_context_extraction``) —
-  stage 4, trace steps already turned into agent lessons;
+  stage 4, trace steps already turned into agent lessons; the same row holds
+  ``TRACE_EXTRACTION_ATTEMPT``, the count at which the last window started,
+  so the trace-write path waits an interval before retrying a failed one;
 * ``distill_watermark(dataset_id)`` — stage 5, gated context-entry ids already
   distilled into that dataset.
 
@@ -209,6 +211,10 @@ class SessionPersistWindow:
     session_id: str
     text: str
     persisted_qa_count: int
+    # The session's pinned node set (``session_node_set``); appended to the
+    # node set the window is added under.
+    node_set: tuple[str, ...] = ()
+    last_entry_time: str | None = None
 
 
 async def get_persisted_qa_count(session_manager, user_id: str, session_id: str) -> int:
@@ -249,6 +255,9 @@ class TracePersistWindow:
     session_id: str
     text: str
     persisted_trace_count: int
+    # The session's pinned node set (``session_node_set``); appended to the
+    # node set the window is added under.
+    node_set: tuple[str, ...] = ()
 
 
 # -- Stage 5: distilled context entries, per (session, dataset) --------------

@@ -20,6 +20,10 @@ class DataItem:
     # Data.system_metadata — never merged with user external_metadata.
     system_metadata: dict | None = field(default=None)
     data_id: UUID | None = None
+    # Item-level node_set (e.g. a document-mode dlt row's own labels). Unioned
+    # with the call-level node_set in ingest_data, not merged here — this
+    # field only carries the item's own contribution.
+    node_set: list[str] | None = None
     # When True, ``data`` (a str) is stored verbatim as a text document and
     # never interpreted as an http(s) URL, an s3:// path, or a local file
     # path. Set this on any DataItem whose text came from a field the caller
@@ -27,6 +31,11 @@ class DataItem:
     # legitimately be just a URL or an existing path, and reading it as one
     # would fetch or read something the caller never asked to ingest.
     literal_text: bool = False
+    # When True, ``data`` (a str) is a file path cognee produced itself, a
+    # document of a repository it cloned from an admitted URL, so the
+    # server-path gate (ACCEPT_LOCAL_FILE_PATH) does not apply: the caller
+    # named a URL, never this path. Only ``resolve_data_directories`` sets it.
+    cognee_path: bool = False
 
 
 def parse_labels(labels: str | None) -> list[str | None] | None:

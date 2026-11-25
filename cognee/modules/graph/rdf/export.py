@@ -158,7 +158,13 @@ async def query_memory_graph_sparql(
 
     Materializes the graph into an in-memory rdflib store and executes the
     query there. Returns rows as rdflib result rows (SELECT) or the appropriate
-    rdflib result for other query forms coerced to a list.
+    rdflib result for other query forms coerced to a list. Refuses the same
+    queries as the dataset SPARQL route (Update, ``SERVICE``, ``FROM``) before
+    the graph is read.
     """
+    # Imported here: sparql.py imports this module.
+    from cognee.modules.graph.rdf.sparql import compile_query, prepare_query
+
+    parse_tree = prepare_query(query)
     graph = await export_memory_graph_to_rdf(base_iri=base_iri, graph_engine=graph_engine)
-    return list(graph.query(query))
+    return list(graph.query(compile_query(parse_tree, graph)))

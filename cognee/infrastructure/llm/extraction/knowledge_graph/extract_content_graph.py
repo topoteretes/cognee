@@ -16,8 +16,18 @@ from cognee.shared.llm_graph_model import (
 
 
 async def extract_content_graph(
-    content: str, response_model: type[BaseModel], custom_prompt: str | None = None, **kwargs: Any
+    content: str,
+    response_model: type[BaseModel],
+    custom_prompt: str | None = None,
+    temporal_hints: list[str] | None = None,
+    **kwargs: Any,
 ) -> BaseModel:
+    """Extract a graph from ``content`` with one structured-output LLM call.
+
+    ``temporal_hints`` are rendered into the default graph prompt's
+    TEMPORAL_NORMALIZATION_HINTS block (see ``engine/utils/temporal_hints.py``).
+    A ``custom_prompt`` is sent verbatim and receives no hints.
+    """
     if custom_prompt:
         system_prompt = custom_prompt
     else:
@@ -33,7 +43,9 @@ async def extract_content_graph(
         else:
             base_directory = None
 
-        system_prompt = render_prompt(prompt_path, {}, base_directory=base_directory)
+        system_prompt = render_prompt(
+            prompt_path, {"temporal_hints": temporal_hints or []}, base_directory=base_directory
+        )
 
     simplified_response_model = response_model
     if isinstance(response_model, type) and issubclass(response_model, DataPoint):

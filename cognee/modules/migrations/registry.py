@@ -33,11 +33,23 @@ from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
 from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
     migrate as namespace_entity_type_node_ids,
 )
+from cognee.modules.migrations.versions.pgvector_hnsw_indexes import (
+    downgrade as pgvector_hnsw_indexes_down,
+)
+from cognee.modules.migrations.versions.pgvector_hnsw_indexes import (
+    migrate as pgvector_hnsw_indexes,
+)
 from cognee.modules.migrations.versions.postgres_graph_provenance_columns import (
     downgrade as postgres_graph_provenance_columns_down,
 )
 from cognee.modules.migrations.versions.postgres_graph_provenance_columns import (
     migrate as postgres_graph_provenance_columns,
+)
+from cognee.modules.migrations.versions.postgres_graph_source_ref_tables import (
+    downgrade as postgres_graph_source_ref_tables_down,
+)
+from cognee.modules.migrations.versions.postgres_graph_source_ref_tables import (
+    migrate as postgres_graph_source_ref_tables,
 )
 from cognee.modules.migrations.versions.rekey_fork_document_ids import (
     downgrade as rekey_fork_document_ids_down,
@@ -108,6 +120,26 @@ MIGRATIONS: list[Migration] = [
         up=rekey_fork_document_ids,
         down_revision="ladybug_graph_provenance_columns",
         down=rekey_fork_document_ids_down,
+    ),
+    # pgvector collections were created without a vector index, so every search was a
+    # full scan of every stored vector. Builds the HNSW index new collections now get.
+    Migration(
+        slug="pgvector_hnsw_indexes",
+        cognee_version="1.6.6",
+        up=pgvector_hnsw_indexes,
+        down_revision="rekey_fork_document_ids",
+        down=pgvector_hnsw_indexes_down,
+    ),
+    # The Postgres graph kept the source refs of a node or edge in four array columns,
+    # so a node shared by many documents had its row rewritten on every attach. Moves
+    # them into graph_node_source_ref / graph_edge_source_ref, one row per ref, in
+    # batches. No-op on every graph that is not stored in these Postgres tables.
+    Migration(
+        slug="postgres_graph_source_ref_tables",
+        cognee_version="1.6.9",
+        up=postgres_graph_source_ref_tables,
+        down_revision="pgvector_hnsw_indexes",
+        down=postgres_graph_source_ref_tables_down,
     ),
 ]
 

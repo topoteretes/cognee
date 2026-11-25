@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.modules.integrations import credentials as store
+from cognee.modules.integrations.google import oauth_integration
 
 
 async def install(provider, user_id=None, token="original"):
@@ -21,7 +22,7 @@ async def install(provider, user_id=None, token="original"):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider", ["google_drive", "gmail"])
+@pytest.mark.parametrize("provider", ["google_drive", "gmail", "google_calendar"])
 @pytest.mark.parametrize("reconnect", [False, True])
 async def test_refresh_cannot_resurrect_or_overwrite_reconnected_credentials(
     credential_db, monkeypatch, provider, reconnect
@@ -29,7 +30,11 @@ async def test_refresh_cannot_resurrect_or_overwrite_reconnected_credentials(
     adapter = import_module(f"cognee.modules.integrations.{provider}.adapter")
     integration = getattr(
         adapter,
-        "GoogleDriveIntegration" if provider == "google_drive" else "GoogleGmailIntegration",
+        {
+            "google_drive": "GoogleDriveIntegration",
+            "gmail": "GoogleGmailIntegration",
+            "google_calendar": "GoogleCalendarIntegration",
+        }[provider],
     )()
     original = await install(provider)
     started, finish = asyncio.Event(), asyncio.Event()
@@ -39,8 +44,8 @@ async def test_refresh_cannot_resurrect_or_overwrite_reconnected_credentials(
         await finish.wait()
         return {"access_token": "stale-refresh-result", "expires_in": 3600}
 
-    monkeypatch.setattr(adapter, "require", lambda key: "test")
-    monkeypatch.setattr(adapter.client, "refresh_access_token", refresh)
+    monkeypatch.setattr(oauth_integration, "require", lambda settings, key, prefix: "test")
+    monkeypatch.setattr(oauth_integration.client, "refresh_access_token", refresh)
     pending = asyncio.create_task(integration.refresh(original))
     await started.wait()
     await store.revoke_credential_by_account(provider, original.provider_account_id)

@@ -3,7 +3,10 @@
 import type { BusinessEntity } from "../sceneTypes";
 import type { SessionEvent } from "../types";
 import { setsOf } from "../computeBrainState";
+import { codeDisplayName } from "../codeGraph";
 import { truncate } from "../textUtils";
+import { structuredTypeName } from "@/modules/business/structuredGraph";
+import StructuredRowDetails from "./StructuredRowDetails";
 
 interface NodePanelProps {
   entity: BusinessEntity | null;
@@ -34,17 +37,30 @@ export default function NodePanel({
   if (!entity) return null;
   const sets = setsOf(entity);
   const usedIn = events.filter((e) => e.node_ids?.includes(entity.id));
+  const fullName = String(entity.name ?? "");
+  const displayName = codeDisplayName(entity);
+  const structuredType = structuredTypeName(entity);
+  // Same signal HoverTooltip uses: a code node's name shortens, a plain
+  // entity's never does, so this is the actual "is there more to show" check.
+  const showFullName = displayName !== fullName;
 
   return (
     <div className="absolute right-4 top-16 z-10 w-72 rounded-xl border border-[#2A3652] bg-[#1A2438] p-4 text-sm text-[#E9EEF6]">
       <div className="flex items-start justify-between">
-        <div className="font-semibold">{entity.name}</div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-semibold">{displayName}</div>
+          {showFullName && (
+            <div className="truncate text-[10.5px] font-normal text-[#7E8CA6]" title={fullName}>
+              {fullName}
+            </div>
+          )}
+        </div>
         <button type="button" onClick={onClose} className="text-[#7E8CA6] hover:text-[#E9EEF6]">
           ✕
         </button>
       </div>
       <div className="mt-1 text-xs text-[#7E8CA6]">
-        {entity.type || ""}
+        {structuredType || entity.type || ""}
         {sets.length ? ` · from ${sets.join(", ")}` : ""}
         {docCount ? ` · seen in ${docCount} places` : ""}
         {connectionCount ? ` · ${connectionCount} connection${connectionCount === 1 ? "" : "s"}` : ""}
@@ -62,13 +78,16 @@ export default function NodePanel({
           shift+click another record to trace the path between them
         </div>
       )}
-      <button
-        type="button"
-        onClick={onSimulateRemoval}
-        className="mt-2 w-full cursor-pointer rounded-[8px] border border-[#2A3652] px-2 py-1.5 text-left text-[11px] text-[#7E8CA6] transition-colors hover:border-[#F5566B] hover:text-[#F5566B]"
-      >
-        ⚠ what breaks without this record?
-      </button>
+      <StructuredRowDetails node={entity} />
+      {!structuredType && (
+        <button
+          type="button"
+          onClick={onSimulateRemoval}
+          className="mt-2 w-full cursor-pointer rounded-[8px] border border-[#2A3652] px-2 py-1.5 text-left text-[11px] text-[#7E8CA6] transition-colors hover:border-[#F5566B] hover:text-[#F5566B]"
+        >
+          ⚠ what breaks without this record?
+        </button>
+      )}
       <div className="mt-3 text-xs uppercase tracking-wide text-[#7E8CA6]">
         Used in {usedIn.length} answer{usedIn.length === 1 ? "" : "s"}
       </div>

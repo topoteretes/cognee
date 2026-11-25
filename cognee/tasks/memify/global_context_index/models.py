@@ -72,3 +72,29 @@ class BucketAssignment:
     @property
     def bucket_id(self) -> str:
         return self.parent_id
+
+
+@dataclass(frozen=True)
+class DatasetContent:
+    """A dataset's documents, their chunks, the entities those chunks mention, and its
+    index as stored now. Every chunk and entity id in it resolves."""
+
+    dataset_id: str
+    document_names: dict[str, str]  # document id -> name, for documents that have one
+    document_by_chunk: dict[str, str]  # chunk id -> document id
+    entities: dict[str, DatasetEntity]  # only entities some chunk mentions
+    relations: dict[tuple[str, str], tuple[str, ...]]  # (source id, target id) -> edge texts
+    existing_summary_texts: dict[str, str]  # index node id -> text; only the write reads it
+
+    def document_name(self, document_id: str) -> str:
+        """A document with no name on its chunks renders as its id."""
+        return self.document_names.get(document_id, document_id)
+
+
+@dataclass(frozen=True)
+class DatasetEntity:
+    """One entity as the dataset states it."""
+
+    name: str
+    type_name: str
+    chunk_ids: frozenset[str]  # the dataset's chunks that mention it

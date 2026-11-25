@@ -55,7 +55,7 @@ def test_installer_prefers_pip_then_uv_then_raises():
         assert install.installer_command() == ("pip", [sys.executable, "-m", "pip", "install"])
     with (
         patch("importlib.util.find_spec", return_value=None),
-        patch("shutil.which", return_value="/bin/uv"),
+        patch.object(install, "find_uv", return_value="/bin/uv"),
     ):
         assert install.installer_command() == (
             "uv",
@@ -63,7 +63,7 @@ def test_installer_prefers_pip_then_uv_then_raises():
         )
     with (
         patch("importlib.util.find_spec", return_value=None),
-        patch("shutil.which", return_value=None),
+        patch.object(install, "find_uv", return_value=None),
         pytest.raises(
             install.GlinerInstallError, match=r"neither pip nor uv(.|\n)*cognee\[gliner\]"
         ),
@@ -71,7 +71,55 @@ def test_installer_prefers_pip_then_uv_then_raises():
         install.installer_command()
 
 
-def _install(tmp_path, present, installed_after=True):
+UV_EXECUTABLE = "uv.exe" if sys.platform == "win32" else "uv"
+
+
+def _fake_uv(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    uv = directory / UV_EXECUTABLE
+    uv.touch()
+    return uv
+
+
+def test_find_uv_prefers_the_uv_variable_that_uv_run_sets(tmp_path, monkeypatch):
+    uv = _fake_uv(tmp_path / "uv-run")
+    monkeypatch.setenv("UV", str(uv))
+    with patch("shutil.which", return_value="/on/path/uv"):
+        assert install.find_uv() == str(uv)
+
+
+def test_find_uv_uses_path_when_the_uv_variable_is_unset(monkeypatch):
+    monkeypatch.delenv("UV", raising=False)
+    with patch("shutil.which", return_value="/on/path/uv"):
+        assert install.find_uv() == "/on/path/uv"
+
+
+def test_find_uv_finds_the_installer_location_when_uv_is_not_on_path(tmp_path, monkeypatch):
+    # An IDE, MCP client or service starts cognee without uv on PATH; uv's installer
+    # puts it in ~/.local/bin.
+    monkeypatch.delenv("UV", raising=False)
+    monkeypatch.delenv("XDG_BIN_HOME", raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "venv" / "bin" / "python"))
+    uv = _fake_uv(tmp_path / "home" / ".local" / "bin")
+    with (
+        patch("shutil.which", return_value=None),
+        patch.object(Path, "home", return_value=tmp_path / "home"),
+    ):
+        assert install.find_uv() == str(uv)
+
+
+def test_find_uv_finds_uv_installed_in_this_environment(tmp_path, monkeypatch):
+    monkeypatch.delenv("UV", raising=False)
+    uv = _fake_uv(tmp_path / "venv" / "bin")
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "venv" / "bin" / "python"))
+    with (
+        patch("shutil.which", return_value=None),
+        patch.object(Path, "home", return_value=tmp_path / "home"),
+    ):
+        assert install.find_uv() == str(uv)
+
+
+def _install(tmp_path, present, installed_after=True, installer="pip"):
     """Run install_gliner_runtime with the environment faked.
 
     ``present`` is the set of modules importable before the install; returns the
@@ -97,7 +145,9 @@ def _install(tmp_path, present, installed_after=True):
         patch.object(sys, "prefix", str(tmp_path)),
         patch.object(install, "_installed", side_effect=lambda module: module in present),
         patch.object(install, "gliner_runtime_installed", side_effect=runtime_installed),
-        patch.object(install, "installer_command", return_value=("pip", ["pip", "install"])),
+        patch.object(
+            install, "installer_command", return_value=(installer, [installer, "install"])
+        ),
         patch.object(install, "_run", side_effect=run),
         patch.object(install, "_import_runtime", side_effect=verify),
         patch.object(install, "installed_pins", return_value=["numpy==2.2.0"]),
@@ -144,6 +194,23 @@ def test_missing_torch_comes_from_the_cpu_index_then_the_extra_with_installed_pi
     assert command[-1] == "gliner2[local]<3,>=2.0.0"
     assert constraints == ["numpy==2.2.0"]
     assert "step 2 of 2" in step
+
+
+def test_uv_takes_torch_from_the_cpu_index_and_its_dependencies_from_pypi(tmp_path):
+    """uv searches the CPU index first and falls through to PyPI per package, so a torch
+    dependency the CPU index cannot serve (its files carry no upload date, which the
+    repo's exclude-newer setting filters) still resolves while torch stays the CPU build."""
+    (torch_step, _), outcome = _install(tmp_path, present=set(), installer="uv")
+    assert outcome.installer == "uv"
+    assert torch_step[0] == [
+        "uv",
+        "install",
+        "--index",
+        "https://mirror.example/cpu",
+        "--index-strategy",
+        "unsafe-first-match",
+        "torch<3,>=2.1",
+    ]
 
 
 def test_an_installed_torch_cpu_or_gpu_is_kept(tmp_path):

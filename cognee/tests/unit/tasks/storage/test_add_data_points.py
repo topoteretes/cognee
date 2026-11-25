@@ -8,13 +8,10 @@ import pytest
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types.Document import Document
-from cognee.modules.engine.models import Triplet
 from cognee.modules.graph.utils import ensure_default_edge_properties
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.storage.add_data_points import (
     InvalidDataPointsInAddDataPointsError,
-    _create_triplets_from_graph,
-    _extract_embeddable_text_from_datapoint,
     add_data_points,
 )
 
@@ -112,7 +109,11 @@ async def test_add_data_points_indexes_nodes_and_edges(
         "custom edges are written in their own call, not the main-edge batch"
     )
     assert graph_engine.add_edges.await_args_list[1].args[0] == expected_custom_edges
-    assert mock_index_edges.await_count == 2
+    # One edge-indexing pass over both lists: an edge type they share is embedded once.
+    mock_index_edges.assert_awaited_once()
+    indexed_edges = mock_index_edges.await_args.args[0]
+    assert expected_main_edges[0] in indexed_edges
+    assert expected_custom_edges[0] in indexed_edges
 
 
 @pytest.mark.asyncio
@@ -152,28 +153,103 @@ async def test_a_failed_graph_write_indexes_no_vectors(
 @patch.object(adp_module, "get_unified_engine")
 @patch.object(adp_module, "deduplicate_nodes_and_edges")
 @patch.object(adp_module, "get_graph_from_model")
-async def test_add_data_points_indexes_triplets_when_enabled(
+async def test_node_vectors_are_written_while_the_edge_graph_rows_are(
     mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
 ):
-    dp1 = SimplePoint(text="source")
-    dp2 = SimplePoint(text="target")
+    """Each store's vectors follow its graph rows, and the two kinds overlap: the edge
+    graph rows are written while the node vectors are still in flight."""
+    import asyncio
 
-    edge1 = (str(dp1.id), str(dp2.id), "relates", {"edge_text": "describes"})
-
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
     mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
     mock_dedup.side_effect = lambda n, e: (n, e)
-    unified, _graph_engine, _vector_engine = _make_unified_mock()
+    unified, graph_engine, _vector_engine = _make_unified_mock()
     mock_get_unified.return_value = unified
 
-    await add_data_points([dp1, dp2], embed_triplets=True)
+    order = []
+    edges_written = asyncio.Event()
 
-    assert mock_index_nodes.await_count == 2
-    nodes_arg = mock_index_nodes.await_args_list[0].args[0]
-    triplets_arg = mock_index_nodes.await_args_list[1].args[0]
-    assert nodes_arg == [dp1, dp2]
-    assert len(triplets_arg) == 1
-    assert isinstance(triplets_arg[0], Triplet)
+    async def _add_nodes(*_args, **_kwargs):
+        order.append("graph_add_nodes")
+
+    async def _add_edges(*_args, **_kwargs):
+        order.append("graph_add_edges")
+        edges_written.set()
+
+    async def _index_nodes(*_args, **_kwargs):
+        order.append("index_nodes:start")
+        # Returns only once the edge rows went in: they must not wait for this.
+        await asyncio.wait_for(edges_written.wait(), timeout=5)
+        order.append("index_nodes:end")
+
+    async def _index_edges(*_args, **_kwargs):
+        assert edges_written.is_set(), "edge vectors must follow the edge graph rows"
+        order.append("index_edges")
+
+    graph_engine.add_nodes.side_effect = _add_nodes
+    graph_engine.add_edges.side_effect = _add_edges
+    mock_index_nodes.side_effect = _index_nodes
+    mock_index_edges.side_effect = _index_edges
+
+    await add_data_points([dp1, dp2])
+
+    assert order.index("graph_add_nodes") < order.index("index_nodes:start")
+    assert order.index("graph_add_edges") < order.index("index_nodes:end")
+    assert order.index("graph_add_edges") < order.index("index_edges")
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_a_failed_node_indexing_lets_the_edge_writes_finish_before_raising(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    """The error is raised only once the concurrent edge half has finished, so nothing
+    is still writing after add_data_points has reported failure."""
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, _vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+    mock_index_nodes.side_effect = RuntimeError("vector store down")
+
+    with pytest.raises(RuntimeError, match="vector store down"):
+        await add_data_points([dp1, dp2])
+
+    graph_engine.add_edges.assert_awaited_once()
     mock_index_edges.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_a_failed_edge_graph_write_indexes_no_edge_vectors(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, _vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+    graph_engine.add_edges.side_effect = RuntimeError("graph is down")
+
+    with pytest.raises(RuntimeError, match="graph is down"):
+        await add_data_points([dp1, dp2])
+
+    mock_index_nodes.assert_awaited_once()  # the node half still ran to its end
+    mock_index_edges.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -216,6 +292,98 @@ async def test_add_data_points_with_single_datapoint(
     assert result == [dp]
     mock_get_graph.assert_called_once()
     mock_index_nodes.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "replace_nodes, expected",
+    [
+        # Graph adapters outside this repository may not take ``replace``, so an
+        # ordinary write must not pass it at all.
+        pytest.param(False, {}, id="default"),
+        pytest.param(True, {"replace": True}, id="replace"),
+    ],
+)
+@pytest.mark.parametrize("ownership", [False, True], ids=["one-call", "per-row"])
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_replace_nodes_reaches_add_nodes_only_when_set(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    ownership,
+    replace_nodes,
+    expected,
+):
+    dp = SimplePoint(text="node")
+    mock_get_graph.side_effect = [([dp], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, _vector_engine = _make_unified_mock()
+    graph_engine.supports_per_row_source_refs = ownership
+    mock_get_unified.return_value = unified
+    # A provenance-marked graph whose batch has chunk owners takes the per-row write.
+    chunk_owners = SimpleNamespace(has_chunks=True, node_owners={}, edge_owners={})
+
+    with (
+        patch.object(adp_module, "mark_graph_provenance_if_empty", AsyncMock(return_value=True)),
+        patch.object(
+            adp_module,
+            "collect_chunk_ownership",
+            AsyncMock(
+                return_value=chunk_owners if ownership else SimpleNamespace(has_chunks=False)
+            ),
+        ),
+        patch.object(adp_module, "capture_graph_provenance", AsyncMock()),
+        patch.object(adp_module, "record_provenance_at_storage", AsyncMock()),
+    ):
+        await add_data_points([dp], ctx=_provenance_ctx(), replace_nodes=replace_nodes)
+
+    graph_engine.add_nodes.assert_awaited_once()
+    call = graph_engine.add_nodes.await_args
+    assert isinstance(call.kwargs["source_ref_key"], dict) is ownership
+    assert {key: call.kwargs[key] for key in call.kwargs if key == "replace"} == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "replace_nodes, expected",
+    [pytest.param(False, {}, id="default"), pytest.param(True, {"replace": True}, id="replace")],
+)
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_replace_nodes_reaches_the_hybrid_write_of_already_indexed_nodes(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    replace_nodes,
+    expected,
+):
+    from cognee.infrastructure.databases.unified.capabilities import EngineCapability
+
+    dp = SimplePoint(text="indexed")
+    mock_get_graph.side_effect = [([dp], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, _vector_engine = _make_unified_mock()
+    unified.has_capability = MagicMock(side_effect=lambda cap: cap == EngineCapability.HYBRID_WRITE)
+    mock_get_unified.return_value = unified
+
+    ctx = PipelineContext(extras={adp_module.SEARCH_INDEXED_IDS: {str(dp.id)}})
+
+    await add_data_points([dp], ctx=ctx, replace_nodes=replace_nodes)
+
+    graph_engine.add_nodes.assert_awaited_once()
+    call = graph_engine.add_nodes.await_args
+    assert {key: call.kwargs[key] for key in call.kwargs if key == "replace"} == expected
 
 
 class _AsyncCM:
@@ -526,148 +694,8 @@ def test_entity_description_not_in_index_fields():
 
     entity_type = EntityType(name="Person", description="A human being")
     entity = Entity(name="Alice", description="A software engineer", is_a=entity_type)
-    text = _extract_embeddable_text_from_datapoint(entity)
     # description is stored but not indexed — only name is embedded
-    assert "Alice" in text
-    assert "A software engineer" not in text
-
-
-def test_extract_embeddable_text_from_datapoint():
-    dp = SimplePoint(text="hello world")
-    text = _extract_embeddable_text_from_datapoint(dp)
-    assert text == "hello world"
-
-
-def test_extract_embeddable_text_with_multiple_fields():
-    class MultiField(DataPoint):
-        title: str
-        description: str
-        metadata: dict = {"index_fields": ["title", "description"]}
-
-    dp = MultiField(title="Test", description="Description")
-    text = _extract_embeddable_text_from_datapoint(dp)
-    assert text == "Test Description"
-
-
-def test_extract_embeddable_text_with_no_index_fields():
-    class NoIndex(DataPoint):
-        text: str
-        metadata: dict = {"index_fields": []}
-
-    dp = NoIndex(text="ignored")
-    text = _extract_embeddable_text_from_datapoint(dp)
-    assert text == ""
-
-
-def test_create_triplets_from_graph():
-    dp1 = SimplePoint(text="source node")
-    dp2 = SimplePoint(text="target node")
-    edge = (str(dp1.id), str(dp2.id), "connects_to", {"edge_text": "links"})
-
-    triplets = _create_triplets_from_graph([dp1, dp2], [edge])
-
-    assert len(triplets) == 1
-    assert isinstance(triplets[0], Triplet)
-    assert triplets[0].from_node_id == str(dp1.id)
-    assert triplets[0].to_node_id == str(dp2.id)
-    assert "source node" in triplets[0].text
-    assert "target node" in triplets[0].text
-
-
-def test_extract_embeddable_text_with_none_datapoint():
-    text = _extract_embeddable_text_from_datapoint(None)
-    assert text == ""
-
-
-def test_extract_embeddable_text_without_metadata():
-    class NoMetadata(DataPoint):
-        text: str
-
-    dp = NoMetadata(text="test")
-    delattr(dp, "metadata")
-    text = _extract_embeddable_text_from_datapoint(dp)
-    assert text == ""
-
-
-def test_extract_embeddable_text_with_whitespace_only():
-    class WhitespaceField(DataPoint):
-        text: str
-        metadata: dict = {"index_fields": ["text"]}
-
-    dp = WhitespaceField(text="   ")
-    text = _extract_embeddable_text_from_datapoint(dp)
-    assert text == ""
-
-
-def test_create_triplets_skips_short_edge_tuples():
-    dp = SimplePoint(text="node")
-    incomplete_edge = (str(dp.id), str(dp.id))
-
-    triplets = _create_triplets_from_graph([dp], [incomplete_edge])
-
-    assert len(triplets) == 0
-
-
-def test_create_triplets_skips_missing_source_node():
-    dp1 = SimplePoint(text="target")
-    edge = ("missing_id", str(dp1.id), "relates", {})
-
-    triplets = _create_triplets_from_graph([dp1], [edge])
-
-    assert len(triplets) == 0
-
-
-def test_create_triplets_skips_missing_target_node():
-    dp1 = SimplePoint(text="source")
-    edge = (str(dp1.id), "missing_id", "relates", {})
-
-    triplets = _create_triplets_from_graph([dp1], [edge])
-
-    assert len(triplets) == 0
-
-
-def test_create_triplets_skips_none_relationship():
-    dp1 = SimplePoint(text="source")
-    dp2 = SimplePoint(text="target")
-    edge = (str(dp1.id), str(dp2.id), None, {})
-
-    triplets = _create_triplets_from_graph([dp1, dp2], [edge])
-
-    assert len(triplets) == 0
-
-
-def test_create_triplets_uses_relationship_name_when_no_edge_text():
-    dp1 = SimplePoint(text="source")
-    dp2 = SimplePoint(text="target")
-    edge = (str(dp1.id), str(dp2.id), "connects_to", {})
-
-    triplets = _create_triplets_from_graph([dp1, dp2], [edge])
-
-    assert len(triplets) == 1
-    assert "connects_to" in triplets[0].text
-
-
-def test_create_triplets_prevents_duplicates():
-    dp1 = SimplePoint(text="source")
-    dp2 = SimplePoint(text="target")
-    edge = (str(dp1.id), str(dp2.id), "relates", {"edge_text": "links"})
-
-    triplets = _create_triplets_from_graph([dp1, dp2], [edge, edge])
-
-    assert len(triplets) == 1
-
-
-def test_create_triplets_skips_nodes_without_id():
-    class NodeNoId:
-        pass
-
-    dp = SimplePoint(text="valid")
-    node_no_id = NodeNoId()
-    edge = (str(dp.id), "some_id", "relates", {})
-
-    triplets = _create_triplets_from_graph([dp, node_no_id], [edge])
-
-    assert len(triplets) == 0
+    assert entity.metadata["index_fields"] == ["name"]
 
 
 def test_ensure_default_edge_properties_preserves_existing_defaults():

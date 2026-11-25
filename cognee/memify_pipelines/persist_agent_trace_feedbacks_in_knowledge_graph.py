@@ -1,9 +1,9 @@
-from cognee import memify
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.improve.constants import AGENT_TRACE_FEEDBACKS_NODE_SET
+from cognee.modules.memify import run_memify_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -23,6 +23,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
     raw_trace_content: bool = False,
     last_n_steps: int | None = None,
     run_in_background: bool = False,
+    persist_up_to: dict[str, int] | None = None,
 ):
     """
     Persist agent trace content into the knowledge graph via memify pipeline.
@@ -41,6 +42,8 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             of ``session_feedback`` summaries.
         last_n_steps: Optional number of most recent trace steps to persist per
             session. When None, all stored steps are persisted.
+        persist_up_to: Optional step count per session that no window passes;
+            later steps wait for a later run.
         run_in_background: If True, runs memify asynchronously and returns immediately.
     """
     await set_session_user_context_variable(user)
@@ -65,6 +68,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             session_ids=session_ids,
             raw_trace_content=raw_trace_content,
             last_n_steps=last_n_steps,
+            persist_up_to=persist_up_to,
             needs_llm=False,
         )
     ]
@@ -75,10 +79,13 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             node_set_name=node_set_name,
             user=user,
             needs_llm=False,
+            # Extraction yields at most one window per session, so this hands the
+            # task every window of the run in one call: one cognify per run.
+            batch_size=max(1, len(session_ids or [])),
         ),
     ]
 
-    result = await memify(
+    result = await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
         dataset=dataset_to_write[0].id,

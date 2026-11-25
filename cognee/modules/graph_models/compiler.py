@@ -12,11 +12,8 @@ Set ``identity_fields: []`` on an entity to opt out of merging.
 
 Known composition caveats of custom graph models in general (not specific to
 this DSL): extraction with a non-``KnowledgeGraph`` model bypasses ontology
-grounding and the extra node/edge dedup passes in ``integrate_chunk_graphs``,
-and does not compose with ``functional_relationships``.
+grounding and the extra node/edge dedup passes in ``integrate_chunk_graphs``.
 """
-
-from typing import cast
 
 from .spec import EntitySpec, GraphSchemaSpec
 
@@ -138,6 +135,4 @@ def graph_model_from_spec(spec: GraphSchemaSpec | dict) -> type:
     # demo block, which would otherwise create an import cycle through low_level.
     from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 
-    # graph_schema_to_graph_model is annotated as returning an instance but
-    # actually returns the generated model class.
-    return cast(type, graph_schema_to_graph_model(graph_spec_to_json_schema(spec)))
+    return graph_schema_to_graph_model(graph_spec_to_json_schema(spec))

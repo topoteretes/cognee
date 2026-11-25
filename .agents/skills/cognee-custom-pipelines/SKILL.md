@@ -1,6 +1,6 @@
 ---
 name: cognee-custom-pipelines
-description: Use when building your own cognee processing — writing custom tasks, chaining them into a pipeline with run_custom_pipeline or the lightweight run_pipeline (from cognee.pipelines import run_pipeline), storing custom DataPoints with add_data_points, running custom extraction/enrichment over the existing graph with memify, checking pipeline run status, or debugging how data flows between tasks (batch_size, data_per_batch, ctx, Drop, enriches).
+description: Use when building your own cognee processing — writing custom tasks, chaining them into a pipeline with run_custom_pipeline or the lightweight run_pipeline (from cognee.pipelines import run_pipeline), storing custom DataPoints with add_data_points, running custom enrichment over the existing graph, checking pipeline run status, or debugging how data flows between tasks (batch_size, data_per_batch, ctx, Drop, enriches).
 ---
 
 # Custom tasks and pipelines
@@ -110,34 +110,39 @@ tag = Task(tag_chunks, label="reviewed", batch_size=10, needs_llm=False)
 
 ### Store results
 
-`add_data_points(data_points, custom_edges=None, embed_triplets=False,
-graph_only=False)` writes a list of `DataPoint`s to the graph and indexes
+`add_data_points(data_points, custom_edges=None, graph_only=False)` writes a list of `DataPoint`s to the graph and indexes
 their `index_fields` in the vector DB. It returns the same list, so it can
 sit mid-chain. Give every node type `identity_fields` so repeated runs merge
 instead of duplicating (see the `cognee-custom-graph-models` skill).
 
-### Work on the existing graph: memify
+### Work on the existing graph
+
+`cognee.memify`, `cognee-cli memify`, `POST /api/v1/memify` and `improve()`'s
+`extraction_tasks` / `enrichment_tasks` are deprecated and removed in the next
+release. Run a post-processing step over the
+graph with `run_custom_pipeline`: the task reads the graph itself, and one
+placeholder item as `data` makes the chain run once instead of once per
+document.
 
 ```python
-await cognee.memify(
-    extraction_tasks=["extract_subgraph_chunks"],  # names or Task objects
-    enrichment_tasks=[Task(my_enrichment, needs_llm=False)],
+from cognee.infrastructure.databases.graph import get_graph_engine
+
+
+async def enrich_graph(_items: list):
+    graph = await get_graph_engine()  # the dataset's graph inside the pipeline
+    nodes, edges = await graph.get_graph_data()
+    return [...]  # new DataPoints for add_data_points
+
+
+await cognee.run_custom_pipeline(
+    tasks=[Task(enrich_graph, needs_llm=False), Task(add_data_points, needs_llm=False)],
+    data=[{}],
     dataset="people",
-    node_name=["AI"],  # optional subgraph filter
 )
 ```
 
-With no `data`, memify passes the graph (or the `node_type` / `node_name`
-subgraph) to the first task. Registered task names:
-`extract_subgraph`, `extract_subgraph_chunks`, `get_triplet_datapoints`,
-`extract_user_sessions`, `cognify_session`, `extract_agent_trace_feedbacks`,
-`cognify_agent_trace_feedback`, `apply_feedback_weights`,
-`detect_entity_duplicates`, `merge_entity_duplicates`, `index_data_points`.
-`improve()` also forwards `extraction_tasks` / `enrichment_tasks` to memify,
-but only inside its enrichment stage. With custom tasks that stage skips
-the `TRIPLET_EMBEDDING` gate and the has-the-graph-changed check, so they
-run on every improve (unless the stage is disabled, the lock is held, or
-the fatal `persist_session_qa` stage errors and stops the run first).
+For cognee's own enrichment (session bridging, feedback weights, conflict
+review, global context index) call `improve()`.
 
 ### Check status
 
@@ -160,8 +165,8 @@ outcome: `PipelineRunCompleted`, `PipelineRunAlreadyCompleted`,
   specs *called* (`extract()`, not `extract`) and raises `TypeError`
   otherwise; the orchestrator in `cognee.modules.pipelines` wants `Task`
   objects and raises `WrongTaskTypeError` otherwise.
-- **String task names only work in `memify`.** `run_custom_pipeline` accepts
-  only `Task` objects despite its type hint.
+- **`run_custom_pipeline` accepts only `Task` objects** despite its type hint;
+  string task names are not resolved.
 - **Some callables are rejected** by `Task` (`ValueError: Unsupported task
   type`): bound methods and `functools.partial`s of a plain (non-generator)
   sync function, and callable objects (instances with `__call__`). Generator
@@ -169,14 +174,6 @@ outcome: `PipelineRunCompleted`, `PipelineRunAlreadyCompleted`,
   in a plain `def` / `async def`.
 - **`run_custom_pipeline` does not run database migrations.** On an existing
   database, run `await cognee.run_migrations()` (or any `remember()` first).
-- **Keep `pipeline_name="custom_pipeline"`** unless you add your name to
-  `WRITE_PIPELINE_NAMES` in `cognee/modules/improve/graph_changes.py`.
-  Otherwise `improve()` does not notice your graph writes and may skip
-  enrichment as "already completed".
-- **memify defaults.** An omitted or empty task list is replaced by the
-  defaults: `index_data_points` enrichment, plus `get_triplet_datapoints`
-  extraction only when `TRIPLET_EMBEDDING=true` (off by default). memify
-  uses only the first dataset it resolves.
 - **Nodes duplicate on every run** when a DataPoint has no
   `identity_fields` (or `Dedup()` fields). `examples/guides/custom_data_models.py`
   and `examples/guides/custom_tasks_and_pipelines.py` have this bug; don't
@@ -198,8 +195,6 @@ consumer's `batch_size`, injecting `ctx`, stamping provenance).
   exported from `cognee/pipelines/`
 - Context: `cognee/modules/pipelines/models/PipelineContext.py`
 - `run_custom_pipeline`: `cognee/modules/run_custom_pipeline/run_custom_pipeline.py`
-- memify: `cognee/modules/memify/memify.py`,
-  `cognee/memify_pipelines/memify_task_registry.py`, `memify_default_tasks.py`
 - Storage: `cognee/tasks/storage/add_data_points.py`
 - Index of all shipped tasks: `cognee/tasks/README.md`
 
@@ -213,17 +208,12 @@ Examples:
   `run_tasks`, no LLM, dedup via `identity_fields`, status polling.
 - `examples/demos/custom_pipelines/custom_cognify_pipeline_example.py`:
   rebuilds add + cognify from the default task list.
-- `examples/demos/custom_pipelines/memify_coding_agent_rule_extraction_example.py`:
-  memify with a custom enrichment task.
 
 ## Extending it
 
 - **A new shipped task:** put it in the `cognee/tasks/` subpackage for its
   stage, export it from that package's `__init__.py`, follow the template in
   `cognee/tasks/README.md`, and add a unit test under `cognee/tests/unit/tasks/`.
-- **A new memify task name:** register it in
-  `cognee/memify_pipelines/memify_task_registry.py`.
-- **A new write pipeline name:** add it to `WRITE_PIPELINE_NAMES`.
 - Pipeline tests: `cognee/tests/unit/modules/pipelines/` (runner semantics,
   context, provenance, rollback) and `cognee/tests/unit/pipelines/` (the
   lightweight API).

@@ -1,8 +1,7 @@
 """Google Drive API calls used by the Drive integration.
 
 OAuth operations live in :mod:`cognee.modules.integrations.google.client` so
-Gmail and Drive cannot drift apart. This module keeps the Drive file API and
-the compatibility exports used by existing Drive integrations and tests.
+Gmail and Drive cannot drift apart. This module keeps the Drive file API.
 """
 
 import logging
@@ -13,11 +12,8 @@ import aiohttp
 from cognee.modules.integrations.google.client import (
     GoogleAuthError,
     _authorized_get,
-    exchange_code,
-    fetch_userinfo,
-    refresh_access_token,
-    revoke_token,
 )
+from cognee.modules.integrations.outbound import client_session
 
 logger = logging.getLogger(__name__)
 
@@ -98,9 +94,12 @@ async def _authorized_text(
     chunks: list[bytes] = []
     received = 0
     async with (
-        aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session,
+        client_session("google_drive", timeout=aiohttp.ClientTimeout(total=60)) as session,
         session.get(
-            url, params=params, headers={"Authorization": f"Bearer {access_token}"}
+            url,
+            params=params,
+            headers={"Authorization": f"Bearer {access_token}"},
+            allow_redirects=False,
         ) as response,
     ):
         if response.status != 200:
@@ -131,12 +130,8 @@ __all__ = [
     "GoogleAuthError",
     "aiohttp",
     "download_file",
-    "exchange_code",
     "export_file",
-    "fetch_userinfo",
     "list_drives",
     "list_files",
     "list_folders",
-    "refresh_access_token",
-    "revoke_token",
 ]

@@ -1,7 +1,11 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio
+import uuid
+from types import SimpleNamespace
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from cognee.infrastructure.background_tasks import wait_for_background_tasks
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
 from cognee.infrastructure.session.feedback_models import (
@@ -126,6 +130,7 @@ class TestSessionManager:
         cache.delete_feedback = AsyncMock(return_value=True)
         cache.delete_qa_entry = AsyncMock(return_value=True)
         cache.delete_session = AsyncMock(return_value=True)
+        cache.delete_sessions = AsyncMock(side_effect=lambda sessions: [True] * len(sessions))
         cache.create_session_context_entry = AsyncMock(return_value=True)
         cache.get_session_context_entries = AsyncMock(return_value=[])
         cache.update_session_context_entry = AsyncMock(return_value=True)
@@ -243,11 +248,178 @@ class TestSessionManager:
         assert call_kw["status"] == "error"
         assert call_kw["error_message"] == "exit 1"
         assert call_kw["session_id"] == "s1"
+        # The LLM batch runs in the background; drain it before asserting.
+        assert await wait_for_background_tasks(timeout=5)
         pending_spy.assert_awaited_once_with(
             session_manager=sm,
             user_id="u1",
             session_id="s1",
+            admission=ANY,
         )
+
+    @pytest.mark.asyncio
+    async def test_trace_extraction_asks_the_host_about_the_session_and_dataset(
+        self, mock_cache, monkeypatch
+    ):
+        """The admission handed to the extractor asks the host check with the manager's dataset."""
+        import cognee.infrastructure.session.agent_context_extraction as ace
+        from cognee.modules.improve import (
+            clear_auto_improve_admission,
+            register_auto_improve_admission,
+        )
+        from cognee.modules.users import methods as user_methods
+
+        dataset_id = uuid.uuid4()
+        user_id = uuid.uuid4()
+        sm = SessionManager(cache_engine=mock_cache, dataset_id=dataset_id)
+        pending_spy = AsyncMock(return_value=[])
+        monkeypatch.setattr(ace, "extract_live_agent_context", AsyncMock(return_value=[]))
+        monkeypatch.setattr(ace, "extract_pending_agent_context", pending_spy)
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
+
+        async def get_user(looked_up):
+            return SimpleNamespace(id=looked_up)
+
+        asked = []
+
+        async def check(**context):
+            asked.append(context)
+            return "insufficient_credits"
+
+        monkeypatch.setattr(user_methods, "get_user", get_user)
+        register_auto_improve_admission(check)
+        try:
+            await sm.add_agent_trace_step(
+                user_id=str(user_id),
+                origin_function="run_tests",
+                status="success",
+                session_id="s1",
+                generate_feedback_with_llm=False,
+            )
+            assert await wait_for_background_tasks(timeout=5)
+            reason = await pending_spy.await_args.kwargs["admission"]()
+        finally:
+            clear_auto_improve_admission()
+
+        assert reason == "insufficient_credits"
+        assert len(asked) == 1
+        assert asked[0]["user"].id == user_id
+        assert asked[0]["dataset_id"] == dataset_id
+        assert asked[0]["session_id"] == "s1"
+        assert asked[0]["session_ids"] == ["s1"]
+
+    @pytest.mark.asyncio
+    async def test_trace_write_does_not_wait_for_the_llm_batch(self, sm, mock_cache, monkeypatch):
+        """A slow batch keeps running after the write returns; a second trace starts none."""
+        import cognee.infrastructure.session.agent_context_extraction as ace
+
+        release = asyncio.Event()
+        started = asyncio.Event()
+
+        async def slow_batch(**_):
+            started.set()
+            await release.wait()
+            return []
+
+        pending_spy = AsyncMock(side_effect=slow_batch)
+        monkeypatch.setattr(ace, "extract_live_agent_context", AsyncMock(return_value=[]))
+        monkeypatch.setattr(ace, "extract_pending_agent_context", pending_spy)
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
+
+        async def write():
+            await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="run_tests",
+                status="success",
+                session_id="s1",
+                generate_feedback_with_llm=False,
+            )
+
+        await asyncio.wait_for(write(), timeout=1)
+        await asyncio.wait_for(started.wait(), timeout=1)
+        await asyncio.wait_for(write(), timeout=1)
+
+        release.set()
+        assert await wait_for_background_tasks(timeout=5)
+        pending_spy.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_a_failed_llm_batch_is_logged_and_the_next_trace_retries(
+        self, sm, mock_cache, monkeypatch
+    ):
+        """A failed background batch never reaches the writer, and does not block the next one."""
+        import cognee.infrastructure.session.agent_context_extraction as ace
+
+        pending_spy = AsyncMock(side_effect=[RuntimeError("llm down"), []])
+        monkeypatch.setattr(ace, "extract_live_agent_context", AsyncMock(return_value=[]))
+        monkeypatch.setattr(ace, "extract_pending_agent_context", pending_spy)
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
+
+        for _ in range(2):
+            await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="run_tests",
+                status="success",
+                session_id="s1",
+                generate_feedback_with_llm=False,
+            )
+            assert await wait_for_background_tasks(timeout=5)
+
+        assert pending_spy.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_skips_extraction_in_coding_mode(
+        self, sm, mock_cache, monkeypatch
+    ):
+        """DISTILLATION_MODE=coding extracts once per unit from improve(), never per trace."""
+        import cognee.infrastructure.session.agent_context_extraction as ace
+        import cognee.modules.improve.config as improve_config
+
+        live_spy = AsyncMock(return_value=[])
+        pending_spy = AsyncMock(return_value=[])
+        monkeypatch.setattr(ace, "extract_live_agent_context", live_spy)
+        monkeypatch.setattr(ace, "extract_pending_agent_context", pending_spy)
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
+        monkeypatch.setattr(improve_config, "coding_distillation_enabled", lambda: True)
+
+        trace_id = await sm.add_agent_trace_step(
+            user_id="u1",
+            origin_function="Edit",
+            status="error",
+            session_id="s1",
+            error_message="No changes to make",
+            generate_feedback_with_llm=False,
+        )
+
+        assert trace_id
+        mock_cache.append_agent_trace_step.assert_awaited_once()
+        live_spy.assert_not_awaited()
+        pending_spy.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_survives_an_invalid_improve_setting(
+        self, sm, mock_cache, monkeypatch
+    ):
+        """The mode is read from the improve config; a setting it refuses (a misspelled
+        DISTILLATION_MODE) must not fail a trace write that is already stored."""
+        import cognee.modules.improve.config as improve_config
+
+        def refuse():
+            raise ValueError("distillation_mode: Input should be '' or 'coding'")
+
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
+        monkeypatch.setattr(improve_config, "coding_distillation_enabled", refuse)
+
+        trace_id = await sm.add_agent_trace_step(
+            user_id="u1",
+            origin_function="Edit",
+            status="success",
+            session_id="s1",
+            generate_feedback_with_llm=False,
+        )
+
+        assert trace_id
+        mock_cache.append_agent_trace_step.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_add_agent_trace_step_skips_extraction_when_disabled(
@@ -585,6 +757,29 @@ class TestSessionManager:
         mock_cache.get_all_qa_entries.assert_called_once_with("u1", "s1")
 
     @pytest.mark.asyncio
+    async def test_get_session_since_calls_the_bounded_read(self, sm, mock_cache):
+        from datetime import datetime, timezone
+
+        since = datetime(2026, 6, 11, tzinfo=timezone.utc)
+        mock_cache.get_qa_entries_since = AsyncMock(return_value=[])
+
+        await sm.get_session(user_id="u1", session_id="s1", since=since, lead_in=1)
+
+        mock_cache.get_qa_entries_since.assert_called_once_with("u1", "s1", since, lead_in=1)
+        mock_cache.get_all_qa_entries.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_session_since_is_exclusive_with_last_n(self, sm):
+        from datetime import datetime, timezone
+
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session(
+                user_id="u1", session_id="s1", since=datetime.now(timezone.utc), last_n=3
+            )
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session(user_id="u1", session_id="s1", lead_in=1)
+
+    @pytest.mark.asyncio
     async def test_get_session_formatted(self, sm, mock_cache):
         """get_session with formatted=True returns string."""
         mock_cache.get_all_qa_entries.return_value = [
@@ -614,7 +809,26 @@ class TestSessionManager:
         entries = await sm.get_agent_trace_session(user_id="u1", session_id="s1")
         assert len(entries) == 1
         assert entries[0]["trace_id"] == "t1"
-        mock_cache.get_agent_trace_session.assert_called_once_with("u1", "s1", last_n=None)
+        mock_cache.get_agent_trace_session.assert_called_once_with(
+            "u1", "s1", last_n=None, start=None, end=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_agent_trace_session_forwards_a_range(self, sm, mock_cache):
+        mock_cache.get_agent_trace_session.return_value = []
+        await sm.get_agent_trace_session(user_id="u1", session_id="s1", start=0, end=9)
+        mock_cache.get_agent_trace_session.assert_called_once_with(
+            "u1", "s1", last_n=None, start=0, end=9
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{"start": 1}, {"end": 2}, {"start": 3, "end": 3}, {"start": 0, "end": 2, "last_n": 1}],
+    )
+    async def test_get_agent_trace_session_rejects_a_bad_range(self, sm, kwargs):
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_agent_trace_session(user_id="u1", session_id="s1", **kwargs)
 
     @pytest.mark.asyncio
     async def test_get_agent_trace_session_unavailable_returns_empty(self, sm_unavailable):
@@ -758,23 +972,49 @@ class TestSessionManager:
         """delete_session delegates to cache and removes its scoped vector rows."""
         ok = await sm.delete_session(user_id="u1", session_id="s1")
         assert ok is True
-        mock_cache.delete_session.assert_called_once_with(user_id="u1", session_id="s1")
-        session_vector_mocks["delete_session"].assert_awaited_once_with(
-            user_id="u1",
-            session_id="s1",
-        )
+        mock_cache.delete_sessions.assert_awaited_once_with([("u1", "s1")])
+        session_vector_mocks["delete_session"].assert_awaited_once_with([("u1", "s1")])
 
     @pytest.mark.asyncio
-    async def test_delete_session_skips_vector_cleanup_when_cache_delete_misses(
+    async def test_delete_session_cleans_vectors_even_when_cache_delete_misses(
         self, sm, mock_cache, session_vector_mocks
     ):
-        """delete_session leaves vectors alone when the cache session was not deleted."""
-        mock_cache.delete_session.return_value = False
+        """An expired session has no cache entries left but still has its Q&A
+        vectors, which hold the question and answer text; delete_session strips
+        them whether or not the cache held anything."""
+        mock_cache.delete_sessions.side_effect = None
+        mock_cache.delete_sessions.return_value = [False]
 
         ok = await sm.delete_session(user_id="u1", session_id="s1")
 
         assert ok is False
-        session_vector_mocks["delete_session"].assert_not_awaited()
+        session_vector_mocks["delete_session"].assert_awaited_once_with([("u1", "s1")])
+
+    @pytest.mark.asyncio
+    async def test_delete_sessions_detags_every_session_in_one_call(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """One cache call and one tag removal for all of them, one flag per session."""
+        mock_cache.delete_sessions.side_effect = None
+        mock_cache.delete_sessions.return_value = [True, False]
+
+        existed = await sm.delete_sessions([("u1", "s1"), ("u2", "s2")])
+
+        assert existed == [True, False]
+        session_vector_mocks["delete_session"].assert_awaited_once_with(
+            [("u1", "s1"), ("u2", "s2")]
+        )
+        mock_cache.delete_sessions.assert_awaited_once_with([("u1", "s1"), ("u2", "s2")])
+        mock_cache.delete_values.assert_called_once_with(
+            ["graph_knowledge:u1:s1", "graph_knowledge:u2:s2"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_session_ids_reads_the_cache(self, sm, mock_cache):
+        mock_cache.list_session_ids = AsyncMock(return_value=["s1", "s2"])
+
+        assert await sm.list_session_ids(user_id="u1") == ["s1", "s2"]
+        mock_cache.list_session_ids.assert_awaited_once_with("u1")
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_session_no_user_id_calls_generate_completion_only(
@@ -1425,3 +1665,49 @@ class TestAutoFeedbackPredicate:
         assert sm.is_auto_feedback_enabled() is True
         monkeypatch.setenv("AUTO_FEEDBACK", "false")
         assert sm.is_auto_feedback_enabled() is False
+
+
+class TestContextEntryReadFailOpen:
+    """The context-entry read fails open by default; ``raise_on_error`` re-raises."""
+
+    @staticmethod
+    def _manager(read_error: Exception | None = None) -> SessionManager:
+        cache = MagicMock()
+        cache.get_session_context_entries = AsyncMock(
+            side_effect=read_error, return_value=[{"id": "row", "kind": "context"}]
+        )
+        return SessionManager(cache_engine=cache)
+
+    @pytest.mark.asyncio
+    async def test_a_failed_read_answers_empty_by_default(self):
+        sm = self._manager(ConnectionError("down"))
+
+        assert await sm.get_session_context_entries(user_id="u", session_id="s") == []
+
+    @pytest.mark.asyncio
+    async def test_raise_on_error_re_raises_a_failed_read(self):
+        sm = self._manager(ConnectionError("down"))
+
+        with pytest.raises(ConnectionError):
+            await sm.get_session_context_entries(user_id="u", session_id="s", raise_on_error=True)
+
+    @pytest.mark.asyncio
+    async def test_raise_on_error_still_answers_empty_for_an_unavailable_cache(self):
+        """No cache means nothing could have been stored; that is not a read failure."""
+        sm = SessionManager(cache_engine=None)
+
+        assert (
+            await sm.get_session_context_entries(user_id="u", session_id="s", raise_on_error=True)
+            == []
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_successful_read_is_unchanged_either_way(self):
+        sm = self._manager()
+
+        rows = await sm.get_session_context_entries(user_id="u", session_id="s")
+        strict = await sm.get_session_context_entries(
+            user_id="u", session_id="s", raise_on_error=True
+        )
+
+        assert rows == strict == [{"id": "row", "kind": "context"}]

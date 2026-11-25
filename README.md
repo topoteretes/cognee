@@ -143,7 +143,7 @@ The bundled GLiNER extractor is a demo of Cognee's small-model pipeline. For a p
 ```python
 import os
 
-os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
+os.environ["LLM_API_KEY"] = "YOUR_OPENAI_API_KEY"
 ```
 Alternatively, create a `.env` file using our [template](https://github.com/topoteretes/cognee/blob/main/.env.template).
 
@@ -215,11 +215,12 @@ codex plugin marketplace add topoteretes/cognee-integrations --ref main
 codex plugin add cognee@cognee
 ```
 
-Follow the [plugin setup guide](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) to configure local or remote memory.
+Follow the setup guide for [Claude Code](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) or [Codex](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/codex) to configure local or remote memory.
 
 | Interface | Start here |
 | --- | --- |
 | Claude Code memory plugin | [Install and configure the plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) |
+| Codex memory plugin | [Install and configure the plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/codex) |
 | OpenClaw memory plugin | [Install `@cognee/cognee-openclaw`](https://www.npmjs.com/package/@cognee/cognee-openclaw) |
 | Cursor, Cline, and other MCP clients | [Cognee MCP guide](https://docs.cognee.ai/cognee-mcp/mcp-overview) and [server README](cognee-mcp/README.md) |
 | Python applications | [Python API reference](https://docs.cognee.ai/python-api) |
@@ -239,8 +240,8 @@ The UI launcher requires Node.js/npm; Docker is needed for its MCP service. See 
 
 ## Explore examples
 
-- [Build a small Company Brain from text, code, and session lessons](examples/demos/company_brain/docs_code_conversations/company_brain_demo.py).
-- [Build a Company Brain from a database, a ticket export, and meeting notes](examples/demos/company_brain/multi_source/), then browse it in the UI and query it from Claude Code or Codex.
+- [Build a small Company Brain from text, code, and session lessons](examples/cookbooks/company_brain/docs_code_conversations/company_brain_demo.py).
+- [Build a Company Brain from your database, ticket export, and docs](examples/cookbooks/company_brain/company_qa/) (or a sample company), then browse it in the UI and query it from Claude Code or Codex.
 - [Import memory from Mem0, Letta, Zep, or Graphiti](https://docs.cognee.ai/examples/migrate-memory-systems) using the COGX exchange format.
 - [Run with local Ollama models](https://docs.cognee.ai/guides/local-ollama), including a local embedding model.
 - [Visualize your knowledge graph](https://docs.cognee.ai/guides/graph-visualization) and inspect its connections.

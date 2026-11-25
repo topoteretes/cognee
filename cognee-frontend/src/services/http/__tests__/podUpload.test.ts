@@ -128,6 +128,10 @@ describe("podUpload", () => {
     expect(xhrs[0].method).toBe("POST");
     expect(xhrs[0].url).toBe("https://pod/api/v1/remember");
     expect(xhrs[0].headers["X-Api-Key"]).toBe("key-123");
+    // The XHR path bypasses the shared fetch client, so it has to set the
+    // origin header itself — and uploads are exactly the rows whose Via
+    // column this fixes.
+    expect(xhrs[0].headers["X-Cognee-Origin"]).toBe("cloud");
   });
 
   it("reports upload progress from lengthComputable events only", async () => {

@@ -6,13 +6,12 @@ from sqlalchemy.exc import IntegrityError
 from cognee.infrastructure.databases.exceptions import EntityAlreadyExistsError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.exceptions import (
-    PermissionDeniedError,
     TenantNotFoundError,
     UserNotFoundError,
 )
 from cognee.modules.users.methods import get_user
 from cognee.modules.users.models.UserTenant import UserTenant
-from cognee.modules.users.permissions.methods import get_tenant
+from cognee.modules.users.permissions.methods import get_tenant, has_user_management_permission
 
 
 async def add_user_to_tenant(
@@ -20,7 +19,8 @@ async def add_user_to_tenant(
 ):
     """
         Add a user with the given id to the tenant with the given id.
-        This can only be successful if the request owner with the given id is the tenant owner.
+        This can only be successful if the request owner with the given id can
+        manage users in the tenant. The tenant owner always can.
 
         If set_as_active_tenant is true it will automatically set the users active tenant to provided tenant.
     Args:
@@ -32,12 +32,18 @@ async def add_user_to_tenant(
     Returns:
         None
 
+    Raises:
+        UserNotFoundError: If the user does not exist.
+        TenantNotFoundError: If the tenant does not exist.
+        PermissionDeniedError: If the request owner cannot manage users in the
+            tenant.
     """
     db_engine = get_relational_engine()
 
-    # Resolve user + tenant (each opens its own session) BEFORE opening ours, so
-    # this request never holds two pooled connections at once — that overlap
-    # deadlocks the pool under concurrency (issue #4197 class).
+    # Resolve user + tenant and check permission (each opens its own session)
+    # BEFORE opening ours, so this request never holds two pooled connections
+    # at once: that overlap deadlocks the pool under concurrency (issue #4197
+    # class).
     user = await get_user(user_id)
     tenant = await get_tenant(tenant_id)
 
@@ -46,10 +52,7 @@ async def add_user_to_tenant(
     elif not tenant:
         raise TenantNotFoundError
 
-    if tenant.owner_id != owner_id:
-        raise PermissionDeniedError(
-            message="Only tenant owner can add other users to organization."
-        )
+    await has_user_management_permission(requester_id=owner_id, tenant_id=tenant_id)
 
     async with db_engine.get_async_session() as session:
         if set_as_active_tenant:

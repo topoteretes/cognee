@@ -1,0 +1,41 @@
+name: CVE alert
+
+# Posts new CVEs that mention cognee to Slack once a day
+# (.github/scripts/cve_alert.py).
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read  # the script reads this workflow's own run history
+
+concurrency:
+  group: cve-alert-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cve-alert:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Post new CVEs to Slack
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_NIGHTLY_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CVE_CHANNEL_ID }}
+        run: python3 .github/scripts/cve_alert.py
+
+      - name: Alert Slack if the check failed
+        if: ${{ failure() }}
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d  # v4.0.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_NIGHTLY_BOT_TOKEN }}
+          errors: true  # mark this step failed if the notice itself is rejected
+          payload: |
+            channel: ${{ secrets.SLACK_CVE_CHANNEL_ID }}
+            text: "CVE alert check failed; CVEs published since its last successful run will be reported by the next one that succeeds. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

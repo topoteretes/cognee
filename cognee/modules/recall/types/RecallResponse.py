@@ -18,6 +18,7 @@ class ResponseSessionContextEntry(BaseModel):
     source: Literal["session_context"]
     content: str
     context_profile: str
+    session_summary: dict | None = None
 
 
 class ResponseGraphEntry(SearchResultItem):
