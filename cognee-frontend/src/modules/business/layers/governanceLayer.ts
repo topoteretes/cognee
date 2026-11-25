@@ -15,7 +15,7 @@ const governanceLayer: BusinessLayer = {
   defaultEnabled: true,
   useData(ctx: BusinessLayerContext): BusinessLayerResult {
     const { data, isLoading, error } = useQuery({
-      // Scoped by instanceId — same class of bug as businessBrainsQueryKey:
+      // Scoped by instanceId — same class of bug as businessBrainsSummaryQueryKey:
       // an unscoped key served the PREVIOUS tenant's users/ACLs/emails for
       // up to staleTime after switching tenants (COG-6233).
       queryKey: ["business-governance", ctx.cogniInstance.instanceId],

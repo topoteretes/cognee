@@ -217,7 +217,7 @@ async def test_cognee_client_local_improve_returns_the_result_as_json_dict():
             self.calls.append(kwargs)
             return ImproveResult(
                 dataset_name="ds",
-                stages=[StageResult.skipped("global_context_index", "opt_in_disabled")],
+                stages=[StageResult.skipped("global_context_index", "turned_off")],
             )
 
     fake = FakeCognee()
@@ -240,7 +240,7 @@ async def test_cognee_client_local_improve_returns_the_result_as_json_dict():
         }
     ]
     assert result["status"] == "skipped"
-    assert result["stages"][0]["reason"] == "opt_in_disabled"
+    assert result["stages"][0]["reason"] == "turned_off"
 
 
 # --- remember(self_improvement=...) ----------------------------------------------

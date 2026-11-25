@@ -8,7 +8,7 @@ import { FONT, T } from "./mono";
  *  and is a Cognee Cloud feature. This renders a static illustration behind a
  *  blurred overlay with a call to action instead of syncing the real graph. */
 
-export type NodeStatus = "live" | "connected" | "reconnect" | "disconnected";
+export type NodeStatus = "live" | "connected" | "reconnect" | "unknown" | "disconnected";
 
 export interface FlowNodeData {
   name: string;
@@ -27,7 +27,7 @@ interface MemoryFlowDiagramProps {
   healthy: boolean;
   onInvite?: () => void;
   onCoreClick?: () => void;
-  onNodeNavigate?: () => void;
+  onNodeNavigate?: (node: FlowNodeData) => void;
   onTeamsClick?: () => void;
 }
 

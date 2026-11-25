@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+
 import { getServerBackendUrl } from "@/modules/config/serverRuntimeConfig";
 
 export async function GET(request: Request) {

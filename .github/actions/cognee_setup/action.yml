@@ -18,6 +18,10 @@ inputs:
     description: "Whether to rebuild the uv lockfile"
     required: false
     default: "false"
+  keyless-models:
+    description: "Whether the job cognifies on local models (GLiNER, fastembed) when CI has no secrets; fetches them during setup on such runs"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -88,3 +92,21 @@ runs:
       shell: bash
       run: |
         echo "test-machine" > .anon_id
+
+    # Without secrets (fork PRs) cognify runs on local models. For jobs that
+    # cognify, fetch them here, with retries: huggingface_hub does not retry a
+    # rate limit (429), but once a file is cached it falls back to that copy
+    # when the Hub refuses a request.
+    - name: Fetch keyless models
+      if: inputs.keyless-models == 'true' && env.CI_HAS_SECRETS == 'false'
+      shell: bash
+      run: |
+        source .github/scripts/keyless_ci_env.sh
+        for attempt in 1 2 3 4 5; do
+          uv run python -m cognee.tasks.graph.gliner_demo.install \
+            && uv run python .github/scripts/fetch_keyless_models.py && exit 0
+          echo "Fetching the keyless models failed (attempt $attempt of 5)"
+          # Random extra seconds, so jobs refused together do not retry together.
+          [ "$attempt" -lt 5 ] && sleep $((attempt * 30 + RANDOM % 30))
+        done
+        exit 1

@@ -8,7 +8,7 @@ import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
 export type OnboardingPath = "claude-code" | "codex" | "company";
 
 function CompanyBrainIcon() {
-  // Stacked-document icon — mirrors the Company Brain card on the dashboard.
+  // Stacked-document icon — mirrors the Company Dataset card on the dashboard.
   return (
     <svg height="72" viewBox="0 0 80 100" fill="none" xmlns="http://www.w3.org/2000/svg">
       <rect x="16" y="6" width="54" height="70" rx="6" fill="#D4D4D8" stroke="#71717A" strokeWidth="3.5" />
@@ -26,7 +26,7 @@ export function StepSelect({ onSelect }: { onSelect: (path: OnboardingPath) => v
   const cards: { key: OnboardingPath; name: string; description: string; logo: React.ReactNode }[] = [
     { key: "claude-code", name: "Claude Code", description: "Give Claude Code persistent memory across all your projects", logo: <Image src="/visuals/logos/claude.svg" alt="Claude Code" width={72} height={72} style={{ height: 72, width: "auto" }} /> },
     { key: "codex", name: "Codex", description: "Connect OpenAI Codex to your knowledge graph via a skill", logo: <Image src="/visuals/logos/codex.svg" alt="Codex" width={72} height={72} style={{ height: 72, width: "auto" }} /> },
-    { key: "company", name: "Company Brain", description: "Upload PDFs, docs, and data to build your knowledge graph", logo: <CompanyBrainIcon /> },
+    { key: "company", name: "Company Dataset", description: "Upload PDFs, docs, and data to build your knowledge graph", logo: <CompanyBrainIcon /> },
   ];
   const [hovered, setHovered] = useState<OnboardingPath | null>(null);
   const track = useOnboardingTrackEvent();
@@ -43,7 +43,7 @@ export function StepSelect({ onSelect }: { onSelect: (path: OnboardingPath) => v
       <div className="flex flex-col items-center gap-2" style={{ paddingBottom: 36 }}>
         <h1 style={{ fontSize: 30, fontWeight: 300, color: "#EDECEA", margin: 0, fontFamily: '"TWKLausanne", sans-serif', letterSpacing: "-0.02em" }}>How do you want to start?</h1>
         <p style={{ fontSize: 15, color: "rgba(237,236,234,0.65)", margin: 0, textAlign: "center", maxWidth: 460, lineHeight: "22px" }}>
-          Connect a coding agent to your memory, or upload your own data to build a company brain.
+          Connect a coding agent to your memory, or upload your own data to build a company dataset.
         </p>
       </div>
 

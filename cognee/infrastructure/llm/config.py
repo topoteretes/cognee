@@ -107,7 +107,7 @@ class LLMConfig(BaseSettings):
     structured_output_framework: str = "litellm_native"
     llm_instructor_mode: str = ""
     llm_provider: str = "openai"
-    llm_model: str = "openai/gpt-5.6-luna"
+    llm_model: str = "openai/gpt-6-luna"
     llm_endpoint: str = ""
     llm_api_key: str | None = None
     llm_api_version: str | None = None
@@ -150,7 +150,7 @@ class LLMConfig(BaseSettings):
     llm_max_completion_tokens: int = 16384
 
     baml_llm_provider: str = "openai"
-    baml_llm_model: str = "gpt-5.6-luna"
+    baml_llm_model: str = "gpt-6-luna"
     baml_llm_endpoint: str = ""
     baml_llm_api_key: str | None = None
     baml_llm_temperature: float = 0.0
@@ -172,6 +172,12 @@ class LLMConfig(BaseSettings):
     llm_rate_limit_requests: int = 60
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     llm_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
+    # Max LLM requests in flight at once per backend model (0 = unlimited,
+    # the default for every provider). Unlike the RPM limiter this bounds
+    # CONCURRENCY, not entry rate: slow backends (local servers, bounded
+    # KV-cache self-hosters) are protected by how many requests they hold,
+    # not how many start per minute. Opt-in: set it for such backends.
+    llm_max_concurrent_requests: int = 0
     # When the provider reports a rate limit, warn and switch on the RPM limiter
     # (with the llm_rate_limit_requests/interval budget) for the rest of the process.
     auto_rate_limit: bool = True
@@ -366,7 +372,7 @@ class LLMConfig(BaseSettings):
         #
         # llm_endpoint/llm_api_key default to blank ("" / None), so "has a
         # non-blank value" alone tells us whether they were configured.
-        # llm_model defaults to a real model id ("openai/gpt-5.6-luna"), so the
+        # llm_model defaults to a real model id ("openai/gpt-6-luna"), so the
         # same non-blank check can't tell "configured, happens to match the
         # default" from "left unset" - that also needs `model_fields_set`
         # (populated by pydantic-settings whether the value came from a kwarg

@@ -6,10 +6,20 @@ import SkeletonBar from "@/ui/elements/SkeletonBar";
  * Shared placeholder for pod-dependent pages while the tenant workspace is still
  * provisioning. Rendered by CustomAppShell in place of the route's children so
  * those pages never show broken/empty data against an unready pod.
+ *
+ * A workspace being WOKEN gets WorkspaceWaking instead: it already exists, so
+ * "being set up" would be wrong there.
  */
 export default function WorkspaceProvisioning() {
   return (
     <div
+      // An indeterminate ~1 minute wait otherwise leaves a screen reader on the
+      // previous page's content with no indication anything is happening.
+      // role="status" (rather than only aria-live) is what gets this announced
+      // at all: the region mounts already populated, and a bare live region is
+      // only reliably announced when its content changes after mount.
+      role="status"
+      aria-live="polite"
       style={{
         display: "flex",
         flexDirection: "column",

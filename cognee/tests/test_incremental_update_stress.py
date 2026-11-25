@@ -110,6 +110,9 @@ def _setup_environment() -> None:
         DATA_ROOT_DIRECTORY=str(root / "data"),
         SYSTEM_ROOT_DIRECTORY=str(root / "system"),
         ENABLE_BACKEND_ACCESS_CONTROL="false",
+        # The verifier expects one TextSummary per chunk; only the LLM method
+        # summarizes every chunk, and update() reads the method from config.
+        SUMMARY_METHOD="llm",
     )
     os.environ.setdefault("LLM_API_KEY", "mock-key")
 

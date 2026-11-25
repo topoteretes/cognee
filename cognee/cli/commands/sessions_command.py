@@ -17,6 +17,7 @@ View and manage Cognee conversation sessions.
 
 Subcommands:
   get       Retrieve Q&A entries from a session
+  delete    Delete a session and everything stored for it
 """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -45,6 +46,15 @@ Subcommands:
             help="Output format (default: pretty)",
         )
 
+        p_delete = sub.add_parser(
+            "delete",
+            help="Delete a session: its Q&A, traces, context and dashboard rows",
+        )
+        p_delete.add_argument("session_id", help="Session ID to delete")
+        p_delete.add_argument(
+            "--force", "-f", action="store_true", help="Skip the confirmation prompt"
+        )
+
     def execute(self, args: argparse.Namespace) -> None:
         action = getattr(args, "sessions_action", None)
         if not action:
@@ -53,6 +63,28 @@ Subcommands:
 
         if action == "get":
             self._get(args)
+        elif action == "delete":
+            self._delete(args)
+
+    def _delete(self, args: argparse.Namespace) -> None:
+        sid = args.session_id
+        if not args.force and not fmt.confirm(
+            f"Delete session '{sid}' and everything stored for it?"
+        ):
+            fmt.echo("Deletion cancelled.")
+            return
+
+        async def run() -> bool:
+            from cognee.api.v1.session import delete_session
+            from cognee.cli.user_resolution import resolve_cli_user
+
+            user = await resolve_cli_user(getattr(args, "user_id", None))
+            return await delete_session(session_id=sid, user=user)
+
+        if not asyncio.run(run()):
+            fmt.error(f"No session '{sid}' found.")
+            raise CliCommandException(f"No session '{sid}' found", error_code=1)
+        fmt.success(f"Deleted session '{sid}'.")
 
     def _get(self, args: argparse.Namespace) -> None:
         async def run():

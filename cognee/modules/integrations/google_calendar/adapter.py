@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from cognee.modules.integrations.base import refuse_parent
 from cognee.modules.integrations.google.oauth_integration import GoogleOAuthIntegration
 from cognee.modules.integrations.google_calendar import client as calendar_client
 from cognee.modules.integrations.google_calendar.google_calendar_settings import (
@@ -31,7 +32,10 @@ class GoogleCalendarIntegration(GoogleOAuthIntegration):
 
         await sync_google_calendar(credential)
 
-    async def list_resources(self, credential: IntegrationCredential) -> list[dict[str, Any]]:
+    async def list_resources(
+        self, credential: IntegrationCredential, *, parent: str | None = None
+    ) -> list[dict[str, Any]]:
+        refuse_parent(self.provider, parent)
         token = await access_token_for(credential)
         calendars = await calendar_client.list_calendars(token)
         return [

@@ -20,7 +20,7 @@ def test_pytest_session_has_telemetry_disabled():
 
 def test_send_telemetry_is_a_no_op_under_pytest(monkeypatch):
     sent = []
-    monkeypatch.setattr(utils, "_send_telemetry_request", lambda payload: sent.append(payload))
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", sent.append)
     # Even with ENV pointing at a reporting environment, the pinned default wins.
     monkeypatch.setenv("ENV", "prod")
 

@@ -29,6 +29,7 @@ from cognee_db_workers.lancedb_protocol import (
     OP_TABLE_COMPACT_FRAGMENTS,
     OP_TABLE_COUNT_ROWS,
     OP_TABLE_DELETE,
+    OP_TABLE_EVOLVE_PAYLOAD,
     OP_TABLE_MERGE_INSERT_EXECUTE,
     OP_TABLE_NAMES,
     OP_TABLE_OPTIMIZE,
@@ -121,6 +122,12 @@ class RemoteQuery(_BuilderChain):
 
     def where(self, predicate: str) -> RemoteQuery:
         return self._add("where", predicate)
+
+    def select(self, columns: list[str]) -> RemoteQuery:
+        return self._add("select", columns)
+
+    def limit(self, limit: int) -> RemoteQuery:
+        return self._add("limit", limit)
 
     async def to_list(self) -> list:
         return await self._terminal("to_list")
@@ -335,6 +342,36 @@ class RemoteLanceDBTable:
                 kwargs={
                     "target_rows_per_fragment": target_rows_per_fragment,
                     "max_tasks": max_tasks,
+                },
+            ),
+            timeout=None,
+        )
+        return resp.result
+
+    async def evolve_payload_schema(
+        self,
+        target: pa.StructType,
+        *,
+        defaults: dict,
+        required: frozenset[str],
+        batch_size: int | None = None,
+    ) -> dict:
+        """Mirrors ``lancedb_schema_evolution.evolve_payload_schema`` on the worker's handle.
+
+        The target struct travels as a one-field Arrow schema in IPC form, like the
+        schema of ``create_table``; ``defaults`` holds plain values only and
+        ``required`` goes as a sorted list of field names.
+        """
+        target_bytes = pa.schema([pa.field("payload", target)]).serialize().to_pybytes()
+        resp = await self._session.call_async(
+            Request(
+                op=OP_TABLE_EVOLVE_PAYLOAD,
+                handle_id=self.handle_id,
+                args=(target_bytes,),
+                kwargs={
+                    "defaults": defaults,
+                    "required": sorted(required),
+                    "batch_size": batch_size,
                 },
             ),
             timeout=None,

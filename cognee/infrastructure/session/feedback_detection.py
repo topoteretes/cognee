@@ -2,6 +2,7 @@
 
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.pipeline_stage import caller_scope
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.modules.preflight import llm_available
@@ -116,11 +117,12 @@ async def analyze_turn_for_session_context(
                 + rendered_context
             )
 
-        result = await LLMGateway.acreate_structured_output(
-            text_input=text_input,
-            system_prompt=system_prompt,
-            response_model=SessionTurnAnalysis,
-        )
+        with caller_scope("analyze_turn_for_session_context"):
+            result = await LLMGateway.acreate_structured_output(
+                text_input=text_input,
+                system_prompt=system_prompt,
+                response_model=SessionTurnAnalysis,
+            )
         return result
     except Exception as e:
         logger.warning(

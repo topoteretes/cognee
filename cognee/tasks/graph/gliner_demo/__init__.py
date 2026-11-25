@@ -22,7 +22,9 @@ Usage::
     # Every task declares needs_llm=False, so the first-run check probes only
     # the embeddings this pipeline actually uses.
 
-Requires the ``gliner`` extra (``pip install "cognee[gliner]"``).
+Requires the ``gliner`` extra (``pip install "cognee[gliner]"``), or a remote
+GLiNER worker: set ``COGNEE_GLINER_TRANSPORT`` and ``COGNEE_GLINER_ENDPOINT`` and
+the model calls run there instead (see :mod:`.remote`).
 """
 
 from .banks import LABEL_BANK, RELATION_BANK

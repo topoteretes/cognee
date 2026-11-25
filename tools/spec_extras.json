@@ -25,6 +25,7 @@
     "checks": "Diagnostic endpoint for validating a Cognee Cloud API key supplied in the X-Api-Key header.",
     "cognify": "Knowledge processing endpoints to transform raw data into knowledge graphs.",
     "configuration": "Endpoints for storing, retrieving, and listing a user's saved configurations.",
+    "conflicts": "Conflict endpoints for listing competing facts with their evidence and resolving them by choosing one.",
     "datasets": "Dataset management endpoints for listing, creating, and deleting datasets.",
     "delete": "Data deletion endpoints (deprecated — use datasets endpoints instead).",
     "forget": "Endpoint for removing data from the knowledge graph.",

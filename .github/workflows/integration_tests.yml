@@ -7,17 +7,110 @@ permissions:
 on:
   workflow_call:
     inputs:
+      has-secrets:
+        required: false
+        type: boolean
+        default: true
       ci-image:
         required: false
         type: string
         default: ''
 
 env:
+  CI_HAS_SECRETS: ${{ inputs.has-secrets }}
   COGNEE_SKIP_CONNECTION_TEST: 'true'
 
 jobs:
   integration-retrieval:
-    name: Integration - Retrieval (${{ matrix.split-group }}/4)
+    name: Integration - Retrieval (${{ matrix.split-group }}/5)
+    if: ${{ inputs.has-secrets }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        split-group: [1, 2, 3, 4, 5]
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    env:
+      ENV: 'dev'
+      LLM_PROVIDER: openai
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_ARGS: ${{ secrets.LLM_ARGS }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+      EMBEDDING_DIMENSIONS: 300
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "scraping fastembed"
+
+      - name: Run Retrieval Tests
+        run: uv run pytest cognee/tests/integration/retrieval/ --splits 5 --group ${{ matrix.split-group }}
+
+  integration-documents-tasks:
+    name: Integration - Documents & Tasks (${{ matrix.split-group }}/6)
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        split-group: [1, 2, 3, 4, 5, 6]
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      ENV: 'dev'
+      TEST_POSTGRES_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+      LLM_PROVIDER: openai
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_ARGS: ${{ secrets.LLM_ARGS }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+      EMBEDDING_DIMENSIONS: 300
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          keyless-models: "true"
+          python-version: '3.11.x'
+          extra-dependencies: "scraping postgres"
+
+      - name: Run Document & Task Tests
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/integration/documents/ cognee/tests/integration/tasks/ --splits 6 --group ${{ matrix.split-group }}
+
+  integration-infra:
+    name: Integration - Infrastructure (${{ matrix.split-group }}/4)
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -44,84 +137,21 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
-          extra-dependencies: "scraping fastembed"
-
-      - name: Run Retrieval Tests
-        run: uv run pytest cognee/tests/integration/retrieval/ --splits 4 --group ${{ matrix.split-group }}
-
-  integration-documents-tasks:
-    name: Integration - Documents & Tasks (${{ matrix.split-group }}/3)
-    runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        split-group: [1, 2, 3]
-    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    env:
-      ENV: 'dev'
-      LLM_PROVIDER: openai
-      LLM_MODEL: ${{ secrets.LLM_MODEL }}
-      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-      LLM_ARGS: ${{ secrets.LLM_ARGS }}
-      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-      EMBEDDING_DIMENSIONS: 300
-      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-          extra-dependencies: "scraping"
-
-      - name: Run Document & Task Tests
-        run: uv run pytest cognee/tests/integration/documents/ cognee/tests/integration/tasks/ --splits 3 --group ${{ matrix.split-group }}
-
-  integration-infra:
-    name: Integration - Infrastructure (${{ matrix.split-group }}/3)
-    runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        split-group: [1, 2, 3]
-    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    env:
-      ENV: 'dev'
-      LLM_PROVIDER: openai
-      LLM_MODEL: ${{ secrets.LLM_MODEL }}
-      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-      LLM_ARGS: ${{ secrets.LLM_ARGS }}
-      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-      EMBEDDING_DIMENSIONS: 300
-      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
+          keyless-models: "true"
           python-version: '3.11.x'
           # fastembed so the embedding tokenizer delegation tests can import
           # FastembedEmbeddingEngine.
           extra-dependencies: "scraping fastembed"
 
       - name: Run Infrastructure Tests
-        run: uv run pytest cognee/tests/integration/infrastructure/ --splits 3 --group ${{ matrix.split-group }}
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/integration/infrastructure/ --splits 4 --group ${{ matrix.split-group }}
 
   integration-web:
     name: Integration - Web
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     env:
@@ -185,8 +215,12 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
           extra-dependencies: "scraping redis"
 
       - name: Run Deletion & Misc Tests
-        run: uv run pytest cognee/tests/integration/test_delete_edge_cases.py cognee/tests/integration/shared/
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/integration/test_delete_edge_cases.py cognee/tests/integration/shared/

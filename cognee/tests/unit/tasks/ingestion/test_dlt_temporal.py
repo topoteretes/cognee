@@ -70,7 +70,7 @@ def test_anything_but_an_iso_date_or_datetime_is_not_a_time_cell(value):
 def _row(row_data, foreign_keys=None, primary_key_column="id"):
     return DltRowData(
         table_name="orders",
-        primary_key_column=primary_key_column,
+        primary_key_columns=[primary_key_column],
         primary_key_value="1",
         row_data=row_data,
         content_hash="hash",

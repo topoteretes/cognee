@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -49,6 +50,8 @@ async def linear(clean_environment, monkeypatch):
 
     user = await get_default_user()
     credential = SimpleNamespace(
+        id=uuid4(),
+        workspace_id=None,
         status="active",
         provider="linear",
         provider_account_id="org-1",

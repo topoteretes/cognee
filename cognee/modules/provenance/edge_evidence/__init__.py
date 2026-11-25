@@ -14,8 +14,9 @@ Not to be confused with ``COGNEE_PROVENANCE_MODE`` (source_* stamps written
 onto nodes) or ``PROVENANCE_TRACKING`` (the hash-chained audit ledger in the
 parent package). Rows here are cheap observations, not audit records: they are
 bulk-inserted without chaining, ignored at read time when their pipeline run
-did not complete or their document is gone, and swept by ``cleanup`` when the
-document or its memory is deleted.
+did not complete or their document is gone (a failed run's rollback detaches
+the rows of the documents it keeps, so those stay readable), and swept by
+``cleanup`` when the document or its memory is deleted.
 
 Scope: evidence is captured only where document chunks are stored
 (``add_data_points`` during cognify). Edges from ``improve()`` enrichment,

@@ -1,0 +1,12 @@
+name: cognee
+kind: exclusive
+version: 1.4.3
+description: "Cognee knowledge-graph memory for Hermes: recall, remember, forget and session-end improvement. After installing, run `hermes memory setup cognee` in a terminal to make it your memory provider, then start a new chat. Remote mode (the default: Cognee Cloud URL + API key) needs nothing else; local mode installs its cognee runtime (cognee==1.6.6, about 1 GB) into a private environment when you choose it."
+hooks:
+  - on_session_end
+  - on_pre_compress
+  - on_memory_write
+# Hooks register() adds through ctx.register_hook (the memory-credit logo); the
+# validator checks this list against what register() actually registers.
+provides_hooks:
+  - transform_llm_output

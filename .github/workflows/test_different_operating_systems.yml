@@ -6,6 +6,13 @@ permissions:
 on:
   workflow_call:
     inputs:
+      has-secrets:
+        # False on fork PRs, where GitHub withholds repository secrets. Jobs
+        # that need a real LLM/embedding key skip instead of failing on an
+        # empty key. Other callers leave the default and run everything.
+        required: false
+        type: boolean
+        default: true
       python-versions:
         required: false
         type: string
@@ -20,48 +27,54 @@ on:
         required: false
         type: string
         default: ''
+    # Optional, not required: on a fork PR `secrets: inherit` passes none, and a
+    # required secret makes GitHub refuse to start ANY job in this workflow,
+    # including the ones that need no key. Jobs that do need one gate on
+    # inputs.has-secrets instead.
     secrets:
       LLM_PROVIDER:
-        required: true
+        required: false
       LLM_MODEL:
-        required: true
+        required: false
       LLM_ENDPOINT:
-        required: true
+        required: false
       LLM_API_KEY:
-        required: true
+        required: false
       LLM_ARGS:
         required: false
       LLM_API_VERSION:
-        required: true
+        required: false
       EMBEDDING_PROVIDER:
-        required: true
+        required: false
       EMBEDDING_MODEL:
-        required: true
+        required: false
       EMBEDDING_API_KEY:
-        required: true
+        required: false
 
 env:
+  CI_HAS_SECRETS: ${{ inputs.has-secrets }}
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
 
 jobs:
   run-unit-tests:
-    name: Unit tests ${{ matrix.python-version }} on ${{ matrix.os }} (${{ matrix.shard }}/3)
+    name: Unit tests ${{ matrix.python-version }} on ${{ matrix.os }} (${{ matrix.shard }}/4)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
         os: ${{ fromJSON(inputs.os) }}
-        # pytest-split across three jobs, not xdist within one: the shards are
+        # pytest-split across four jobs, not xdist within one: the shards are
         # separate processes, so the ~50 unit files that mutate process-global
         # config (env, lru_cache'd settings) cannot interfere, and it is the
         # tool the integration suite already shards with. Balanced by
         # .test_durations with least_duration (greedy bin-packing): the default
-        # duration_based_chunks cuts collection order at 1/3-time boundaries,
+        # duration_based_chunks cuts collection order at equal-time boundaries,
         # and with the slow subprocess tests clustered that gave 1059/131/4207
-        # tests per shard. least_duration gives 1795/1801/1801 at equal time.
-        shard: [1, 2, 3]
+        # tests per shard with three shards, where least_duration gave
+        # 1795/1801/1801 at equal time.
+        shard: [1, 2, 3, 4]
       fail-fast: false
     steps:
       - name: Check out
@@ -111,16 +124,13 @@ jobs:
           GRAPH_DATABASE_SUBPROCESS_ENABLED: "false"
           VECTOR_DB_SUBPROCESS_ENABLED: "false"
           LLM_PROVIDER: openai
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          LLM_MODEL: "openai/gpt-4o-mini"
+          LLM_API_KEY: "mock-not-used"
 
           EMBEDDING_PROVIDER: openai
           EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_MODEL: "openai/text-embedding-3-large"
+          EMBEDDING_API_KEY: "mock-not-used"
         run: |
           set +e
           rm -f junit-unit.xml
@@ -173,7 +183,7 @@ jobs:
           # step removes one layer from the suspect window; it is a hypothesis
           # test, not a known fix, and the snapshot above names the survivor.
           uv run --no-sync python -m pytest cognee/tests/unit/ \
-            --splits 3 --group "${{ matrix.shard }}" --splitting-algorithm least_duration \
+            --splits 4 --group "${{ matrix.shard }}" --splitting-algorithm least_duration \
             --timeout=300 --timeout-method=thread \
             -p no:cacheprovider --junitxml=junit-unit.xml --durations=15
           rc=$?
@@ -236,16 +246,13 @@ jobs:
           GRAPH_DATABASE_SUBPROCESS_ENABLED: "false"
           VECTOR_DB_SUBPROCESS_ENABLED: "false"
           LLM_PROVIDER: openai
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          LLM_MODEL: "openai/gpt-4o-mini"
+          LLM_API_KEY: "mock-not-used"
 
           EMBEDDING_PROVIDER: openai
           EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_MODEL: "openai/text-embedding-3-large"
+          EMBEDDING_API_KEY: "mock-not-used"
         run: |
           set +e
           rm -f junit-unit.xml
@@ -303,7 +310,7 @@ jobs:
           # attempts). Letting the retry re-sync gives it a chance to repair a
           # broken environment instead of replaying the same failure into it.
           uv run python -m pytest cognee/tests/unit/ \
-            --splits 3 --group "${{ matrix.shard }}" --splitting-algorithm least_duration \
+            --splits 4 --group "${{ matrix.shard }}" --splitting-algorithm least_duration \
             --timeout=300 --timeout-method=thread \
             -p no:cacheprovider --junitxml=junit-unit.xml --durations=15
           rc=$?
@@ -356,6 +363,7 @@ jobs:
 
   run-library-test:
     name: Library test ${{ matrix.python-version }} on ${{ matrix.os }}
+    if: ${{ inputs.has-secrets }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -686,7 +694,10 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_delete_default_graph.py
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh mock-llm
+          uv run python ./cognee/tests/test_delete_default_graph.py
 
   run-hard-deletion-test:
     name: Custom Graph Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -706,6 +717,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: ${{ matrix.python-version }}
 
       - name: Drop Git for Windows usr\bin from PATH
@@ -734,4 +746,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_delete_custom_graph.py
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run python ./cognee/tests/test_delete_custom_graph.py

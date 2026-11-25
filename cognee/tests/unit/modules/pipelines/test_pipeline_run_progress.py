@@ -188,7 +188,7 @@ async def test_log_pipeline_run_progress_updates_in_place():
     dataset_id = uuid4()
     pipeline_id = uuid4()
 
-    pipeline_run = await log_pipeline_run_start(pipeline_id, "cognify_pipeline", dataset_id, None)
+    pipeline_run = await log_pipeline_run_start(pipeline_id, "cognify_pipeline", dataset_id)
     pipeline_run_id = pipeline_run.pipeline_run_id
 
     for tick in range(1, 6):
@@ -240,11 +240,9 @@ async def test_log_pipeline_run_progress_drops_tick_after_terminal_status():
     dataset_id = uuid4()
     pipeline_id = uuid4()
 
-    pipeline_run = await log_pipeline_run_start(pipeline_id, "cognify_pipeline", dataset_id, None)
+    pipeline_run = await log_pipeline_run_start(pipeline_id, "cognify_pipeline", dataset_id)
     pipeline_run_id = pipeline_run.pipeline_run_id
-    await log_pipeline_run_complete(
-        pipeline_run_id, pipeline_id, "cognify_pipeline", dataset_id, None
-    )
+    await log_pipeline_run_complete(pipeline_run_id, pipeline_id, "cognify_pipeline", dataset_id)
 
     # Simulate the STARTED row no longer existing (e.g. pruned/archived),
     # leaving only the terminal COMPLETED row — the scenario the fallback
@@ -314,3 +312,32 @@ def test_queue_round_trips_pipeline_run_progress():
         assert received.current_stage == "extract_graph_from_data"
     finally:
         queues_module.remove_queue(pipeline_run_id)
+
+
+@pytest.mark.asyncio
+async def test_log_pipeline_run_progress_inserts_a_started_row_with_only_its_progress():
+    """With no row at all for the run, the tick inserts one STARTED row. It carries the
+    progress and nothing else, in particular no ``data``."""
+    await create_db_and_tables()
+
+    pipeline_run_id = uuid4()
+    await log_pipeline_run_progress(
+        pipeline_run_id=pipeline_run_id,
+        pipeline_id=uuid4(),
+        pipeline_name="cognify_pipeline",
+        dataset_id=uuid4(),
+        completed_items=1,
+        total_items=2,
+    )
+
+    async with get_relational_engine().get_async_session() as session:
+        row = (
+            await session.execute(
+                select(PipelineRun).filter(PipelineRun.pipeline_run_id == pipeline_run_id)
+            )
+        ).scalar_one()
+
+    assert row.status == PipelineRunStatus.DATASET_PROCESSING_STARTED
+    assert row.run_info == {
+        "progress": {"completed_items": 1, "total_items": 2, "current_stage": None}
+    }

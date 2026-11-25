@@ -1,5 +1,6 @@
 """Get the LLM client."""
 
+import importlib.util
 from collections.abc import Hashable
 from dataclasses import dataclass
 from enum import Enum
@@ -8,17 +9,22 @@ from typing import Any, TypeGuard
 
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.exceptions import (
+    InstructorNotInstalledError,
     LLMAPIKeyNotSetError,
     UnsupportedLLMProviderError,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter import (
-    OllamaAPIAdapter,
-)
 
 _LLM_CLIENT_CACHE_MAXSIZE = 32
+
+
+def instructor_installed() -> bool:
+    """Whether the ``instructor`` extra is installed (checked without importing it)."""
+    return importlib.util.find_spec("instructor") is not None
+
+
 _FROZEN_DICT = "__cognee_dict__"
 _FROZEN_LIST = "__cognee_list__"
 _FROZEN_TUPLE = "__cognee_tuple__"
@@ -259,6 +265,10 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
         )
 
     elif provider == LLMProvider.OLLAMA:
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter import (
+            OllamaAPIAdapter,
+        )
+
         return OllamaAPIAdapter(
             endpoint=cache_key.endpoint,
             api_key=llm_api_key,
@@ -408,6 +418,11 @@ def get_llm_client(raise_api_key_error: bool = True) -> LLMInterface:
     llm_config = get_llm_context_config()
 
     provider = LLMProvider(llm_config.llm_provider)
+    # Every adapter except MCP sampling's imports ``instructor`` (an optional
+    # extra); checked here, before the adapter is imported, so a missing package
+    # names its fix instead of failing with a bare ModuleNotFoundError.
+    if provider is not LLMProvider.MCP_SAMPLING and not instructor_installed():
+        raise InstructorNotInstalledError()
     _raise_for_missing_api_key(
         provider,
         llm_config.llm_api_key,

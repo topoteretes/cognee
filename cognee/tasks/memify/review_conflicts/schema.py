@@ -1,4 +1,4 @@
-"""The structured answer one review call asks the LLM for.
+"""The structured response one review call asks the LLM for.
 
 Every field here is a label the call rendered — ``n1`` for a subject, ``r2`` or
 ``s3`` for a fact, ``f1`` for a stored conflict. The validator resolves them
@@ -10,12 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-class ReviewedEntity(BaseModel):
-    entity: str
-    description: str
-
-
-class ReviewedConflict(BaseModel):
+class ReportedConflict(BaseModel):
     about: str
     attribute: str
     kind: Literal["time_varying", "fixed"]
@@ -25,7 +20,7 @@ class ReviewedConflict(BaseModel):
     conflicting: list[str] = Field(default_factory=list)
 
 
-class ReviewOutput(BaseModel):
-    descriptions: list[ReviewedEntity]
-    conflicts: list[ReviewedConflict] = Field(default_factory=list)
+class ReviewResponse(BaseModel):
+    reviewed: list[str]
+    conflicts: list[ReportedConflict] = Field(default_factory=list)
     drop: list[str] = Field(default_factory=list)

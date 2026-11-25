@@ -7,8 +7,10 @@ cognify resolves to the GLiNER extractor and its runtime is missing, it installs
 list) into the running environment:
 
 1. its torch requirement, only when no torch (CPU or GPU build) is installed, from
-   the PyTorch CPU index only, so no other package can come from there (PyPI's Linux
-   torch pulls several GB of CUDA libraries);
+   the PyTorch CPU index (PyPI's Linux torch pulls several GB of CUDA libraries).
+   torch's own dependencies may come from the default index: the PyTorch index
+   serves them too, but without upload dates, so a uv ``exclude-newer`` setting
+   (this repo sets one) filters them out whenever one is not installed yet;
 2. the rest of the extra, only when ``gliner2`` is missing, from the default index.
 
 Step 2 runs with every installed distribution pinned to its current version: the
@@ -181,6 +183,19 @@ def installer_command() -> tuple[str, list[str]]:
     raise GlinerInstallError("this environment has neither pip nor uv.", "installer")
 
 
+def torch_index_options(installer: str, index_url: str) -> list[str]:
+    """Options that take torch from ``index_url`` while its dependencies may come from PyPI.
+
+    uv: ``index_url`` is searched first and a package moves on to the default index only
+    when that one cannot serve it (``unsafe-first-match``), so torch is the CPU build and
+    a missing dependency is not blocked by ``exclude-newer``. pip has no such filter, so
+    the index serves both.
+    """
+    if installer == "uv":
+        return ["--index", index_url, "--index-strategy", "unsafe-first-match"]
+    return ["--index-url", index_url]
+
+
 def _run(command: list[str], step: str, failed_step: str, installer: str) -> None:
     """Run one install step, relaying its progress lines and a periodic elapsed-time status."""
     started = time.monotonic()
@@ -287,7 +302,7 @@ def install_gliner_runtime(
         )
         if not _installed("torch"):
             _run(
-                [*command, "--index-url", index_url, torch_requirement],
+                [*command, *torch_index_options(outcome.installer, index_url), torch_requirement],
                 "downloading CPU-only PyTorch (step 1 of 2)",
                 "torch",
                 outcome.installer,

@@ -1,11 +1,26 @@
+import { traceStructuredShape } from "@/modules/business/structuredGraphStyle";
 import type { BusinessEntity } from "../sceneTypes";
 import { setsOf } from "../computeBrainState";
+import { codeDisplayName, isCodeNode } from "../codeGraph";
 import { pickNonOverlappingLabels, type LabelCandidate, type Box } from "./businessLabelLayout";
 import { computeNeighborIds } from "./businessGraphFocus";
 import type { DrawState } from "./businessDraw";
 
-export function inLens(n: BusinessEntity, focusSets: Set<string> | null): boolean {
-  return !focusSets || setsOf(n).some((s) => focusSets.has(s));
+// Both lens params are required, not optional — the type lens shipped with
+// them optional (defaulting to "no type filter"), which let three call sites
+// (drawDocumentBadges, drawSourceHulls, useBusinessCamera's altimeter framing)
+// keep compiling while silently never checking focusTypes at all. Requiring
+// every caller to state its stance surfaces the gap at the type checker
+// instead of in a bug report.
+export function inLens(
+  n: BusinessEntity,
+  focusSets: Set<string> | null,
+  focusTypes: Set<string> | null,
+  entityType: Record<string, string>,
+): boolean {
+  const passesSets = !focusSets || setsOf(n).some((s) => focusSets.has(s));
+  const passesTypes = !focusTypes || focusTypes.has(entityType[n.id] || "other");
+  return passesSets && passesTypes;
 }
 
 // A handful of entities carry a real but sentence-length name (session
@@ -93,7 +108,7 @@ export function computeVisibleEntityIds(state: DrawState, now: number): Set<stri
   state.entities.forEach((n) => {
     if (n.x == null || n.y == null) return;
     const inSpot = spotIds?.has(n.id) ?? false;
-    if (!inLens(n, state.focusSets) && !inSpot) return;
+    if (!inLens(n, state.focusSets, state.focusTypes, state.entityType) && !inSpot) return;
     if (!showAll && (n.importance || 0) < importanceCut && !inSpot) return;
     const { alpha: bornAlpha } = newbornAlphaAndScale(now, state.newbornAt[n.id], state.reducedMotion);
     if (bornAlpha <= 0) return;
@@ -112,6 +127,26 @@ export function hashPhase(id: string): number {
 }
 
 const NEWBORN_FADE_MS = 700;
+
+// A code entity is a rounded square so it reads as code next to the round
+// knowledge entities in the same scene. The corner rounding is load-bearing:
+// at this side length the corners reach about 1.02 r from the center, which
+// only stays inside the ring drawn at r + 2.2 because they are rounded, so
+// lowering the corner fraction pushes them out through the ring. The square
+// covers about 90% of the circle's area, close enough that "size = importance"
+// still reads across the two shapes.
+const CODE_SQUARE_SIDE = 1.75;
+const CODE_SQUARE_CORNER = 0.3;
+
+function traceEntityShape(ctx: CanvasRenderingContext2D, n: BusinessEntity, x: number, y: number, r: number): void {
+  if (traceStructuredShape(ctx, n, x, y, r)) return;
+  if (!isCodeNode(n)) {
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    return;
+  }
+  const side = r * CODE_SQUARE_SIDE;
+  ctx.roundRect(x - side / 2, y - side / 2, side, side, side * CODE_SQUARE_CORNER);
+}
 
 function newbornAlphaAndScale(
   now: number,
@@ -203,24 +238,18 @@ export function drawEntities(
     }
 
     const sets = setsOf(n);
-    const sourceSets = sets.filter((s) => !state.isSessionSet(s));
-    const sessionMember = sets.length > sourceSets.length;
-    const fillSet = sourceSets[0] || sets[0];
-    const fill = (fillSet && state.setColor[fillSet]) || "#8A7BD8";
     ctx.beginPath();
-    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    traceEntityShape(ctx, n, n.x, n.y, r);
     ctx.globalAlpha = fade;
-    ctx.fillStyle = fill;
+    ctx.fillStyle = state.encoding.entityFill(sets, state.entityType[n.id]);
     ctx.fill();
     // A second ring marks an entity that bridges sources, or carries agent
-    // session memory — the same "amber = agent-made" convention as the
-    // session-set anchors and colors elsewhere.
-    if (sourceSets.length > 1 || sessionMember) {
+    // session memory.
+    const ringColor = state.encoding.entityRing(sets);
+    if (ringColor) {
       ctx.beginPath();
       ctx.arc(n.x, n.y, r + 2.2 / state.transform.k, 0, Math.PI * 2);
-      ctx.strokeStyle = sessionMember && sourceSets.length <= 1
-        ? "#F5A83C"
-        : state.setColor[sourceSets[1]] || (sessionMember ? "#F5A83C" : "#E9EEF6");
+      ctx.strokeStyle = ringColor;
       ctx.lineWidth = 1.6 / state.transform.k;
       ctx.stroke();
     }
@@ -302,7 +331,7 @@ export function drawEntities(
     const baseFontSize = Math.max(10, Math.min(16, 10 + 6 * ((n.importance || 0) / state.importanceMax)));
     const fontSize = Math.max(baseFontSize / Math.sqrt(state.transform.k), MIN_LABEL_SCREEN_PX / state.transform.k);
     ctx.font = `600 ${fontSize}px 'TWKLausanne', sans-serif`;
-    const text = truncateLabel(String(n.name));
+    const text = truncateLabel(codeDisplayName(n));
     const width = ctx.measureText(text).width;
     const y = n.y + r + fontSize + 2;
     // Selected/hovered always wins a collision — a label the user just

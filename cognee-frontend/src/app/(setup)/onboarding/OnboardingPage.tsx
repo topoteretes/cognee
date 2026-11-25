@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useUser } from "@/modules/users/UserContext";
@@ -17,38 +17,47 @@ import { Step2 } from "./partials/Step2";
 import { Step3, extractFirstAnswer } from "./partials/Step3";
 import { StepSelect, type OnboardingPath } from "./partials/StepSelect";
 import { AgentOnboarding } from "./partials/AgentOnboarding";
+import isCloudEnvironment from "@/utils/isCloudEnvironment";
+import { isNewOnboardingHost } from "@/utils/newOnboardingRollout";
+import { NEW_ONBOARDING_PATH } from "@/utils/onboardingPaths";
 
 // Completes onboarding and navigates to the dashboard, where the skeleton
 // takes over until the workspace is fully ready. Used by the "Skip to
 // dashboard" escape so a slow pod/dataset never traps the user.
 function skipToDashboard(
   router: ReturnType<typeof useRouter>,
+  markWelcomeSeen: () => Promise<void>,
   markOnboardingComplete: () => Promise<void>,
   track: ReturnType<typeof useOnboardingTrackEvent>,
 ): void {
   track({ pageName: "Onboarding", eventName: "onboarding_skipped_provisioning" });
-  void completeOnboardingAndNavigate(markOnboardingComplete, () => router.push("/dashboard"));
+  void completeOnboardingAndNavigate(markWelcomeSeen, markOnboardingComplete, () => router.push("/dashboard"));
 }
 
 export default function OnboardingPage() {
   const { cogniInstance, isInitializing, serviceUrl, apiKey } = useCogniInstance();
-  const { markOnboardingComplete } = useUser();
+  const { markWelcomeSeen, markOnboardingComplete } = useUser();
   const router = useRouter();
   const track = useOnboardingTrackEvent();
   const searchParams = useSearchParams();
   const isServeMode = searchParams.get("source") === "serve";
+  const isReplay = searchParams.get("replay") === "1";
   const rawStep = parseInt(searchParams.get("step") ?? "0", 10);
   const initialStep = Math.min(Math.max(isNaN(rawStep) ? 0 : rawStep, 0), 3);
   const [step, setStep] = useState(initialStep);
   // Top-level branch: preparing → path selection → either the Claude/Codex
-  // card flow ("agent") or the existing Company Brain upload flow ("company").
-  // A ?step= deep link jumps straight into the Company Brain sub-steps. The
+  // card flow ("agent") or the existing Company Dataset upload flow ("company").
+  // A ?step= deep link jumps straight into the Company Dataset sub-steps. The
   // former "welcome" step here duplicated the real /welcome page's content —
   // that content now lives there instead, so onboarding starts on preparing.
   const [view, setView] = useState<"preparing" | "select" | "company" | "agent">(initialStep >= 1 ? "company" : "preparing");
   const [agent, setAgent] = useState<"claude-code" | "codex">("claude-code");
   const [files, setFiles] = useState<File[]>([]);
   const [datasetId, setDatasetId] = useState<string | null>(null);
+  // Signature of the file set Step 2 already sent. Lives here rather than in
+  // Step 2 so it survives Back unmounting that component, and so it stops
+  // matching as soon as the Step 1 selection changes.
+  const [ingestedKey, setIngestedKey] = useState<string | null>(null);
   // Demo recalls are kicked off the moment cognify finishes (datasetId is set).
   // The Step 3 terminal reveals them sequentially with a typewriter — by the
   // time the user reads the first question, the answers are usually already in.
@@ -83,11 +92,33 @@ export default function OnboardingPage() {
     });
   }, [datasetId, cogniInstance, demoEntries]);
 
+  // Shared by the agent flow's Back and the Company Brain steps that can't
+  // safely step backwards into a stage with side effects.
+  const backToSelect = () => { setView("select"); setStep(0); };
+
   const darkPage: React.CSSProperties = {
     backgroundColor: "#000000",
     backgroundImage: "linear-gradient(rgba(244,244,244,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(244,244,244,0.10) 1px, transparent 1px)",
-    backgroundSize: "33px 33px",
+    backgroundSize: "24px 24px",
   };
+
+  // Preparing stays the first screen on every host; on a host that has the new
+  // onboarding, what follows it is the window instead of path selection. Only
+  // a flow that starts at preparing gets here: a ?step= deep link goes straight
+  // into the current flow. Preparing reports ready more than once (the
+  // "Continue without waiting" button, then the pod coming up), and the window
+  // has to be navigated to once. `replace`, so Back from the window does not
+  // land on a preparing screen that hands over again.
+  const handedOver = useRef(false);
+  const onPrepared = useCallback((): void => {
+    if (isCloudEnvironment() && isNewOnboardingHost(window.location.host)) {
+      if (handedOver.current) return;
+      handedOver.current = true;
+      router.replace(isReplay ? `${NEW_ONBOARDING_PATH}?replay=1` : NEW_ONBOARDING_PATH);
+      return;
+    }
+    setView("select");
+  }, [router, isReplay]);
 
   if (isInitializing) {
     return (
@@ -109,7 +140,7 @@ export default function OnboardingPage() {
     return <ServeOnboarding />;
   }
 
-  // Within the Company Brain flow, steps 1 and 2 render fine while the tenant
+  // Within the Company Dataset flow, steps 1 and 2 render fine while the tenant
   // pod is still being provisioned in the background (Step 2 owns its own
   // loading state). Step 3 renders recall results, so it needs both the pod
   // (cogniInstance) AND the dataset before it can show anything.
@@ -123,7 +154,7 @@ export default function OnboardingPage() {
         // it says nothing about whether the user actually went through
         // onboarding. Completion is marked on explicit finish/skip only
         // (see markOnboardingComplete call sites below), never here.
-        <StepPreparing onReady={() => setView("select")} />
+        <StepPreparing onReady={onPrepared} />
       )}
       {view === "select" && (
         <StepSelect onSelect={(path: OnboardingPath) => {
@@ -137,7 +168,7 @@ export default function OnboardingPage() {
           serviceUrl={serviceUrl}
           apiKey={apiKey}
           cogniInstance={cogniInstance}
-          onRestart={() => { setView("select"); setStep(0); }}
+          onRestart={backToSelect}
         />
       )}
       {view === "company" && (
@@ -148,19 +179,19 @@ export default function OnboardingPage() {
             <p style={{ margin: 0, fontSize: 14, color: "rgba(237,236,234,0.75)" }}>Still preparing your memory…</p>
             <p style={{ margin: 0, fontSize: 13, color: "rgba(237,236,234,0.5)" }}>This usually takes about a minute on first sign-up.</p>
             <button
-              onClick={() => skipToDashboard(router, markOnboardingComplete, track)}
+              onClick={() => skipToDashboard(router, markWelcomeSeen, markOnboardingComplete, track)}
               className="cursor-pointer"
-              style={{ marginTop: 8, background: "none", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.8)" }}
+              style={{ marginTop: 8, background: "none", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 0, padding: "8px 18px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.8)" }}
             >
               Skip to dashboard
             </button>
           </div>
         ) : (
           <>
-            {step === 1 && <Step1 files={files} setFiles={setFiles} onNext={() => setStep(2)} />}
-            {step === 2 && <Step2 files={files} datasetId={datasetId} onNext={(id) => { setDatasetId(id); setStep(3); }} cogniInstance={cogniInstance} />}
+            {step === 1 && <Step1 files={files} setFiles={setFiles} onNext={() => setStep(2)} onBack={backToSelect} />}
+            {step === 2 && <Step2 files={files} datasetId={datasetId} onNext={(id) => { setDatasetId(id); setStep(3); }} onDatasetCreated={setDatasetId} ingestedKey={ingestedKey} onIngested={setIngestedKey} onBack={() => setStep(1)} cogniInstance={cogniInstance} />}
             {step === 3 && cogniInstance && datasetId && (
-              <Step3 datasetId={datasetId} cogniInstance={cogniInstance} demoEntries={demoEntries} />
+              <Step3 datasetId={datasetId} cogniInstance={cogniInstance} demoEntries={demoEntries} onBack={backToSelect} />
             )}
           </>
         )

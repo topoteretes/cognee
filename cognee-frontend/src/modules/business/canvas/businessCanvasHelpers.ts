@@ -1,4 +1,5 @@
 import type { BrainState } from "../sceneTypes";
+import { createSourceEncoding, createTypeEncoding } from "../colorEncoding";
 import type { Spotlight } from "./businessDraw";
 
 // Ports the hover handler's `!spotlight` check (customer_tutorial.html
@@ -81,21 +82,22 @@ export const EMPTY_PATH_EDGE_KEYS: Set<string> = new Set();
 
 export const EMPTY_BRAIN_STATE: Pick<
   BrainState,
-  | "entities" | "typeNodes" | "typeLinks" | "semanticLinks" | "docLinks" | "byId" | "setColor" | "sourceNames"
-  | "anchors" | "importanceMax" | "isSessionSet" | "plumbingNodes" | "plumbingEntityId"
+  | "entities" | "typeNodes" | "typeLinks" | "entityType" | "graphLinks" | "docLinks" | "byId" | "encodings"
+  | "sourceNames" | "anchors" | "entityAnchors" | "importanceMax" | "plumbingNodes" | "plumbingEntityId"
   | "importanceCut" | "connectedIds"
 > = {
   entities: [],
   typeNodes: [],
   typeLinks: [],
-  semanticLinks: [],
+  entityType: {},
+  graphLinks: [],
   docLinks: [],
   byId: {},
-  setColor: {},
+  encodings: { source: createSourceEncoding({}, () => false), type: createTypeEncoding({}, () => false) },
   sourceNames: [],
   anchors: {},
+  entityAnchors: {},
   importanceMax: 1,
-  isSessionSet: () => false,
   plumbingNodes: [],
   plumbingEntityId: {},
   importanceCut: 0,

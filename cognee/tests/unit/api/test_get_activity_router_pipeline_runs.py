@@ -31,6 +31,7 @@ from cognee.modules.users.exceptions import PermissionDeniedError
 # ``from ... import get_activity_router`` yields the function, not the module
 # whose attributes these tests monkeypatch.
 router_module = importlib.import_module("cognee.api.v1.activity.routers.get_activity_router")
+run_sessions_module = importlib.import_module("cognee.modules.pipelines.operations.run_sessions")
 
 
 def _run(**overrides) -> PipelineRun:
@@ -57,7 +58,6 @@ def _run(**overrides) -> PipelineRun:
         "tokens_out": None,
         "embedding_tokens": None,
         "origin": None,
-        "session_id": None,
         "parent_operation_id": None,
         "background": None,
     }
@@ -103,10 +103,12 @@ class _FakeEngine:
         return _FakeSession(self._rows, self._statements)
 
 
-def _stub_engine(monkeypatch, rows) -> list:
+def _stub_engine(monkeypatch, rows, sessions=None) -> list:
     """Swap the router's lazily imported engine for the fake one.
 
-    Returns the list every executed statement is appended to.
+    ``sessions`` maps a row id to the sessions the session lookup reports for
+    it (none by default). Returns the list every executed statement is
+    appended to.
     """
     from cognee.infrastructure.databases import relational as relational_module
 
@@ -114,6 +116,11 @@ def _stub_engine(monkeypatch, rows) -> list:
     monkeypatch.setattr(
         relational_module, "get_relational_engine", lambda: _FakeEngine(rows, statements)
     )
+
+    async def fake_session_ids(row_ids):
+        return {row_id: sessions[row_id] for row_id in row_ids if row_id in (sessions or {})}
+
+    monkeypatch.setattr(run_sessions_module, "get_run_session_ids", fake_session_ids)
     return statements
 
 
@@ -298,10 +305,10 @@ def test_legacy_row_returns_every_new_column_as_null(monkeypatch):
         "started_at",
         "ended_at",
         "user_id",
-        "session_id",
         "parent_operation_id",
     ):
         assert body[0][column] is None, column
+    assert body[0]["session_ids"] == []
 
 
 def test_kind_distinguishes_pipeline_rows_from_operation_rows(monkeypatch):
@@ -416,3 +423,59 @@ def test_no_pipeline_name_leaves_the_filter_out(monkeypatch):
     _client(user_id).get("/activity/pipeline-runs")
 
     assert "pipeline_name" not in _where_terms(statements[0])
+
+
+def test_session_id_filters_through_the_session_table(monkeypatch):
+    """The session page asks for one session's improve runs (CLO-1105), including
+    runs of an improve over several sessions: the filter is row id IN the rows
+    pipeline_run_sessions lists for that session, not an equality on session_id."""
+    user_id = uuid4()
+    statements = _stub_engine(monkeypatch, [])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    response = _client(user_id).get(
+        "/activity/pipeline-runs",
+        params={"pipeline_name": "memify_pipeline", "session_id": "chat_1"},
+    )
+
+    assert response.status_code == 200
+    id_terms = [
+        clause
+        for clause in statements[0].whereclause.clauses
+        if getattr(clause, "left", None) is not None and clause.left.name == "id"
+    ]
+    assert len(id_terms) == 1
+    assert id_terms[0].operator is operators.in_op
+    compiled = str(id_terms[0].right.compile(compile_kwargs={"literal_binds": True}))
+    assert "FROM pipeline_run_sessions" in compiled
+    assert "pipeline_run_sessions.session_id = 'chat_1'" in compiled
+    assert "session_id" not in _where_terms(statements[0])
+
+
+def test_rows_list_every_session_they_belong_to(monkeypatch):
+    user_id = uuid4()
+    two = _run(user_id=user_id)
+    one = _run(user_id=user_id)
+    none = _run(user_id=user_id)
+    _stub_engine(
+        monkeypatch,
+        [_joined(two), _joined(one), _joined(none)],
+        sessions={two.id: ["chat_1", "chat_2"], one.id: ["chat_1"]},
+    )
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    rows = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert [r["session_ids"] for r in rows] == [["chat_1", "chat_2"], ["chat_1"], []]
+    assert all("session_id" not in r for r in rows)
+
+
+def test_no_session_id_leaves_the_filter_out(monkeypatch):
+    """Most rows carry no session id, so an always-applied filter would hide them."""
+    user_id = uuid4()
+    statements = _stub_engine(monkeypatch, [])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    _client(user_id).get("/activity/pipeline-runs")
+
+    assert "session_id" not in _where_terms(statements[0])

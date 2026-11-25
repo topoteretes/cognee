@@ -89,6 +89,60 @@ export function useGovernanceIndex(payload: VisualizationPayload | null): Govern
   }, [payload]);
 }
 
+// How `/v1/datasets/` (the read-scoped list) is doing. Every surface that
+// renders off the narrowed index needs it: an empty index means "still
+// answering", "the fetch failed" or "you may read nothing", and those are
+// three different things to put on screen.
+export type ReadableListState = "loading" | "unavailable" | "ready";
+
+declare const READABLE_ONLY: unique symbol;
+
+// A GovernanceIndex that has been through narrowToReadable. Nominal on
+// purpose: the narrowed and the tenant-wide index are structurally identical,
+// so nothing but a brand can stop `index={tenantGovernanceIndex}` from
+// compiling in a panel that renders dataset names — which is exactly the line
+// the leak lived on, and exactly the mistake no test can catch after the fact.
+export type ReadableGovernanceIndex = GovernanceIndex & {
+  readonly [READABLE_ONLY]: true;
+};
+
+// The provenance payload this index is built from is scoped by TENANT, not by
+// read grant (cognee's memory_provenance.py selects every Dataset whose
+// tenant_id matches the caller's), so it names datasets this caller holds no
+// grant on — and every panel that renders a dataset name straight off the
+// index published those names to whoever opened the Mindmap.
+//
+// Narrowing happens here, once, rather than in each panel: a panel added later
+// cannot reintroduce the leak by forgetting a filter it never had to apply.
+//
+// DATASETS, not principals. `users`, `agents` and `agentOwnerId` pass through
+// whole, and OperatorsRail still names every member of the workspace — the
+// same roster /members already lists for every signed-in member, so it is not
+// what this narrowing is about.
+// `readableDatasetIds` is `/v1/datasets/`, the read-scoped list. When it is
+// null we do not KNOW what this caller may read, and an unknown grant is not a
+// grant: the index narrows to nothing rather than falling back to the tenant's
+// full list.
+export function narrowToReadable(
+  index: GovernanceIndex,
+  readableDatasetIds: string[] | null,
+): ReadableGovernanceIndex {
+  const readable = new Set(readableDatasetIds ?? []);
+  const datasets = index.datasets.filter((d) => readable.has(d.id));
+  const datasetById: Record<string, BusinessGraphNode> = {};
+  datasets.forEach((d) => { datasetById[d.id] = d; });
+  // Access slots are narrowed too, not just the dataset list: the rails render
+  // "access · 2/11" and "3/11 datasets" straight off these maps, and a count
+  // taken over the tenant's full list discloses how much exists beyond the
+  // caller's reach even when no name is drawn.
+  const access: GovernanceIndex["access"] = {};
+  Object.entries(index.access).forEach(([principalId, slots]) => {
+    const kept = Object.entries(slots).filter(([datasetId]) => readable.has(datasetId));
+    if (kept.length > 0) access[principalId] = Object.fromEntries(kept);
+  });
+  return { ...index, datasets, datasetById, access } as ReadableGovernanceIndex;
+}
+
 export function accessibleDatasetIds(index: GovernanceIndex, principalId: string): Set<string> {
   return new Set(Object.keys(index.access[principalId] || {}));
 }

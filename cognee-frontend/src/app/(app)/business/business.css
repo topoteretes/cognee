@@ -52,3 +52,35 @@
   min-width: 0;
   overflow: hidden;
 }
+
+/* A scrollbar that stays visible: overlay scrollbars hide until the list is
+   scrolled, so on macOS nothing else would say the list continues. */
+.bv-brain-switcher-dropdown::-webkit-scrollbar {
+  width: 6px;
+}
+.bv-brain-switcher-dropdown::-webkit-scrollbar-thumb {
+  background: #2A3652;
+  border-radius: 3px;
+}
+@supports not selector(::-webkit-scrollbar) {
+  .bv-brain-switcher-dropdown {
+    scrollbar-width: thin;
+    scrollbar-color: #2A3652 transparent;
+  }
+}
+
+/* Soft fade over the last visible row while more rows are below. Sticky and
+   pulled up by its own height, so it adds nothing to the list's height. */
+.bv-brain-switcher-fade {
+  position: sticky;
+  bottom: 0;
+  height: 28px;
+  margin-top: -28px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, #1A2438);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.bv-brain-switcher-fade[data-visible="true"] {
+  opacity: 1;
+}

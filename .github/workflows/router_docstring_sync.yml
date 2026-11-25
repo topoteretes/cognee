@@ -85,11 +85,14 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
 
+      # Pinned: a bare `uv python install` fetches the newest CPython, and
+      # once that fell outside requires-python (3.15 vs <3.15) `uv sync`
+      # silently fell back to the runner's system 3.10.
       - name: Install Python
-        run: uv python install
+        run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --locked --all-extras
+        run: uv sync --locked --all-extras --python 3.12
 
       # Imports the same FastAPI app the published OpenAPI spec is generated
       # from and compares each handler's documented parameters against the
@@ -208,9 +211,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    name: Generate missing parameter descriptions with Claude
+    name: Generate and fact-check parameter descriptions with Claude
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    timeout-minutes: 45
     needs: sync-docstrings
     # Runs whenever the sync job pushed fresh fixes; also on manual dispatch,
     # to fill placeholders on an already-existing fix branch.
@@ -262,20 +265,153 @@ jobs:
           uv run --no-project --with 'anthropic>=0.75,<1' \
             python automation-src/tools/describe_router_params.py
 
-      - name: Commit and push
+      # Committed locally only, so the critic below gets an exact patch of this
+      # run's text and check_critic_edits.py can compare HEAD~1, HEAD and the
+      # critic's working tree. Nothing is pushed until the critic has passed.
+      - name: Commit generated text locally
+        id: generated
         if: ${{ steps.branch.outputs.exists == 'true' }}
-        env:
-          PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
         run: |
           uvx ruff@0.16.6 format cognee/api
           git add cognee
           if git diff --cached --quiet; then
             echo "No description changes to commit."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "docs: Generate parameter descriptions with Claude (RES-14)"
+          git diff HEAD~1 HEAD -- cognee > router_docstring_generated.patch
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # The critic gets Edit/Write. Fingerprint everything it must not touch
+      # (the machinery that judges it, and git hooks, which the PAT reaches)
+      # and keep a copy of the edit check outside its reach. .git/config is
+      # saved rather than fingerprinted: claude-code-action writes its own git
+      # settings there, so it is restored wholesale before anything pushes.
+      - name: Record protected files
+        if: ${{ steps.generated.outputs.changed == 'true' }}
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/protected_manifest.sh" <<'EOF'
+          set -euo pipefail
+          find automation-src .git/hooks -type f -not -path 'automation-src/.git/objects/*' \
+            -not -path '*/__pycache__/*' -print0 | sort -z | xargs -0 sha256sum
+          EOF
+          bash "${RUNNER_TEMP}/protected_manifest.sh" > "${RUNNER_TEMP}/protected.sha256"
+          cp .git/config "${RUNNER_TEMP}/git-config.orig"
+          cp automation-src/tools/check_critic_edits.py "${RUNNER_TEMP}/"
+
+      # Pass 2: checks every generated claim against the code, following calls
+      # as deep as a claim needs, and corrects it to what the code does. The
+      # generator sees one hop of source; most of its wrong claims lived further
+      # down. Correcting rather than deleting keeps the true, specific part.
+      - name: Fact-check generated docstrings
+        id: critic
+        if: ${{ steps.generated.outputs.changed == 'true' }}
+        continue-on-error: true
+        uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790  # v1.0.235
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read and follow `automation-src/.github/prompts/router_docstring_critic.md`.
+
+            - Generated patch: `./router_docstring_generated.patch`
+            - Ledger path: `./router_docstring_ledger.md`
+          # --allowed-tools only pre-approves; it does not remove other tools. In
+          # run 41080457249 the critic handed its checks to background agents and
+          # ended its turn "waiting" for them, which ends a headless session with
+          # nothing written. So take away everything that waits or delegates.
+          claude_args: >-
+            --allowed-tools Read,Edit,Write,Glob,Grep
+            --disallowed-tools Agent,Task,Bash,ScheduleWakeup,CronCreate,Monitor,WebFetch,WebSearch
+            --max-turns 150
+
+      # The transcript stays on the runner otherwise, and "finished" alone does
+      # not say what the critic did: kept briefly so a bad run can be diagnosed.
+      - name: Keep the critic's transcript
+        if: ${{ always() && steps.critic.outputs.execution_file != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: router-docstring-critic-transcript
+          path: ${{ steps.critic.outputs.execution_file }}
+          retention-days: 7
+
+      # continue-on-error keeps a clean finish that only tripped the turn count;
+      # a critic that did not finish fails here, so unchecked text is never pushed.
+      # Finishing is not enough either: the critic always writes a ledger, even
+      # when nothing needed changing, so a missing ledger means it never did the
+      # check (one run stopped after 12 turns with three denied tool calls).
+      - name: Check the critic finished
+        if: ${{ steps.generated.outputs.changed == 'true' }}
+        env:
+          CLAUDE_CONCLUSION: ${{ steps.critic.outputs.conclusion }}
+          EXECUTION_FILE: ${{ steps.critic.outputs.execution_file }}
+        run: |
+          set -euo pipefail
+          if [ "${CLAUDE_CONCLUSION:-}" != "success" ]; then
+            if [ -z "${EXECUTION_FILE:-}" ] || [ ! -s "${EXECUTION_FILE}" ] || \
+               ! jq -e '[.. | objects | select(has("is_error"))] | last | .is_error == false' \
+                    "${EXECUTION_FILE}" >/dev/null 2>&1; then
+              echo "The critic did not finish (conclusion=${CLAUDE_CONCLUSION:-unknown})." >&2
+              exit 1
+            fi
+            echo "The action failed on the turn count but the critic finished cleanly."
+          fi
+          if [ ! -s router_docstring_ledger.md ]; then
+            echo "The critic finished without writing its ledger, so the generated" >&2
+            echo "text was not checked. See the transcript artifact." >&2
+            exit 1
+          fi
+
+      - name: Check the critic's edits
+        if: ${{ steps.generated.outputs.changed == 'true' }}
+        run: |
+          set -euo pipefail
+          cp "${RUNNER_TEMP}/git-config.orig" .git/config
+          if ! bash "${RUNNER_TEMP}/protected_manifest.sh" \
+               | diff "${RUNNER_TEMP}/protected.sha256" - >&2; then
+            echo "The critic changed automation-src/ or .git/hooks; stopping." >&2
+            exit 1
+          fi
+          uv run --no-project python "${RUNNER_TEMP}/check_critic_edits.py"
+
+      - name: Commit and push
+        if: ${{ steps.generated.outputs.changed == 'true' }}
+        env:
+          PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+        run: |
+          uvx ruff@0.16.6 format cognee/api
+          git add cognee
+          if ! git diff --cached --quiet; then
+            git commit -m "docs: Fact-check generated parameter descriptions with Claude (RES-14)"
+          fi
           git push \
             "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             HEAD:automation/fix-router-docstrings
+
+      # The ledger lists what the critic changed and what it could not settle, so
+      # the reviewer starts from the open questions instead of re-checking all.
+      - name: Post the critic's ledger
+        if: ${{ steps.generated.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr=$(gh pr list --repo "${GITHUB_REPOSITORY}" \
+            --head automation/fix-router-docstrings --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -z "${pr}" ]; then
+            echo "No open fix PR to comment on."
+            exit 0
+          fi
+          {
+            echo "## Docstring fact-check"
+            echo
+            echo "Claude checked this run's generated text against the code. Its corrections"
+            echo "are in the last commit, with evidence below; open questions are at the end."
+            echo
+            cat router_docstring_ledger.md
+          } > "${RUNNER_TEMP}/ledger_comment.md"
+          gh pr comment "${pr}" --repo "${GITHUB_REPOSITORY}" --body-file "${RUNNER_TEMP}/ledger_comment.md"

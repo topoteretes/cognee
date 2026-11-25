@@ -37,6 +37,16 @@ class _InMemoryRedisList:
     async def lset(self, key: str, idx: int, val: str):
         self.data[key][idx] = val
 
+    async def lrem(self, key: str, count: int, val: str):
+        """Only count=0, every occurrence, is used; an emptied list disappears as in Redis."""
+        lst = self.data.get(key, [])
+        kept = [item for item in lst if item != val]
+        if kept:
+            self.data[key] = kept
+        else:
+            self.data.pop(key, None)
+        return len(lst) - len(kept)
+
     async def delete(self, key: str):
         return 1 if self.data.pop(key, None) is not None else 0
 
@@ -84,26 +94,10 @@ class InMemoryGraphWithWeights:
         return result
 
 
-@pytest.fixture(params=["fs", "redis", "sqlite"])
+@pytest.fixture(params=["redis", "sqlite"])
 def session_manager_with_backend(request):
     backend = request.param
-    if backend == "fs":
-        with (
-            tempfile.TemporaryDirectory() as tmpdir,
-            patch(
-                "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-                return_value={"data_root_directory": tmpdir},
-            ),
-        ):
-            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                FSCacheAdapter,
-            )
-
-            adapter = FSCacheAdapter()
-            sm = SessionManager(cache_engine=adapter)
-            yield sm
-            adapter.cache.close()
-    elif backend == "redis":
+    if backend == "redis":
         store = _InMemoryRedisList()
         patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
         with (

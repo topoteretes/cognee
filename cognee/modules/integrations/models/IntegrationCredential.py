@@ -95,3 +95,7 @@ class IntegrationCredential(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 'owner' (a disconnect) | 'provider' (an uninstall, a token the provider no longer
+    # accepts); None while active, on rows revoked before the column existed, and when
+    # the revoking caller named no one.
+    revoked_by: Mapped[str | None] = mapped_column(String, nullable=True)

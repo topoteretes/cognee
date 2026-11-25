@@ -21,6 +21,7 @@ from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine im
     LiteLLMEmbeddingEngine,
 )
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.llm.config import get_llm_config
 from cognee.tasks.ingestion.connectors import google_drive as gd_source
 
 add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
@@ -131,6 +132,10 @@ async def clean_environment(tmp_path, monkeypatch):
     pytest.importorskip("dlt")
 
     monkeypatch.setenv("COGNEE_SKIP_CONNECTION_TEST", "true")
+    # The LLM and embedder are mocked below; a placeholder key keeps cognee on
+    # that mocked path when CI has no real key (fork PRs).
+    monkeypatch.setenv("LLM_API_KEY", "sk-mocked")
+    get_llm_config.cache_clear()  # a config read before this would have no key
     monkeypatch.setenv("GOOGLE_DRIVE_FOLDER_ID", "root")
     monkeypatch.setenv("GOOGLE_DRIVE_AUTH_MODE", "service_account")
     monkeypatch.setenv("GOOGLE_DRIVE_CREDENTIALS_PATH", "unused.json")
@@ -157,7 +162,9 @@ async def clean_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(
         gd_source,
         "extract_file_content",
-        lambda service, file_id, mime_type, name: "Acme is a company based in Springfield.",
+        lambda service, file_id, mime_type, name, **_kwargs: (
+            "Acme is a company based in Springfield."
+        ),
     )
 
     await cognee.prune.prune_data()
@@ -167,6 +174,7 @@ async def clean_environment(tmp_path, monkeypatch):
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
+    get_llm_config.cache_clear()  # do not hand the placeholder key to later tests
 
 
 @pytest.mark.asyncio

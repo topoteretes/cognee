@@ -1,6 +1,8 @@
+import { isTabularStructureLink } from "@/modules/business/structuredGraphStyle";
 import { mean } from "d3-array";
 import type { BusinessEntity, TypeNode, TypeLink, SemanticLink } from "../sceneTypes";
 import type { BusinessGraphNode } from "../types";
+import type { ColorEncoding } from "../colorEncoding";
 import type { Transform } from "./businessHitTest";
 import { drawTypeModelLayer } from "./businessTypeLayer";
 import { inLens, drawEntities, computeVisibleEntityIds } from "./businessEntityLayer";
@@ -38,16 +40,21 @@ export interface DrawState {
   semanticLinks: SemanticLink[];
   docLinks: SemanticLink[];
   byId: Record<string, BusinessEntity | BusinessGraphNode>;
-  setColor: Record<string, string>;
+  encoding: ColorEncoding;
   sourceNames: string[];
   newbornAt: Record<string, number>;
   hoveredId: string | null;
   selectedId: string | null;
   spotlight: Spotlight | null;
   focusSets: Set<string> | null;
+  // A second, independent focus lens keyed by business-model type name
+  // (BrainState.entityType) instead of source — an entity must clear BOTH
+  // lenses (whichever are active) to render, same AND composition as the
+  // node_set filter it sits beside on the rail.
+  focusTypes: Set<string> | null;
+  entityType: Record<string, string>;
   reducedMotion: boolean;
   importanceMax: number;
-  isSessionSet: (name: string) => boolean;
   // Every entity id that has EVER answered a live search this session — a
   // lasting "this has been useful" mark, distinct from spotlight's current
   // 9s window (see businessEntityLayer's drawEntities).
@@ -125,9 +132,15 @@ const OVERLAP_MIN_GAP = 46;
 // member centroids often land close together, and without this the model
 // layer itself becomes the "too many overlapping circles" clutter, not just
 // the links between them.
-function layoutTypeNodes(typeNodes: TypeNode[], focusSets: Set<string> | null): void {
+function layoutTypeNodes(
+  typeNodes: TypeNode[],
+  focusSets: Set<string> | null,
+  focusTypes: Set<string> | null,
+  entityType: Record<string, string>,
+): void {
+  const hasFocusLens = Boolean(focusSets || focusTypes);
   typeNodes.forEach((tn) => {
-    const visible = focusSets ? tn.members.filter((m) => inLens(m, focusSets)) : tn.members;
+    const visible = hasFocusLens ? tn.members.filter((m) => inLens(m, focusSets, focusTypes, entityType)) : tn.members;
     tn._visible = visible;
     const pool = visible.length ? visible : tn.members;
     tn.x = mean(pool, (m) => m.x ?? 0) || 0;
@@ -241,6 +254,7 @@ function drawSemanticLinks(
     // endpoint used to still draw at full length, reading as a loose,
     // unconnected line to nothing.
     if (!visibleEntityIds.has(s.id) || !visibleEntityIds.has(t.id)) return;
+    const structural = isTabularStructureLink(s, t);
     const inSpot = spotIds ? spotIds.has(s.id) && spotIds.has(t.id) : false;
     const touchesSelected = state.selectedId !== null && (s.id === state.selectedId || t.id === state.selectedId);
     const inPath = state.pathEdgeKeys.has(edgeKey(l._sid, l._tid));
@@ -271,7 +285,15 @@ function drawSemanticLinks(
       ctx.strokeStyle = `rgba(126,140,166,${0.4 * dimmed})`;
       ctx.lineWidth = 1.1 / state.transform.k;
     }
+    if (structural) {
+      ctx.setLineDash([3 / state.transform.k, 4 / state.transform.k]);
+      if (!highlighted) {
+        ctx.globalAlpha *= 0.45;
+        ctx.lineWidth = 0.8 / state.transform.k;
+      }
+    }
     ctx.stroke();
+    ctx.setLineDash([]);
     // The relation name — invisible at the instance layer otherwise — only
     // for links a click or a path actually calls out, so it answers "how
     // are these two connected" instead of adding more label soup.
@@ -287,7 +309,7 @@ function drawSemanticLinks(
     // dims it with a smooth sine pulse, so it never reads brighter than the
     // line it rides on. Skipped above the same density threshold that
     // fades the lines themselves — a hairball doesn't need more motion.
-    if (!state.reducedMotion && state.semanticLinks.length <= DENSE_LINK_THRESHOLD) {
+    if (!structural && !state.reducedMotion && state.semanticLinks.length <= DENSE_LINK_THRESHOLD) {
       const travelT = ((now / PARTICLE_TRAVEL_MS + hashSeed(l._sid + l._tid)) % 1 + 1) % 1;
       const [px, py] = quadraticPoint(s.x, s.y, mx, my, t.x, t.y, travelT);
       ctx.globalAlpha = ctx.globalAlpha * Math.sin(travelT * Math.PI);
@@ -328,21 +350,21 @@ export function draw(
   const typeAlpha = 1 - instAlpha;
   const dimmed = spotlightActive ? 0.16 : 1;
 
-  layoutTypeNodes(state.typeNodes, state.focusSets);
+  layoutTypeNodes(state.typeNodes, state.focusSets, state.focusTypes, state.entityType);
   // Hulls fade out with the entity layer they shade: territory polygons
   // span the ENTITY extents, so left at full strength under the schema view
   // they dwarfed the compact type cluster (reviewer 2b's screenshot) —
   // giant colored areas around a tiny model.
   if (state.level <= 1 && instAlpha > 0.01) {
     drawSourceHulls(
-      ctx, state.entities, state.sourceNames, state.setColor, state.focusSets,
+      ctx, state.entities, state.sourceNames, state.encoding, state.focusSets, state.focusTypes, state.entityType,
       dimmed * instAlpha, state.transform.k,
     );
   }
   if (typeAlpha > 0.01) {
     drawTypeModelLayer(
-      ctx, state.typeNodes, state.typeLinks, state.setColor, state.isSessionSet,
-      typeAlpha, dimmed, state.focusSets, state.transform.k,
+      ctx, state.typeNodes, state.typeLinks, state.encoding,
+      typeAlpha, dimmed, state.focusSets, state.focusTypes, state.transform.k,
     );
   }
   if (instAlpha > 0.01) {
@@ -367,6 +389,9 @@ export function draw(
   if (state.level === 3) {
     const entityById: Record<string, BusinessEntity> = {};
     state.entities.forEach((n) => { entityById[n.id] = n; });
-    drawPlumbingLayer(ctx, state.plumbingNodes, state.plumbingEntityId, entityById, state.transform.k, state.focusSets);
+    drawPlumbingLayer(
+      ctx, state.plumbingNodes, state.plumbingEntityId, entityById, state.transform.k,
+      state.focusSets, state.focusTypes, state.entityType,
+    );
   }
 }

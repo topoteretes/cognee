@@ -189,16 +189,10 @@ async def mark_auto_improve_fired(
     """Record that an automatic improve was launched for this session.
 
     Written before the improve runs, so back-to-back ``remember()`` calls see
-    the advanced watermark. A launched bridge that then loses its lock claim
-    gets the window refunded (``rearm_auto_improve_debounce``), so its entries
-    never wait out a window behind a bridge that did nothing. The refund is
-    ONLY for lock loss: a bridge that errors keeps the mark on purpose —
-    refunding would hammer a failing backend once per remember, and the
-    persist stages' own watermarks make the next successful improve pick up
-    everything anyway. Corollary: while a long improve holds the lock, every
-    remember fires a losing-then-refunded attempt, so the debounce holds
-    nothing back under contention (claims fail fast, so that is cheap).
-    Never raises: losing the row only means the next call fires one improve
+    the advanced watermark. A launched bridge always runs: behind an improve
+    already holding the session or dataset it waits its turn. A bridge that
+    errors keeps the mark — the persist stages' own watermarks make the next
+    successful improve pick up everything anyway. Never raises: losing the row only means the next call fires one improve
     earlier than the thresholds ask for.
     """
     try:
@@ -215,18 +209,3 @@ async def mark_auto_improve_fired(
         )
     except Exception as exc:
         logger.debug("auto-improve debounce: could not save state (%s)", exc, exc_info=True)
-
-
-async def rearm_auto_improve_debounce(session_manager, user_id: str, session_id: str) -> None:
-    """Refund the debounce budget after a bridge that did no work.
-
-    A launched bridge that lost its improve-lock claim persisted nothing, but
-    ``mark_auto_improve_fired`` already spent the window — without a refund the
-    session's entries wait out a full extra debounce window behind a bridge
-    that never ran. Clearing the state value makes the NEXT ``remember()`` fire
-    unconditionally (a non-dict state is the first-run path). Never raises.
-    """
-    try:
-        await AUTO_IMPROVE_WATERMARK.write_value(session_manager, user_id, session_id, None)
-    except Exception as exc:
-        logger.debug("auto-improve debounce: could not re-arm (%s)", exc, exc_info=True)

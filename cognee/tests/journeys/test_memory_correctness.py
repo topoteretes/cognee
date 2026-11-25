@@ -73,7 +73,11 @@ async def test_golden_corpus_is_answerable_through_every_user_path(
     check_forbidden = journey_mode == "llm"
 
     # --- remember the whole corpus through the public API --------------------
-    result = await cognee.remember([d.text for d in corpus], dataset_name=DATASET)
+    # The SUMMARIES gate below needs a prose summary per document; the default
+    # from_extraction method carries no summary for chunks without relations.
+    result = await cognee.remember(
+        [d.text for d in corpus], dataset_name=DATASET, summary_method="llm"
+    )
     assert result.status == "completed", f"remember did not complete: {result!r}"
     assert result.dataset_id, "remember returned no dataset id"
 

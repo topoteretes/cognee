@@ -1,8 +1,9 @@
 "use client";
 
 import { type SetStateAction, useCallback, useEffect, useRef, useState } from "react";
-import type { CogneeInstance } from "../instances/types";
-import getDatasetData, { DEFAULT_DATASET_DATA_LIMIT, getDatasetDataCount } from "./getDatasetData";
+import type { CogneeInstance } from "@/modules/instances/types";
+import getDatasetData, { DEFAULT_DATASET_DATA_LIMIT } from "./getDatasetData";
+import getDatasetDataCount from "./getDatasetDataCount";
 
 /** Load bounded pages; discard responses superseded by a selection, refresh, or mutation. */
 export default function useDatasetDataPages<T extends { id: string }>(
@@ -93,8 +94,12 @@ export default function useDatasetDataPages<T extends { id: string }>(
         .catch(() => { if (generation.current === token) setTotal(null); });
     }
     try {
-      const page: T[] = await getDatasetData(id, instance, { offset, limit, signal: controller.current?.signal });
+      const body = await getDatasetData(id, instance, { offset, limit, signal: controller.current?.signal });
       if (generation.current !== token) return;
+      // A non-array body is an error response (e.g. a 404 body), not an empty
+      // page: reading it as one would end paging and show a false "no documents".
+      if (!Array.isArray(body)) throw new Error("Unexpected dataset data response");
+      const page: T[] = body;
       const seen = new Set(previous.map(row => row.id));
       const next = [...previous];
       for (const item of page) {

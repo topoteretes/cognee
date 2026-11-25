@@ -9,7 +9,7 @@ import pytest
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 
-module = importlib.import_module("cognee.memify_pipelines.review_conflicts")
+module = importlib.import_module("cognee.memify_pipelines.review_conflicts_pipeline")
 
 
 @pytest.mark.asyncio
@@ -34,14 +34,16 @@ async def test_wrapper_passes_work_to_memify_and_reports_failed_entities(monkeyp
         review, write = kwargs["enrichment_tasks"]
         assert write.task_config["batch_size"] == 1
         assert write.needs_llm is False
-        assert "unreviewed_entity_ids" not in review.default_params["kwargs"]
-        write.default_params["kwargs"]["state"].unreviewed_entity_ids = ["failed-entity"]
+        assert write.default_params["kwargs"] == {}  # the writer keeps nothing across items
+        review.default_params["kwargs"]["failed_entity_ids"].extend(["b", "a", "b"])
+        review.default_params["kwargs"]["skipped_entity_ids"].extend(["d", "c", "d"])
         return {dataset_id: result}
 
     monkeypatch.setattr(module, "run_memify_tasks", memify)
     returned = await module.review_conflicts_pipeline("test", user, entity_ids=[], since=since)
-    assert returned[dataset_id] is result
-    assert result.payload == {"unreviewed_entity_ids": ["failed-entity"]}
+    assert returned.run_result[dataset_id] is result
+    assert returned.failed_entity_ids == ["a", "b"]
+    assert returned.skipped_entity_ids == ["c", "d"]
     authorized.assert_awaited_once_with(user=user, datasets=["test"], permission_type="write")
 
 

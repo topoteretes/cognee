@@ -350,3 +350,23 @@ def test_keyless_record_follows_the_engine_not_the_config(monkeypatch, llm_api_k
     assert embedding_model_record() == expected
     # The config alone would have said 3072 in both cases.
     assert embedding_config.embedding_dimensions == 3072
+
+
+@pytest.mark.asyncio
+async def test_an_unset_width_is_asked_of_the_engine(store, monkeypatch):
+    """EMBEDDING_PROVIDER=embedding_worker without EMBEDDING_DIMENSIONS: the record has
+    no width, and the engine learns it from the worker."""
+    monkeypatch.setattr(
+        ensure_mod,
+        "embedding_model_record",
+        lambda: {MODEL_KEY: "worker/model", DIMENSIONS_KEY: None},
+    )
+    store["engine"] = SimpleNamespace(
+        embedding_engine=SimpleNamespace(resolve_vector_size=AsyncMock(return_value=384))
+    )
+
+    await ensure_embedding_model_matches(_row(**SMALL))
+    store["engine"].embedding_engine.resolve_vector_size.assert_awaited_once()
+
+    with pytest.raises(EmbeddingDimensionMismatchError):
+        await ensure_embedding_model_matches(_row(**LARGE))

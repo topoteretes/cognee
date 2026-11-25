@@ -7,8 +7,9 @@ model — which defines no ``__str__`` — so those events recorded
 """
 
 import uuid
-from collections.abc import Coroutine
 from typing import Any
+
+import pytest
 
 from cognee.shared import utils
 from cognee.shared.utils import _resolve_identity, send_telemetry
@@ -60,31 +61,11 @@ def _capture_telemetry(monkeypatch) -> list[dict[str, Any]]:
     """Capture emitted payloads without touching the network."""
     payloads: list[dict[str, Any]] = []
 
-    def capture(payload: dict[str, Any]) -> Coroutine[Any, Any, None]:
-        payloads.append(payload)
-
-        async def noop() -> None:
-            return None
-
-        return noop()
-
-    class StubTask:
-        """send_telemetry tracks tasks in _TELEMETRY_TASKS via add_done_callback."""
-
-        def add_done_callback(self, callback) -> None:
-            callback(self)
-
-    class CapturingLoop:
-        def create_task(self, coroutine: Coroutine[Any, Any, None]) -> StubTask:
-            coroutine.close()
-            return StubTask()
-
     monkeypatch.setenv("ENV", "prod")
     monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "anonymous-test-id")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "persistent-test-id")
-    monkeypatch.setattr(utils, "_send_telemetry_request", capture)
-    monkeypatch.setattr(utils.asyncio, "get_running_loop", lambda: CapturingLoop())
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", payloads.append)
     return payloads
 
 
@@ -216,6 +197,118 @@ def test_send_telemetry_emits_despite_detached_user(monkeypatch):
 
     assert payloads[0]["properties"]["user_id"] == "unknown-user"
     assert payloads[0]["properties"]["tenant_id"] == "Single User Tenant"
+
+
+@pytest.fixture
+def connected(monkeypatch):
+    """Set (or clear) this process's active serve() connection."""
+    from cognee.api.v1.serve import state
+    from cognee.api.v1.serve.cloud_client import CloudClient
+
+    def connect(service_url, tenant_id):
+        client = CloudClient(service_url, "ck_live_raw_api_key_value")
+        client.tenant_id = tenant_id
+        state.set_remote_client(client)
+        return client
+
+    yield connect
+    state.set_remote_client(None)
+
+
+def _connected_fields(payload):
+    return [
+        {k: v for k, v in props.items() if k.startswith("connected_")}
+        for props in (payload["properties"], payload["user_properties"])
+    ]
+
+
+TENANT_ID = "f7974d52-a58b-4497-8c9c-5369fa413d41"
+
+
+def test_payload_has_no_tenant_without_an_active_connection(monkeypatch, connected):
+    payloads = _capture_telemetry(monkeypatch)
+
+    send_telemetry("cognee.recall", "sdk")
+
+    assert _connected_fields(payloads[0]) == [{}, {}]
+
+
+def test_payload_has_no_tenant_when_the_instance_reported_none(monkeypatch, connected):
+    payloads = _capture_telemetry(monkeypatch)
+    connected("http://localhost:8000", "")
+
+    send_telemetry("cognee.recall", "sdk")
+
+    assert _connected_fields(payloads[0]) == [{}, {}]
+
+
+@pytest.mark.parametrize(
+    ("service_url", "expected_host"),
+    [
+        (f"https://tenant-{TENANT_ID}.aws.cognee.ai", f"tenant-{TENANT_ID}.aws.cognee.ai"),
+        ("http://localhost:8000", "localhost"),
+        ("http://127.0.0.1:8000", "localhost"),
+        ("https://cognee.internal.acme.corp", "self_hosted"),
+        ("http://10.0.4.12:8000", "self_hosted"),
+        ("https://cognee.ai.acme.corp", "self_hosted"),
+    ],
+)
+def test_payload_carries_the_connected_tenant_and_host(
+    monkeypatch, connected, service_url, expected_host
+):
+    payloads = _capture_telemetry(monkeypatch)
+    connected(service_url, TENANT_ID)
+
+    send_telemetry("cognee.recall", "sdk")
+
+    expected = {"connected_tenant_id": TENANT_ID, "connected_host": expected_host}
+    assert _connected_fields(payloads[0]) == [expected, expected]
+
+
+def test_events_are_untagged_after_disconnect_even_with_a_saved_tenant(
+    monkeypatch, connected, tmp_path
+):
+    """The saved connection file is for reconnecting, never read by telemetry."""
+    from cognee.api.v1.serve import credentials, state
+
+    monkeypatch.setattr(credentials, "_CREDENTIALS_FILE", tmp_path / "cloud_credentials.json")
+    credentials.save_credentials(
+        credentials.CloudCredentials(
+            service_url=f"https://tenant-{TENANT_ID}.aws.cognee.ai",
+            api_key="ck_x",
+            tenant_id=TENANT_ID,
+        )
+    )
+    payloads = _capture_telemetry(monkeypatch)
+    connected(f"https://tenant-{TENANT_ID}.aws.cognee.ai", TENANT_ID)
+    state.set_remote_client(None)
+
+    send_telemetry("cognee.recall", "sdk")
+
+    assert _connected_fields(payloads[0]) == [{}, {}]
+
+
+def test_unparseable_url_never_breaks_telemetry(monkeypatch, connected):
+    payloads = _capture_telemetry(monkeypatch)
+    connected("https://[bad", TENANT_ID)
+
+    send_telemetry("cognee.recall", "sdk")
+
+    assert len(payloads) == 1
+    assert _connected_fields(payloads[0]) == [{}, {}]
+
+
+def test_api_key_and_self_hosted_url_never_reach_the_serialized_event(monkeypatch, connected):
+    import json
+
+    payloads = _capture_telemetry(monkeypatch)
+    connected("https://cognee.internal.acme.corp/some/path", TENANT_ID)
+
+    send_telemetry("cognee.recall", "sdk")
+
+    serialized = json.dumps(payloads[0])
+    for value in ["ck_live_raw_api_key_value", "acme", "/some/path"]:
+        assert value not in serialized
 
 
 class FakeAgentUser(FakeUser):
