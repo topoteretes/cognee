@@ -3,7 +3,6 @@
 import { useEffect, useRef } from "react";
 import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from "d3-force";
 import type { BusinessEntity, SemanticLink, Anchor } from "../sceneTypes";
-import { setsOf } from "../computeBrainState";
 
 const NEWBORN_BASE_DELAY_MS = 400;
 const NEWBORN_STAGGER_MS = 40;
@@ -14,6 +13,17 @@ const NEWBORN_STAGGER_MS = 40;
 const ALPHA_UNCHANGED_IDS = 0.02;
 const ALPHA_CHANGED_IDS = 0.5;
 const ALPHA_FIRST_RUN = 0.9;
+// Viewport membership changing is NOT the dataset changing, and must not be
+// reheated like it. Sharing ALPHA_CHANGED_IDS between the two closed a
+// feedback loop, measured while capping was being tried on a single dataset
+// (ACTIVE_CAP_ENTITY_THRESHOLD temporarily at 500): a 0.5 reheat moves
+// entities hard enough to push some across the viewport boundary, the next
+// ~800ms recheck sees different membership and reheats again, and the graph
+// visibly pulses forever without anything actually changing. Capping is only
+// reachable for a merged multi-dataset scene today (CLO-578), so this is what
+// keeps that path from bringing the pulse back with it. Sized to place
+// entities that just came into view and then die out within a few ticks.
+const ALPHA_VIEWPORT_SET_CHANGED = 0.08;
 // Was 0.07 — dwarfed by charge (-220) and link (0.2), so a source with few
 // internal links (little to hold it together) scattered across the whole
 // graph instead of reading as its own visual cluster; a source card's focus
@@ -53,16 +63,10 @@ interface LinkDatum {
   target: string;
 }
 
-export function anchorOf(n: BusinessEntity, anchors: Record<string, Anchor>): Anchor {
-  const sets = setsOf(n);
-  if (!sets.length) return { x: 0, y: 0 };
-  let x = 0, y = 0;
-  sets.forEach((s) => {
-    const a = anchors[s] || { x: 0, y: 0 };
-    x += a.x;
-    y += a.y;
-  });
-  return { x: x / sets.length, y: y / sets.length };
+const ORIGIN: Anchor = { x: 0, y: 0 };
+
+function anchorOf(n: BusinessEntity, entityAnchors: Record<string, Anchor>): Anchor {
+  return entityAnchors[n.id] ?? ORIGIN;
 }
 
 // Deterministic per-id scatter so a brand-new entity's starting position
@@ -75,14 +79,14 @@ function hashId(id: string): number {
 
 function seedPosition(
   n: BusinessEntity,
-  anchors: Record<string, Anchor>,
+  entityAnchors: Record<string, Anchor>,
   cached: [number, number] | undefined,
 ): void {
   if (cached) {
     [n.x, n.y] = cached;
     return;
   }
-  const a = anchorOf(n, anchors);
+  const a = anchorOf(n, entityAnchors);
   n.x = a.x + Math.sin(hashId(n.id)) * 150;
   n.y = a.y + Math.cos(hashId(n.id) * 2) * 110;
 }
@@ -95,7 +99,7 @@ function idsKeyOf(entities: BusinessEntity[]): string {
 // collects the genuinely-new ones with their staggered birth timestamps.
 function seedAndDetectNewborns(
   entities: BusinessEntity[],
-  anchors: Record<string, Anchor>,
+  entityAnchors: Record<string, Anchor>,
   importanceMax: number,
   positions: Record<string, [number, number]>,
   treatUncachedAsNewborn: boolean,
@@ -104,7 +108,7 @@ function seedAndDetectNewborns(
   entities.forEach((n) => {
     n._r = 5 + 11 * ((n.importance || 0) / importanceMax);
     const cached = positions[n.id];
-    seedPosition(n, anchors, cached);
+    seedPosition(n, entityAnchors, cached);
     if (!cached && treatUncachedAsNewborn) newborn.push(n);
   });
   const born = performance.now();
@@ -121,7 +125,7 @@ function seedAndDetectNewborns(
 // re-fetch look like a continuation: ids seen before keep their last
 // position, ids that are genuinely new get staggered birth timing.
 //
-// useBrains refetches on an interval — every refetch hands back a brand-new
+// useBrainGraph refetches on an interval — every refetch hands back a brand-new
 // `entities` array (freshly parsed JSON) even when the actual node set is
 // unchanged. The simulation still needs to re-run on that fresh array (the
 // new object instances need their x/y written back onto them), but reheating
@@ -134,7 +138,7 @@ function seedAndDetectNewborns(
 export function useBusinessSimulation(
   entities: BusinessEntity[],
   semanticLinks: SemanticLink[],
-  anchors: Record<string, Anchor>,
+  entityAnchors: Record<string, Anchor>,
   importanceMax: number,
   onTick: () => void,
   onGrowth?: (newborn: BusinessEntity[]) => void,
@@ -176,7 +180,7 @@ export function useBusinessSimulation(
     const isNewWorld = isFirstRun || prevSettleKeyRef.current !== settleKeyNow;
 
     const { newborn, newbornAt } = seedAndDetectNewborns(
-      entities, anchors, importanceMax, positionsRef.current, idsChanged && !isNewWorld,
+      entities, entityAnchors, importanceMax, positionsRef.current, idsChanged && !isNewWorld,
     );
     newbornAtRef.current = newbornAt;
     // Ports the reload-era "cognify complete" narration's gate (customer_
@@ -187,15 +191,23 @@ export function useBusinessSimulation(
     if (newborn.length) onGrowth?.(newborn);
 
     // Physics only runs on the active subset (everyone, when activeIds is
-    // null) — reheat is judged against ITS membership too, separately from
-    // idsChanged above, so panning into a new area (which changes who's
-    // active without any real dataset growth) still gets a mild reheat
-    // instead of settling at whatever alpha the last, unrelated dataset
-    // change left behind.
+    // null) — its membership is tracked separately from idsChanged above, so
+    // panning into a new area (which changes who's active without any real
+    // dataset growth) still gets a nudge instead of settling at whatever
+    // alpha the last, unrelated dataset change left behind. That nudge is
+    // deliberately far weaker than a dataset reheat: see
+    // ALPHA_VIEWPORT_SET_CHANGED for the pulse it caused when the two shared
+    // one alpha.
     const simulatedEntities = activeIds ? entities.filter((n) => activeIds.has(n.id)) : entities;
     const simulatedIdsKey = idsKeyOf(simulatedEntities);
     const simulatedSetChanged = prevSimulatedIdsKeyRef.current !== null && prevSimulatedIdsKeyRef.current !== simulatedIdsKey;
-    const willReheat = isFirstRun || idsChanged || simulatedSetChanged;
+    const startAlpha = isFirstRun
+      ? ALPHA_FIRST_RUN
+      : idsChanged
+        ? ALPHA_CHANGED_IDS
+        : simulatedSetChanged
+          ? ALPHA_VIEWPORT_SET_CHANGED
+          : ALPHA_UNCHANGED_IDS;
 
     const linkDatums: LinkDatum[] = semanticLinks
       .filter((l) => !activeIds || (activeIds.has(l._sid) && activeIds.has(l._tid)))
@@ -213,9 +225,9 @@ export function useBusinessSimulation(
         "collide",
         forceCollide<BusinessEntity>().radius((d) => (d._r ?? 5) + 26),
       )
-      .force("ax", forceX<BusinessEntity>((d) => anchorOf(d, anchors).x).strength(SOURCE_ANCHOR_STRENGTH))
-      .force("ay", forceY<BusinessEntity>((d) => anchorOf(d, anchors).y).strength(SOURCE_ANCHOR_STRENGTH))
-      .alpha(isFirstRun ? ALPHA_FIRST_RUN : willReheat ? ALPHA_CHANGED_IDS : ALPHA_UNCHANGED_IDS)
+      .force("ax", forceX<BusinessEntity>((d) => anchorOf(d, entityAnchors).x).strength(SOURCE_ANCHOR_STRENGTH))
+      .force("ay", forceY<BusinessEntity>((d) => anchorOf(d, entityAnchors).y).strength(SOURCE_ANCHOR_STRENGTH))
+      .alpha(startAlpha)
       .on("tick", onTick);
 
     if (isNewWorld) {
@@ -259,7 +271,7 @@ export function useBusinessSimulation(
       flushPositions();
       sim.stop();
     };
-  }, [entities, semanticLinks, anchors, importanceMax, onTick, onGrowth, activeIds, settleKey]);
+  }, [entities, semanticLinks, entityAnchors, importanceMax, onTick, onGrowth, activeIds, settleKey]);
 
   return { newbornAt: newbornAtRef.current };
 }

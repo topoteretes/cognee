@@ -35,7 +35,8 @@ def _tables():
             "foreign_keys": [
                 {"column": "customer_id", "ref_table": "customers", "ref_column": "id"}
             ],
-            "dlt_db_name": "shop",
+            "primary_key": "id",
+            "row_count": 1,
         }
     }
 
@@ -53,7 +54,7 @@ def _row_records():
                     "column": "customer_id",
                 }
             ],
-            "column_values": {},
+            "column_values": {"status": "active"},
         }
     ]
 
@@ -138,3 +139,165 @@ async def test_emit_passes_uuid_node_ids_in_edge_tuples(monkeypatch):
     for source_id, target_id, _name, _attrs in [*graph_edges, *ledger_edges]:
         assert isinstance(source_id, UUID), f"str source id would crash the ledger: {source_id!r}"
         assert isinstance(target_id, UUID), f"str target id would crash the ledger: {target_id!r}"
+
+
+@pytest.mark.asyncio
+async def test_tables_of_one_name_from_two_sources_are_separate_nodes(monkeypatch):
+    """Each source's table node keeps its own keys, names its database, links to
+    that database's source document, and its rows point at it."""
+    graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
+    _wire(monkeypatch, graph, {"source_ref_key": None, "pipeline_run_id": None})
+    shop, crm = str(uuid4()), str(uuid4())
+    orders = _tables()["orders"]
+    tables = {
+        f"{shop}:orders": {
+            **orders,
+            "name": "orders",
+            "scope": shop,
+            "source_label": "shop.sqlite",
+        },
+        f"{crm}:orders": {
+            **orders,
+            "name": "orders",
+            "scope": crm,
+            "source_label": "crm",
+            "foreign_keys": [],
+        },
+    }
+    shop_row, crm_row = str(uuid4()), str(uuid4())
+    row_records = [
+        {"source_id": shop_row, "table_name": "orders", "scope": shop, "fk_references": []},
+        {"source_id": crm_row, "table_name": "orders", "scope": crm, "fk_references": []},
+    ]
+
+    await emit_dlt_schema_graph(tables, row_records, _ctx())
+
+    nodes = graph.add_nodes.await_args.args[0]
+    table_nodes = {node.id: node for node in nodes if type(node).__name__ == "SchemaTable"}
+    shop_table = schema_graph_module._table_node_id("orders", shop)
+    crm_table = schema_graph_module._table_node_id("orders", crm)
+    assert set(table_nodes) == {shop_table, crm_table}
+    assert table_nodes[shop_table].foreign_keys != table_nodes[crm_table].foreign_keys
+    assert table_nodes[shop_table].description == (
+        "Relational table 'orders' from shop.sqlite with 1 rows, loaded through dlt."
+    )
+    assert "from crm with" in table_nodes[crm_table].description
+
+    edges = graph.add_edges.await_args.args[0]
+    row_of = {(str(source), target) for source, target, name, _ in edges if name == "is_row_of"}
+    assert row_of == {(shop_row, shop_table), (crm_row, crm_table)}
+    table_of = {(source, str(target)) for source, target, name, _ in edges if name == "is_table_of"}
+    assert table_of == {(shop_table, shop), (crm_table, crm)}
+
+
+@pytest.mark.asyncio
+async def test_ontology_alignment_sees_each_table_under_its_database_qualified_name(monkeypatch):
+    """Tables are keyed ``"{source}:{name}"`` and their node ids by ``(scope, name)``;
+    the ontology alignment must be handed every table's own node id (regression:
+    KeyError on scoped tables), named by its database when the source names one."""
+    graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
+    _wire(monkeypatch, graph, {"source_ref_key": None, "pipeline_run_id": None})
+    seen = []
+
+    def fake_align(table_names, resolver, authoritative_sources):
+        seen.extend(table_names.items())
+        return [], []
+
+    monkeypatch.setattr(schema_graph_module, "align_tables_with_ontology", fake_align)
+    shop, crm = str(uuid4()), str(uuid4())
+    orders = _tables()["orders"]
+    tables = {
+        f"{shop}:orders": {**orders, "name": "orders", "scope": shop},
+        f"{crm}:orders": {**orders, "name": "orders", "scope": crm, "source_label": "crm"},
+    }
+
+    await emit_dlt_schema_graph(tables, [], _ctx())
+
+    assert seen == [
+        (schema_graph_module._table_node_id("orders", shop), "orders"),
+        (schema_graph_module._table_node_id("orders", crm), "crm.orders"),
+    ]
+
+
+def _order_resolver():
+    """An ontology whose only class is ``Order``."""
+    from rdflib import OWL, RDF, Graph, Namespace
+
+    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+
+    ontology = Graph()
+    ontology.add((Namespace("http://example.org/shop#").Order, RDF.type, OWL.Class))
+    resolver = RDFLibOntologyResolver(ontology_file=None)
+    resolver.graph = ontology
+    resolver.build_lookup()
+    return resolver
+
+
+@pytest.mark.asyncio
+async def test_the_given_resolver_and_sources_align_the_tables(monkeypatch):
+    """The DLT path uses the ontology arguments it is handed and reads no environment."""
+    graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
+    _wire(monkeypatch, graph, {"source_ref_key": None, "pipeline_run_id": None})
+
+    await emit_dlt_schema_graph(
+        _tables(),
+        [],
+        _ctx(),
+        ontology_resolver=_order_resolver(),
+        authoritative_sources={"orders": "ops"},
+    )
+
+    edges = graph.add_edges.await_args.args[0]
+    realizes = [props for _, _, name, props in edges if name == "realizes"]
+    assert [(props["authoritative"], props["owner"]) for props in realizes] == [(True, "ops")]
+
+
+@pytest.mark.asyncio
+async def test_a_database_qualified_source_marks_only_that_databases_table(monkeypatch):
+    """Two databases both hold ``orders``; ``crm.orders`` names one of them."""
+    graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
+    _wire(monkeypatch, graph, {"source_ref_key": None, "pipeline_run_id": None})
+    shop, crm = str(uuid4()), str(uuid4())
+    orders = _tables()["orders"]
+    tables = {
+        f"{shop}:orders": {**orders, "name": "orders", "scope": shop, "source_label": "shop.db"},
+        f"{crm}:orders": {**orders, "name": "orders", "scope": crm, "source_label": "crm"},
+    }
+
+    await emit_dlt_schema_graph(
+        tables,
+        [],
+        _ctx(),
+        ontology_resolver=_order_resolver(),
+        authoritative_sources={"crm.orders": "ops"},
+    )
+
+    edges = graph.add_edges.await_args.args[0]
+    authority = {
+        source: (props["authoritative"], props["owner"])
+        for source, _, name, props in edges
+        if name == "realizes"
+    }
+    assert authority == {
+        schema_graph_module._table_node_id("orders", shop): (False, None),
+        schema_graph_module._table_node_id("orders", crm): (True, "ops"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_dlt_tasks_hand_cognifys_ontology_to_the_edge_task():
+    from cognee.api.v1.cognify.cognify import get_dlt_tasks
+
+    resolver = object()
+    tasks = await get_dlt_tasks(
+        config={
+            "ontology_config": {
+                "ontology_resolver": resolver,
+                "authoritative_sources": {"orders": None},
+            }
+        }
+    )
+
+    edge_task = next(t for t in tasks if t.executable.__name__ == "extract_dlt_source_edges")
+    assert edge_task.default_params["kwargs"]["ontology_resolver"] is resolver
+    assert edge_task.default_params["kwargs"]["authoritative_sources"] == {"orders": None}

@@ -7,7 +7,6 @@ are user-chosen and descriptive, so `send_telemetry` replaces each one with a
 marked uuid5 fingerprint; dataset ids pass through.
 """
 
-import asyncio
 from typing import Any
 from uuid import NAMESPACE_OID, uuid5
 
@@ -80,17 +79,13 @@ def test_sanitizer_still_fingerprints_a_uuid_shaped_string_value():
 async def test_send_telemetry_ships_fingerprints_not_names(monkeypatch, event_name):
     payloads: list[dict[str, Any]] = []
 
-    async def capture(payload: dict[str, Any]) -> None:
-        payloads.append(payload)
-
     monkeypatch.setenv("ENV", "prod")
     monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
-    monkeypatch.setattr(utils, "_send_telemetry_request", capture)
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", payloads.append)
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "anon")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "persistent")
 
     utils.send_telemetry(event_name, None, additional_properties={"datasets": NAMES})
-    await asyncio.sleep(0)
 
     assert len(payloads) == 1
     assert payloads[0]["properties"]["datasets"] == FINGERPRINTS
@@ -146,17 +141,13 @@ async def test_send_telemetry_ships_a_fingerprint_for_a_single_dataset_name(
 ):
     payloads: list[dict[str, Any]] = []
 
-    async def capture(payload: dict[str, Any]) -> None:
-        payloads.append(payload)
-
     monkeypatch.setenv("ENV", "prod")
     monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
-    monkeypatch.setattr(utils, "_send_telemetry_request", capture)
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", payloads.append)
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "anon")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "persistent")
 
     utils.send_telemetry(event_name, None, additional_properties={key: NAMES[0]})
-    await asyncio.sleep(0)
 
     assert payloads[0]["properties"][key] == FINGERPRINTS[0]
     assert NAMES[0] not in repr(payloads[0])

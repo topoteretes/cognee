@@ -45,6 +45,7 @@ def _unified(vector):
         vector=vector,
         graph=SimpleNamespace(
             is_empty=AsyncMock(return_value=False),
+            get_filtered_graph_data=AsyncMock(return_value=([], [])),
             get_neighborhood=AsyncMock(return_value=([], [])),
         ),
     )

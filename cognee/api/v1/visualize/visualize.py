@@ -15,6 +15,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets, get_datasets_graph_counts
 from cognee.modules.data.models import Data
+from cognee.modules.engine.models.node_set import parse_node_set_names
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models.User import User
@@ -385,35 +386,6 @@ async def build_brains_payload(
     return payload
 
 
-def _parse_node_set(raw: Any) -> list[str]:
-    """The node set names on one ``Data`` row, defensively.
-
-    ``Data.node_set`` is written by ingestion as ``json.dumps(list)`` — a JSON
-    string inside a JSON column — so the value read back is normally a string
-    holding a list. A row written or migrated by anything else could hold the
-    list itself, a bare name, or something unusable; none of those may break an
-    overview of every dataset a user can read, so each degrades to what it can
-    contribute instead of raising.
-
-    Order is preserved: it is the order ``classify_documents`` joins the names
-    in to build the graph's ``source_node_set`` value, which is what the node
-    set color map is keyed by.
-    """
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except ValueError:
-            return [raw.strip()] if raw.strip() else []
-
-    if isinstance(raw, str):
-        return [raw.strip()] if raw.strip() else []
-
-    if not isinstance(raw, (list, tuple)):
-        return []
-
-    return [name.strip() for name in raw if isinstance(name, str) and name.strip()]
-
-
 async def _fetch_dataset_node_sets(dataset_ids: list[UUID]) -> dict[UUID, list[list[str]]]:
     """Every dataset's node sets, one entry per ingested document, in one query.
 
@@ -444,7 +416,7 @@ async def _fetch_dataset_node_sets(dataset_ids: list[UUID]) -> dict[UUID, list[l
 
     node_sets: dict[UUID, list[list[str]]] = defaultdict(list)
     for dataset_id, raw in rows:
-        names = _parse_node_set(raw)
+        names = parse_node_set_names(raw)
         if names:
             node_sets[dataset_id].append(names)
 
@@ -521,13 +493,10 @@ async def build_brains_summary_payload(user: User | None = None) -> dict:
 
 
 def _as_naive_utc(value: datetime) -> datetime:
-    """Normalize to match the write side.
+    """Normalize cursors and event times to UTC for comparison.
 
-    ``SessionQAEntry.time`` is always ``datetime.utcnow().isoformat()`` —
-    naive, UTC. A ``since`` sent with a timezone offset compares fine against
-    another aware datetime, but not against those naive strings once parsed
-    back, so it is converted here rather than left to fail the comparison
-    below with a raised ``TypeError`` at an unexpected place.
+    Events may contain legacy naive UTC timestamps or timezone-aware ones.
+    Normalize both sides without changing the timestamp returned as the cursor.
     """
     if value.tzinfo is not None:
         return value.astimezone(timezone.utc).replace(tzinfo=None)
@@ -539,7 +508,7 @@ def _event_time(event: dict[str, Any]) -> datetime | None:
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(raw)
+        return _as_naive_utc(datetime.fromisoformat(raw))
     except ValueError:
         return None
 

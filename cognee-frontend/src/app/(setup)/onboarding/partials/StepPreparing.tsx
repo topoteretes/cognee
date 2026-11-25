@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import TetrisBackground from "@/ui/elements/Auth/TetrisBackground";
+import PodUnreachableCard from "@/ui/elements/PodUnreachableCard";
 import { GraphBuildingAnimation } from "./GraphBuildingAnimation";
 import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
 
@@ -37,7 +38,7 @@ function PreparingChecklistItem({ label, done }: { label: string; done: boolean 
 
 export function StepPreparing({ onReady }: { onReady: () => void }) {
   const { cogniInstance, apiKey } = useCogniInstance();
-  const { tenantReady } = useTenant();
+  const { tenantReady, podUnreachable, wakeState, currentName } = useTenant();
   const [elapsedMs, setElapsedMs] = useState(0);
   const track = useOnboardingTrackEvent();
   const completedTracked = useRef(false);
@@ -64,6 +65,18 @@ export function StepPreparing({ onReady }: { onReady: () => void }) {
   }, []);
 
   const takingLonger = elapsedMs > 30_000;
+
+  // tenantReady never flips once the readiness poll has given up, so waiting
+  // on it alone left this spinner up for good (CLO-1276, where one early 401
+  // ended the poll; a key still rejected after AUTH_SYNC_GRACE_MS, or a spent
+  // budget, still does). Show the terminal state with its retry instead.
+  if (podUnreachable) {
+    return (
+      <div style={{ minHeight: "100vh", backgroundColor: "#000000", display: "flex", alignItems: "center", justifyContent: "center", padding: "56px 24px", boxSizing: "border-box" }}>
+        <PodUnreachableCard pageName="Onboarding" wakeFailed={wakeState === "failed"} workspaceName={currentName} />
+      </div>
+    );
+  }
 
   return (
     <div style={{

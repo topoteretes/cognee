@@ -1,69 +1,38 @@
-"""Slack OAuth v2 install flow: authorize URL, signed state, code exchange.
+"""Slack OAuth v2 install flow: authorize URL and code exchange.
 
 https://docs.slack.dev/authentication/installing-with-oauth
 
-The ``state`` parameter is the CSRF defense AND the connecting-user binding:
-it is minted only for the authenticated cognee user who initiated the
-install, carries ``user_id:expiry`` signed with an HMAC, and the callback
-trusts nothing else — the callback itself is necessarily unauthenticated (the
-browser arrives from slack.com without a session header), so a valid state is
-the only thing that ties the incoming code back to a cognee user.
-
-The signing/validation mechanics themselves are provider-agnostic and live in
-:mod:`cognee.modules.integrations.oauth_flow`; this module only supplies
-Slack's own signing secret to them, plus everything that IS Slack-specific
-(the authorize/token-exchange endpoints, bot scopes, response shape).
+The ``state`` parameter (the CSRF defense and the connecting-user binding) is the
+integrations router's, signed by :mod:`cognee.modules.integrations.oauth_flow` with a
+key only this server holds; this module is what IS Slack-specific (the
+authorize/token-exchange endpoints, bot scopes, response shape).
 """
 
 from typing import Any
-from uuid import UUID
 
 import aiohttp
 
-from cognee.modules.integrations.oauth_flow import (
-    make_state as _make_state,
-)
-from cognee.modules.integrations.oauth_flow import (
-    sign_state_payload as _sign_state_payload,
-)
-from cognee.modules.integrations.oauth_flow import (
-    validate_state as _validate_state,
-)
+from cognee.modules.integrations.outbound import client_session
 from cognee.modules.integrations.slack.slack_settings import require
 
 _AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
 _ACCESS_URL = "https://slack.com/api/oauth.v2.access"
 
 # History is fetched only for explicitly selected channels. Metadata scopes
-# also let imports verify both bot and connecting-user membership. Existing
-# installations must re-authorize to grant these additional scopes.
+# also let a sync verify both bot and connecting-user membership; users:read renders
+# message authors by name; app_mentions:read and im:history receive ``@cognee`` in
+# channels and DMs; chat:write answers it with ``chat.postEphemeral``; commands is what
+# message shortcuts (Remember this, Forget this) need. Existing installations must
+# re-authorize when this list changes. No other write scope: an unused one only widens
+# what a leaked bot token could do (SDK-832).
 _BOT_SCOPES = (
-    "commands,chat:write,im:write,channels:read,channels:history,groups:read,groups:history"
+    "app_mentions:read,chat:write,commands,im:history,channels:read,"
+    "channels:history,groups:read,groups:history,users:read"
 )
 
 # oauth.v2.access is a synchronous call inside the callback request — cap it so
 # a hanging Slack never ties up a worker.
 _TIMEOUT = aiohttp.ClientTimeout(total=30)
-
-
-def _sign_state(payload: str) -> str:
-    # Keyed with the signing secret — a server-side-only secret Slack also
-    # holds, never exposed to the browser or the URL beyond the HMAC itself.
-    return _sign_state_payload(payload, signing_secret=require("signing_secret"))
-
-
-def make_state(user_id: UUID) -> str:
-    """Mint the CSRF state binding this install to its initiating cognee user."""
-    return _make_state(user_id, signing_secret=require("signing_secret"))
-
-
-def validate_state(state: str) -> UUID | None:
-    """Return the ``user_id`` for a valid, unexpired state; ``None`` otherwise.
-
-    Verifies the HMAC before reading any field, so a forged or tampered state
-    never influences behavior — not even error messages.
-    """
-    return _validate_state(state, signing_secret=require("signing_secret"))
 
 
 def build_authorize_url(state: str) -> str:
@@ -82,7 +51,7 @@ async def exchange_code(code: str) -> dict[str, Any]:
     alone cannot be trusted.
     """
     async with (
-        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        client_session("slack", timeout=_TIMEOUT) as session,
         session.post(
             _ACCESS_URL,
             data={
@@ -91,8 +60,13 @@ async def exchange_code(code: str) -> dict[str, Any]:
                 "code": code,
                 "redirect_uri": require("redirect_uri"),
             },
+            # The body carries the client secret: never let a redirect replay
+            # it to the host a Location header names.
+            allow_redirects=False,
         ) as response,
     ):
+        if response.status != 200:
+            raise RuntimeError(f"Slack oauth.v2.access failed: HTTP {response.status}")
         payload = await response.json()
 
     if not payload.get("ok"):

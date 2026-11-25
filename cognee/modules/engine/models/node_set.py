@@ -1,3 +1,4 @@
+import json
 from typing import Any
 from uuid import UUID
 
@@ -66,3 +67,29 @@ def validate_node_set_names(value: Any) -> list[str] | None:
         except UnicodeEncodeError:
             raise InvalidNodeSetError(f"node_set entry {name!r} cannot be encoded as a name")
     return value
+
+
+def parse_node_set_names(raw: Any) -> list[str]:
+    """The node set names a stored ``Data.node_set`` value holds, defensively.
+
+    Ingestion writes ``json.dumps(list)`` into the JSON column, so the value read
+    back is normally a string holding a list. A row written or migrated by
+    anything else could hold the list itself, a bare name, or something
+    unusable; each degrades to the names it can contribute instead of raising.
+    Names are stripped and order is preserved: it is the order
+    ``classify_documents`` joins them in to build the graph's ``source_node_set``
+    value, which the visualization's node set color map is keyed by.
+    """
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return [raw.strip()] if raw.strip() else []
+
+    if isinstance(raw, str):
+        return [raw.strip()] if raw.strip() else []
+
+    if not isinstance(raw, (list, tuple)):
+        return []
+
+    return [name.strip() for name in raw if isinstance(name, str) and name.strip()]

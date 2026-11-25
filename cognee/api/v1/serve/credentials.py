@@ -19,6 +19,9 @@ class CloudCredentials:
 
     service_url: str = ""
     api_key: str = ""
+    # Tenant the instance's /api/v1/users/me reported at connect time (on
+    # Cognee Cloud, the control-plane tenants.id). Read by telemetry.
+    tenant_id: str = ""
 
 
 def get_credentials_path() -> Path:

@@ -1,8 +1,6 @@
 import asyncio
 import os
 
-import litellm
-
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from cognee.shared.logging_utils import get_logger
@@ -120,6 +118,10 @@ def get_model_max_completion_tokens(model_name: str) -> int | None:
 
         Number of max tokens of model, or None if model is unknown
     """
+    # Imported here, not at module scope: this module is on the ``import cognee``
+    # path and litellm (with the OpenAI SDK behind it) is half of that import.
+    import litellm
+
     max_completion_tokens: int | None = None
 
     if model_name in litellm.model_cost:
@@ -174,16 +176,23 @@ async def test_llm_connection() -> None:
     """
     Test connectivity to the LLM endpoint using a simple completion call.
     """
+    from litellm.exceptions import AuthenticationError
+
+    # Imported here: this module loads during cognee's startup, before the
+    # context variables caller_scope depends on can be imported.
+    from cognee.infrastructure.llm.pipeline_stage import caller_scope
+
     try:
         logger.info("Testing connection to LLM endpoint...")
-        await asyncio.wait_for(
-            LLMGateway.acreate_structured_output(
-                text_input="test",
-                system_prompt='Respond to me with the following string: "test"',
-                response_model=str,
-            ),
-            timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
-        )
+        with caller_scope("test_llm_connection"):
+            await asyncio.wait_for(
+                LLMGateway.acreate_structured_output(
+                    text_input="test",
+                    system_prompt='Respond to me with the following string: "test"',
+                    response_model=str,
+                ),
+                timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
+            )
     except asyncio.TimeoutError:
         msg = (
             f"LLM connection test timed out after {CONNECTION_TEST_TIMEOUT_SECONDS}s. "
@@ -192,7 +201,7 @@ async def test_llm_connection() -> None:
         )
         logger.error(msg)
         raise TimeoutError(msg)
-    except litellm.exceptions.AuthenticationError:
+    except AuthenticationError:
         msg = (
             "LLM authentication failed. Check your LLM_API_KEY configuration. "
             "Set COGNEE_SKIP_CONNECTION_TEST=true to bypass this check."
@@ -266,6 +275,14 @@ async def determine_embedding_dimensions(detected_dimensions: int) -> None:
     from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
 
     embedding_config = get_embedding_config()
+    if embedding_config.embedding_dimensions is None:
+        embedding_engine = (await get_vector_engine_async()).embedding_engine
+        if hasattr(embedding_engine, "configured_dimensions"):
+            # The engine learns its vector size itself (embedding_worker) and
+            # already holds it. Writing it into the config would make the next
+            # get_embedding_engine() build a second engine (it is cached by its
+            # arguments) that takes the learned size for EMBEDDING_DIMENSIONS.
+            return
     if embedding_config.embedding_dimensions != detected_dimensions:
         embedding_config.embedding_dimensions = detected_dimensions
 

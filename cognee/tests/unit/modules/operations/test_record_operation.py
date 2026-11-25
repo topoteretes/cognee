@@ -12,6 +12,7 @@ Runs against a real temporary SQLite database — no LLM, no network.
 
 import asyncio
 import importlib
+import sys
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -278,6 +279,47 @@ async def test_operation_rows_are_invisible_to_pipeline_status_readers(ops_engin
     statuses = await get_pipeline_status_mod.get_pipeline_status([dataset_id], "cognify_pipeline")
 
     assert statuses == {str(dataset_id): PipelineRunStatus.DATASET_PROCESSING_COMPLETED}
+
+
+@pytest.mark.asyncio
+async def test_background_improve_cancelled_before_start_persists_one_failed_scrubbed_row(
+    ops_engine, monkeypatch
+):
+    from cognee.infrastructure.background_tasks import wait_for_background_tasks
+    from cognee.tests.unit.api.v1.improve.conftest import FakeStage, ImproveHarness
+
+    harness = ImproveHarness(monkeypatch)
+    harness.use_stages([FakeStage("a")])
+    monkeypatch.setattr(
+        harness.improve_mod, "record_operation", record_operation_mod.record_operation
+    )
+    monkeypatch.setattr(
+        harness.improve_mod, "finish_operation", record_operation_mod.finish_operation
+    )
+    secret = "sk-dummycredential123456789"
+
+    result = await harness.improve(run_in_background=True)
+    result._task.cancel(secret)
+    with pytest.raises(asyncio.CancelledError):
+        await result._task
+    assert await wait_for_background_tasks(timeout=2)
+
+    assert result.finished and result.status == "errored"
+    assert secret not in result.model_dump_json()
+    rows = await _fetch_rows(ops_engine)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.operation_name == "improve"
+    assert row.outcome == "failed"
+    assert row.error_class == "CancelledError"
+    assert secret not in (row.error_message or "")
+    if sys.version_info >= (3, 11):
+        # Python 3.10 does not hand a done callback the cancel message, so the
+        # row has no message to scrub there.
+        assert "[secret]" in row.error_message
+    assert row.dataset_id == harness.dataset.id
+    assert row.user_id == harness.user.id
+    assert row.ended_at is not None
 
 
 @pytest.mark.asyncio

@@ -45,11 +45,13 @@ class SourceRefRemovalResult:
 
     Consumed by session invalidation to find cached answers that used the
     deleted elements. Instances are always truthy — "handled, deleted nothing"
-    must still read as handled.
+    must still read as handled. ``matched`` is whether the refs owned any
+    artifact, deleted or surviving.
     """
 
     deleted_node_ids: list[str] = dataclasses.field(default_factory=list)
     deleted_edges: list[EdgeIdentity] = dataclasses.field(default_factory=list)
+    matched: bool = False
 
 
 def _is_unowned(current_refs: list[str], removed_refs: list[str]) -> bool:
@@ -170,6 +172,7 @@ async def execute_source_ref_removal(
     return SourceRefRemovalResult(
         deleted_node_ids=list(unowned_node_ids),
         deleted_edges=list(unowned_edges),
+        matched=bool(node_data or edge_data),
     )
 
 
@@ -200,13 +203,9 @@ async def _cleanup_orphaned_edge_types(
         return
 
     try:
-        _, remaining_edges = await graph_engine.get_graph_data()
-        remaining_edge_texts: set[str] = set()
-        for edge in remaining_edges:
-            properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
-            edge_text = get_edge_retrieval_text(properties.get("edge_text"), edge[2])
-            if edge_text:
-                remaining_edge_texts.add(edge_text)
+        # Only the deleted texts are asked about: reading every remaining edge to
+        # collect all texts made each delete cost what the whole graph holds.
+        remaining_edge_texts = await graph_engine.find_edge_texts_in_use(sorted(deleted_edge_texts))
 
         orphaned_edge_texts = [
             edge_text for edge_text in deleted_edge_texts if edge_text not in remaining_edge_texts

@@ -90,7 +90,6 @@ def case(request, monkeypatch):
     monkeypatch.setattr(settings, "client_id", "client-id")
     monkeypatch.setattr(settings, "client_secret", "client-secret")
     monkeypatch.setattr(settings, "redirect_uri", "http://localhost:8000/callback")
-    monkeypatch.setattr(settings, "state_secret", "state-secret")
     monkeypatch.setattr(settings, "frontend_base_url", "http://localhost:3000")
     return request.param
 
@@ -210,14 +209,13 @@ def test_a_response_without_a_subject_is_refused(case):
         case.integration_cls().parse_installation({"access_token": "a", "userinfo": {}})
 
 
-def test_the_state_secret_and_frontend_url_come_from_this_providers_settings(case, monkeypatch):
+def test_the_frontend_url_comes_from_this_providers_settings(case, monkeypatch):
     integration = case.integration_cls()
-    assert integration.state_signing_secret() == "state-secret"
     assert integration.frontend_base_url() == "http://localhost:3000"
 
-    monkeypatch.setattr(case.settings, "state_secret", "")
-    with pytest.raises(RuntimeError, match=f"{case.env_prefix}STATE_SECRET is not configured"):
-        integration.state_signing_secret()
+    monkeypatch.setattr(case.settings, "frontend_base_url", "")
+    with pytest.raises(RuntimeError, match=f"{case.env_prefix}FRONTEND_BASE_URL is not configured"):
+        integration.frontend_base_url()
 
 
 # --- refresh ---

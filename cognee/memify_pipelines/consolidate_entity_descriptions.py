@@ -54,7 +54,8 @@ async def consolidate_entity_descriptions_pipeline(
     """Rewrite Entity descriptions from their graph neighborhood, then summarize
     each EntityType from its member Entities and write is_a edge text.
 
-    Deprecated: use ``improve(review_conflicts=True)`` for Entity descriptions.
+    Deprecated: ``improve()`` reviews facts instead (on by default) and leaves
+    descriptions as extracted.
 
     Every size/budget cap below is a defensive backstop against pathological
     inputs (an unusually long description, an over-connected entity, a huge
@@ -103,7 +104,7 @@ async def consolidate_entity_descriptions_pipeline(
     """
     warnings.warn(
         "consolidate_entity_descriptions_pipeline is deprecated; "
-        "use improve(review_conflicts=True)",
+        "improve() reviews conflicts by default",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -126,7 +127,8 @@ async def consolidate_entity_descriptions_pipeline(
             max_completion_tokens=type_description_max_completion_tokens,
             tokens_per_is_a_line=type_tokens_per_is_a_line,
         ),
-        Task(add_data_points),
+        # The descriptions are rewritten on purpose, so stored entities are replaced.
+        Task(add_data_points, replace_nodes=True),
     ]
 
     result = await run_memify_tasks(

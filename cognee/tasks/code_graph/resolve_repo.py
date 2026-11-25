@@ -29,8 +29,6 @@ logger = get_logger("code_graph")
 
 _REMOTE_PREFIXES = ("https://", "http://", "git@", "ssh://")
 
-_FALSEY = {"false", "0", "no", "off"}
-
 _GIT_TIMEOUT_SECONDS = 600
 
 # github.com / gitlab.com repository roots are detected by shape; any other
@@ -218,20 +216,40 @@ def check_branch_name(branch) -> None:
         raise ValueError(f"Invalid branch name {branch!r}: {reason}.")
 
 
-def _credential_env(token: str) -> dict:
+def _credential_env(token: str, url: str) -> dict:
     """Auth for git over https, injected as environment-level git config.
 
     The environment channel (git >= 2.31) keeps the token out of argv (which
     any local process can read from the process listing), out of every
     URL-shaped string (so nothing derived from the URL can leak it into
     logs or error messages), and out of the on-disk remote config.
+
+    The header is scoped to the origin of the credential-free ``url``
+    (``http.<origin>/.extraHeader``): git and git-lfs send it only to that
+    host, never to another server a request ends up at.
     """
+    parts = urlsplit(url)
+    # netloc, not hostname: hostname drops an IPv6 literal's brackets, which git needs.
+    origin = f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}"
     basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
     return {
         "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": "http.extraHeader",
+        "GIT_CONFIG_KEY_0": f"http.{origin}/.extraHeader",
         "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}",
     }
+
+
+# Git LFS is disabled for every git command cognee runs: an LFS file is left
+# as its small pointer file.
+_LFS_OFF_ARGS = (
+    "-c",
+    "filter.lfs.smudge=",
+    "-c",
+    "filter.lfs.process=",
+    "-c",
+    "filter.lfs.required=false",
+)
+_LFS_OFF_ENV = {"GIT_LFS_SKIP_SMUDGE": "1"}
 
 
 async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
@@ -242,9 +260,10 @@ async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tu
         )
     process = await asyncio.create_subprocess_exec(
         git_binary,
+        *_LFS_OFF_ARGS,
         *args,
         cwd=str(cwd) if cwd else None,
-        env={**os.environ, **env} if env else None,
+        env={**os.environ, **_LFS_OFF_ENV, **(env or {})},
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -282,7 +301,9 @@ async def resolve_repo_source(
     Local paths are validated and returned as-is. Remote URLs are cloned with
     ``--depth 1`` into ``clones_dir`` (default :func:`default_clones_dir`); an
     existing clone is reused after a best-effort ``git pull --ff-only``.
-    Remote resolution honors ``ALLOW_HTTP_REQUESTS=false``.
+    Remote resolution follows ``ALLOW_HTTP_REQUESTS``: API calls need an
+    explicit opt-in; other surfaces allow it unless a set value disables it. The
+    refusal names the setting and reports HTTP 403.
 
     ``branch`` clones that branch instead of the remote's default, into a directory of
     its own (see :func:`_clone_slug`); reusing it fetches and resets, which follows a
@@ -322,11 +343,15 @@ async def resolve_repo_source(
             )
         return path
 
-    if os.getenv("ALLOW_HTTP_REQUESTS", "true").strip().lower() in _FALSEY:
-        raise CodeRepositoryError(
-            message="Cannot clone a remote repository: outbound HTTP requests are "
-            "disabled (ALLOW_HTTP_REQUESTS=false). Clone it yourself and pass the local path."
-        )
+    from cognee.tasks.web_scraper.ssrf_protection import (
+        SSRFProtectionError,
+        require_http_requests_allowed,
+    )
+
+    try:
+        require_http_requests_allowed()
+    except SSRFProtectionError as error:
+        raise CodeRepositoryError(message=error.message, status_code=error.status_code) from error
 
     url = str(spec)
 
@@ -343,16 +368,14 @@ async def resolve_repo_source(
     # execute) never reach here -- they do not match _REMOTE_PREFIXES and are handled
     # as local paths above.
     if url.lower().startswith(("http://", "https://")):
-        from cognee.tasks.web_scraper.ssrf_protection import (
-            SSRFProtectionError,
-            validate_outbound_url,
-        )
+        from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
 
         try:
             await validate_outbound_url(url)
         except SSRFProtectionError as error:
             raise CodeRepositoryError(
-                message=f"Refusing to clone '{redact_repo_spec(url)}': {error}"
+                message=f"Refusing to clone '{redact_repo_spec(url)}': {error.message}",
+                status_code=error.status_code,
             ) from error
 
     # Slug, remote, logs, and errors all use the credential-free URL: tokens
@@ -369,7 +392,7 @@ async def resolve_repo_source(
             text = text.replace(url, clean_url)
         return re.sub(r"://[^/\s@]+@", "://", text)
 
-    auth_env = _credential_env(credentials) if credentials else None
+    auth_env = _credential_env(credentials, clean_url) if credentials else None
 
     base = Path(clones_dir) if clones_dir else default_clones_dir()
     target = clone_dir(clean_url, branch, base)

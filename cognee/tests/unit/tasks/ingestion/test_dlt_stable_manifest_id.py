@@ -41,11 +41,15 @@ def _incremental_run(monkeypatch, completed=True):
         }
         if completed
         else {},
+        name="row",
+        label=None,
+        external_metadata={},
     )
 
     session = MagicMock()
     result = MagicMock()
     result.scalar_one_or_none.return_value = data_point
+    result.scalars.return_value.all.return_value = [data_point]
     session.execute = AsyncMock(return_value=result)
     session.merge = AsyncMock()
     session.commit = AsyncMock()

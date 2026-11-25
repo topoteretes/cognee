@@ -54,7 +54,7 @@ def text_pdf(
 
 
 VALID = text_pdf()
-# pypdf raises KeyError, NotImplementedError and AttributeError on these.
+# pypdf raises on each of these; the exception kind varies by pypdf release.
 CORRUPT_PDFS = {
     "font without descendants": text_pdf(font=TYPE0_FONT_WITHOUT_DESCENDANTS),
     "unsupported filter": text_pdf(stream_filter=b"/Filter/Fl?teDecode"),

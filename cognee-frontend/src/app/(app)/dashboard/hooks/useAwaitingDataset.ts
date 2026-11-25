@@ -4,7 +4,11 @@ import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
-import pollDatasetStatus, { DatasetProcessingError } from "@/modules/datasets/pollDatasetStatus";
+import pollDatasetStatus, {
+  DatasetProcessingError,
+  InsufficientCreditsProcessingError,
+} from "@/modules/datasets/pollDatasetStatus";
+import { INSUFFICIENT_CREDITS_PROCESSING_MESSAGE } from "@/app/(app)/datasets/processingErrorMessage";
 import { datasetStatusQueryKey } from "@/modules/datasets/useDatasetStatuses";
 import { getAwaitingDataset, clearAwaitingDataset } from "@/utils/browserStorage";
 
@@ -57,15 +61,17 @@ export function useAwaitingDataset(): boolean {
       .finally(() => queryClient.invalidateQueries({ queryKey: datasetStatusQueryKey(tenant?.tenant_id) }))
       .then(clear, (err: unknown) => {
         // The dashboard must unblock either way, but a failed pipeline is not
-        // a silent event — the user was told their brain is being prepared.
+        // a silent event — the user was told their dataset is being prepared.
         if (!cancelled && !gaveUpEarly) {
           notifications.show({
             color: "red",
-            title: "Brain processing failed",
+            title: err instanceof InsufficientCreditsProcessingError ? "Out of LLM budget" : "Dataset processing failed",
             message:
-              err instanceof DatasetProcessingError
-                ? "Your brain could not be processed. Try uploading it again."
-                : "We could not confirm your brain finished processing. Check the Brain page for its status.",
+              err instanceof InsufficientCreditsProcessingError
+                ? INSUFFICIENT_CREDITS_PROCESSING_MESSAGE
+                : err instanceof DatasetProcessingError
+                ? "Your dataset could not be processed. Try uploading it again."
+                : "We could not confirm your dataset finished processing. Check the Datasets page for its status.",
           });
         }
         clear();

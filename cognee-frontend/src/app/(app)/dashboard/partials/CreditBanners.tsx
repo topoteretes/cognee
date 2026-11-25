@@ -1,9 +1,7 @@
 "use client";
 
 interface CreditBannersProps {
-  creditsSpentPct: number | null;
   creditsRemainingUsd: number | null;
-  showCreditPctBanner: boolean;
   showLowBalanceBanner: boolean;
   showVoucherBanner: boolean;
   onDismiss: () => void;
@@ -30,56 +28,15 @@ const CLOSE_ICON = (
  * by the parent hook (useCreditsBanner) — only one show-flag will be true.
  */
 export function CreditBanners({
-  creditsSpentPct,
   creditsRemainingUsd,
-  showCreditPctBanner,
   showLowBalanceBanner,
   showVoucherBanner,
   onDismiss,
   isOwner,
 }: CreditBannersProps): React.ReactElement | null {
-  if (showCreditPctBanner && creditsSpentPct !== null) {
-    const isOut = creditsSpentPct >= 100;
-    const accent = isOut ? "#EF4444" : "#EAB308";
-    const textColor = isOut ? "#FCA5A5" : "#FDE047";
-    return (
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        gap: 12, flexWrap: "wrap",
-        background: isOut ? "rgba(239,68,68,0.10)" : "rgba(234,179,8,0.10)",
-        border: `1px solid ${isOut ? "rgba(239,68,68,0.30)" : "rgba(234,179,8,0.30)"}`,
-        borderRadius: 0, padding: "12px 16px",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: accent }}>{WARN_ICON}</span>
-          <span style={{ fontSize: 13, color: textColor }}>
-            {isOut
-              ? "Your workspace has used all available credits. Agent requests may fail."
-              : `Your workspace has used ${creditsSpentPct}% of available credits.`}
-          </span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          {isOwner ? (
-            <a href="/billing" style={{ fontSize: 13, fontWeight: 500, color: textColor, textDecoration: "underline", textUnderlineOffset: 3 }}>
-              Top up credits →
-            </a>
-          ) : (
-            <span style={{ fontSize: 13, color: "rgba(237,236,234,0.5)" }}>Ask the workspace owner to top up.</span>
-          )}
-          <button
-            onClick={onDismiss}
-            aria-label="Dismiss"
-            style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "rgba(237,236,234,0.4)", lineHeight: 1 }}
-          >
-            {CLOSE_ICON}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (showLowBalanceBanner) {
-    const balanceLabel = creditsRemainingUsd !== null ? `$${creditsRemainingUsd.toFixed(2)}` : "below $1";
+  if (showLowBalanceBanner && creditsRemainingUsd !== null) {
+    const balanceLabel = `$${creditsRemainingUsd.toFixed(2)}`;
+    const failureLabel = creditsRemainingUsd <= 0 ? "will fail" : "may fail";
     return (
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -91,7 +48,7 @@ export function CreditBanners({
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ color: "#EF4444" }}>{WARN_ICON}</span>
           <span style={{ fontSize: 13, color: "#FCA5A5" }}>
-            Your workspace credit balance is {balanceLabel}. Agent requests may fail.
+            Your workspace credit balance is {balanceLabel}. Agent requests {failureLabel}.
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>

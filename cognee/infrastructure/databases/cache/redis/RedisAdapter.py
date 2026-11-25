@@ -18,6 +18,11 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("RedisAdapter")
 
 
+def _escape_glob(text: str) -> str:
+    """Escape Redis MATCH pattern characters so ``text`` matches only itself."""
+    return "".join("\\" + char if char in "*?[]\\" else char for char in text)
+
+
 class RedisAdapter(CacheDBInterface):
     """Redis-backed cache adapter for session QA, trace storage, and coordination."""
 
@@ -116,14 +121,17 @@ class RedisAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        time: str | None = None,
+        prompt_time: str | None = None,
     ) -> dict:
         """Serialize one QA entry into the normalized Redis payload shape."""
         entry = SessionQAEntry(
-            time=datetime.now(timezone.utc).isoformat(),
+            time=time or datetime.now(timezone.utc).isoformat(),
             question=question,
             context=context,
             answer=answer,
             qa_id=qa_id or str(uuid.uuid4()),
+            prompt_time=prompt_time or "",
             feedback_text=feedback_text,
             feedback_score=feedback_score,
             used_graph_element_ids=used_graph_element_ids,
@@ -143,6 +151,7 @@ class RedisAdapter(CacheDBInterface):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        time: str | None = None,
     ) -> dict:
         """Serialize one agent-trace step into the normalized Redis payload shape."""
         entry = SessionAgentTraceEntry(
@@ -155,6 +164,7 @@ class RedisAdapter(CacheDBInterface):
             method_return_value=method_return_value,
             error_message=error_message,
             session_feedback=session_feedback,
+            time=time or datetime.now(timezone.utc).isoformat(),
         )
         return entry.model_dump()
 
@@ -167,11 +177,23 @@ class RedisAdapter(CacheDBInterface):
         """Overwrite a single serialized entry in-place within a Redis list."""
         await self.async_redis.lset(session_key, index, json.dumps(entry_dump))
 
-    async def _rewrite_entries(self, session_key: str, entries: list) -> None:
-        """Replace the full Redis list contents for a session key."""
-        await self.async_redis.delete(session_key)
-        for entry in entries:
-            await self.async_redis.rpush(session_key, json.dumps(entry))
+    async def _delete_entries(self, key: str, field: str, value: str) -> bool:
+        """Remove every entry whose ``field`` is ``value``; False when none is stored.
+
+        Each LREM removes one stored element in place, so a reader never sees the list
+        half rewritten. An entry an update rewrote after the read is read again.
+        """
+        removed = False
+        while True:
+            stored = await self.async_redis.lrange(key, 0, -1)
+            matching = [raw for raw in stored if json.loads(raw).get(field) == value]
+            if not matching:
+                break
+            for raw in matching:
+                removed = bool(await self.async_redis.lrem(key, 0, raw)) or removed
+        if removed and stored:
+            await self._apply_session_ttl(key)
+        return removed
 
     async def _apply_session_ttl(self, session_key: str) -> None:
         """Refresh the configured TTL for a session-scoped Redis key."""
@@ -293,6 +315,8 @@ class RedisAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        time: str | None = None,
+        prompt_time: str | None = None,
     ) -> None:
         """
         Add a Q/A/context triplet to a Redis list for this session.
@@ -310,6 +334,8 @@ class RedisAdapter(CacheDBInterface):
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
                 used_session_context_ids=used_session_context_ids,
+                time=time,
+                prompt_time=prompt_time,
             )
             await self.async_redis.rpush(session_key, json.dumps(qa_entry))
             await self._apply_session_ttl(session_key)
@@ -447,16 +473,9 @@ class RedisAdapter(CacheDBInterface):
         Returns True if deleted, False if qa_id not found.
         """
         try:
-            session_key = self._session_key(user_id, session_id)
-            entries = await self._load_entries(session_key)
-            idx = self._find_index_by_qa_id(entries, qa_id)
-            if idx is None:
-                return False
-            entries.pop(idx)
-            await self._rewrite_entries(session_key, entries)
-            if entries:
-                await self._apply_session_ttl(session_key)
-            return True
+            return await self._delete_entries(
+                self._session_key(user_id, session_id), "qa_id", qa_id
+            )
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while deleting Q&A: {e!s}"
             logger.error(error_msg)
@@ -488,6 +507,56 @@ class RedisAdapter(CacheDBInterface):
             error_msg = f"Unexpected error while deleting session from Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
+
+    async def delete_sessions(self, sessions: list[tuple[str, str]]) -> list[bool]:
+        """Delete each session's QA, trace and context keys in one pipelined round trip."""
+        if not sessions:
+            return []
+        try:
+            pipe = self.async_redis.pipeline(transaction=False)
+            for user_id, session_id in sessions:
+                pipe.delete(
+                    self._session_key(user_id, session_id),
+                    self._agent_trace_key(user_id, session_id),
+                    self._session_context_key(user_id, session_id),
+                )
+            return [deleted > 0 for deleted in await pipe.execute()]
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while deleting sessions: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting sessions from Redis: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def list_session_ids(self, user_id: str) -> list[str]:
+        """Every session id with a QA, trace or session-context key for the user."""
+        prefixes = [
+            key_for(user_id, "")
+            for key_for in (self._session_key, self._agent_trace_key, self._session_context_key)
+        ]
+        session_ids: set[str] = set()
+        try:
+            # SCAN walks the whole keyspace whatever MATCH says, so one walk for all three
+            # kinds; count is keys per round trip (default 10), not a cap on the result.
+            match = "*:" + _escape_glob(f"{user_id}:") + "*"
+            async for key in self.async_redis.scan_iter(match=match, count=1000):
+                key = key.decode() if isinstance(key, bytes) else key
+                for prefix in prefixes:
+                    if key.startswith(prefix):
+                        session_ids.add(key[len(prefix) :])
+                        break
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while listing sessions: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while listing sessions from Redis: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        session_ids.discard("")
+        return list(session_ids)
 
     async def get_value(self, key: str) -> str | None:
         """Retrieve a raw string value stored under the given key, or None if absent."""
@@ -533,6 +602,21 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
+    async def delete_values(self, keys: list[str]) -> None:
+        """Delete the values stored under the given keys in one call."""
+        if not keys:
+            return
+        try:
+            await self.async_redis.delete(*keys)
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while deleting values: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting values from Redis: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
     async def append_agent_trace_step(
         self,
         user_id: str,
@@ -546,6 +630,7 @@ class RedisAdapter(CacheDBInterface):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        time: str | None = None,
     ) -> None:
         """Append one trace step to the Redis list for this trace session."""
         try:
@@ -560,6 +645,7 @@ class RedisAdapter(CacheDBInterface):
                 method_return_value=method_return_value,
                 error_message=error_message,
                 session_feedback=session_feedback,
+                time=time,
             )
             await self.async_redis.rpush(trace_key, json.dumps(trace_entry))
             await self._apply_session_ttl(trace_key)
@@ -573,7 +659,12 @@ class RedisAdapter(CacheDBInterface):
             raise CacheConnectionError(error_msg) from e
 
     async def get_agent_trace_session(
-        self, user_id: str, session_id: str, last_n: int | None = None
+        self,
+        user_id: str,
+        session_id: str,
+        last_n: int | None = None,
+        start: int | None = None,
+        end: int | None = None,
     ) -> list[SessionAgentTraceEntry]:
         """Retrieve stored trace steps for the given session."""
         trace_key = self._agent_trace_key(user_id, session_id)
@@ -581,6 +672,11 @@ class RedisAdapter(CacheDBInterface):
             return [
                 SessionAgentTraceEntry(**entry)
                 for entry in await self._load_entries(trace_key, -last_n, -1)
+            ]
+        if start is not None:
+            return [
+                SessionAgentTraceEntry(**entry)
+                for entry in await self._load_entries(trace_key, start, end - 1)
             ]
         return [SessionAgentTraceEntry(**entry) for entry in await self._load_entries(trace_key)]
 
@@ -646,15 +742,9 @@ class RedisAdapter(CacheDBInterface):
     ) -> bool:
         """Delete a single session-context entry by its "id" field."""
         try:
-            context_key = self._session_context_key(user_id, session_id)
-            entries = await self._load_entries(context_key)
-            surviving = [entry for entry in entries if entry.get("id") != entry_id]
-            if len(surviving) == len(entries):
-                return False
-            await self._rewrite_entries(context_key, surviving)
-            if surviving:
-                await self._apply_session_ttl(context_key)
-            return True
+            return await self._delete_entries(
+                self._session_context_key(user_id, session_id), "id", entry_id
+            )
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while deleting session context entry: {e!s}"
             logger.error(error_msg)

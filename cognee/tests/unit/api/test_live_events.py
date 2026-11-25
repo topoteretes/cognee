@@ -106,6 +106,32 @@ async def test_timezone_aware_since_is_normalized_before_comparing():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("since_text", ["2026-10-23T14:06:01", "2026-10-23T16:06:01+02:00"])
+async def test_mixed_timezone_events_compare_by_instant_and_preserve_cursor(since_text):
+    events = [
+        _event("2026-10-23T14:06:00+00:00"),
+        _event("2026-10-23T16:06:01+02:00"),
+        _event("2026-10-23T14:06:02"),
+        _event("2026-10-23T16:06:03+02:00"),
+    ]
+    ctx_a, ctx_b = _patches(events)
+    with ctx_a, ctx_b:
+        result = await visualize_module.get_live_events(
+            DATASET_ID,
+            since=datetime.fromisoformat(since_text),
+            user=SimpleNamespace(id="test-user"),
+        )
+        repeated = await visualize_module.get_live_events(
+            DATASET_ID,
+            since=datetime.fromisoformat(result["cursor"]),
+            user=SimpleNamespace(id="test-user"),
+        )
+
+    assert result == {"events": events[2:], "cursor": events[-1]["time"]}
+    assert repeated == {"events": [], "cursor": events[-1]["time"]}
+
+
+@pytest.mark.asyncio
 async def test_unauthorized_dataset_raises_permission_denied():
     ctx_a, ctx_b = _patches([], authorized=False)
     with ctx_a, ctx_b, pytest.raises(PermissionDeniedError):

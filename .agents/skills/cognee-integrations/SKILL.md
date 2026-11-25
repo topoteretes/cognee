@@ -18,7 +18,7 @@ Default is OpenAI (`LLM_API_KEY` is all you need). To switch, set
 
 - **Azure OpenAI**: `LLM_PROVIDER=azure`, `LLM_MODEL=azure/gpt-4o-mini`, endpoint + api version required.
 - **Gemini** (no extra needed): `LLM_PROVIDER=gemini`, `LLM_MODEL=gemini/gemini-2.0-flash-exp`.
-- **Anthropic** (`cognee[anthropic]`): `LLM_PROVIDER=anthropic`, model e.g. `claude-3-5-sonnet-20241022`.
+- **Anthropic** (`cognee[anthropic]`): `LLM_PROVIDER=anthropic`, model e.g. `claude-sonnet-5-5`.
 - **Ollama, local** (`cognee[ollama]`): `LLM_PROVIDER=ollama`, `LLM_ENDPOINT=http://localhost:11434/v1`, and set the embedding block + `HUGGINGFACE_TOKENIZER` too.
 - **Custom / OpenRouter / vLLM**: `LLM_PROVIDER=custom` with the provider's OpenAI-compatible endpoint.
 - **AWS Bedrock** (`cognee[aws]`): `LLM_PROVIDER=bedrock` + AWS credentials/region.
@@ -51,7 +51,7 @@ host services with `DB_HOST=host.docker.internal`.
 
 - **S3 storage** (`cognee[aws]`): `STORAGE_BACKEND=s3` + bucket/credentials,
   and point `DATA_ROOT_DIRECTORY`/`SYSTEM_ROOT_DIRECTORY` at `s3://` paths.
-- **Session cache**: `CACHE_BACKEND` = sqlite (default) | postgres | redis | fs | tapes.
+- **Session cache**: `CACHE_BACKEND` = sqlite (default) | postgres | redis | tapes.
 - **Ontologies**: `ONTOLOGY_FILE_PATH` to an OWL file, resolver/matching via
   `ONTOLOGY_RESOLVER` / `MATCHING_STRATEGY`.
 

@@ -640,10 +640,8 @@ def build_site_check_user_message(
 
 
 async def site_check_with_llm(system_prompt: str, user_message: str) -> Any:
-    """One structured LLM call. Same instructor/litellm block as tools/assess_branch_notes.py."""
+    """One structured LLM call. Same NativeLiteLLMAdapter call as tools/assess_branch_notes.py."""
     try:
-        import instructor
-        import litellm
         from pydantic import BaseModel, Field
     except ImportError as exc:
         raise RuntimeError(f"Required dependencies not available: {exc}") from exc
@@ -687,16 +685,15 @@ async def site_check_with_llm(system_prompt: str, user_message: str) -> Any:
         )
 
     try:
-        client = instructor.from_litellm(litellm.acompletion)
-        return await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            response_model=SiteCheck,
-            api_key=api_key,
-            max_retries=2,
+        # Imported here, after LLM_API_KEY / LLM_MODEL are read: importing cognee
+        # loads a local .env over the environment.
+        from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+            NativeLiteLLMAdapter,
+        )
+
+        adapter = NativeLiteLLMAdapter(api_key=api_key, model=model, max_completion_tokens=16384)
+        return await adapter.acreate_structured_output(
+            text_input=user_message, system_prompt=system_prompt, response_model=SiteCheck
         )
     except Exception as exc:
         raise RuntimeError(f"LLM site check failed: {exc}") from exc
@@ -1146,10 +1143,8 @@ def build_source_check_user_message(
 
 
 async def source_check_with_llm(system_prompt: str, user_message: str) -> Any:
-    """Second structured LLM call, same instructor/litellm block as the site check."""
+    """Second structured LLM call, same NativeLiteLLMAdapter call as the site check."""
     try:
-        import instructor
-        import litellm
         from pydantic import BaseModel, Field
     except ImportError as exc:
         raise RuntimeError(f"Required dependencies not available: {exc}") from exc
@@ -1174,16 +1169,15 @@ async def source_check_with_llm(system_prompt: str, user_message: str) -> Any:
         )
 
     try:
-        client = instructor.from_litellm(litellm.acompletion)
-        return await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            response_model=SourceCheck,
-            api_key=api_key,
-            max_retries=2,
+        # Imported here, after LLM_API_KEY / LLM_MODEL are read: importing cognee
+        # loads a local .env over the environment.
+        from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+            NativeLiteLLMAdapter,
+        )
+
+        adapter = NativeLiteLLMAdapter(api_key=api_key, model=model, max_completion_tokens=16384)
+        return await adapter.acreate_structured_output(
+            text_input=user_message, system_prompt=system_prompt, response_model=SourceCheck
         )
     except Exception as exc:
         raise RuntimeError(f"LLM source check failed: {exc}") from exc

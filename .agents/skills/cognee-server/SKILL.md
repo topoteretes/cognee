@@ -31,6 +31,19 @@ prebuilt `cognee/cognee:main` image or `docker compose up` from the repo).
 `REQUIRE_AUTHENTICATION=false` is ignored while access control is on; to turn
 auth off you must set `ENABLE_BACKEND_ACCESS_CONTROL=false`.
 
+Behind a TLS-terminating proxy set `AUTH_TOKEN_COOKIE_SECURE=true` so the auth cookie
+gets the `Secure` attribute; leave it off for plain `http://localhost`, where a browser
+refuses to store a Secure cookie.
+
+### URL ingestion
+
+API requests cannot fetch URLs or clone remote repositories unless the server
+sets `ALLOW_HTTP_REQUESTS=true`. A blocked attempt raises an error naming that
+setting. With the variable unset or blank, SDK, CLI and MCP calls still allow
+fetching. Only `true`, `1`, `yes` or `on` enable it; any other value (`false`,
+or a misspelling) disables it on every surface. This setting does not disable
+LLM or embedding provider calls.
+
 ## Connecting clients to the running server
 
 - **SDK / CLI against the server** (instead of embedded local mode):

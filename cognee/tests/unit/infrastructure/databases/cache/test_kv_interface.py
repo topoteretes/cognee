@@ -1,11 +1,12 @@
 """Regression tests for the formalized KV methods on CacheDBInterface.
 
 Covers:
-- FsCacheAdapter get_value/set_value/delete_value round-trip.
+- SqlCacheAdapter get_value/set_value/delete_value round-trip.
 - RedisAdapter KV methods producing byte-identical keys/values to the legacy
   ``adapter.async_redis`` duck-typed path.
 """
 
+import asyncio
 import tempfile
 from unittest.mock import MagicMock, patch
 
@@ -17,21 +18,13 @@ import pytest
 
 
 @pytest.fixture
-def fs_adapter():
-    with (
-        tempfile.TemporaryDirectory() as tmpdir,
-        patch(
-            "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-            return_value={"data_root_directory": tmpdir},
-        ),
-    ):
-        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-            FSCacheAdapter,
-        )
+def sql_adapter():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 
-        inst = FSCacheAdapter()
+        inst = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmpdir}/cache.db")
         yield inst
-        inst.cache.close()
+        asyncio.run(inst.close())
 
 
 class _InMemoryRedisKV:
@@ -73,38 +66,38 @@ def redis_adapter(redis_store):
 
 
 # --------------------------------------------------------------------------- #
-# FsCacheAdapter KV round-trip (regression for the silent-no-op bug)
+# SqlCacheAdapter KV round-trip (regression for the silent-no-op bug)
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
-async def test_fs_kv_set_get_round_trip(fs_adapter):
-    """set_value/get_value round-trips a raw string on the fs backend."""
-    await fs_adapter.set_value("session_note:u1:s1", "session note")
-    assert await fs_adapter.get_value("session_note:u1:s1") == "session note"
+async def test_sql_kv_set_get_round_trip(sql_adapter):
+    """set_value/get_value round-trips a raw string on the SQL backend."""
+    await sql_adapter.set_value("session_note:u1:s1", "session note")
+    assert await sql_adapter.get_value("session_note:u1:s1") == "session note"
 
 
 @pytest.mark.asyncio
-async def test_fs_kv_get_returns_none_for_missing_key(fs_adapter):
-    assert await fs_adapter.get_value("session_note:u1:missing") is None
+async def test_sql_kv_get_returns_none_for_missing_key(sql_adapter):
+    assert await sql_adapter.get_value("session_note:u1:missing") is None
 
 
 @pytest.mark.asyncio
-async def test_fs_kv_delete_value(fs_adapter):
-    await fs_adapter.set_value("session_note:u1:s1", "note")
-    await fs_adapter.delete_value("session_note:u1:s1")
-    assert await fs_adapter.get_value("session_note:u1:s1") is None
+async def test_sql_kv_delete_value(sql_adapter):
+    await sql_adapter.set_value("session_note:u1:s1", "note")
+    await sql_adapter.delete_value("session_note:u1:s1")
+    assert await sql_adapter.get_value("session_note:u1:s1") is None
     # Deleting a missing key is a no-op, not an error.
-    await fs_adapter.delete_value("session_note:u1:s1")
+    await sql_adapter.delete_value("session_note:u1:s1")
 
 
 @pytest.mark.asyncio
-async def test_fs_kv_set_with_ttl_overwrites_and_round_trips(fs_adapter):
-    """ttl is passed through to diskcache expire; value stays readable before expiry."""
-    await fs_adapter.set_value("k1", "v1", ttl=3600)
-    assert await fs_adapter.get_value("k1") == "v1"
-    await fs_adapter.set_value("k1", "v2", ttl=3600)
-    assert await fs_adapter.get_value("k1") == "v2"
+async def test_sql_kv_set_with_ttl_overwrites_and_round_trips(sql_adapter):
+    """ttl sets the row expiry; value stays readable before expiry."""
+    await sql_adapter.set_value("k1", "v1", ttl=3600)
+    assert await sql_adapter.get_value("k1") == "v1"
+    await sql_adapter.set_value("k1", "v2", ttl=3600)
+    assert await sql_adapter.get_value("k1") == "v2"
 
 
 # --------------------------------------------------------------------------- #

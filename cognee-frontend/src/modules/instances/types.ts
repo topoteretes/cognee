@@ -27,4 +27,11 @@ export interface CogneeInstance {
   // Takes a FormData *factory*, not an instance: a body is consumed by send(),
   // so a retried attempt (429/Retry-After) needs a freshly built one.
   upload?: (path: string, makeBody: () => FormData, opts?: UploadRequestOpts) => Promise<Response>;
+  // Resolves a path to the WebSocket URL + credential a live-updates client
+  // needs to open a `wss://` connection (see @/modules/business/liveSocket).
+  // Optional so local mode and test doubles stay HTTP-poll only — a browser
+  // WebSocket handshake can't carry the X-Api-Key header `fetch` uses, so the
+  // credential has to travel as a query param instead, which only makes sense
+  // for the one instance kind that actually opens tenant-pod sockets.
+  socketTarget?: (path: string) => { url: string; apiKey: string };
 }
