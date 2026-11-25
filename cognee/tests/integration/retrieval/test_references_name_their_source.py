@@ -165,10 +165,7 @@ async def test_the_answer_and_its_evidence_are_unchanged(cognified, query_type):
     for bullet in bullets:
         assert " of document " in bullet
         assert TITLE not in bullet and URL not in bullet
-    if query_type == SearchType.HYBRID_COMPLETION:
-        assert result["evidence"] == []
-    else:
-        assert result["evidence"]
+    assert result["evidence"]
     for reference in result["evidence"]:
         assert "title" not in reference and "url" not in reference
         name = reference.get("document_name")
