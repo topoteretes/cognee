@@ -1,6 +1,6 @@
-"""Unit tests for cognee_connector_slack.home.publish_home_view.
+"""Unit tests for cognee_connector_slack.cognee_host.home.publish_home_view.
 
-Copied from cognee/tests/unit/modules/integrations/test_home.py (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.modules.integrations.test_home (cognee dev, 2026-11-12).
 
 Network is mocked. Invariants: the call is authenticated with the bot token
 and targets the given Slack user, and a rejected call raises with Slack's
@@ -11,11 +11,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cognee_connector_slack.home import publish_home_view
+from cognee_connector_slack.cognee_host.home import publish_home_view
 
 
 class _FakeResponse:
     def __init__(self, payload):
+        self.status = 200  # Slack answers ``ok: false`` with 200 too
         self._payload = payload
 
     async def __aenter__(self):

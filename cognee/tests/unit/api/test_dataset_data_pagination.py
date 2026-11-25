@@ -42,6 +42,7 @@ def _row(index: int) -> SimpleNamespace:
         external_metadata=None,
         data_size=1024 + index,
         content_hash=f"{index:032x}",
+        system_metadata=None,
     )
 
 
@@ -208,3 +209,15 @@ def test_legacy_null_timestamp_is_returned_on_the_last_page(client, monkeypatch)
     response = client.get(f"/api/v1/datasets/{DATASET_ID}/data?limit=100&offset=200")
     assert response.status_code == 200
     assert response.json()[-1]["createdAt"] is None
+
+
+def test_a_rows_place_in_its_source_is_returned_so_the_page_can_group_it(client, monkeypatch):
+    """A Slack day, a Slack thread and a Notion page carry where they sit in their source
+    (``system_metadata["structure"]``); the dataset page groups rows by it."""
+    structure = {"ancestors": [{"kind": "slack_channel", "id": "C1", "name": "#general"}]}
+    monkeypatch.setattr(ROWS[0], "system_metadata", {"structure": structure, "source": "slack"})
+    response = client.get(f"/api/v1/datasets/{DATASET_ID}/data?limit=2")
+    assert response.status_code == 200
+    first, second = response.json()
+    assert first["structure"] == structure
+    assert second["structure"] is None

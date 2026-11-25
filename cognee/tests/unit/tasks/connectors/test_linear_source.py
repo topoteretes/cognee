@@ -88,7 +88,7 @@ class FakeLinear:
         }
 
     # -- transport ---------------------------------------------------------
-    def execute(self, query, variables=None):
+    def execute(self, query, variables=None, *, check_active=None):
         variables = variables or {}
         self.calls.append(query)
         if self.fail_after is not None and len(self.calls) > self.fail_after:
@@ -280,8 +280,8 @@ def test_low_remaining_quota_stops_before_the_next_request(team):
     state: dict = {}
     original = team.execute
 
-    def report_low_quota_after_answering(query, variables=None):
-        data = original(query, variables)
+    def report_low_quota_after_answering(query, variables=None, **kwargs):
+        data = original(query, variables, **kwargs)
         team.rate_limit = {"requests": 5000, "complexity": 1_000}  # known once Linear answers
         return data
 
@@ -316,7 +316,7 @@ def test_missing_team_raises_a_typed_error():
     class Gone:
         rate_limit: dict = {}
 
-        def execute(self, query, variables=None):
+        def execute(self, query, variables=None, **_):
             return {"team": None}
 
     with pytest.raises(LinearTeamNotFoundError):
@@ -372,8 +372,8 @@ class _Response:
 def _client_with(monkeypatch, responses):
     calls = []
 
-    def post(url, json=None, headers=None, timeout=None):
-        calls.append(headers)
+    def post(url, json=None, headers=None, timeout=None, **kwargs):
+        calls.append({**(headers or {}), "_kwargs": kwargs})
         item = responses.pop(0)
         if isinstance(item, Exception):
             raise item
@@ -409,6 +409,53 @@ def test_server_errors_are_retried_a_bounded_number_of_times(monkeypatch):
     client, _ = _client_with(monkeypatch, [_Response(502)] * 3)
     with pytest.raises(LinearAPIError, match="HTTP 502"):
         client.execute("query A { x }")
+
+
+def test_a_500_and_a_dropped_connection_are_retried_with_backoff(monkeypatch):
+    import requests
+
+    answers = [
+        _Response(500),
+        requests.ConnectionError("dropped"),
+        _Response(200, {"data": {"ok": 1}}),
+    ]
+    waits = []
+
+    def post(url, json=None, headers=None, timeout=None, **kwargs):
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr("requests.post", post)
+    client = LinearClient(TOKEN, sleep=waits.append)
+
+    assert client.execute("query A { x }") == {"ok": 1}
+    assert waits == [1, 2]
+
+
+def test_a_revoked_connection_stops_a_retry_before_it_waits(monkeypatch):
+    """The host's check runs before every attempt, so a revoked run does not sleep a backoff."""
+    posted, waits, checks = [], [], []
+
+    def post(url, json=None, headers=None, timeout=None, **kwargs):
+        posted.append(url)
+        return _Response(502)
+
+    def check_active():
+        checks.append(1)
+        if len(checks) == 1:  # the first attempt runs unchecked; this is before its wait
+            raise PermissionError("access revoked")
+
+    monkeypatch.setattr("requests.post", post)
+    client = LinearClient(TOKEN, sleep=waits.append)
+
+    with pytest.raises(PermissionError, match="access revoked"):
+        client.execute("query A { x }", check_active=check_active)
+
+    assert len(posted) == 1
+    assert waits == []
+    assert len(checks) == 1
 
 
 def test_remaining_quota_headers_are_recorded(monkeypatch):
@@ -478,6 +525,24 @@ def test_resource_name_defaults_to_a_linear_prefixed_table_name():
     assert resource.cognee_sync_stats == {}
 
 
+def test_a_revoked_run_is_not_reported_as_a_spent_budget(team):
+    """A walk that hits its budget after the connection was revoked raises the revocation."""
+
+    def check_active():
+        if len(team.calls) >= 2:
+            raise PermissionError("access revoked")
+
+    stats = _stats()
+    with pytest.raises(PermissionError):
+        list(
+            _iter_rows(
+                team, TEAM, {}, stats, page_size=1, max_requests=2, check_active=check_active
+            )
+        )
+
+    assert "failed_budget" not in stats
+
+
 def test_check_active_runs_before_every_request(team):
     seen = []
     _run(team, {}, check_active=lambda: seen.append(1))
@@ -521,6 +586,28 @@ def test_cursors_survive_between_real_dlt_runs(team, tmp_path):
     assert quiet.cognee_sync_stats["scanned"] == 0 or quiet.cognee_sync_stats["skipped"] > 0
 
 
+def test_the_resource_asks_the_host_once_per_request_not_per_row(team, tmp_path):
+    """In Cloud every check is a call to the control plane: one per request, as before."""
+    import dlt
+
+    checks = []
+    source = linear_source(
+        team_id=TEAM,
+        service=team,
+        resource_name="linear_team_1",
+        check_active=lambda: checks.append(1),
+    )
+    pipeline = dlt.pipeline(
+        pipeline_name="linear_checks",
+        destination=dlt.destinations.sqlalchemy(f"sqlite:///{tmp_path / 'l.db'}"),
+        dataset_name="linear",
+        pipelines_dir=str(tmp_path / "pipelines"),
+    )
+    pipeline.run(source)
+
+    assert len(checks) == len(team.calls)
+
+
 # -- regressions found by the review swarm ----------------------------------
 def test_a_comment_edited_after_its_issue_was_rendered_is_not_lost(team):
     state: dict = {}
@@ -528,8 +615,8 @@ def test_a_comment_edited_after_its_issue_was_rendered_is_not_lost(team):
     original = team.execute
     edited = {"done": False}
 
-    def edit_after_the_issues_page(query, variables=None):
-        data = original(query, variables)
+    def edit_after_the_issues_page(query, variables=None, **kwargs):
+        data = original(query, variables, **kwargs)
         if "LinearTeamIssues" in query and not edited["done"]:
             edited["done"] = True
             import copy
@@ -612,10 +699,10 @@ def test_a_refused_resume_cursor_falls_back_to_the_ceiling_window(team):
 
     original = team.execute
 
-    def refuse_cursors(query, variables=None):
+    def refuse_cursors(query, variables=None, **kwargs):
         if variables and variables.get("after"):
             raise LinearAPIError("Linear request failed: GraphQL codes INVALID")
-        return original(query, variables)
+        return original(query, variables, **kwargs)
 
     team.execute = refuse_cursors
     rows, stats = _run(team, state, page_size=50)
@@ -633,9 +720,9 @@ def test_archived_projects_and_comments_follow_include_archived(team):
     seen = []
     original = team.execute
 
-    def record(query, variables=None):
+    def record(query, variables=None, **kwargs):
         seen.append((query.split("(")[0].split()[-1], (variables or {}).get("archived")))
-        return original(query, variables)
+        return original(query, variables, **kwargs)
 
     team.execute = record
     _run(team, {}, include_archived=True)
@@ -649,7 +736,7 @@ def test_a_missing_team_from_linear_becomes_the_typed_error():
     class Gone:
         rate_limit: dict = {}
 
-        def execute(self, query, variables=None):
+        def execute(self, query, variables=None, **_):
             raise LinearEntityNotFoundError("Linear entity not found or not accessible")
 
     with pytest.raises(LinearTeamNotFoundError):
@@ -669,10 +756,10 @@ def test_a_deleted_issue_during_comment_paging_keeps_the_comments_read(team):
         team.add_comment(f"x{n:02d}", "i1", 10 + (n % 40), body=f"remark {n:02d}")
     original = team.execute
 
-    def vanish(query, variables=None):
+    def vanish(query, variables=None, **kwargs):
         if "LinearIssueComments" in query:
             raise LinearEntityNotFoundError("gone")
-        return original(query, variables)
+        return original(query, variables, **kwargs)
 
     team.execute = vanish
     rows, stats = _run(team, {})
@@ -714,9 +801,9 @@ def test_page_size_is_clamped_to_what_fits_the_complexity_limit(team, tmp_path):
     sizes = []
     original = team.execute
 
-    def record(query, variables=None):
+    def record(query, variables=None, **kwargs):
         sizes.append((variables or {}).get("first"))
-        return original(query, variables)
+        return original(query, variables, **kwargs)
 
     team.execute = record
     pipeline = dlt.pipeline(
@@ -733,10 +820,10 @@ def test_comment_queries_stay_scoped_to_the_team_whatever_the_filter_holds(team)
     seen = []
     original = team.execute
 
-    def record(query, variables=None):
+    def record(query, variables=None, **kwargs):
         if "LinearTeamComments" in query:
             seen.append(variables["filter"])
-        return original(query, variables)
+        return original(query, variables, **kwargs)
 
     team.execute = record
     walker = linear_module._Walker(
@@ -752,3 +839,13 @@ def test_comment_queries_stay_scoped_to_the_team_whatever_the_filter_holds(team)
     walker._fetch_comments({"issue": {"team": {"id": {"eq": "someone-elses-team"}}}}, None)
 
     assert seen == [{"issue": {"team": {"id": {"eq": TEAM}}}}]
+
+
+def test_a_request_never_follows_a_redirect(monkeypatch):
+    """SDK-832: a 3xx from Linear is an error answer, never a new request target."""
+    client, calls = _client_with(monkeypatch, [_Response(307, None)])
+
+    with pytest.raises(LinearAPIError, match="HTTP 307"):
+        client.execute("query A { x }")
+
+    assert calls[0]["_kwargs"]["allow_redirects"] is False

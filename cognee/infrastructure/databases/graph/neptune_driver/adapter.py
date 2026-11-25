@@ -278,6 +278,8 @@ class NeptuneGraphDB(GraphDBInterface):
         nodes: list[DataPoint],
         source_ref_key: str | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """
         Add multiple nodes to the graph in a single operation.
@@ -285,6 +287,7 @@ class NeptuneGraphDB(GraphDBInterface):
         Parameters:
         -----------
             - nodes (List[DataPoint]): A list of DataPoint objects to be added to the graph.
+            - replace (bool): Ignored: every write stores the incoming properties.
         """
         if not nodes:
             logger.debug("No nodes to add")

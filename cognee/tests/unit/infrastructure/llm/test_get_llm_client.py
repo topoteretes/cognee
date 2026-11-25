@@ -173,6 +173,23 @@ def test_openai_adapter_preserves_default_instructor_mode_for_non_gpt5_models(mo
     assert calls[-1][1] == {}
 
 
+@pytest.mark.parametrize("model", ["openai/gpt-5.6-luna", "openai/gpt-6-luna"])
+def test_openai_adapter_uses_default_instructor_mode_for_gpt5_and_gpt6_models(monkeypatch, model):
+    calls = []
+
+    def fake_from_litellm(completion, **kwargs):
+        calls.append((completion, kwargs))
+        return object()
+
+    monkeypatch.setattr(generic_adapter.instructor, "from_litellm", fake_from_litellm)
+    monkeypatch.setattr(openai_adapter.instructor, "from_litellm", fake_from_litellm)
+
+    OpenAIAdapter(api_key="test-key", model=model, max_completion_tokens=1024)
+
+    assert calls[-2][1]["mode"].value == OpenAIAdapter.default_instructor_mode
+    assert calls[-1][1]["mode"].value == OpenAIAdapter.default_instructor_mode
+
+
 def test_openai_adapter_honors_explicit_instructor_mode_for_non_gpt5_models(monkeypatch):
     calls = []
 

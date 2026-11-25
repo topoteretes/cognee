@@ -15,6 +15,7 @@ from .record_operation import (
     get_current_session_ids,
     record_operation,
 )
+from .remote_caller import is_remote_caller, remote_caller_scope
 from .scrub_error import scrub_error_message
 from .usage_accumulator import (
     OperationUsage,
@@ -38,10 +39,12 @@ __all__ = [
     "get_current_session_ids",
     "get_operation_origin",
     "get_parent_run_id",
+    "is_remote_caller",
     "operation_origin_scope",
     "operation_usage_scope",
     "parent_run_scope",
     "record_operation",
+    "remote_caller_scope",
     "scrub_error_message",
     "set_operation_origin",
 ]

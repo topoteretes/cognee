@@ -24,6 +24,7 @@ from cognee.infrastructure.session.session_context_models import (
     ContextProfile,
     ContextSection,
     SessionContextEntry,
+    clip_text,
     normalize_content,
     valid_sections_for,
 )
@@ -173,7 +174,8 @@ def coerce_active_context_entries(raw_entries: list) -> list[SessionContextEntry
             entry = SessionContextEntry.model_validate(raw)
         else:
             continue
-        entries.append(entry)
+        if not entry.expired_at:
+            entries.append(entry)
     return entries
 
 
@@ -353,6 +355,12 @@ async def build_active_context_block(
             session_id=session_id,
         )
         entries = coerce_active_context_entries(raw_entries) if raw_entries else []
+        if context_profile == ContextProfile.AGENT.value and entries:
+            from .context_quality import filter_unused_entries
+
+            entries = await filter_unused_entries(
+                session_manager, user_id, session_id, entries, persist=stamp_served
+            )
 
         selected = []
         if entries:
@@ -416,6 +424,13 @@ async def build_active_context_block(
         return "", []
 
 
+def _source_ids(source_id) -> list[str]:
+    """``source_id`` as a list: one id, a list of ids, or nothing; empty ids dropped."""
+    if isinstance(source_id, (list, tuple)):
+        return list(dict.fromkeys(str(sid) for sid in source_id if sid))
+    return [str(source_id)] if source_id else []
+
+
 async def _apply_single_candidate(
     *,
     session_manager,
@@ -423,12 +438,14 @@ async def _apply_single_candidate(
     session_id,
     source_id,
     candidate: CandidateContextUpdate,
+    qa_id: str = "",
 ) -> str | None:
     """Apply one validated candidate. Returns the touched/created entry id, or None to skip.
 
     Implements validate -> confidence>=0.75 -> normalize -> dup-link-or-create, where a dup is
     an exact normalized-content match within the same (profile, section). ``source_id`` is the
-    evidence id linked on the entry — a feedback id for qa, a trace id for agent.
+    evidence linked on the entry — a feedback id for qa, a trace id for agent — or a list of
+    such ids (a coding failure candidate links every errored trace of its turn).
     Raises on store errors; the caller wraps this so one failure never aborts the batch.
     """
     context_profile = getattr(candidate, "context_profile", ContextProfile.QA.value)
@@ -443,6 +460,11 @@ async def _apply_single_candidate(
         return None
     if float(candidate.confidence) < MIN_CANDIDATE_CONFIDENCE:
         return None
+    if context_profile == ContextProfile.AGENT.value:
+        from .context_quality import supported_project_candidate
+
+        if not supported_project_candidate(candidate, source_id):
+            return None
 
     normalized = normalize_content(content)
     source_field = (
@@ -476,19 +498,25 @@ async def _apply_single_candidate(
 
     if duplicate_row is not None:
         entry_id = duplicate_row.get("id")
+        merge = {}
         source_ids = list(duplicate_row.get(source_field) or [])
-        if source_id and source_id not in source_ids:
-            source_ids.append(source_id)
+        added = [sid for sid in _source_ids(source_id) if sid not in source_ids]
+        if added:
+            merge[source_field] = [*source_ids, *added]
+        qa_ids = list(duplicate_row.get("source_qa_ids") or [])
+        if qa_id and qa_id not in qa_ids:
+            merge["source_qa_ids"] = [*qa_ids, qa_id]
+        if merge:
             await session_manager.update_session_context_entry(
                 user_id=user_id,
                 session_id=session_id,
                 entry_id=entry_id,
-                merge={source_field: source_ids},
+                merge=merge,
             )
         return entry_id
 
     # Novel content: create a new active entry under this profile/section.
-    linked_ids = [source_id] if source_id else []
+    linked_ids = _source_ids(source_id)
     new_entry = SessionContextEntry(
         id=str(uuid4()),
         section=section,
@@ -496,9 +524,12 @@ async def _apply_single_candidate(
         content=content,
         normalized_content=normalized,
         confidence=float(candidate.confidence),
+        reason=clip_text(getattr(candidate, "reason", ""), MAX_CONTEXT_CONTENT_CHARS),
+        evidence=clip_text(getattr(candidate, "evidence", ""), MAX_CONTEXT_CONTENT_CHARS),
         created_at=datetime.now(timezone.utc).isoformat(),
         source_feedback_ids=linked_ids if source_field == "source_feedback_ids" else [],
         source_trace_ids=linked_ids if source_field == "source_trace_ids" else [],
+        source_qa_ids=[qa_id] if qa_id else [],
         kind="context",
     )
     await session_manager.create_session_context_entry(
@@ -528,8 +559,13 @@ async def apply_candidate_updates(
     session_id,
     source_id,
     candidates: list,
+    qa_id: str = "",
 ) -> list[str]:
     """Deterministically apply candidate context updates (qa or agent).
+
+    ``qa_id`` names the turn the candidates were learned in (coding distillation); it is
+    linked on the entry as ``source_qa_ids``, appended on an exact duplicate like the
+    source id.
 
     For each candidate: validate section/content/length for its profile, require
     confidence >= 0.75, normalize, then either link to an exact duplicate (append ``source_id``
@@ -551,6 +587,7 @@ async def apply_candidate_updates(
                     session_id=session_id,
                     source_id=source_id,
                     candidate=model,
+                    qa_id=qa_id,
                 )
                 if entry_id:
                     touched.append(entry_id)

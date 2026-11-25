@@ -15,6 +15,7 @@ from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
     NodeDeleteData,
+    data_source_ref_key_selector,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger
@@ -36,6 +37,8 @@ _warned_degree_fallbacks: set[type] = set()
 _warned_graph_stream_fallbacks: set[type] = set()
 _warned_neighborhood_fallbacks: set[type] = set()
 _warned_graph_counts_fallbacks: set[type] = set()
+_warned_data_source_ref_fallbacks: set[type] = set()
+_warned_edge_text_fallbacks: set[type] = set()
 
 
 def validate_graph_stream_batch_size(batch_size: int) -> None:
@@ -106,7 +109,47 @@ class GraphDBInterface(ABC):
     """
     Interface every graph backend implements (Ladybug/Kuzu, Neo4j, Neptune, Turso, Postgres demo).
 
-    Get an instance with ``get_graph_engine()``; never construct adapters directly.
+    Cognify's ``add_data_points``, the retrievers, ``improve()`` stages, ``forget()`` and
+    the graph view all talk to the engine through these methods, so a backend's graph code
+    lives in its adapter and one that satisfies the contract below plugs into the
+    remember → recall flow (with access control on, it also needs the dataset-database
+    handler described at the end). Get an instance with ``get_graph_engine()``;
+    never construct adapters directly. A community backend is registered with
+    ``use_graph_adapter(provider_name, AdapterClass)`` and selected by
+    ``GRAPH_DATABASE_PROVIDER``; ``get_graph_engine`` then constructs it with the
+    ``graph_database_url`` / ``_username`` / ``_password`` / ``_port`` / ``_key`` and
+    ``database_name`` keyword arguments.
+
+    What an adapter provides, in layers:
+
+    * **Required** (``@abstractmethod``): node and edge upserts, node and whole-graph
+      deletes, reads by id, edge checks, whole-graph, neighbourhood, node-set and
+      filtered reads, metrics, and raw ``query()``.
+    * **Inherited defaults** that work on any adapter but read more than they need
+      (``get_top_degree_node_ids``, ``iter_bounded_neighborhood``,
+      ``get_entity_type_names``, ``get_graph_counts``, ``get_timestamps_in_range``,
+      ``get_temporal_anchors``): override them with native queries to keep graph views,
+      graph summaries and ``TEMPORAL`` search bounded on large graphs.
+    * **Optional capabilities** whose defaults raise; callers check for them and take
+      another path, so leaving them out narrows features but never breaks ingestion:
+
+      - Graph provenance (``set_graph_metadata`` / ``get_graph_metadata`` plus the
+        ``attach_*`` / ``remove_*`` / ``find_*`` source-ref methods,
+        ``get_*_delete_data`` and ``delete_edge_triples``): ``add_data_points`` marks an
+        empty graph through ``set_graph_metadata``, and a marked graph keeps document
+        ownership in the graph itself, which ``forget()`` and failed-run rollback use to
+        remove one document's nodes and edges. Where these raise
+        ``UnsupportedProvenanceCapability`` the graph is never marked and ownership is
+        tracked in the relational ledger instead.
+      - Feedback weights and truth state (``get_/set_node_feedback_weights``,
+        ``get_/set_edge_feedback_weights``, ``get_/set_node_truth_state``): the
+        ``improve()`` loop probes once per run whether the adapter overrides the
+        setters and truth-state methods (or declares ``supports_feedback_weights`` /
+        ``supports_truth_state``) and skips the stages that need them with
+        ``backend_unsupported`` when it does not.
+      - ``update_chunk_index`` (chunk-level ``update()``), ``update_node`` (user
+        preference patching) and ``remove_belongs_to_set_tags`` (node-set cleanup on
+        delete; the default is a no-op).
 
     Contract shared by all adapters:
 
@@ -126,11 +169,23 @@ class GraphDBInterface(ABC):
       graph source-refs in the same statement so ``forget()`` can delete or roll back by
       document; see ``cognee.infrastructure.databases.provenance``.
 
-    Capability flags (class attributes, checked by callers on the engine instance):
-    ``supports_cypher_queries``, ``supports_per_row_source_refs``,
-    ``supports_incremental_chunk_updates``. A new backend also needs a
-    ``DatasetDatabaseHandlerInterface`` registration to work with
-    ``ENABLE_BACKEND_ACCESS_CONTROL`` (see ``dataset_database_handler/``).
+    Capability flags (class attributes, read by callers on the engine instance they
+    already hold, so no optional backend package is imported to check them):
+
+    * ``supports_cypher_queries`` (default True): ``CYPHER`` and ``NATURAL_LANGUAGE``
+      search raise ``SearchTypeNotSupported`` when False.
+    * ``supports_per_row_source_refs`` (default False): when True and the graph is
+      provenance-marked, ``add_data_points`` passes ``add_nodes`` / ``add_edges`` one
+      mapping of row → owner key and writes a batch in a single call; otherwise it makes
+      one call per owner key.
+    * ``supports_incremental_chunk_updates`` (default False): chunk-level ``update()``
+      requires this to be True, along with a provenance-marked graph and a vector store
+      that supports payload updates; when any is missing it rebuilds the whole document.
+      Declare it only with a working ``update_chunk_index``.
+
+    A new backend also needs a ``DatasetDatabaseHandlerInterface`` registration (see
+    ``dataset_database_handler/``) to give each dataset its own database; without one,
+    cognee raises while ``ENABLE_BACKEND_ACCESS_CONTROL`` is on (its default).
     """
 
     # Whether this backend executes raw Cypher through ``query()``. Declared on
@@ -196,6 +251,8 @@ class GraphDBInterface(ABC):
         nodes: list[Node] | list[DataPoint],
         source_ref_key: str | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """
         Add multiple nodes to the graph in a single operation.
@@ -208,10 +265,17 @@ class GraphDBInterface(ABC):
 
             - nodes (Union[List[Node], List[DataPoint]]): A list of Node objects or DataPoint objects to be added to the graph.
             - source_ref_key (Optional[str]): Graph provenance source ref to stamp
-              atomically as part of this write. Backends that support graph-provenance
-              provenance fold it into the same statement; others may ignore it. (default None)
+              atomically as part of this write. Backends that support graph provenance
+              fold it into the same statement, so no node is written without its owner;
+              others may ignore it. Adapters declaring ``supports_per_row_source_refs``
+              also receive a mapping of node id -> ref key here. (default None)
             - pipeline_run_id (Optional[str]): Run id recorded with the provenance stamp so
               the write is rollbackable by run. Ignored when source_ref_key is None. (default None)
+            - replace (bool): When True, every node that already exists is stored with the
+              incoming properties, even where the adapter would otherwise keep the stored
+              node. An adapter that always replaces may ignore it, but must accept it:
+              entity consolidation and the consolidate_entity_descriptions pipeline pass
+              it, and fail with TypeError on an adapter that does not. (default False)
         """
         raise NotImplementedError
 
@@ -503,6 +567,127 @@ class GraphDBInterface(ABC):
         """
         raise UnsupportedProvenanceCapability()
 
+    async def find_node_source_refs_by_data(
+        self,
+        dataset_id: str,
+        data_id: str,
+    ) -> dict[str, list[str]]:
+        """
+        Find the node source refs one data item of a dataset owns: its v1
+        document key and every v2 chunk key of that data item.
+
+        This default reads every ref of the dataset and keeps the data item's,
+        so its cost follows the dataset. An adapter that can select the rows in
+        its store overrides it, and deleting or replacing one document then
+        costs what that document holds.
+
+        Parameters:
+        -----------
+
+            - dataset_id (str): Dataset id to match.
+            - data_id (str): Data item id to match.
+
+        Returns:
+        --------
+
+            - dict[str, list[str]]: The data item's source refs keyed by node id.
+        """
+        self._warn_data_source_ref_fallback()
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
+        refs_by_node = await self.find_node_source_refs_by_dataset(dataset_id)
+        return {
+            node_id: data_refs
+            for node_id, refs in refs_by_node.items()
+            if (data_refs := select(refs))
+        }
+
+    async def find_edge_source_refs_by_data(
+        self,
+        dataset_id: str,
+        data_id: str,
+    ) -> dict[EdgeIdentity, list[str]]:
+        """
+        Find the edge source refs one data item of a dataset owns: its v1
+        document key and every v2 chunk key of that data item.
+
+        Same default and same reason to override as
+        ``find_node_source_refs_by_data``.
+
+        Parameters:
+        -----------
+
+            - dataset_id (str): Dataset id to match.
+            - data_id (str): Data item id to match.
+
+        Returns:
+        --------
+
+            - dict[EdgeIdentity, list[str]]: The data item's source refs keyed by
+              edge identity.
+        """
+        self._warn_data_source_ref_fallback()
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
+        refs_by_edge = await self.find_edge_source_refs_by_dataset(dataset_id)
+        return {
+            edge: data_refs for edge, refs in refs_by_edge.items() if (data_refs := select(refs))
+        }
+
+    def _warn_data_source_ref_fallback(self) -> None:
+        adapter_type = type(self)
+        if adapter_type not in _warned_data_source_ref_fallbacks:
+            _warned_data_source_ref_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native find_node_source_refs_by_data / "
+                "find_edge_source_refs_by_data; deleting one document reads every source "
+                "ref of its dataset. This is O(dataset) in memory.",
+                adapter_type.__name__,
+            )
+
+    async def find_edge_texts_in_use(self, edge_texts: list[str]) -> set[str]:
+        """
+        Find which of the given retrieval texts a stored edge still has.
+
+        An edge's retrieval text is ``get_edge_retrieval_text`` of its
+        ``edge_text`` property and its relationship name. Graph-provenance
+        delete asks this after removing edges, to drop the EdgeType of a text no
+        edge uses any more.
+
+        This default reads every edge of the graph. An adapter that can ask its
+        store overrides it.
+
+        Parameters:
+        -----------
+
+            - edge_texts (list[str]): Retrieval texts to look for.
+
+        Returns:
+        --------
+
+            - set[str]: The given texts that at least one stored edge has.
+        """
+        from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+
+        wanted = set(edge_texts)
+        if not wanted:
+            return set()
+
+        adapter_type = type(self)
+        if adapter_type not in _warned_edge_text_fallbacks:
+            _warned_edge_text_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native find_edge_texts_in_use; a delete that removes edges "
+                "reads the whole graph. This is O(graph) in memory.",
+                adapter_type.__name__,
+            )
+        _, edges = await self.get_graph_data()
+        in_use: set[str] = set()
+        for edge in edges:
+            properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
+            edge_text = get_edge_retrieval_text(properties.get("edge_text"), edge[2])
+            if edge_text in wanted:
+                in_use.add(edge_text)
+        return in_use
+
     async def find_node_source_refs_by_pipeline_run(
         self,
         pipeline_run_id: str,
@@ -628,8 +813,10 @@ class GraphDBInterface(ABC):
 
             - edges (Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]): A list of EdgeData objects or tuples representing edges to be added.
             - source_ref_key (Optional[str]): Graph provenance source ref to stamp
-              atomically as part of this write. Backends that support graph-provenance
-              provenance fold it into the same statement; others may ignore it. (default None)
+              atomically as part of this write. Backends that support graph provenance
+              fold it into the same statement, so no edge is written without its owner;
+              others may ignore it. Adapters declaring ``supports_per_row_source_refs``
+              also receive a mapping of edge identity -> ref key here. (default None)
             - pipeline_run_id (Optional[str]): Run id recorded with the provenance stamp so
               the write is rollbackable by run. Ignored when source_ref_key is None. (default None)
         """

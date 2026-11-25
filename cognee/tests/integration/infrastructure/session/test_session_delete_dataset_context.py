@@ -15,7 +15,7 @@ import contextvars
 import importlib
 import pathlib
 from collections.abc import Awaitable, Callable
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
@@ -30,7 +30,10 @@ from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.locks import acquire_improve_lock_many, release_improve_lock_many
 from cognee.infrastructure.locks.session_lock import improve_lock_keys
 from cognee.infrastructure.session.get_session_manager import get_session_manager
-from cognee.infrastructure.session.session_embeddings import SESSION_QA_VECTOR_COLLECTION
+from cognee.infrastructure.session.session_embeddings import (
+    SESSION_QA_VECTOR_COLLECTION,
+    index_session_qa,
+)
 from cognee.memory.entries import QAEntry
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.engine.operations.setup import setup as engine_setup
@@ -136,8 +139,8 @@ async def test_without_the_dataset_context_the_vectors_survive(isolated_dataset,
     user, dataset = isolated_dataset
     await _answer_turn(user.id, dataset.id, "s2")
 
-    async def no_datasets(user_id, session_id):
-        return []
+    async def no_datasets(sessions):
+        return {}
 
     monkeypatch.setattr(delete_module, "_session_vector_datasets", no_datasets)
     # Cache content went, so it reports True; the vectors in the dataset store did not.
@@ -151,8 +154,10 @@ async def test_without_the_dataset_context_the_vectors_survive(isolated_dataset,
 async def test_delete_session_strips_vectors_a_typed_entry_left_in_the_global_store(
     isolated_dataset,
 ):
-    """A typed remember() entry binds the session to its dataset but indexes the
-    Q&A in the global store, so the delete must clean that store too."""
+    """Before SDK-1229 a typed remember() entry bound the session to its dataset
+    but indexed the Q&A in the global store. remember() now indexes in the
+    dataset's store, but rows written before that stay in the global store, so
+    the delete must clean that store too."""
     user, dataset = isolated_dataset
     entry = QAEntry(question="What is the door code?", answer="8919-6729")
     await _as_fresh_request(
@@ -160,7 +165,19 @@ async def test_delete_session_strips_vectors_a_typed_entry_left_in_the_global_st
             entry, session_id="s3", dataset_id=dataset.id, user=user, self_improvement=False
         )
     )
+    # A row a pre-SDK-1229 remember() left behind: indexed with no dataset context.
+    await _as_fresh_request(
+        lambda: index_session_qa(
+            user_id=str(user.id),
+            session_id="s3",
+            qa_id=str(uuid4()),
+            question="What is the door code?",
+            answer="8919-6729",
+        )
+    )
     assert await _as_fresh_request(_session_vector_rows) == 1
+    async with set_database_global_context_variables(dataset.id, user.id):
+        assert await _session_vector_rows() == 1
 
     assert await _as_fresh_request(lambda: delete_session(user.id, "s3")) is True
 
@@ -201,7 +218,7 @@ async def test_a_session_id_naming_another_users_dataset_does_not_reach_it(isola
     stranger = await create_user("stranger@example.com", "password")
     foreign = await create_authorized_dataset("foreign", stranger)
 
-    targets = await delete_module._session_vector_datasets(user.id, f"x_{foreign.id}")
+    targets = await delete_module._session_vector_datasets([(user.id, f"x_{foreign.id}")])
 
     assert foreign.id not in targets
     assert dataset.id in targets

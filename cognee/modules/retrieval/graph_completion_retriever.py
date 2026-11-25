@@ -10,6 +10,11 @@ from cognee.infrastructure.session.get_session_manager import get_session_manage
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
+from cognee.modules.ontology.query_grounding import (
+    ground,
+    seed_node_ids_by_collection,
+    with_grounding_block,
+)
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
@@ -261,6 +266,17 @@ class GraphCompletionRetriever(BaseRetriever):
         # error yields {}, so the search stays byte-identical to an
         # un-personalized run.
         personal_weights = await load_preference_weights()
+        # Ontology concepts the query names become pinned seeds: they are projected
+        # with the vector hits and rank ahead of them, so "exposure" reaches the
+        # CreditExposure class node even when the embedding neighbourhood misses it.
+        # Batch mode has no query, so it grounds nothing (the search could not pin anyway).
+        # Neighbourhood mode pins nothing: its seeds are the first vector hits, and its
+        # projection does not apply node_name, which the vector hits already passed.
+        pinned_node_ids = (
+            seed_node_ids_by_collection(await ground(query))
+            if self.neighborhood_depth is None
+            else {}
+        )
         return await brute_force_triplet_search(
             query,
             query_batch,
@@ -276,6 +292,7 @@ class GraphCompletionRetriever(BaseRetriever):
             neighborhood_depth=self.neighborhood_depth,
             neighborhood_seed_top_k=self.neighborhood_seed_top_k,
             personal_weights=personal_weights or None,
+            pinned_node_ids=pinned_node_ids or None,
         )
 
     async def get_triplets_batch(
@@ -347,6 +364,7 @@ class GraphCompletionRetriever(BaseRetriever):
             )
 
         graph_context = await self.resolve_edges_to_text(triplets) if triplets else ""
+        graph_context = await with_grounding_block(query, graph_context)
 
         if not self.include_global_context_index:
             if not triplets:

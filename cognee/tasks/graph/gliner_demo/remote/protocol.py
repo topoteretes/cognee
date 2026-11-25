@@ -17,7 +17,9 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
-from urllib.parse import urlsplit, urlunsplit
+
+# Re-exported: the transports and tests import it from here.
+from cognee.infrastructure.remote_worker.urls import redact_url
 
 from .errors import GlinerWorkerRuntimeError
 
@@ -67,24 +69,6 @@ class WorkerTransport(Protocol):
         ...
 
     async def aclose(self) -> None: ...
-
-
-def redact_url(url: str) -> str:
-    """``scheme://user:pass@host`` -> ``scheme://***@host``; each comma-separated part."""
-    parts = []
-    for part in url.split(","):
-        part = part.strip()
-        try:
-            split = urlsplit(part)
-        except ValueError:
-            parts.append("<invalid url>")
-            continue
-        if "@" in split.netloc:
-            # The last "@" ends the userinfo, so a password containing "@" stays hidden.
-            host = split.netloc.rsplit("@", 1)[1]
-            part = urlunsplit(split._replace(netloc=f"***@{host}"))
-        parts.append(part)
-    return ",".join(parts)
 
 
 def parse_json_reply(body: bytes) -> WorkerReply:

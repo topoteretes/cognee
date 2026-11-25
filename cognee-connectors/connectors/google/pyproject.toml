@@ -29,7 +29,7 @@ classifiers = [
 dependencies = [
     # No [dlt] extra: this package ships no DLT source; the three service packages
     # that do depend on cognee-connectors-core[dlt] themselves.
-    "cognee-connectors-core>=0.1,<1",
+    "cognee-connectors-core>=0.2,<1",
     # The provider's own libraries, with the ranges cognee's pyproject.toml uses:
     # aiohttp for the OAuth and OpenID Connect client, pydantic-settings for the
     # settings base the GOOGLE_<PRODUCT>_* settings classes subclass.

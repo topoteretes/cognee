@@ -1,5 +1,8 @@
+import asyncio
 from typing import Any, NamedTuple
+from uuid import UUID
 
+from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.modules.engine.models.DltColumn import DltColumn
 from cognee.modules.engine.models.Entity import Entity
 from cognee.modules.graph.utils.fact_conflicts import (
@@ -11,6 +14,9 @@ from cognee.modules.graph.utils.fact_conflicts import (
     status_label,
     user_selected_facts,
 )
+from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY
+from cognee.modules.ontology.query_grounding import GroundedConcept
+from cognee.modules.ontology.schema_alignment import REALIZES_RELATIONSHIP
 from cognee.modules.retrieval.hybrid.chunks import search_collections
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
 from cognee.modules.retrieval.hybrid.results import payload_matches_node_filter
@@ -67,6 +73,37 @@ async def search_entities(
         return []
 
 
+def pin_grounded_entities(entity_hits: list[Any], concepts: list[GroundedConcept]) -> list[Any]:
+    """Put the ontology nodes a query resolved to at the head of the entity hits.
+
+    Each grounded concept becomes an exact-score hit (0.0) carrying the payload the
+    entity formatter reads (``name``, ``type``); a node the vector search already
+    returned is moved up rather than duplicated. Pinned entities come first and count
+    against ``entities_top_k``; ``build_entities`` drops one that has no connection in
+    the graph.
+    """
+    pinned: list[Any] = []
+    for concept in concepts:
+        if concept.category == ONTOLOGY_CLASS_CATEGORY:
+            concept_type = "ontology class"
+        else:
+            concept_type = concept.parents[0] if concept.parents else "ontology individual"
+        pinned.append(
+            ScoredResult(
+                id=UUID(concept.node_id),
+                score=0.0,
+                payload={
+                    "id": concept.node_id,
+                    "name": concept.canonical_name,
+                    "type": concept_type,
+                },
+            )
+        )
+
+    pinned_ids = {concept.node_id for concept in concepts}
+    return pinned + [hit for hit in entity_hits if result_id(hit) not in pinned_ids]
+
+
 async def build_entities(
     graph_engine: Any,
     entity_hits: list[Any],
@@ -74,7 +111,19 @@ async def build_entities(
     edge_ranks: dict[str, int] | None = None,
     node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
+    pinned_ids: frozenset[str] | set[str] = frozenset(),
+    pinned_class_ids: frozenset[str] | set[str] = frozenset(),
 ) -> tuple[list[dict], set[str]]:
+    """Entities for the hits, with their one-hop edges as bullets.
+
+    A pinned entity (an ontology node the query names, ``pin_grounded_entities``) is
+    dropped when it has no connection left: the dataset's graph does not hold it, and
+    showing it would invent an entity and make an empty context look non-empty.
+
+    A pinned class (``pinned_class_ids``) is read with its ``realizes`` edges only, the
+    tables that realize it. Its other neighbours are every entity of its type, which a
+    search that names a common class would otherwise read in full on every call.
+    """
     if not entity_hits:
         return [], set()
 
@@ -84,21 +133,40 @@ async def build_entities(
     if not entity_ids:
         return entities, set()
 
+    class_ids = [entity_id for entity_id in entity_ids if entity_id in pinned_class_ids]
+    other_ids = [entity_id for entity_id in entity_ids if entity_id not in pinned_class_ids]
     try:
-        nodes, edges = await graph_engine.get_neighborhood(entity_ids, depth=1)
+        reads = []
+        if other_ids:
+            reads.append(graph_engine.get_neighborhood(other_ids, depth=1))
+        if class_ids:
+            reads.append(
+                graph_engine.get_neighborhood(
+                    class_ids, depth=1, edge_types=[REALIZES_RELATIONSHIP]
+                )
+            )
+        neighborhoods = await asyncio.gather(*reads)
+        nodes = [node for read_nodes, _ in neighborhoods for node in read_nodes]
+        edges = [edge for _, read_edges in neighborhoods for edge in read_edges]
     except Exception as error:
         logger.warning(
             "Graph neighborhood retrieval failed; returning entities without edges: %s",
             error,
             exc_info=True,
         )
-        return entities, set()
+        return [entity for entity in entities if entity["id"] not in pinned_ids], set()
 
     connections_by_entity_id = _keep_scoped_connections(
         _partition_neighborhood(entity_ids, nodes, edges),
         node_name,
         node_name_filter_operator,
+        pinned_ids,
     )
+    entities = [
+        entity
+        for entity in entities
+        if entity["id"] not in pinned_ids or connections_by_entity_id.get(entity["id"])
+    ]
     for entity in entities:
         connections = connections_by_entity_id.get(entity["id"], [])
         _hydrate_entity(entity, connections, scoped=scoped)
@@ -106,6 +174,7 @@ async def build_entities(
             connections,
             max_edges_per_entity,
             edge_ranks or {},
+            entity["id"] if entity["id"] in pinned_class_ids else None,
         )
     return entities, _reachable_edge_type_ids(connections_by_entity_id)
 
@@ -182,11 +251,14 @@ def _keep_scoped_connections(
     connections_by_entity_id: dict[str, list[tuple[dict, dict, dict]]],
     node_name: list[str] | None,
     node_name_filter_operator: str,
+    pinned_ids: frozenset[str] | set[str],
 ) -> dict[str, list[tuple[dict, dict, dict]]]:
     """Drop 1-hop neighbours that are not in the requested node set.
 
-    ``is_a`` type edges stay: EntityType nodes usually have no ``belongs_to_set``.
-    Unscoped searches are unchanged.
+    A vector hit's ``is_a`` type edges stay: the hit passed the filter itself, and
+    EntityType nodes usually have no ``belongs_to_set``. A pinned entity did not pass
+    it, so every one of its neighbours must be in the node set. Unscoped searches are
+    unchanged.
     """
     if not node_name:
         return connections_by_entity_id
@@ -194,7 +266,9 @@ def _keep_scoped_connections(
         entity_id: [
             triple
             for triple in triples
-            if _connection_in_scope(entity_id, triple, node_name, node_name_filter_operator)
+            if _connection_in_scope(
+                entity_id, triple, node_name, node_name_filter_operator, entity_id in pinned_ids
+            )
         ]
         for entity_id, triples in connections_by_entity_id.items()
     }
@@ -205,9 +279,10 @@ def _connection_in_scope(
     triple: tuple[dict, dict, dict],
     node_name: list[str],
     node_name_filter_operator: str,
+    pinned: bool,
 ) -> bool:
     source, edge, target = triple
-    if _is_type_relationship(display_value(edge.get("relationship_name"))):
+    if not pinned and _is_type_relationship(display_value(edge.get("relationship_name"))):
         return True
     neighbor = target if display_value(source.get("id")) == entity_id else source
     return payload_matches_node_filter(neighbor, node_name, node_name_filter_operator)
@@ -278,13 +353,18 @@ def _entity_type(result_payload: dict) -> str | None:
 
 
 def _edge_bullets_from_connections(
-    connections: list[Any], max_edges: int, edge_ranks: dict[str, int]
+    connections: list[Any],
+    max_edges: int,
+    edge_ranks: dict[str, int],
+    pinned_class_id: str | None = None,
 ) -> list[dict]:
     if max_edges <= 0:
         return []
 
     ranked = _deduplicated_bullets(connections)
-    ranked.sort(key=lambda edge_bullet: _edge_sort_key(edge_bullet.bullet, edge_ranks))
+    ranked.sort(
+        key=lambda edge_bullet: _edge_sort_key(edge_bullet.bullet, edge_ranks, pinned_class_id)
+    )
     selected = ranked[:max_edges]
     # Inside the window a superseded fact sinks below the ones that still hold.
     # The sort is stable, so everything else keeps the rank order above.
@@ -324,14 +404,25 @@ def _deduplicated_bullets(connections: Any) -> list["_EdgeBullet"]:
     return bullets
 
 
-def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int]:
-    """Pinned type edges first, then query-ranked edges, then legacy graph order."""
+def _edge_sort_key(
+    edge: dict, edge_ranks: dict[str, int], pinned_class_id: str | None = None
+) -> tuple[int, int, int]:
+    """Type edges first, then query-ranked edges, then legacy graph order.
+
+    For a pinned class (``pinned_class_id``) the ``is_a`` edges pointing into it come
+    last: they are its members, which say the least about the class. Within each group
+    an edge from an authoritative source (a ``realizes`` edge stamped ``authoritative``
+    by schema alignment) sorts before the others, so when several tables realize one
+    concept the system of record survives the edge cap.
+    """
+    authority = 0 if edge.get("authoritative") else 1
     if _is_type_edge(edge):
-        return (0, 0)
+        is_member = pinned_class_id is not None and edge.get("source_id") != pinned_class_id
+        return (3 if is_member else 0, 0, authority)
     rank = edge_ranks.get(edge.get("edge_type_id"))
     if rank is None:
-        return (2, 0)
-    return (1, rank)
+        return (2, 0, authority)
+    return (1, rank, authority)
 
 
 def _unpack_connection(connection: Any) -> tuple[dict, dict, dict] | None:
@@ -363,10 +454,20 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> _EdgeBullet | None:
     if is_rejected_fact(properties):
         return None
     label = status_label(properties)
+    if label:
+        text = f"{text} {label}"
+
+    authoritative = bool(properties.get("authoritative"))
+    owner = display_value(properties.get("owner"))
+    qualifiers = ["authoritative source"] if authoritative else []
+    if owner:
+        qualifiers.append(f"owner: {owner}")
+    if qualifiers:
+        text = f"{text} ({', '.join(qualifiers)})"
 
     return _EdgeBullet(
         {
-            "text": f"{text} {label}" if label else text,
+            "text": text,
             "source": source_label,
             "target": target_label,
             "source_id": display_value(source.get("id")),
@@ -374,6 +475,7 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> _EdgeBullet | None:
             "target_id": display_value(target.get("id")),
             "edge_type_id": connection_edge_type_id(edge),
             "edge_object_id": display_value(properties.get("edge_object_id")),
+            "authoritative": authoritative,
         },
         fact_status(properties) == "superseded",
     )

@@ -18,20 +18,32 @@ It is also the reference for a future port. Read `docs/ARCHITECTURE.md` first.
 | `cognee/modules/integrations/<p>/<p>_settings.py` | `.../settings.py` |
 | `cognee/modules/integrations/<p>/client.py` | `.../client.py` |
 | `cognee/modules/integrations/<p>/verify_<p>_signature.py` | `.../webhooks.py` on the core `WebhookVerifier`; the cognee shim stays in `cognee_host/` |
-| `cognee/modules/integrations/<p>/adapter.py`, `sync.py`, `handle_*_event.py`, `agent_session.py`, `resume_sync.py`, `history*.py`, `home.py`, `persistence.py`, `oauth.py`, `channels.py`, `remember_message.py`, `response_url.py`, `handle_cognee_*.py`, `handle_slack_*.py` | `.../cognee_host/<same name>.py` |
+| `cognee/modules/integrations/<p>/adapter.py`, `sync.py`, `handle_*_event.py`, `agent_session.py`, `resume_sync.py`, `home.py`, `persistence.py`, `oauth.py`, `channels.py`, `channel_membership.py`, `member_link.py`, `status.py`, `remember_message.py`, `response_url.py`, `handle_cognee_*.py`, `handle_slack_*.py` | `.../cognee_host/<same name>.py` |
 | `cognee/modules/integrations/<p>/__init__.py` (registration side effect) | `.../cognee_host/__init__.py`: an explicit `register()`; no side effect at import |
 | `cognee/api/v1/slack/routers/*.py` | `connectors/slack/cognee_connector_slack/cognee_host/routers.py` with `routers()` |
 | `cognee/tests/unit/modules/integrations/test_<p>*.py`, `test_handle_<p>_*.py` and the provider's other unit tests | `connectors/<p>/tests/unit/` |
 | `cognee/tests/unit/modules/integrations/conftest.py` | `connectors/<p>/tests/unit/conftest.py` (a copy, when a moved test uses `credential_db`) |
 | `cognee/tests/integration/tasks/connectors/test_<p>_*.py`, `conftest.py`, `fake_linear.py` (Linear) | `connectors/<p>/tests/integration/` |
-| `cognee/tests/integration/modules/integrations/test_slack_history_native.py` | `connectors/slack/tests/integration/` |
 | `.env.template`, the provider's block | the README's Configuration section; names unchanged |
 | `examples/guides/<p>.py`, `examples/python/integrations/*` | `connectors/<p>/examples/` with imports updated |
-| `docs/slack-history.md`, `docs/integration-sync-progress.md` | `connectors/<p>/docs/` |
+| `docs/integration-sync-progress.md` | `connectors/<p>/docs/` |
+| `scripts/slack-app-manifest.sdk.yml` | `connectors/slack/manifest.yml` |
 
-Pure modules that a provider shares with no host (a client, response-shape helpers,
-`history_models.py`, `home.py` block builders, `response_url.py`) go next to `source.py`,
-not under `cognee_host/`, when they import nothing from cognee.
+A provider whose integration module stays in cognee (Dropbox: its adapter, sync runner and
+OAuth routes are not ported) has no `cognee_host/` and no `cognee.integrations` entry point.
+`connector.py` still mirrors the adapter, and the host-free parts of its `sync.py` (the
+selection key and checks, the dataset name formula) go into a module next to `source.py`
+(`selection.py`).
+
+When the in-tree copy of a source stays in cognee, the package carries a parity test
+(`tests/unit/test_<p>_parity.py`) that runs both copies on the same fake provider and compares
+rows, stats, requests and state, skipped when the installed cognee has no in-tree copy. The
+connectors CI installs cognee from the checkout, so it runs there.
+
+Pure modules that a provider shares with no host (a client, response-shape helpers) go
+next to `source.py`, not under `cognee_host/`, when they import nothing from cognee. A
+module that opens its HTTP sessions through `cognee.modules.integrations.outbound` (Slack's
+`home.py`, `response_url.py`, `channels.py`) imports cognee and goes under `cognee_host/`.
 
 ## Import rewrites
 
@@ -46,6 +58,7 @@ not under `cognee_host/`, when they import nothing from cognee.
 | `from cognee.tasks.ingestion.connectors.<p> import ...` | `from cognee_connector_<p>.source import ...` |
 | `from cognee.modules.integrations.google import ...` | `from cognee_connector_google import ...` |
 | `from cognee.modules.integrations.oauth_flow import ...` | `from cognee_connectors_core.oauth_state import ...` |
+| `from cognee.modules.integrations.outbound import client_session` / `client_session("<p>", timeout=...)` | `aiohttp.ClientSession(timeout=...)`. `client_session` also refuses the call when `ALLOW_HTTP_REQUESTS` disables outbound HTTP; that is a host policy (cognee's integrations router and sync runner also check it themselves), and a test that patched `client_session` patches `aiohttp.ClientSession` on the client module instead |
 | `if getattr(dlt_utils, "DOCUMENT_SYNC_VERSION", 0) < N: raise RuntimeError(...)` (the capability gate at the top of a source factory) | `dlt_conventions.require_document_sync_version(N, provider="<Provider>", feature="<what the host must read>")`, which reads the installed cognee's version; the package's own constant would compare the package with itself. A test that monkeypatched `module.dlt_utils.DOCUMENT_SYNC_VERSION` monkeypatches `cognee_connectors_core.dlt_conventions.host_document_sync_version` instead. |
 | `cognee.modules.integrations.{base,credentials,registry,crypto,models,connect,sync_progress,ingestion}` | unchanged: these are the host seam; allowed only under `cognee_host/` |
 

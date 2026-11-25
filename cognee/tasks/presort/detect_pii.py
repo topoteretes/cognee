@@ -21,6 +21,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.pipeline_stage import caller_scope
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.shared.logging_utils import get_logger
 
@@ -188,7 +189,8 @@ def _read_sample(record: FileRecord, max_sample_bytes: int) -> str | None:
 
 async def _llm_assess(record: FileRecord, text: str) -> list[PiiFinding]:
     system_prompt = render_prompt("detect_pii.txt", {"file_name": record.name})
-    assessment = await LLMGateway.acreate_structured_output(text, system_prompt, PiiAssessment)
+    with caller_scope("detect_pii._llm_assess"):
+        assessment = await LLMGateway.acreate_structured_output(text, system_prompt, PiiAssessment)
     if not assessment.contains_personal_data:
         return []
     return [

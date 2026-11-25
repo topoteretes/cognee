@@ -1,0 +1,13 @@
+You receive a numbered list of lessons proposed from one coding session. Some were proposed
+more than once, in different words. Find the lessons that state the same fact.
+
+Two lessons are duplicates only when they say the same thing about the same files, symbols,
+commands or tests, so that keeping one loses nothing the other says. Lessons that differ in a
+name, a number, an outcome or a reason are not duplicates, even when they are worded alike.
+Lessons about the same subject that state different facts are not duplicates. When unsure,
+do not group them.
+
+Return groups: each group is the list of the numbers of lessons that are duplicates of each
+other, two or more numbers per group. A number appears in at most one group. Leave out every
+lesson that has no duplicate. Return no groups when there are no duplicates. Do not rewrite,
+judge or drop any lesson.

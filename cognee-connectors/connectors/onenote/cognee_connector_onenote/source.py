@@ -15,7 +15,6 @@ import json
 import logging
 import math
 import re
-import time
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -33,6 +32,8 @@ _RENDERER_VERSION = 2
 # One run may sleep at most this long in total across all its retries. The walk runs under
 # cognee's process-wide dlt staging lock, so a longer wait stops the run instead.
 RETRY_WAIT_BUDGET_SECONDS = 60
+_ATTEMPTS = 5
+_RETRY_STATUSES = (429, 500, 502, 503, 504)
 # Microsoft's OneNote error codes: 20113 "the resource specified in the request was deleted",
 # 20102 "you requested a resource that doesn't exist". Only 20113 counts as proof of a deletion;
 # 20102 also fits a resource this token can no longer see (see the package README.md).
@@ -45,10 +46,13 @@ Token = str | Callable[[], str]
 class OneNoteError(RuntimeError):
     """Graph failure with safe diagnostics (never response bodies or bearer tokens)."""
 
-    def __init__(self, message: str, *, status: int = 0, code: str = ""):
+    def __init__(self, message: str, *, status: int = 0, code: str = "", interrupted: bool = False):
         super().__init__(message)
         self.status = status
         self.code = code
+        # The run stopped for a reason a later run need not share (Graph kept failing); what
+        # it fetched before is still good. A rate limit or a spent budget says so by its type.
+        self.interrupted = interrupted
 
 
 class OneNoteRateLimitedError(OneNoteError):
@@ -57,6 +61,23 @@ class OneNoteRateLimitedError(OneNoteError):
 
 class OneNoteBudgetExceededError(OneNoteError):
     """The run spent its ``max_requests`` budget; it resumes on the next run."""
+
+
+class _Transient(OneNoteError):
+    """A failed attempt worth retrying; raised as it is when it was the last one."""
+
+    def __init__(self, message: str, *, status: int = 0, code: str = "", retry_after=None):
+        super().__init__(message, status=status, code=code)
+        # The raw Retry-After header, for the client's retry policy.
+        self.retry_after = retry_after
+
+
+class _TransientRateLimited(_Transient, OneNoteRateLimitedError):
+    """A transient 429, which is still a rate limit once the retries run out."""
+
+
+class _TransportFailure(_Transient):
+    """The request never got an answer."""
 
 
 def _identity(value: str) -> str:
@@ -97,8 +118,6 @@ class _Graph:
             self.client.close()
 
     def request(self, url: str, *, html: bool = False):
-        import httpx
-
         parsed = urlsplit(url)
         # Dot segments (also percent-encoded) are normalized by httpx, so a link under
         # /v1.0/me/onenote/ could otherwise send the token to another Graph endpoint.
@@ -117,85 +136,120 @@ class _Graph:
             or not parsed.path.startswith("/v1.0/me/onenote/")
         ):
             raise OneNoteError("Unsafe Graph URL rejected")
-        for attempt in range(5):
-            self.ensure_active()
-            if self.stats["requests"] >= self.max_requests:
-                raise OneNoteBudgetExceededError("Graph request budget exhausted")
-            token = self.token() if callable(self.token) else self.token
-            if not isinstance(token, str) or not token.strip():
-                raise OneNoteError("A delegated access token is required")
-            token = token.strip()
-            if any(char.isspace() for char in token):
-                raise OneNoteError("The access token must not contain whitespace")
-            if not token.isascii() or not token.isprintable():
-                raise OneNoteError("The access token is not a valid header value")
-            self.stats["requests"] += 1
-            # The failure is raised after the except block so no exception that mentions the
-            # request (and so possibly the token) stays attached as __context__.
-            failure = None
+        self.ensure_active()
+        try:
+            return dlt_utils.with_retries(
+                lambda: self._attempt(url, html),
+                retry_on=(_Transient,),
+                delay=self._retry_delay,
+                attempts=_ATTEMPTS,
+                check_active=self.check_active,
+            )
+        except _TransportFailure:
+            raise OneNoteError(
+                "Graph transport failed after five attempts", interrupted=True
+            ) from None
+        except _Transient as error:
+            # Out of retries: the caller sees the public error, as for any other answer.
+            public = (
+                OneNoteRateLimitedError
+                if isinstance(error, OneNoteRateLimitedError)
+                else OneNoteError
+            )
+            raise public(
+                str(error), status=error.status, code=error.code, interrupted=True
+            ) from None
+
+    def _retry_delay(self, error: _Transient, number: int) -> float | None:
+        """Seconds to wait before the next attempt, charged to the run's wait budget.
+
+        Raises the budget errors itself, so their messages stay the ones callers match.
+        """
+        if isinstance(error, _TransportFailure):
+            delay = 2**number
+            if self.slept + delay > RETRY_WAIT_BUDGET_SECONDS:
+                raise OneNoteError("Graph retry wait budget exhausted", interrupted=True) from None
+        else:
             try:
-                response = self.client.get(
-                    url,
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=30,
-                    follow_redirects=False,
-                )
-            except httpx.LocalProtocolError:
-                failure = "protocol"
-            except httpx.TransportError:
-                failure = "transport"
-            if failure == "protocol":
-                raise OneNoteError("Graph request could not be sent; check the access token")
-            if failure == "transport":
-                if attempt == 4:
-                    raise OneNoteError("Graph transport failed after five attempts")
-                delay = 2**attempt
-                if self.slept + delay > RETRY_WAIT_BUDGET_SECONDS:
-                    raise OneNoteError("Graph retry wait budget exhausted")
-                self.slept += delay
-                time.sleep(delay)
-                continue
-            if response.status_code in (429, 500, 502, 503, 504) and attempt < 4:
-                try:
-                    delay = float(response.headers.get("Retry-After", 2**attempt))
-                    if not math.isfinite(delay) or delay < 0:
-                        delay = 2**attempt
-                except ValueError:
-                    delay = 2**attempt
-                if self.slept + delay > RETRY_WAIT_BUDGET_SECONDS:
-                    error = OneNoteRateLimitedError if response.status_code == 429 else OneNoteError
-                    raise error(
-                        "Graph Retry-After exceeds wait budget", status=response.status_code
-                    )
-                self.slept += delay
-                time.sleep(delay)
-                continue
-            if response.status_code != 200:
-                code = ""
-                try:
-                    code = str(response.json().get("error", {}).get("code", ""))
-                except (ValueError, AttributeError):
-                    # An unreadable error body leaves the code empty, which no caller treats
-                    # as proof of a deletion, so the request fails closed.
-                    pass
-                message = (
-                    "Graph rejected the token; reauthenticate the selected account"
-                    if response.status_code == 401
-                    else "Graph request failed; snapshot was not authorized for replacement"
-                )
-                error = OneNoteRateLimitedError if response.status_code == 429 else OneNoteError
-                raise error(message, status=response.status_code, code=code)
-            if html:
-                if "text/html" not in response.headers.get("content-type", "").lower():
-                    raise OneNoteError("Graph page content is not HTML")
-                return response.text
-            try:
-                result = response.json()
+                delay = float(error.retry_after if error.retry_after is not None else 2**number)
+                if not math.isfinite(delay) or delay < 0:
+                    delay = 2**number
             except ValueError:
-                raise OneNoteError("Malformed Graph JSON") from None
-            if not isinstance(result, dict):
-                raise OneNoteError("Expected a Graph object")
-            return result
+                delay = 2**number
+            if self.slept + delay > RETRY_WAIT_BUDGET_SECONDS:
+                exceeded = OneNoteRateLimitedError if error.status == 429 else OneNoteError
+                raise exceeded(
+                    "Graph Retry-After exceeds wait budget", status=error.status, interrupted=True
+                ) from None
+        self.slept += delay
+        return delay
+
+    def _attempt(self, url: str, html: bool):
+        """One request; a transient failure raises a ``_Transient`` for the retry policy."""
+        import httpx
+
+        if self.stats["requests"] >= self.max_requests:
+            raise OneNoteBudgetExceededError("Graph request budget exhausted")
+        token = self.token() if callable(self.token) else self.token
+        if not isinstance(token, str) or not token.strip():
+            raise OneNoteError("A delegated access token is required")
+        token = token.strip()
+        if any(char.isspace() for char in token):
+            raise OneNoteError("The access token must not contain whitespace")
+        if not token.isascii() or not token.isprintable():
+            raise OneNoteError("The access token is not a valid header value")
+        self.stats["requests"] += 1
+        # The failure is raised after the except block so no exception that mentions the
+        # request (and so possibly the token) stays attached as __context__.
+        failure = None
+        try:
+            response = self.client.get(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=30,
+                follow_redirects=False,
+            )
+        except httpx.LocalProtocolError:
+            failure = "protocol"
+        except httpx.TransportError:
+            failure = "transport"
+        if failure == "protocol":
+            raise OneNoteError("Graph request could not be sent; check the access token")
+        if failure == "transport":
+            raise _TransportFailure("Graph transport failed")
+        if response.status_code != 200:
+            code = ""
+            try:
+                code = str(response.json().get("error", {}).get("code", ""))
+            except (ValueError, AttributeError):
+                # An unreadable error body leaves the code empty, which no caller treats
+                # as proof of a deletion, so the request fails closed.
+                pass
+            message = (
+                "Graph rejected the token; reauthenticate the selected account"
+                if response.status_code == 401
+                else "Graph request failed; snapshot was not authorized for replacement"
+            )
+            if response.status_code in _RETRY_STATUSES:
+                transient = _TransientRateLimited if response.status_code == 429 else _Transient
+                raise transient(
+                    message,
+                    status=response.status_code,
+                    code=code,
+                    retry_after=response.headers.get("Retry-After"),
+                )
+            raise OneNoteError(message, status=response.status_code, code=code)
+        if html:
+            if "text/html" not in response.headers.get("content-type", "").lower():
+                raise OneNoteError("Graph page content is not HTML")
+            return response.text
+        try:
+            result = response.json()
+        except ValueError:
+            raise OneNoteError("Malformed Graph JSON") from None
+        if not isinstance(result, dict):
+            raise OneNoteError("Expected a Graph object")
+        return result
 
     def collection(self, path: str):
         base = f"{_BASE}/{path}"
@@ -342,18 +396,16 @@ def _lookup(graph, page_id, notebook_id):
     return True
 
 
-def _snapshot(graph, notebook_id, cache):
+def _snapshot(graph, notebook_id, cache, rows, present):
     """Build an authoritative view of the notebook.
 
-    Returns ``(rows, present, unresolved)``: the rows of pages that are new or whose
-    fingerprint changed, ``{page_id: fingerprint}`` of every listed page, and the pages kept
-    because Graph answered 20102 for them. Bodies fetched for the rows are kept in
-    ``cache["pending"]`` until a run publishes them, so a failed run does not repeat them.
+    Fills ``rows`` with the pages that are new or whose fingerprint changed and ``present``
+    with ``{page_id: fingerprint}`` of every listed page as it goes, so a run cut by its
+    budget still has what it fetched. Returns the pages kept because Graph answered 20102
+    for them. Bodies live only in rows: dlt stores the state with every load, so page text
+    there would outlive a forget in the state history.
     """
-    pending = cache.setdefault("pending", {})
     published = cache.get("published", {})
-    rows = {}
-    present = {}
     locations = {}
     deleted_parent = False
     # Containers whose listing answered 20113 and was read as "no children" in this walk.
@@ -416,16 +468,10 @@ def _snapshot(graph, notebook_id, cache):
                     if published.get(page_id) == fingerprint:
                         graph.stats["skipped"] += 1
                         continue
-                    held = pending.get(page_id)
-                    if held is None or held["fingerprint"] != fingerprint:
-                        held = {
-                            "fingerprint": fingerprint,
-                            "text": _body(
-                                graph.request(f"{_BASE}/pages/{_path(page_id)}/content", html=True)
-                            ),
-                        }
-                        pending[page_id] = held
-                    rows[page_id] = _row(fields, page_ancestors, held["text"])
+                    text = _body(
+                        graph.request(f"{_BASE}/pages/{_path(page_id)}/content", html=True)
+                    )
+                    rows[page_id] = _row(fields, page_ancestors, text)
             for group in children(f"{container}/sectionGroups"):
                 _require(group, "id", "displayName")
                 group_ancestors = (
@@ -479,7 +525,7 @@ def _snapshot(graph, notebook_id, cache):
             confirmed[page_id] = True
         else:
             unresolved.append(page_id)
-    return rows, present, set(unresolved)
+    return set(unresolved)
 
 
 def onenote_source(
@@ -500,7 +546,8 @@ def onenote_source(
     should watch ``cognee_sync_stats['unresolved']``: pages Graph answered 20102 for are
     kept, not forgotten, and do not fail the run. Expected Graph failures, throttling and a
     spent ``max_requests`` budget return normally, publish nothing and checkpoint progress;
-    failures of ``check_active`` or of a token callable raise unchanged.
+    failures of ``check_active`` or of a token callable raise unchanged. ``check_active``
+    runs before every request attempt and every retry wait, and around every row.
 
     ``token`` is a delegated access token or a zero-argument callable returning one.
     ``http_client`` and ``service`` are two names for one ``httpx.Client`` (give at most
@@ -570,6 +617,7 @@ def onenote_source(
             raise ValueError("Resource name is already bound to another OneNote connection")
         state["connection"] = identity
         cache = state.setdefault("onenote_cache", {})
+        cache.pop("pending", None)  # Page text an older release kept in state.
         graph = _Graph(
             token,
             http_client if http_client is not None else service,
@@ -578,8 +626,9 @@ def onenote_source(
             max_requests=max_requests,
         )
         try:
+            rows, present = {}, {}
             try:
-                rows, present, unresolved = _snapshot(graph, notebook_id, cache)
+                unresolved = _snapshot(graph, notebook_id, cache, rows, present)
             except OneNoteError as exc:
                 stats["failed"] += 1
                 stats["failed_rate_limit"] += int(isinstance(exc, OneNoteRateLimitedError))
@@ -589,7 +638,23 @@ def onenote_source(
                     "(reason: %s)",
                     exc,
                 )
-                yield dlt.mark.materialize_table_schema()
+                if (
+                    exc.interrupted
+                    or isinstance(exc, (OneNoteRateLimitedError, OneNoteBudgetExceededError))
+                ) and rows:
+                    # Progress an interrupted run bought (a budget cut, a throttle, a 5xx) is
+                    # published, never deletions: the next run skips these pages instead of
+                    # fetching their bodies again. A structural failure (a malformed page,
+                    # a page that moved) still holds everything until a full recovery.
+                    for page_id in sorted(rows):
+                        graph.ensure_active()
+                        yield rows[page_id]
+                    cache["published"] = {
+                        **cache.get("published", {}),
+                        **{page_id: present[page_id] for page_id in rows},
+                    }
+                else:
+                    yield dlt.mark.materialize_table_schema()
                 return
             graph.ensure_active()
             if unresolved:
@@ -614,7 +679,6 @@ def onenote_source(
                 **{page_id: published[page_id] for page_id in unresolved},
                 **present,
             }
-            cache.pop("pending", None)
             cache.pop("confirmed_missing", None)
             cache.pop("swallowed", None)
             stats["deleted"] = len(deleted)
