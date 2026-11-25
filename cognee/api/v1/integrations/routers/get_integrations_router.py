@@ -643,9 +643,10 @@ def get_integrations_router():
         """Create or replace the caller's default sync policy. A pause is kept.
 
         ## Request Parameters
-        - **intervalMinutes** (int): How often the sync runs; accepts a preset interval or a
-          whole number of hours within the allowed range (both listed in the response as
-          intervalPresets and customHours), otherwise the request fails with 400.
+        - **intervalMinutes** (int): How often the sync runs, in minutes; one of the presets
+          15, 30, 60, 120, 240, 360, 480, 1440 or 10080, or whole hours from 1 to 23 (60 to
+          1380), both listed in the response as intervalPresets and customHours; anything
+          else fails with 400. 1440 and 10080 run once, at 10:00 local, on each listed day.
         - **timezone** (str): IANA timezone name (e.g. Europe/Belgrade) in which the
           weekdays and the next due slot are interpreted; a name absent from the tz database
           is rejected with 400. Defaults to 'UTC'.
@@ -1487,9 +1488,10 @@ def get_integrations_router():
         - **account_id** (str, optional): As for POST /{provider}/sync.
 
         ## Request Parameters
-        - **intervalMinutes** (int): How often this connection syncs; accepts a preset
-          interval or a whole number of hours within the allowed range (returned as
-          intervalPresets and customHours), otherwise the request fails with 400.
+        - **intervalMinutes** (int): How often this connection syncs, in minutes; one of the
+          presets 15, 30, 60, 120, 240, 360, 480, 1440 or 10080, or whole hours from 1 to 23
+          (60 to 1380), both returned as intervalPresets and customHours; anything else
+          fails with 400. 1440 and 10080 run once, at 10:00 local, on each listed day.
         - **timezone** (str): IANA timezone name (e.g. Europe/Belgrade) in which the
           weekdays and the next due slot are interpreted; a name absent from the tz database
           is rejected with 400. Defaults to 'UTC'.
