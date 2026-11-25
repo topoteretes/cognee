@@ -193,3 +193,15 @@ warning naming the IDs. The rest of the sync goes on and its state advances. Whe
 reads completely, the pages that are really gone are forgotten. State stored before
 ancestors were recorded withholds by root instead. Child pages inside synced copies are
 never discovered, so an unreadable block inside a copy withholds nothing.
+
+What the sync itself proved gone is never withheld: a page or database it reached and found
+gone (403/404, archived or in the trash), everything below it, and a row missing from a data
+source it queried to the end. Rows live in the data source, not under blocks, so a complete
+query is proof.
+
+A block Notion lists as `"type": "unsupported"` is matched by the type in its
+`unsupported.block_type`, the type Notion's error names.
+
+In Cognee Cloud, a selected root nested inside another selected root is normally synced
+through the outer one. When the outer root's sync leaves blocks unread, the nested root may
+be behind one of them, so it is synced as its own source and its pages are kept.

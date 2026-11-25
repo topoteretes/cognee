@@ -639,16 +639,23 @@ def _unsupported_children(fake, monkeypatch, block_type):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("block_type", ["external_object_instance_page", "ai_block"])
+# Notion documents an API-unsupported type as listed "unsupported" with its own type inside;
+# which shape the tenant's listing uses is not known, so both are synced.
+@pytest.mark.parametrize("listed_as", ["own_type", "unsupported"])
 async def test_unsupported_children_sync_and_recover_without_page_edit(
-    clean_environment, monkeypatch, block_type
+    clean_environment, monkeypatch, block_type, listed_as
 ):
     fake = _tree()
-    fake.blocks[ROOT].extend(
-        [
-            {"id": "unsupported", "type": block_type, "has_children": True, block_type: {}},
-            _paragraph("after", "Content after unsupported block."),
-        ]
-    )
+    if listed_as == "own_type":
+        block = {"id": "unsupported", "type": block_type, "has_children": True, block_type: {}}
+    else:
+        block = {
+            "id": "unsupported",
+            "type": "unsupported",
+            "has_children": True,
+            "unsupported": {"block_type": block_type},
+        }
+    fake.blocks[ROOT].extend([block, _paragraph("after", "Content after unsupported block.")])
     fake.blocks["unsupported"] = [_paragraph("recovered", "Recovered content.")]
     failures = _unsupported_children(fake, monkeypatch, block_type)
     await _sync(fake)

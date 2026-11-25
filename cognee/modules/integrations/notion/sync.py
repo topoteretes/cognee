@@ -65,15 +65,15 @@ async def sync_notion(credential: IntegrationCredential) -> None:
     await ingestion.run_sync("notion", credential, _sync_source)
 
 
-async def without_nested_roots(access_token: str, roots: list[str]) -> list[str]:
-    """The roots whose parent chain does not reach another selected root.
+async def nested_roots(access_token: str, roots: list[str]) -> dict[str, str]:
+    """Each root whose parent chain reaches another selected root, mapped to that root.
 
-    The outer root's walk already reads everything under it, so syncing the inner root
-    too would ingest and cognify its pages twice under two node sets. The chain is
-    followed one request per level (a page's parent can be a block, and a data
-    source's parent is its database). A chain that cannot be followed because Notion
-    reports an object as not shared is left alone and the root is kept. Any other
-    failure raises, so a flaky lookup never silently changes what is synced.
+    The outer root's walk reads what is under it, so syncing the inner root too would
+    ingest and cognify its pages twice under two node sets. The chain is followed one
+    request per level (a page's parent can be a block, and a data source's parent is its
+    database). A chain that cannot be followed because Notion reports an object as not
+    shared is left alone and the root is kept. Any other failure raises, so a flaky
+    lookup never silently changes what is synced.
     """
     # ``_split`` refuses an entry that is not page:<id> or data_source:<id>, before any request.
     selected = {client.canonical_id(_split(root)[1]): root for root in roots}
@@ -90,21 +90,18 @@ async def without_nested_roots(access_token: str, roots: list[str]) -> list[str]
                 parents[key] = None
         return parents[key]
 
-    kept = []
+    nested = {}
     for root in roots:
         kind, object_id = _split(root)
         seen = {client.canonical_id(object_id)}
         parent = await parent_of(kind, object_id)
-        nested = False
         while parent is not None and client.canonical_id(parent[1]) not in seen:
             if client.canonical_id(parent[1]) in selected:
-                nested = True
+                nested[root] = selected[client.canonical_id(parent[1])]
                 break
             seen.add(client.canonical_id(parent[1]))
             parent = await parent_of(*parent)
-        if not nested:
-            kept.append(root)
-    return kept
+    return nested
 
 
 async def _require_accepted_token(credential: IntegrationCredential, access_token: str) -> None:
@@ -146,11 +143,12 @@ async def _sync_source(
     source_factory = ingestion.source_factory("notion")
     access_token = await access_token_for(credential)
     await _require_accepted_token(credential, access_token)
-    roots = await without_nested_roots(access_token, roots)
+    nested = await nested_roots(access_token, roots)
+    sources = {}
 
     def make_source(root: str, resource_name: str, check_active):
         kind, object_id = _split(root)
-        return source_factory(
+        sources[root] = source_factory(
             token=access_token,
             root_page_ids=[object_id] if kind == "page" else [],
             root_data_source_ids=[object_id] if kind == "data_source" else [],
@@ -158,16 +156,29 @@ async def _sync_source(
             resource_name=resource_name,
             check_active=check_active,
         )
+        return sources[root]
 
-    retained = await ingestion.sync_scopes(
-        "notion",
-        credential,
-        counts,
-        scopes=roots,
-        dataset_name=dataset_name_for_credential(credential),
-        make_source=make_source,
-        classify_error=_classify_error,
-    )
+    retained: set[str] = set()
+    scopes = [root for root in roots if root not in nested]
+    while scopes:
+        retained |= await ingestion.sync_scopes(
+            "notion",
+            credential,
+            counts,
+            scopes=scopes,
+            dataset_name=dataset_name_for_credential(credential),
+            make_source=make_source,
+            classify_error=_classify_error,
+        )
+        # An outer walk that left blocks it could not read may not have reached a root
+        # nested in it, so that root is synced as its own scope instead of being retired.
+        scopes = [
+            inner
+            for inner, outer in nested.items()
+            if inner not in sources
+            and outer in sources
+            and ingestion.source_counts(sources[outer]).get("pages_incomplete")
+        ]
     if not ingestion.retirement_blocked(counts):
         await ingestion.retire_resources(
             "notion", credential, dataset_name_for_credential(credential), retained

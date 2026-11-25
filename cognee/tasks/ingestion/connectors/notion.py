@@ -530,6 +530,7 @@ def _withheld_deletions(
     deleted_ids: list[str],
     incomplete_pages: set[str],
     present_pages: dict[str, dict],
+    settled_ids: set[str],
 ) -> set[str]:
     """The absent pages whose deletion this run cannot prove.
 
@@ -538,6 +539,11 @@ def _withheld_deletions(
     page is withheld, and so is everything below a withheld page. State without ancestors
     falls back to the root. A withheld page is kept as it was; it is forgotten once the
     tree reads completely.
+
+    ``settled_ids`` are the ids this run read to a conclusion: data sources queried to the
+    end, and pages and databases it found gone. Such an id is never withheld, and the stored
+    ancestry is only read up to the nearest one: a row is absent from a complete query, and
+    whatever was below a gone page or database went with it.
     """
     incomplete_roots = {present_pages[page_id]["root_id"] for page_id in incomplete_pages}
     withheld: set[str] = set()
@@ -545,16 +551,20 @@ def _withheld_deletions(
     while grew:
         grew = False
         for page_id in deleted_ids:
-            if page_id in withheld:
+            if page_id in withheld or page_id in settled_ids:
                 continue
             previous = previous_pages[page_id]
             ancestors = previous.get("ancestors")
             if ancestors is None:
                 ambiguous = previous.get("root_id") in incomplete_roots
             else:
-                ambiguous = any(
-                    a["id"] in incomplete_pages or a["id"] in withheld for a in ancestors
-                )
+                ambiguous = False
+                for a in ancestors:
+                    if a["id"] in settled_ids:
+                        break
+                    if a["id"] in incomplete_pages or a["id"] in withheld:
+                        ambiguous = True
+                        break
             if ambiguous:
                 withheld.add(page_id)
                 grew = True
@@ -597,6 +607,8 @@ def _iter_rows(
     visited: set[str] = set()
     present_pages: dict[str, dict] = {}
     incomplete_pages: set[str] = set()
+    # Ids this run read to a conclusion; see _withheld_deletions.
+    settled_ids: set[str] = set()
 
     while queue:
         item = queue.popleft()
@@ -614,6 +626,7 @@ def _iter_rows(
                 if item.is_root or not _is_gone(exc):
                     raise
                 logger.warning("Notion: database %s is gone, skipping: %s", item.id, exc)
+                settled_ids.add(item.id)
                 continue
             ancestors = _ancestors_of(item, _rich_text(database.get("title")))
             for data_source in _database_data_sources(database, item.id):
@@ -645,6 +658,8 @@ def _iter_rows(
                         name=_data_source_name(result) if is_data_source else "",
                     )
                 )
+            # Reached only when the query read every row; a failing query aborts the run.
+            settled_ids.add(item.id)
             continue
 
         # item.kind == "page"
@@ -654,9 +669,11 @@ def _iter_rows(
             if item.is_root or not _is_gone(exc):
                 raise
             logger.warning("Notion: page %s is gone, forgetting it: %s", item.id, exc)
+            settled_ids.add(item.id)
             continue
 
         if page.get("archived") or page.get("in_trash"):
+            settled_ids.add(item.id)
             continue
 
         # The root is part of what was synced: a page that another selected root
@@ -720,7 +737,9 @@ def _iter_rows(
                 )
 
     deleted_ids = sorted(set(previous_pages) - set(present_pages))
-    withheld = _withheld_deletions(previous_pages, deleted_ids, incomplete_pages, present_pages)
+    withheld = _withheld_deletions(
+        previous_pages, deleted_ids, incomplete_pages, present_pages, settled_ids
+    )
     for page_id in sorted(withheld):
         present_pages[page_id] = previous_pages[page_id]
     if withheld:
@@ -885,6 +904,17 @@ _PAGE_BLOCK_TYPES = frozenset({"child_page", "child_database"})
 _END = object()
 
 
+def _api_block_type(block: dict) -> str | None:
+    """The block type Notion names in its errors.
+
+    A type the API does not support is listed as ``"unsupported"``, with its own type in
+    ``unsupported.block_type`` (developers.notion.com/reference/block).
+    """
+    if block.get("type") == "unsupported":
+        return (block.get("unsupported") or {}).get("block_type")
+    return block.get("type")
+
+
 def _is_synced_copy(block: dict) -> bool:
     return block.get("type") == "synced_block" and bool(
         (block.get("synced_block") or {}).get("synced_from")
@@ -943,7 +973,7 @@ def _cached_block_children(
     block_id = block["id"]
     if cache is not None and block_id in cache:
         return cache[block_id] or []
-    children = _list_block_children(client, block_id, block_type=block.get("type"))
+    children = _list_block_children(client, block_id, block_type=_api_block_type(block))
     if cache is not None:
         cache[block_id] = children
     return children or []

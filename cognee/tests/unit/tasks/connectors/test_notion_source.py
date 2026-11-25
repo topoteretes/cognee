@@ -1626,6 +1626,129 @@ def test_a_page_that_turns_incomplete_is_rendered_in_the_same_run():
     assert state["pages"][ROOT_PAGE_ID]["incomplete_content"] is True
 
 
+def _listed_as_unsupported(block_id, block_type):
+    """A block the way Notion lists a type its API does not support."""
+    return {
+        "id": block_id,
+        "type": "unsupported",
+        "has_children": True,
+        "unsupported": {"block_type": block_type},
+    }
+
+
+@pytest.mark.parametrize("block_type", _UNSUPPORTED_TYPES)
+@pytest.mark.parametrize("for_bot_type", [False, True])
+def test_a_block_listed_as_unsupported_is_skipped_by_its_own_type(block_type, for_bot_type, caplog):
+    """Notion's error names the block's own type, not the "unsupported" it is listed as."""
+    fake = _basic_tree()
+    fake.blocks[ROOT_PAGE_ID].extend(
+        [
+            _rich_text_block("before", "paragraph", "before"),
+            _listed_as_unsupported("unsupported", block_type),
+            _rich_text_block("after", "paragraph", "after"),
+        ]
+    )
+    client = _with_block_response(
+        fake, "unsupported", lambda _: _unsupported_response(block_type, for_bot_type)
+    )
+    state = {}
+    with caplog.at_level("WARNING"):
+        rows = list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, state, {}))
+    content = next(row["content"] for row in rows if row["id"] == ROOT_PAGE_ID)
+    assert "before" in content and "after" in content
+    assert state["pages"][ROOT_PAGE_ID]["incomplete_content"] is True
+    skipped = f"skipping unavailable children of block unsupported (type {block_type})"
+    assert sum(skipped in message for message in caplog.messages) == 1
+
+
+def test_a_block_listed_as_unsupported_without_its_type_still_fails():
+    fake = _basic_tree()
+    block = _listed_as_unsupported("unsupported", "ai_block")
+    block["unsupported"] = {}
+    fake.blocks[ROOT_PAGE_ID].append(block)
+    client = _with_block_response(fake, "unsupported", lambda _: _unsupported_response("ai_block"))
+    with pytest.raises(NotionAPIError, match="ai_block is not supported"):
+        list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, {}, {}))
+
+
+@pytest.mark.parametrize("how", ["404", "in_trash", "archived"])
+def test_a_child_the_walk_finds_gone_under_an_incomplete_page_is_forgotten(how):
+    """The walk itself proved the child gone, so the unreadable block on its parent does not
+    make its deletion uncertain; nor that of the page below it."""
+    fake = _basic_tree()
+    grandchild = "page-grandchild"
+    fake.blocks[CHILD_PAGE_ID].append(
+        {"id": grandchild, "type": "child_page", "has_children": False, "child_page": {}}
+    )
+    fake.pages[grandchild] = _page_object(
+        grandchild, "Grandchild", parent={"type": "page_id", "page_id": CHILD_PAGE_ID}
+    )
+    fake.blocks[grandchild] = []
+    _, state, _ = _sync(_client(fake), {})
+    assert {CHILD_PAGE_ID, grandchild} <= set(state["pages"])
+
+    fake.blocks[ROOT_PAGE_ID].append(_rich_text_block("bad", "ai_block", "", has_children=True))
+    if how == "404":
+        fake.gone.add(CHILD_PAGE_ID)
+    else:
+        fake.pages[CHILD_PAGE_ID][how] = True
+    rows, state, stats = _sync(_unsupported_client(fake), state["pages"])
+
+    assert {row["id"] for row in rows if row["_deleted"]} == {CHILD_PAGE_ID, grandchild}
+    assert stats["deletions_withheld"] == 0
+    assert state["pages"][ROOT_PAGE_ID]["incomplete_content"] is True
+
+
+def test_rows_of_a_database_the_walk_finds_gone_under_an_incomplete_page_are_forgotten():
+    fake = _tree_with_database()
+    _, state, _ = _sync(_client(fake), {})
+    assert ROW_PAGE_ID in state["pages"]
+
+    fake.blocks[ROOT_PAGE_ID].append(_rich_text_block("bad", "ai_block", "", has_children=True))
+    fake.gone.add(DB_BLOCK_ID)
+    rows, state, stats = _sync(_unsupported_client(fake), state["pages"])
+
+    assert [row["id"] for row in rows if row["_deleted"]] == [ROW_PAGE_ID]
+    assert stats["deletions_withheld"] == 0
+
+
+def test_a_row_deleted_from_a_queried_data_source_on_an_incomplete_page_is_forgotten():
+    """The query reads the data source to the end, so a missing row is gone, whatever
+    else on the page holding the database could not be read."""
+    fake = _tree_with_database()
+    second_row = "row-2"
+    fake.pages[second_row] = dict(fake.pages[ROW_PAGE_ID], id=second_row)
+    fake.blocks[second_row] = []
+    fake.data_source_rows[DATA_SOURCE_ID] = [ROW_PAGE_ID, second_row]
+    _, state, _ = _sync(_client(fake), {})
+
+    fake.blocks[ROOT_PAGE_ID].append(_rich_text_block("bad", "ai_block", "", has_children=True))
+    fake.data_source_rows[DATA_SOURCE_ID] = [ROW_PAGE_ID]
+    rows, state, stats = _sync(_unsupported_client(fake), state["pages"])
+
+    assert [row["id"] for row in rows if row["_deleted"]] == [second_row]
+    assert stats["deletions_withheld"] == 0
+    assert second_row not in state["pages"]
+    assert state["pages"][ROOT_PAGE_ID]["incomplete_content"] is True
+
+
+def test_a_row_of_a_data_source_hidden_by_an_unsupported_block_is_withheld():
+    """A database inside the unreadable block is not reached, so its rows cannot be
+    proved gone."""
+    fake = _tree_with_database()
+    database_block = fake.blocks[ROOT_PAGE_ID].pop()
+    fake.blocks[ROOT_PAGE_ID].append(_rich_text_block("bad", "ai_block", "", has_children=True))
+    fake.blocks["bad"] = [database_block]
+    _, state, _ = _sync(_client(fake), {})
+    assert ROW_PAGE_ID in state["pages"]
+
+    rows, state, stats = _sync(_unsupported_client(fake), state["pages"])
+
+    assert not any(row["_deleted"] for row in rows)
+    assert stats["deletions_withheld"] == 1
+    assert ROW_PAGE_ID in state["pages"]
+
+
 def test_unsupported_block_does_not_prevent_deletion_under_another_page():
     fake = _basic_tree()
     fake.pages["other"] = _page_object("other", "Other", parent={"type": "workspace"})
