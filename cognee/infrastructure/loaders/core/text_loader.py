@@ -60,9 +60,9 @@ class TextLoader(LoaderInterface):
 
         Args:
             file_path: Path to the file to load
-            encoding: Text encoding to use. When omitted, the encoding named by a
-                leading byte-order mark (UTF-8, UTF-16 or UTF-32) is used and the
-                mark is dropped; a file without one is read as UTF-8.
+            encoding: Text encoding to use. When omitted, a file starting with a
+                UTF-16 or UTF-32 byte-order mark is read in the encoding the mark
+                names, without the mark; any other file is read as UTF-8.
             **kwargs: Additional configuration (unused)
 
         Returns:
@@ -80,6 +80,10 @@ class TextLoader(LoaderInterface):
             file_metadata = await get_file_metadata(f)
             f.seek(0)
             bom_codec = None if encoding else bom_encoding(f.read(4))
+        # Backward compatibility: a UTF-8 BOM keeps the plain UTF-8 read, which leaves
+        # the mark in the text as a leading "﻿", as before BOM support was added.
+        if bom_codec == "utf-8":
+            bom_codec = None
         # Name ingested file of current loader based on original file content hash
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 

@@ -17,7 +17,6 @@ from cognee.infrastructure.loaders.get_loader_engine import get_loader_engine
 TEXT = "Contact: jane.doe@example.com\nZürich, 東京\n"
 
 BOM_ENCODINGS = [
-    pytest.param(codecs.BOM_UTF8, "utf-8", id="utf-8-bom"),
     pytest.param(codecs.BOM_UTF16_LE, "utf-16-le", id="utf-16-le"),
     pytest.param(codecs.BOM_UTF16_BE, "utf-16-be", id="utf-16-be"),
     pytest.param(codecs.BOM_UTF32_LE, "utf-32-le", id="utf-32-le"),
@@ -37,6 +36,15 @@ async def test_bom_file_loads_as_its_utf8_twin(tmp_path, bom, codec):
 
     assert content == await TextLoader().load(str(twin), persist=False)
     assert content == TEXT
+
+
+@pytest.mark.asyncio
+async def test_utf8_bom_is_kept_as_before(tmp_path):
+    """Backward compatibility: a UTF-8 BOM file loads exactly as it did before."""
+    marked = tmp_path / "contact.txt"
+    marked.write_bytes(codecs.BOM_UTF8 + TEXT.encode("utf-8"))
+
+    assert await TextLoader().load(str(marked), persist=False) == "﻿" + TEXT
 
 
 @pytest.mark.asyncio
@@ -66,6 +74,34 @@ async def test_bomless_utf16_is_still_refused(tmp_path):
 
     with pytest.raises(UnreadableFileContentError) as refused:
         await TextLoader().load(str(unmarked), persist=False)
+
+    assert refused.value.status_code == 415
+
+
+@pytest.mark.asyncio
+async def test_bom_prefixed_binary_that_is_valid_utf16_loads_as_text(tmp_path):
+    """Accepted limitation: a BOM alone can't tell text from binary.
+
+    Binary whose bytes after a UTF-16 BOM all form valid UTF-16 loads as control
+    characters instead of being refused. Random binary almost never does (it soon
+    hits an unpaired surrogate and gets the 415), and real binary formats get a
+    non-text mime before reaching this loader. Presort's ``is_text_content``
+    admits the same files.
+    """
+    blob = tmp_path / "blob.txt"
+    blob.write_bytes(codecs.BOM_UTF16_LE + bytes([0x01, 0x00, 0x02, 0x00]) * 256)
+
+    assert await TextLoader().load(str(blob), persist=False) == "\x01\x02" * 256
+
+
+@pytest.mark.asyncio
+async def test_bom_prefixed_random_binary_is_still_refused(tmp_path):
+    blob = tmp_path / "blob.txt"
+    # 0xD800 is an unpaired UTF-16 surrogate: strict decoding rejects it.
+    blob.write_bytes(codecs.BOM_UTF16_LE + b"\x00\xd8\x41\x00" * 256)
+
+    with pytest.raises(UnreadableFileContentError) as refused:
+        await TextLoader().load(str(blob), persist=False)
 
     assert refused.value.status_code == 415
 
