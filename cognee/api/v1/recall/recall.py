@@ -526,13 +526,14 @@ def _validate_cited_request(
         )
     if sources != ["graph"]:
         raise CogneeValidationError(
-            message="result_mode='cited' searches the graph only: pass scope=['graph'], or "
-            f"omit session_id with the default scope (resolved sources: {sources}).",
+            message="result_mode='cited' searches the graph only: pass scope=['graph'], "
+            "query_type=HYBRID_COMPLETION, or omit session_id with the default scope "
+            f"(resolved sources: {sources}).",
             name="CitedRequiresGraphScopeError",
         )
     # The cited prompt is the hybrid prompt with its records tagged, so a request hybrid
-    # would hand to GRAPH_COMPLETION is refused here; a dataset without chunks is refused
-    # per dataset in build_cited_item.
+    # would hand to GRAPH_COMPLETION is refused here; a dataset without chunks is left out
+    # by build_cited_items, which refuses only when no searched dataset has any.
     deferral_reason = request_deferral_reason(
         {
             "node_type": node_type,
@@ -685,17 +686,27 @@ async def recall(
             the memory it used. Requires ``only_context=True`` and graph-only sources; an
             explicit ``query_type`` other than HYBRID_COMPLETION is refused, a routed one
             falls back to it. A request hybrid would hand to GRAPH_COMPLETION (a typed
-            ``node_type``, ``neighborhood_depth``, ``feedback_influence > 0``) and a
-            searched dataset with no chunk collection raise ``CitedRequiresHybridError``.
-            Record fields are documented in ``RecallCited``.
+            ``node_type``, ``neighborhood_depth``, ``feedback_influence > 0``) raises
+            ``CitedRequiresHybridError``. A searched dataset hybrid hands to
+            GRAPH_COMPLETION (no chunk collection, a code graph for example) is left out;
+            the error is raised only when no searched dataset can be cited. With access
+            control off and several datasets, the search reads one shared store and its
+            tags leave the dataset out: ``[mem:<kind>/<record_id>@<version>]``. Record
+            fields are documented in ``RecallCited``.
         expand_items: Records to read by id later (re-reading a cited memory), at most
             20, each a tag string as the cited prompt shows it, an ``ExpandItem``, or a
             dict ``{dataset_id, record_kind, record_id}`` (camelCase keys too); an
-            invalid item raises ``InvalidExpandItemsError``. Pass the cited call's query
-            and settings (``top_k``, ``node_name``, ``retriever_specific_config``) so
-            entities come back as that call ranked them. Each result's
-            ``metadata["status"]`` is ``available``, ``missing`` (no longer stored) or
-            ``forbidden`` (dataset not readable); a changed body has a new ``version``.
+            invalid item raises ``InvalidExpandItemsError``. Records are read by id
+            alone: expand uses the items, the caller, ``include_references``,
+            ``retriever_specific_config`` (passage rendering) and the LLM/embedding
+            configs, and ignores ``query_text``, ``top_k``, ``node_name``,
+            ``node_type``, ``datasets``, ``scope``, ``only_context``,
+            ``neighborhood_depth`` and ``feedback_influence``. A passage or fact comes
+            back as the prompt showed it; an entity with every one-hop edge, a superset
+            of the bullets the prompt showed. One result per item, in request order. Each
+            result's ``metadata["status"]`` is ``available``, ``missing`` (no longer
+            stored) or ``forbidden`` (dataset not readable); a changed body has a new
+            ``version``.
             Not combined with ``result_mode="cited"``.
 
     Returns:
@@ -871,19 +882,14 @@ async def recall(
 
             expanded = await expand_records(
                 expand_items,
-                query_text=query_text,
                 user=user,
+                # The settings that shape a passage's body; nothing about the query.
                 retriever_kwargs={
-                    "top_k": top_k,
-                    "system_prompt_path": system_prompt_path,
-                    "system_prompt": system_prompt,
-                    "node_type": node_type,
-                    "node_name": node_name,
-                    "node_name_filter_operator": node_name_filter_operator,
-                    "session_id": session_id,
                     "retriever_specific_config": retriever_specific_config,
                     "include_references": include_references,
                 },
+                llm_config=llm_config,
+                embedding_config=embedding_config,
             )
             span.set_attribute(COGNEE_RESULT_COUNT, len(expanded))
             return [ResponseGraphEntry(**item.model_dump(), source="graph") for item in expanded]
@@ -1212,17 +1218,13 @@ async def recall(
                 # endpoint, so their questions were absent from history entirely.
                 await log_search_history(query_text, local_query_type.value, user.id, graph_results)
 
-                tagged = []
-                for r in graph_results:
-                    if result_mode == "cited":
-                        from cognee.modules.recall.methods.recall_cited import build_cited_item
+                if result_mode == "cited":
+                    from cognee.modules.recall.methods.recall_cited import build_cited_items
 
-                        items: list[SearchResultItem] = await build_cited_item(r)
-                    else:
-                        items = normalize_search_payload(r)
-                    tagged.extend(
-                        [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
-                    )
+                    items: list[SearchResultItem] = await build_cited_items(graph_results, user)
+                else:
+                    items = [item for r in graph_results for item in normalize_search_payload(r)]
+                tagged = [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
                 # Graph-only recalls always learn the memory's state; a
                 # multi-source recall only when this lane answered, so the
                 # tools "on_empty" fallback (which fires on an empty merge)

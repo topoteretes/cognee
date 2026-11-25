@@ -35,7 +35,8 @@ from cognee.modules.retrieval.hybrid.entities import (
     build_entities,
     entity_collections,
     pin_grounded_entities,
-    render_entity,
+    read_entities_in_full,
+    render_full_entity,
     search_entities,
 )
 from cognee.modules.retrieval.hybrid.external_metadata import project_external_metadata
@@ -228,16 +229,15 @@ class HybridRetriever(BaseRetriever):
         )
 
     @user_resolution_scope()
-    async def expand_records(self, query: str, ids_by_kind: dict[str, list[str]]) -> dict:
-        """The records named by id, rendered exactly as this retriever's context shows them.
+    async def expand_records(self, ids_by_kind: dict[str, list[str]]) -> dict:
+        """The records named by id, with the bodies cited recall versioned.
 
         ``ids_by_kind`` maps ``"passage"``, ``"entity"`` and ``"fact"`` to record ids
         from a cited recall. Returns ``{(kind, id): {"body", "conflicts", "item"}}`` for
-        the ids found; a missing id is simply absent. Passages and facts are read by id
-        alone. An entity's bullets are ranked against ``query`` as the index call ranked
-        them, so this pays one query embedding and one edge search when entities are
-        asked for, and no chunk or entity search. Must run inside the dataset's database
-        context.
+        the ids found; a missing id is simply absent. Every record is read by id alone,
+        with no query: a passage or fact renders as the prompt showed it, an entity with
+        every one-hop edge (``render_full_entity``). Must run inside the dataset's
+        database context.
         """
         self._unified_engine = await get_unified_engine()
         vector_engine = self._unified_engine.vector
@@ -282,33 +282,14 @@ class HybridRetriever(BaseRetriever):
                 }
 
         if entity_ids := ids_by_kind.get("entity"):
-            entity_hits = await _retrieve_by_ids(
-                vector_engine, entity_collections(include_dlt), entity_ids
-            )
-            query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
-            max_ranked_bullets = self.entities_top_k * max(0, self.max_edges_per_entity)
-            edge_hits = await search_collection(
-                vector_engine,
-                _EDGE_TYPE_COLLECTION,
-                query,
-                max_ranked_bullets + self.facts_top_k,
-                self.node_name,
-                self.node_name_filter_operator,
-                apply_node_filter=False,
-                query_vector=query_vector,
-            )
-            entities, _ = await build_entities(
+            entities = await read_entities_in_full(
                 graph_engine,
-                entity_hits,
-                self.max_edges_per_entity,
-                edge_rank_by_id(edge_hits),
-                self.node_name,
-                self.node_name_filter_operator,
+                await _retrieve_by_ids(vector_engine, entity_collections(include_dlt), entity_ids),
             )
             apply_entity_resolutions(entities, resolutions)
             for entity in entities:
                 found[("entity", entity["id"])] = {
-                    "body": render_entity(entity),
+                    "body": render_full_entity(entity),
                     "conflicts": list(entity.get("conflicts", [])),
                     "item": entity,
                 }

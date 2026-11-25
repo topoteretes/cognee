@@ -1,4 +1,4 @@
-"""The retrieval pieces recall's index mode builds on (SDK-1099)."""
+"""The retrieval pieces recall's cited mode and expand build on (SDK-1099)."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -11,7 +11,12 @@ from cognee.modules.retrieval import hybrid_retriever as hybrid_retriever_module
 from cognee.modules.retrieval import only_context_prompt
 from cognee.modules.retrieval.hybrid.chunks import chunk_scores_by_id
 from cognee.modules.retrieval.hybrid.context import format_passages, render_passage
-from cognee.modules.retrieval.hybrid.entities import format_entities, render_entity
+from cognee.modules.retrieval.hybrid.entities import (
+    build_entities,
+    format_entities,
+    render_entity,
+    render_full_entity,
+)
 from cognee.modules.retrieval.hybrid.pairs import chunk_summary_pairs
 from cognee.modules.retrieval.hybrid.ranking import rank_chunk_summary_pairs
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
@@ -111,7 +116,6 @@ async def test_hybrid_expand_reads_records_by_id_and_renders_them(monkeypatch):
     monkeypatch.setattr(resolved_context, "read_user_resolutions", AsyncMock(return_value=[]))
 
     found = await HybridRetriever().expand_records(
-        "q",
         {
             "passage": [passage.payload["id"], "gone"],
             "fact": [str(fact.id)],
@@ -123,51 +127,87 @@ async def test_hybrid_expand_reads_records_by_id_and_renders_them(monkeypatch):
     assert ("passage", "gone") not in found
 
 
+def _neighborhood(entity_id: str, targets: list[str]):
+    """A one-hop read: the entity, its neighbours and an edge to each."""
+    nodes = [(entity_id, {"name": "tenant server", "type": "Entity"})] + [
+        (str(index), {"name": name}) for index, name in enumerate(targets)
+    ]
+    edges = [(entity_id, str(index), "runs", {}) for index in range(len(targets))]
+    return nodes, edges
+
+
 @pytest.mark.asyncio
-async def test_hybrid_expand_ranks_entity_bullets_against_the_query(monkeypatch):
-    entity_hit = _hit("tenant server", 0.0, name="tenant server")
-    stored = {"Entity_name": [entity_hit]}
+async def test_an_entity_keeps_every_edge_beside_its_ranked_bullets():
+    entity_hit = _hit("tenant server", 0.2, name="tenant server")
+    entity_id = entity_hit.payload["id"]
+    graph = SimpleNamespace(
+        get_neighborhood=AsyncMock(return_value=_neighborhood(entity_id, ["zeta", "alpha"]))
+    )
 
+    (entity,), _ = await build_entities(graph, [entity_hit], max_edges_per_entity=1)
+
+    assert len(entity["edges"]) == 1
+    # Every edge, sorted by text, whatever the cap and the query ranking kept.
+    assert [edge["text"] for edge in entity["all_edges"]] == [
+        "tenant server -- runs -- alpha",
+        "tenant server -- runs -- zeta",
+    ]
+    assert render_full_entity(entity) == (
+        "### tenant server\n- tenant server -- runs -- alpha\n- tenant server -- runs -- zeta"
+    )
+
+
+def _entity_store(monkeypatch, entity_hit, graph):
     async def retrieve(collection, ids):
-        return [point for point in stored.get(collection, []) if str(point.id) in ids]
+        return (
+            [entity_hit] if collection == "Entity_name" and entity_hit.payload["id"] in ids else []
+        )
 
-    embed = AsyncMock(return_value=[[0.1, 0.2]])
+    embed = AsyncMock()
     engine = SimpleNamespace(
         vector=SimpleNamespace(
             retrieve=retrieve, embedding_engine=SimpleNamespace(embed_text=embed)
         ),
-        graph=SimpleNamespace(),
-    )
-    edge_hits = [SimpleNamespace(id="edge-type-1", payload={"id": "edge-type-1"})]
-    build_entities = AsyncMock(
-        return_value=(
-            [
-                {
-                    "id": entity_hit.payload["id"],
-                    "name": "tenant server",
-                    "type": "software",
-                    "edges": [{"text": "The tenant server runs cognee."}],
-                }
-            ],
-            set(),
-        )
+        graph=graph,
     )
     monkeypatch.setattr(
         hybrid_retriever_module, "get_unified_engine", AsyncMock(return_value=engine)
     )
     monkeypatch.setattr(hybrid_retriever_module, "dlt_rows_indexed", AsyncMock(return_value=False))
-    monkeypatch.setattr(
-        hybrid_retriever_module, "search_collection", AsyncMock(return_value=edge_hits)
-    )
-    monkeypatch.setattr(hybrid_retriever_module, "build_entities", build_entities)
     monkeypatch.setattr(resolved_context, "read_user_resolutions", AsyncMock(return_value=[]))
+    return embed
 
-    found = await HybridRetriever(max_edges_per_entity=3).expand_records(
-        "who runs cognee?", {"entity": [entity_hit.payload["id"]]}
+
+@pytest.mark.asyncio
+async def test_hybrid_expand_returns_an_entity_with_every_edge_and_no_query(monkeypatch):
+    entity_hit = _hit("tenant server", 0.0, name="tenant server")
+    entity_id = entity_hit.payload["id"]
+    # The adapter returns edges in any order; the body does not depend on it.
+    reads = [
+        _neighborhood(entity_id, ["zeta", "alpha"]),
+        _neighborhood(entity_id, ["alpha", "zeta"]),
+    ]
+    graph = SimpleNamespace(get_neighborhood=AsyncMock(side_effect=reads))
+    embed = _entity_store(monkeypatch, entity_hit, graph)
+
+    first = await HybridRetriever(max_edges_per_entity=1).expand_records({"entity": [entity_id]})
+    second = await HybridRetriever(max_edges_per_entity=5).expand_records({"entity": [entity_id]})
+
+    body = first[("entity", entity_id)]["body"]
+    assert body == (
+        "### tenant server\n- tenant server -- runs -- alpha\n- tenant server -- runs -- zeta"
     )
+    assert second[("entity", entity_id)]["body"] == body
+    embed.assert_not_awaited()
 
-    record = found[("entity", entity_hit.payload["id"])]
-    assert record["body"] == "### tenant server (software)\n- The tenant server runs cognee."
-    embed.assert_awaited_once_with(["who runs cognee?"])
-    # Bullets are ranked by the edge search for the same query the index call ran.
-    assert build_entities.await_args.args[3] == {"edge-type-1": 0}
+
+@pytest.mark.asyncio
+async def test_hybrid_expand_fails_when_the_graph_read_fails(monkeypatch):
+    # build_entities would return the entity without edges: a new version, as if it
+    # had changed.
+    entity_hit = _hit("tenant server", 0.0, name="tenant server")
+    graph = SimpleNamespace(get_neighborhood=AsyncMock(side_effect=RuntimeError("graph down")))
+    _entity_store(monkeypatch, entity_hit, graph)
+
+    with pytest.raises(RuntimeError, match="graph down"):
+        await HybridRetriever().expand_records({"entity": [entity_hit.payload["id"]]})

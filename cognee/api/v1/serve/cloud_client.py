@@ -595,8 +595,9 @@ class CloudClient:
         """The ``capabilities`` the server's ``/health`` lists, fetched once per client.
 
         Read from a 503 too: a degraded server still says what it supports. ``None``
-        means unreadable (no JSON, or the read failed) and is not cached; a body without
-        the list is a server that predates it, so ``[]``.
+        means unknown and is not cached: no JSON, a failed read, or an error body without
+        the list (a failing health check, a proxy error page). Only a 2xx body without the
+        list is a server that predates it, so ``[]``.
         """
         if self._capabilities is not None:
             return self._capabilities
@@ -606,12 +607,15 @@ class CloudClient:
                 f"{self.service_url}/health", timeout=self.SCHEMA_PROBE_TIMEOUT
             ) as resp:
                 body = await resp.json()
+                status = resp.status
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError):
             logger.warning("could not read the server capabilities from /health")
             return None
         if not isinstance(body, dict):
             return None
         capabilities = body.get("capabilities")
+        if not isinstance(capabilities, list) and not 200 <= status < 300:
+            return None
         self._capabilities = (
             [name for name in capabilities if isinstance(name, str)]
             if isinstance(capabilities, list)

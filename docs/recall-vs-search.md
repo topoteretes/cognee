@@ -304,28 +304,42 @@ The Harbor Lights Festival opens …
 ```
 
 - Section headers, the conflict block and the prompt's frame (template, history,
-  grounding, global context, guidance) carry no tag; removing every tag line gives
-  exactly the regular prompt.
+  grounding, global context, guidance) carry no tag; removing every tag line (a line that
+  is one whole tag) gives exactly the regular prompt. A tag is real only when
+  `metadata["records"]` lists it: a stored body may quote an earlier tag.
 - `metadata["records"]` lists one record per tag, in prompt order: `tag`,
   `record_kind`, `dataset_id`, `record_id`, `version` (the content hash of the body
-  without its tag), `chars`, `rank`, `score` (comparable within one kind), `distance`
-  (passages, comparable across datasets), `conflicts` and `sources`. A caller fitting a
-  budget drops whole records (each starts at its tag) and picks them by these fields.
-- A tag is about 115 characters, so tagged records cost more of an injection budget than
+  expand returns), `chars` (the body the prompt shows), `full_chars` (the body expand
+  returns), `rank`, `score` (comparable within one kind), `distance` (passages,
+  comparable across datasets), `conflicts` and `sources`. A caller fitting a budget drops
+  whole records (each starts at its tag) and picks them by these fields.
+- An entity's prompt body is its heading and the edges the query ranked first; its
+  `version`, `full_chars` and `sources` describe every one-hop edge, the body expand
+  returns, so they do not depend on the query.
+- With access control off, a search over several datasets reads one shared store, so its
+  records belong to no single dataset and their tags leave it out:
+  `[mem:<kind>/<record_id>@<version>]`.
+- A tag is about 120 characters, so tagged records cost more of an injection budget than
   untagged ones.
 
 `recall(query, expand_items=[...])` reads up to 20 records by id later, for example a
 cited memory the user wants to re-read. An item is a tag as the prompt shows it, an
 `ExpandItem` or a `{dataset_id, record_kind, record_id}` dict. Each result's
 `metadata["status"]` is `available`, `missing` or `forbidden` (the caller cannot read the
-dataset); a body that changed since it was cited comes back with a new `version`. Send
-the cited call's query and settings so entity bullets rank as they did.
+dataset); a body that changed since it was cited comes back with a new `version`.
+Records are read by id alone: the query, `top_k`, `node_name` and `datasets` are ignored,
+so a tag expands to the same body in any later turn. A passage or fact comes back as the
+prompt showed it, an entity with every one-hop edge (a superset of its prompt bullets),
+sorted by text. One result per item, in request order. A tag without a dataset is read
+from the shared store when access control is off, and is `forbidden` otherwise.
 
 Cited mode runs `HYBRID_COMPLETION` only: an explicit other `query_type` is refused, and
 a routed one falls back to it. A request hybrid would hand to `GRAPH_COMPLETION` (a typed
 `node_type`, `neighborhood_depth`, `feedback_influence > 0`, including a deployment's
-`DEFAULT_FEEDBACK_INFLUENCE`) and a searched dataset without passages (a code-only
-dataset) raise `CitedRequiresHybridError`. Cited mode needs graph-only sources. Over
+`DEFAULT_FEEDBACK_INFLUENCE`) raises `CitedRequiresHybridError`. A searched dataset
+without passages (a code-only dataset), which hybrid hands to `GRAPH_COMPLETION`, is left
+out of the result; the error is raised only when no searched dataset can be cited. Cited
+mode needs graph-only sources. Over
 `serve()` both are sent only to a server whose `GET /health` lists `recall_cited_v1`. The
 CLI and the MCP tools do not expose them.
 

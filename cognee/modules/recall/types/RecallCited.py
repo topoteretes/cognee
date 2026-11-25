@@ -5,7 +5,13 @@ A cited recall returns one item per dataset, shaped like a regular ``only_contex
 <version>]``, directly before every passage, entity and fact, and ``metadata["records"]``
 lists one ``CitedRecord`` per tag, in prompt order. Section headers, the conflict block and
 the prompt's frame (template, history, grounding, global context, guidance) carry no tag:
-they are not memories. Removing every tag line gives exactly the regular prompt.
+they are not memories. Removing every tag line gives exactly the regular prompt. Only
+lines that are a whole tag are tag lines, and a tag is real only when
+``metadata["records"]`` lists it: a stored body may quote an earlier tag.
+
+With access control off, a search over several datasets reads one shared store, so its
+records belong to no single dataset; their tags leave the dataset out:
+``[mem:<kind>/<record_id>@<version>]``.
 """
 
 from typing import Literal
@@ -25,12 +31,14 @@ class ExpandItem(InDTO):
 
     A request body model, so its keys may be camelCase or snake_case like every other
     request field. Every record id is a UUID; a malformed one is refused here instead of
-    reaching the vector store.
+    reaching the vector store. ``dataset_id`` is None for a tag without a dataset (access
+    control off); ``version`` is the tag's, echoed in a ``missing`` or ``forbidden`` row.
     """
 
-    dataset_id: UUID
+    dataset_id: UUID | None = None
     record_kind: MemoryRecordKind
     record_id: UUID
+    version: str | None = None
 
 
 class RecordSource(BaseModel):
@@ -45,21 +53,28 @@ class RecordSource(BaseModel):
 class CitedRecord(BaseModel):
     """One tagged record of a cited recall, or one record an expand returned.
 
-    ``version`` is the content hash of the record's body without its tag and ``chars``
-    that body's length, so a cited record and its expanded body agree. ``rank`` is the
-    order within the kind, from 1. ``score`` is comparable only within one kind: the
-    fused rank score for passages (higher is better), the vector distance for entities
-    and facts (lower is better). ``distance`` is the passage's raw query distance, for
-    merging passages across datasets. ``sources`` is ``None`` for facts, whose sources
-    are not tracked. ``status`` is set on expand results only.
+        ``version`` is the content hash of the body expand returns, so a cited record and its
+        expanded body agree. ``chars`` is the length of the body the prompt shows and
+        ``full_chars`` that of the expanded body. They differ only for entities: the prompt
+        shows the bullets ranked against the query, expand returns every one-hop edge, sorted
+        by text, so the version of an entity does not depend on the query. ``rank`` is the
+        order within the kind among the cited records, from 1. ``score`` is comparable only within one kind: the
+        fused rank score for passages (higher is better), the vector distance for entities
+        and facts (lower is better). ``distance`` is the passage's raw query distance, for
+        merging passages across datasets. ``sources`` is ``None`` for facts, whose sources
+        are not tracked; an entity's sources are those of all its edges. ``dataset_id`` is None
+    for a record of the shared store (access control off). ``tag`` is None on a ``missing``
+    or ``forbidden`` row requested without a version. ``status`` is set on expand results
+    only.
     """
 
-    tag: str
+    tag: str | None
     record_kind: MemoryRecordKind
-    dataset_id: str
+    dataset_id: str | None
     record_id: str
     version: str | None = None
     chars: int
+    full_chars: int | None = None
     rank: int | None = None
     score: float | None = None
     distance: float | None = None

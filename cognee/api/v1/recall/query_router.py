@@ -327,7 +327,7 @@ def _constrain_llm(decision: RouteDecision, llm_available: bool) -> RouteDecisio
 def constrain(
     decision: RouteDecision, constraints: RoutingConstraints | None = None
 ) -> RouteDecision:
-    """Apply scope, Cypher, index, and LLM constraints to a route in that order."""
+    """Apply scope, Cypher, cited, and LLM constraints to a route in that order."""
     if constraints is None:
         return decision
 

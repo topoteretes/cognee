@@ -161,8 +161,8 @@ async def get_retriever_output(
 
 
 def _context_frame(retriever_instance, prompts) -> dict | None:
-    """The parts of an ``only_context`` result that have no record id, for the recall
-    index: the prompt's session layer and template halves, and the context's grounding
+    """The parts of an ``only_context`` result that have no record id, for recall's
+    cited mode: the prompt's session layer and template halves, and the context's grounding
     and global-context sections (set by retrievers that build them). None without a prompt.
     """
     prompt_frame = getattr(prompts, "frame", None)

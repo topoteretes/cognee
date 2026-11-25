@@ -134,6 +134,19 @@ async def test_a_degraded_server_still_says_what_it_supports():
 
 
 @pytest.mark.asyncio
+async def test_an_error_body_without_the_list_is_unknown_not_unsupported():
+    # cognee's own /health when its check fails, or a proxy's JSON error page: not an
+    # older server, so nothing is cached and the next call asks again.
+    client, server = _client({"status": "not ready", "reason": "health check failed"}, status=503)
+    with pytest.raises(RuntimeError, match="is unknown"):
+        await client.recall("q", result_mode="cited", only_context=True)
+    server.health, server.status = CURRENT, 200
+    await client.recall("q", result_mode="cited", only_context=True)
+    assert server.health_reads == 2
+    assert server.posts[-1]["result_mode"] == "cited"
+
+
+@pytest.mark.asyncio
 async def test_a_plain_recall_never_probes():
     client, server = _client(None)
     await client.recall("q")

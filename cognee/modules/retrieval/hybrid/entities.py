@@ -157,8 +157,9 @@ async def build_entities(
         )
         return [entity for entity in entities if entity["id"] not in pinned_ids], set()
 
+    all_connections = _partition_neighborhood(entity_ids, nodes, edges)
     connections_by_entity_id = _keep_scoped_connections(
-        _partition_neighborhood(entity_ids, nodes, edges),
+        all_connections,
         node_name,
         node_name_filter_operator,
         pinned_ids,
@@ -177,7 +178,41 @@ async def build_entities(
             edge_ranks or {},
             entity["id"] if entity["id"] in pinned_class_ids else None,
         )
+        # Every edge the read returned, in or out of scope: the body cited recall
+        # versions and expand returns (``render_full_entity``).
+        entity["all_edges"] = all_edge_bullets(all_connections.get(entity["id"], []))
     return entities, _reachable_edge_type_ids(connections_by_entity_id)
+
+
+async def read_entities_in_full(graph_engine: Any, entity_hits: list[Any]) -> list[dict]:
+    """Entities by id with every one-hop edge in ``all_edges``, for expand.
+
+    Unlike ``build_entities``, a failed graph read raises: an entity read without its
+    edges would come back with a new version, as if it had changed.
+    """
+    entities = [_entity_from_result(hit) for hit in entity_hits]
+    entity_ids = [entity["id"] for entity in entities if entity["id"]]
+    if not entity_ids:
+        return []
+    nodes, edges = await graph_engine.get_neighborhood(entity_ids, depth=1)
+    connections_by_entity_id = _partition_neighborhood(entity_ids, nodes, edges)
+    for entity in entities:
+        connections = connections_by_entity_id.get(entity["id"], [])
+        _hydrate_entity(entity, connections, scoped=False)
+        entity["all_edges"] = all_edge_bullets(connections)
+    return entities
+
+
+def all_edge_bullets(connections: list[tuple[dict, dict, dict]]) -> list[dict]:
+    """One bullet per distinct edge, unranked and sorted by text so the same edges always
+    render, and hash, the same."""
+    return sorted(
+        (edge_bullet.bullet for edge_bullet in _deduplicated_bullets(connections)),
+        key=lambda bullet: (
+            display_value(bullet.get("text")) or "",
+            display_value(bullet.get("edge_object_id")) or "",
+        ),
+    )
 
 
 def _hydrate_entity(
@@ -192,6 +227,12 @@ def _hydrate_entity(
     conflicts = _conflict_explanations(connections)
     if conflicts:
         entity["conflicts"] = conflicts
+
+
+def render_full_entity(entity: dict) -> str:
+    """An entity with every one-hop edge (``all_edges``): the body expand returns and
+    cited recall versions, the same whatever the query ranked."""
+    return render_entity({**entity, "edges": entity.get("all_edges", [])})
 
 
 def _type_from_connections(

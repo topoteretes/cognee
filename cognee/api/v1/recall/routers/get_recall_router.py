@@ -171,7 +171,9 @@ class RecallPayloadDTO(InDTO):
             "[mem:<kind>/<dataset_id>/<record_id>@<version>], before every passage, entity "
             "and fact, and the tagged records (rank, score, distance, chars, version, "
             "conflicts, sources) in metadata.records. Requires only_context=true and "
-            "graph-only sources."
+            "graph-only sources. A dataset without passages (a code graph) is left out. With "
+            "access control off and several datasets the tags leave the dataset out: "
+            "[mem:<kind>/<record_id>@<version>]."
         ),
     )
     expand_items: list[ExpandItem | str] | None = Field(
@@ -179,8 +181,9 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Records to read by id later (1 to 20), each a tag as the cited prompt shows it "
-            "or {dataset_id, record_kind, record_id}. Send the cited call's query, top_k, "
-            "node_name and retriever_specific_config. Each result's metadata.status is "
+            "or {dataset_id, record_kind, record_id}. Read by id alone: the query, top_k, "
+            "node_name and datasets are ignored. An entity comes back with every one-hop "
+            "edge. One result per item, in request order; each result's metadata.status is "
             "'available', 'missing' or 'forbidden'."
         ),
     )
@@ -325,14 +328,17 @@ def get_recall_router() -> APIRouter:
           line, [mem:<kind>/<dataset_id>/<record_id>@<version>], before every passage, entity
           and fact, and the tagged records (rank, score, distance, chars, version, conflicts,
           sources) in metadata.records. A request hybrid would hand to GRAPH_COMPLETION (a
-          typed nodeType, neighborhoodDepth, feedbackInfluence > 0) or a dataset without
-          passages answers 422 CitedRequiresHybridError. Servers that support it list
+          typed nodeType, neighborhoodDepth, feedbackInfluence > 0) answers 422
+          CitedRequiresHybridError; a dataset without passages is left out, and the 422 comes
+          only when no searched dataset has any. With access control off and several datasets
+          the tags leave the dataset out. Servers that support it list
           "recall_cited_v1" in GET /health capabilities.
         - **expandItems** (Optional[List[str | dict]]): 1 to 20 records to read by id later,
           each a tag as the cited prompt shows it or {datasetId, recordKind, recordId}
-          (snake_case too); send the cited call's query and settings. Each result's
-          metadata.status is 'available', 'missing' or 'forbidden'. Not combined with
-          resultMode='cited'.
+          (snake_case too). Records are read by id alone; the query, topK, nodeName and
+          datasets are ignored, and an entity comes back with every one-hop edge. One result
+          per item, in request order; each result's metadata.status is 'available', 'missing'
+          or 'forbidden'. Not combined with resultMode='cited'.
 
         ## Error Codes
         - **402/403/404/409/422**: Cognee errors (payment required, permission
