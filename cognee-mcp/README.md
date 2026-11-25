@@ -755,7 +755,7 @@ In order to use local cognee:
     #"cognee[postgres-binary,docs,neo4j] @ file:/path/to/your/cognee"
     ```
     Replace `/path/to/your/cognee` with the absolute path to your cognee checkout, and
-    comment out the released `"cognee[...]>=1.5.0,<2.0.0"` line directly below it —
+    comment out the released `"cognee[...]==1.6.11"` line directly below it —
     otherwise both requirements apply and uv resolves the published package instead.
 
 2. Install dependencies with uv in the mcp folder
