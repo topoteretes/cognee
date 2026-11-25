@@ -1,9 +1,10 @@
 """Reproductions of pyturso engine bugs, checked against stock SQLite.
 
 Each test runs the same statements on the stdlib ``sqlite3`` and on pyturso and
-expects the same rows. A bug the pinned release still has is a strict xfail: a
-pyturso release that fixes it makes its test pass, which fails the run and flags
-the xfail for removal. A bug a release fixed stays as a plain regression test.
+expects the same rows. A bug the pinned release still has is a strict xfail that
+accepts only the known failure: any other error fails the test, and a pyturso
+release that fixes the bug makes the test pass, which fails the run and flags the
+xfail for removal. A bug a release fixed stays as a plain regression test.
 """
 
 import sqlite3
@@ -50,18 +51,30 @@ print(sorted(tuple(row) for row in rows))
 """
 
 
+class KnownEnginePanic(Exception):
+    """The child process died with the engine panic the xfail below is about."""
+
+
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownEnginePanic,
     reason="pyturso 0.8.3 aborts the process ('duplicate cursor key') on a recursive CTE "
     "seeded from json_each() that the query reads twice, the shape of a k-hop "
     "neighborhood query; the graph adapter walks one query per hop instead",
 )
 def test_recursive_cte_seeded_from_json_each_can_be_read_twice():
-    """Runs in a subprocess: the engine panics, which would take the test run with it."""
+    """Runs in a subprocess: the engine panics, which would take the test run with it.
+
+    Only that panic is the expected failure. Any other child error or wrong rows
+    fails the test.
+    """
     expected = _run_recursive_cte("sqlite3")
     assert expected.returncode == 0 and expected.stdout.strip() == "[('a', 'b'), ('b', 'c')]"
     actual = _run_recursive_cte("turso")
-    assert (actual.returncode, actual.stdout) == (expected.returncode, expected.stdout)
+    if actual.returncode < 0 and "duplicate cursor key" in actual.stderr:
+        raise KnownEnginePanic(actual.stderr)
+    assert actual.returncode == 0, actual.stderr
+    assert actual.stdout == expected.stdout
 
 
 def _run_recursive_cte(module: str) -> subprocess.CompletedProcess:
