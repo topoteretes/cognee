@@ -208,6 +208,46 @@ def test_routed_type_with_no_results_falls_back_to_the_default(retry_client):
     assert retry_client.logged == ["HYBRID_COMPLETION"]
 
 
+def _miss(search_type: SearchType) -> SearchResultPayload:
+    """One dataset's entry when its lane found nothing, as authorized_search returns it."""
+    return SearchResultPayload(result_object=[], context=[], search_type=search_type)
+
+
+def test_routed_type_whose_datasets_all_missed_falls_back_to_the_default(retry_client):
+    """authorized_search answers a miss with one empty payload per dataset, not with []."""
+    retry_client.script[SearchType.CODING_RULES] = [
+        _miss(SearchType.CODING_RULES),
+        _miss(SearchType.CODING_RULES),
+    ]
+    retry_client.script[SearchType.HYBRID_COMPLETION] = _GRAPH_HIT
+
+    response = retry_client.client.post(
+        "/api/v1/recall", json={"query": "what are our coding rules?", "scope": "graph"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert retry_client.calls == [SearchType.CODING_RULES, SearchType.HYBRID_COMPLETION]
+    assert retry_client.logged == ["HYBRID_COMPLETION"]
+
+
+def test_routed_type_with_a_hit_in_one_dataset_is_not_retried(retry_client):
+    retry_client.script[SearchType.CODING_RULES] = [
+        _miss(SearchType.CODING_RULES),
+        SearchResultPayload(
+            result_object=["Use snake_case."],
+            context=["Use snake_case."],
+            search_type=SearchType.CODING_RULES,
+        ),
+    ]
+
+    response = retry_client.client.post(
+        "/api/v1/recall", json={"query": "what are our coding rules?", "scope": "graph"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert retry_client.calls == [SearchType.CODING_RULES]
+
+
 def test_pinned_type_with_no_results_is_not_retried(retry_client):
     """A type the caller chose is never second-guessed, empty or not."""
     response = retry_client.client.post(

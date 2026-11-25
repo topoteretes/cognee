@@ -1010,7 +1010,14 @@ async def recall(
                         # code graph, are misses, so all-miss is an empty result.
                         graph_results = _code_hits(graph_results)
 
-                    if routed_guess and not graph_results and local_query_type in _RETRY_ON_EMPTY:
+                    # authorized_search returns one payload per searched dataset, a
+                    # miss included, so an empty answer is every payload retrieving
+                    # nothing (the check dataset routing makes), not an empty list.
+                    if (
+                        routed_guess
+                        and local_query_type in _RETRY_ON_EMPTY
+                        and all(payload.retrieved_nothing() for payload in graph_results)
+                    ):
                         logger.info(
                             "Rule %s routed to %s, which returned nothing; retrying as %s.",
                             routed_rule,
