@@ -27,7 +27,7 @@ try:
     from playwright.async_api import async_playwright
 except ImportError:
     logger.debug(
-        "Failed to import playwright, make sure to install using pip install playwright>=1.9.0"
+        "Failed to import playwright, make sure to install using pip install playwright>=1.48"
     )
     async_playwright = None
 
@@ -59,6 +59,9 @@ class DefaultUrlCrawler:
         retry_delay_factor: float = 0.5,
         headers: dict[str, str] | None = None,
         robots_cache_ttl: float = 3600.0,
+        proxy_url: str | None = None,
+        ca_bundle: str | None = None,
+        max_browser_response_bytes: int | None = None,
     ):
         """Initialize the DefaultUrlCrawler.
 
@@ -71,7 +74,22 @@ class DefaultUrlCrawler:
             retry_delay_factor: Multiplier for exponential backoff on retries.
             headers: HTTP headers for requests (defaults to User-Agent: Cognee-Scraper/1.0).
             robots_cache_ttl: Time-to-live for robots.txt cache in seconds.
+            proxy_url: Explicit trusted egress proxy; it must enforce destination policy.
+            ca_bundle: Explicit PEM trust bundle; certificate verification stays enabled.
+            max_browser_response_bytes: Optional decompressed response cap; oversized
+                browser routes fail rather than returning truncated content.
         """
+        self.proxy_url = proxy_url or os.getenv("WEB_SCRAPER_PROXY_URL")
+        self.ca_bundle = ca_bundle or os.getenv("WEB_SCRAPER_CA_BUNDLE")
+        configured_limit = os.getenv("WEB_SCRAPER_MAX_BROWSER_RESPONSE_BYTES")
+        self.max_browser_response_bytes = (
+            max_browser_response_bytes
+            if max_browser_response_bytes is not None
+            else (int(configured_limit) if configured_limit else None)
+        )
+        if self.max_browser_response_bytes is not None and self.max_browser_response_bytes <= 0:
+            raise ValueError("max_browser_response_bytes must be positive")
+        self._browser_sem = asyncio.Semaphore(concurrency)
         self.concurrency = concurrency
         self._sem = asyncio.Semaphore(concurrency)
         self.crawl_delay = crawl_delay
@@ -89,21 +107,25 @@ class DefaultUrlCrawler:
         self._robots_cache: dict[str, RobotsTxtCache] = {}
         self._client: httpx.AsyncClient | None = None
         self._robots_lock = asyncio.Lock()
+        self._client_lock = asyncio.Lock()
 
     async def _ensure_client(self):
         """Initialize the HTTP client if not already created."""
-        if self._client is None:
-            from .public_http_transport import PublicHTTPTransport
+        async with self._client_lock:
+            if self._client is None:
+                from .public_http_transport import PublicHTTPTransport
 
-            # follow_redirects stays disabled so a public URL cannot redirect the
-            # server to an internal address, bypassing the SSRF host validation.
-            self._client = httpx.AsyncClient(
-                timeout=self.timeout,
-                headers=self.headers,
-                follow_redirects=False,
-                transport=PublicHTTPTransport(),
-                trust_env=False,
-            )
+                # follow_redirects stays disabled so a public URL cannot redirect the
+                # server to an internal address, bypassing the SSRF host validation.
+                self._client = httpx.AsyncClient(
+                    timeout=self.timeout,
+                    headers=self.headers,
+                    follow_redirects=False,
+                    transport=await asyncio.to_thread(
+                        PublicHTTPTransport, proxy_url=self.proxy_url, ca_bundle=self.ca_bundle
+                    ),
+                    trust_env=False,
+                )
 
     async def close(self):
         """Close the HTTP client."""
@@ -337,23 +359,42 @@ class DefaultUrlCrawler:
     async def _fetch_browser_route(self, route):
         """Fulfil browser traffic through the pinned transport; never route.continue_."""
         request = route.request
+        if request.resource_type in {"image", "media", "font"}:
+            await route.abort("blockedbyclient")
+            return
         try:
-            response = await self._client.request(
-                request.method,
-                request.url,
-                headers=await request.all_headers(),
-                content=request.post_data_buffer,
-            )
-            # HTTPX decompresses content; do not ask the browser to decode it again.
-            headers = {
-                key: value
-                for key, value in response.headers.items()
-                if key.lower() not in {"content-encoding", "content-length", "transfer-encoding"}
-            }
-            await route.fulfill(status=response.status_code, headers=headers, body=response.content)
+            async with (
+                self._browser_sem,
+                self._client.stream(
+                    request.method,
+                    request.url,
+                    headers=await request.all_headers(),
+                    content=request.post_data_buffer,
+                ) as response,
+            ):
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if (
+                        self.max_browser_response_bytes is not None
+                        and len(body) + len(chunk) > self.max_browser_response_bytes
+                    ):
+                        raise ValueError("Browser response exceeds max_browser_response_bytes")
+                    body.extend(chunk)
+                # HTTPX decompresses content; do not decode it a second time.
+                headers = {
+                    key: value
+                    for key, value in response.headers.items()
+                    if key.lower()
+                    not in {"content-encoding", "content-length", "transfer-encoding"}
+                }
+                await route.fulfill(status=response.status_code, headers=headers, body=bytes(body))
         except Exception:
             await route.abort("blockedbyclient")
             raise
+
+    @staticmethod
+    async def _close_browser_socket(socket):
+        await socket.close()
 
     async def _render_with_playwright(
         self, url: str, js_wait: float = 1.0, timeout: float | None = None
@@ -387,7 +428,15 @@ class DefaultUrlCrawler:
             try:
                 async with async_playwright() as p:
                     logger.info(f"Launching headless Chromium browser for {url}")
-                    browser = await p.chromium.launch(headless=True)
+                    browser = await p.chromium.launch(
+                        headless=True,
+                        proxy={"server": "http://127.0.0.1:9"},
+                        args=[
+                            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+                            "--host-resolver-rules=MAP * ~NOTFOUND",
+                            "--proxy-bypass-list=<-loopback>",
+                        ],
+                    )
                     try:
                         # Every browser HTTP request (including subresources and
                         # redirects) goes through the same checked TCP boundary.
@@ -395,7 +444,7 @@ class DefaultUrlCrawler:
                         context = await browser.new_context(service_workers="block")
                         await self._ensure_client()
                         await context.route("**/*", self._fetch_browser_route)
-                        await context.route_web_socket("**/*", lambda ws: ws.close())
+                        await context.route_web_socket("**/*", self._close_browser_socket)
                         page = await context.new_page()
                         logger.info(f"Navigating to {url} and waiting for network idle")
                         await page.goto(
@@ -461,7 +510,7 @@ class DefaultUrlCrawler:
                     # SSRF guard: validate the target before any outbound request
                     # (including the robots.txt fetch) so internal/reserved hosts
                     # are never contacted.
-                    await validate_outbound_url(url)
+                    await asyncio.wait_for(validate_outbound_url(url), self.timeout)
 
                     # Check robots.txt
                     allowed = await self._is_url_allowed(url)

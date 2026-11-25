@@ -45,7 +45,9 @@ async def test_clone_slug_and_remote_never_carry_the_token(monkeypatch, tmp_path
 
     # Slug comes from the clean URL — same directory a credential-free call
     # (or a later sync with a rotated token) would use.
-    assert resolved == tmp_path / "github.com-org-repo"
+    assert resolved == resolve_module.clone_dir(
+        "https://github.com/org/repo.git", clones_dir=tmp_path
+    )
 
     clone_args, _ = git_calls[0]
     # core.symlinks=false is a security requirement, not incidental: without it a
@@ -59,8 +61,11 @@ async def test_clone_slug_and_remote_never_carry_the_token(monkeypatch, tmp_path
 
 @pytest.mark.asyncio
 async def test_existing_clone_pulls_from_the_credentialed_url(monkeypatch, tmp_path):
-    clone_dir = tmp_path / "github.com-org-repo"
+    clone_dir = resolve_module.clone_dir("https://github.com/org/repo.git", clones_dir=tmp_path)
     (clone_dir / ".git").mkdir(parents=True)
+    (clone_dir / ".git" / "config").write_text(
+        '[remote "origin"]\nurl = https://github.com/org/repo.git\n'
+    )
     git_calls = []
 
     async def fake_run_git(args, cwd=None, env=None):
@@ -77,9 +82,12 @@ async def test_existing_clone_pulls_from_the_credentialed_url(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
-async def test_credential_free_urls_keep_the_bare_pull(monkeypatch, tmp_path):
-    clone_dir = tmp_path / "github.com-org-repo"
+async def test_credential_free_urls_pull_from_validated_url(monkeypatch, tmp_path):
+    clone_dir = resolve_module.clone_dir("https://github.com/org/repo.git", clones_dir=tmp_path)
     (clone_dir / ".git").mkdir(parents=True)
+    (clone_dir / ".git" / "config").write_text(
+        '[remote "origin"]\nurl = https://github.com/org/repo.git\n'
+    )
     git_calls = []
 
     async def fake_run_git(args, cwd=None, env=None):
@@ -90,7 +98,7 @@ async def test_credential_free_urls_keep_the_bare_pull(monkeypatch, tmp_path):
 
     await resolve_module.resolve_repo_source(_CLEAN_URL, clones_dir=tmp_path)
 
-    assert git_calls == [(["pull", "--ff-only"], clone_dir)]
+    assert git_calls == [(["pull", "--ff-only", "https://github.com/org/repo.git"], clone_dir)]
 
 
 @pytest.mark.asyncio
@@ -113,7 +121,9 @@ async def test_out_of_band_credentials_ride_the_environment(monkeypatch, tmp_pat
         _CLEAN_URL, clones_dir=tmp_path, credentials="tok-SECRET"
     )
 
-    assert resolved == tmp_path / "github.com-org-repo"
+    assert resolved == resolve_module.clone_dir(
+        "https://github.com/org/repo.git", clones_dir=tmp_path
+    )
     ((clone_args, _cwd, clone_env),) = git_calls
     # argv carries only the clean URL; the token is nowhere in it.
     assert clone_args == [
@@ -128,14 +138,21 @@ async def test_out_of_band_credentials_ride_the_environment(monkeypatch, tmp_pat
     assert "tok-SECRET" not in " ".join(clone_args)
     # ...and rides GIT_CONFIG_* as a basic-auth header instead.
     # Scoped to the repository's origin, so no other host ever receives it.
-    assert clone_env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraHeader"
-    assert clone_env["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
+    config = {
+        clone_env[f"GIT_CONFIG_KEY_{i}"]: clone_env[f"GIT_CONFIG_VALUE_{i}"]
+        for i in range(int(clone_env["GIT_CONFIG_COUNT"]))
+    }
+    assert "http.https://github.com/.extraHeader" in config
+    assert config["http.https://github.com/.extraHeader"].startswith("Authorization: Basic ")
 
 
 @pytest.mark.asyncio
 async def test_out_of_band_credentials_apply_to_pulls_too(monkeypatch, tmp_path):
-    clone_dir = tmp_path / "github.com-org-repo"
+    clone_dir = resolve_module.clone_dir("https://github.com/org/repo.git", clones_dir=tmp_path)
     (clone_dir / ".git").mkdir(parents=True)
+    (clone_dir / ".git" / "config").write_text(
+        '[remote "origin"]\nurl = https://github.com/org/repo.git\n'
+    )
     git_calls = []
 
     async def fake_run_git(args, cwd=None, env=None):
@@ -150,9 +167,9 @@ async def test_out_of_band_credentials_apply_to_pulls_too(monkeypatch, tmp_path)
 
     ((pull_args, pull_cwd, pull_env),) = git_calls
     # Bare pull against the (clean) stored remote; auth via the environment.
-    assert pull_args == ["pull", "--ff-only"]
+    assert pull_args == ["pull", "--ff-only", "https://github.com/org/repo.git"]
     assert pull_cwd == clone_dir
-    assert pull_env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraHeader"
+    assert "http.https://github.com/.extraHeader" in pull_env.values()
 
 
 @pytest.mark.asyncio

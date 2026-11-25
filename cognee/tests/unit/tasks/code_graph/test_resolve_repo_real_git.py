@@ -20,7 +20,7 @@ ssrf_module = importlib.import_module("cognee.tasks.web_scraper.ssrf_protection"
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 
 _URL = "https://github.com/org/repo"
-_NAME = "github.com-org-repo"
+_NAME = resolve_module.clone_dir(_URL).name
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "t",
     "GIT_AUTHOR_EMAIL": "t@example.com",
@@ -113,7 +113,10 @@ def origin(tmp_path, monkeypatch):
     async def run_git(args, cwd=None, env=None):
         # A file:// URL, not a path: only then is the clone shallow, like a real remote.
         remote = origin.bare.resolve().as_uri()
-        return await real_run_git([remote if arg == _URL else arg for arg in args], cwd, env)
+        result = await real_run_git([remote if arg == _URL else arg for arg in args], cwd, env)
+        if args[0] == "clone" and result[0] == 0:
+            _git(args[-1], "remote", "set-url", "origin", _URL)
+        return result
 
     monkeypatch.setattr(resolve_module, "_run_git", run_git)
     monkeypatch.setattr(ssrf_module, "validate_outbound_url", AsyncMock())

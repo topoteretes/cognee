@@ -23,12 +23,15 @@ def test_is_remote_repo_detection():
 
 
 def test_clone_slug_is_stable_and_filesystem_safe():
-    assert (
-        resolve_module._clone_slug("https://github.com/org/repo.git")
-        == resolve_module._clone_slug("https://github.com/org/repo")
-        == "github.com-org-repo"
+    url = "https://github.com/org/repo.git"
+    assert resolve_module._clone_slug(url) == resolve_module._clone_slug(url)
+    assert "/" not in resolve_module._clone_slug(url)
+    assert resolve_module._clone_slug(
+        "http://evil.example:6379/a/b.git"
+    ) != resolve_module._clone_slug("https://evil.example/6379/a/b.git")
+    assert resolve_module._clone_slug("http://example.com/o/r.git") != resolve_module._clone_slug(
+        "https://example.com/o/r.git"
     )
-    assert resolve_module._clone_slug("git@github.com:org/repo.git") == "git-github.com-org-repo"
 
 
 @pytest.mark.asyncio
@@ -199,7 +202,7 @@ async def test_remote_is_shallow_cloned(monkeypatch, tmp_path):
         "https://github.com/org/repo", clones_dir=tmp_path
     )
 
-    assert resolved == tmp_path / "github.com-org-repo"
+    assert resolved == resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
     assert len(git_calls) == 1
     args, _cwd = git_calls[0]
     # core.symlinks=false is a security requirement, not incidental: without it a
@@ -210,8 +213,11 @@ async def test_remote_is_shallow_cloned(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_existing_clone_is_reused_with_pull(monkeypatch, tmp_path):
-    clone_dir = tmp_path / "github.com-org-repo"
+    clone_dir = resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
     (clone_dir / ".git").mkdir(parents=True)
+    (clone_dir / ".git" / "config").write_text(
+        '[remote "origin"]\nurl = https://github.com/org/repo\n'
+    )
     git_calls = []
 
     async def fake_run_git(args, cwd=None, env=None):
@@ -225,13 +231,16 @@ async def test_existing_clone_is_reused_with_pull(monkeypatch, tmp_path):
     )
 
     assert resolved == clone_dir
-    assert git_calls == [(["pull", "--ff-only"], clone_dir)]
+    assert git_calls == [(["pull", "--ff-only", "https://github.com/org/repo"], clone_dir)]
 
 
 @pytest.mark.asyncio
 async def test_failed_pull_still_reuses_stale_clone(monkeypatch, tmp_path):
-    clone_dir = tmp_path / "github.com-org-repo"
+    clone_dir = resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
     (clone_dir / ".git").mkdir(parents=True)
+    (clone_dir / ".git" / "config").write_text(
+        '[remote "origin"]\nurl = https://github.com/org/repo\n'
+    )
 
     async def fake_run_git(args, cwd=None, env=None):
         return 1, "fatal: not fast-forward"
@@ -276,15 +285,15 @@ async def test_missing_git_binary_raises(monkeypatch, tmp_path):
         ("https://github.com/org/repo", "https://github.com/org/repo"),
         ("https://github.com/org/repo.git", "https://github.com/org/repo.git"),
         ("https://github.com/org/repo/", "https://github.com/org/repo"),
-        ("http://github.com/org/repo", "http://github.com/org/repo"),
+        ("http://github.com/org/repo", "https://github.com/org/repo"),
         # Browser chrome is dropped so git gets a clean URL.
         (
             "https://www.github.com/org/repo?tab=readme-ov-file#readme",
-            "https://www.github.com/org/repo",
+            "https://github.com/org/repo",
         ),
         ("  https://github.com/org/repo  ", "https://github.com/org/repo"),
-        ("https://gitlab.com/group/repo", "https://gitlab.com/group/repo"),
-        ("https://gitlab.com/group/subgroup/repo", "https://gitlab.com/group/subgroup/repo"),
+        ("https://gitlab.com/group/repo", "https://gitlab.com/group/repo.git"),
+        ("https://gitlab.com/group/subgroup/repo", "https://gitlab.com/group/subgroup/repo.git"),
         # Any host, when the URL says so.
         ("https://git.example.com/team/repo.git", "https://git.example.com/team/repo.git"),
         # Userinfo (a token) stays: it is needed to clone, redacted before storing.

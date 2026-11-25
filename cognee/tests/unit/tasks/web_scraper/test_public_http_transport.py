@@ -144,6 +144,7 @@ async def test_browser_subresource_uses_same_boundary(monkeypatch, client_parts)
     transport, records, _ = client_parts
     route = SimpleNamespace(
         request=SimpleNamespace(
+            resource_type="fetch",
             method="GET",
             url="http://169.254.169.254/",
             all_headers=AsyncMock(return_value={}),
@@ -160,3 +161,174 @@ async def test_browser_subresource_uses_same_boundary(monkeypatch, client_parts)
     route.abort.assert_awaited_once_with("blockedbyclient")
     route.fulfill.assert_not_called()
     assert not records
+
+
+@pytest.mark.asyncio
+async def test_production_client_is_pinned_and_does_not_mount_env_proxies(monkeypatch):
+    from cognee.tasks.web_scraper.default_url_crawler import DefaultUrlCrawler
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9999")
+    async with DefaultUrlCrawler() as crawler:
+        assert isinstance(crawler._client._transport, PublicHTTPTransport)
+        assert not crawler._client._mounts
+
+
+@pytest.mark.asyncio
+async def test_browser_routes_are_registered_before_page_and_native_network_is_disabled(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from cognee.tasks.web_scraper import default_url_crawler as module
+
+    events = []
+    page = SimpleNamespace(goto=AsyncMock(), content=AsyncMock(return_value="<html>ok</html>"))
+    context = SimpleNamespace(
+        route=AsyncMock(side_effect=lambda *a: events.append("http")),
+        route_web_socket=AsyncMock(side_effect=lambda *a: events.append("ws")),
+        new_page=AsyncMock(side_effect=lambda: events.append("page") or page),
+    )
+    browser = SimpleNamespace(new_context=AsyncMock(return_value=context), close=AsyncMock())
+    launch = AsyncMock(return_value=browser)
+    playwright = MagicMock()
+    playwright.__aenter__ = AsyncMock(
+        return_value=SimpleNamespace(chromium=SimpleNamespace(launch=launch))
+    )
+    playwright.__aexit__ = AsyncMock()
+    monkeypatch.setattr(module, "async_playwright", lambda: playwright)
+    async with module.DefaultUrlCrawler(max_retries=0) as crawler:
+        assert (
+            await crawler._render_with_playwright("https://public.example", js_wait=0)
+            == "<html>ok</html>"
+        )
+    socket = SimpleNamespace(close=AsyncMock())
+    await context.route_web_socket.call_args.args[1](socket)
+    socket.close.assert_awaited_once()
+    assert events == ["http", "ws", "page"]
+    assert launch.call_args.kwargs["proxy"] == {"server": "http://127.0.0.1:9"}
+    assert (
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
+        in launch.call_args.kwargs["args"]
+    )
+    assert "--host-resolver-rules=MAP * ~NOTFOUND" in launch.call_args.kwargs["args"]
+    browser.new_context.assert_awaited_once_with(service_workers="block")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resource_type", ["image", "media", "font"])
+async def test_large_assets_are_aborted_without_fetch(resource_type):
+    from types import SimpleNamespace
+
+    from cognee.tasks.web_scraper.default_url_crawler import DefaultUrlCrawler
+
+    route = SimpleNamespace(request=SimpleNamespace(resource_type=resource_type), abort=AsyncMock())
+    await DefaultUrlCrawler()._fetch_browser_route(route)
+    route.abort.assert_awaited_once_with("blockedbyclient")
+
+
+@pytest.mark.asyncio
+async def test_streamed_browser_response_exceeding_explicit_limit_is_aborted():
+    from types import SimpleNamespace
+
+    from cognee.tasks.web_scraper.default_url_crawler import DefaultUrlCrawler
+
+    route = SimpleNamespace(
+        request=SimpleNamespace(
+            resource_type="fetch",
+            method="GET",
+            url="https://public.example/large",
+            all_headers=AsyncMock(return_value={}),
+            post_data_buffer=None,
+        ),
+        abort=AsyncMock(),
+        fulfill=AsyncMock(),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, content=b"123456789"))
+    ) as client:
+        crawler = DefaultUrlCrawler(max_browser_response_bytes=8)
+        crawler._client = client
+        with pytest.raises(ValueError, match="exceeds"):
+            await crawler._fetch_browser_route(route)
+    route.abort.assert_awaited_once()
+    route.fulfill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dns_resolution_obeys_connect_timeout(monkeypatch):
+    import asyncio
+
+    from cognee.tasks.web_scraper import public_http_transport as module
+
+    async def never(*args):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(module, "validate_outbound_url", never)
+    backend = module.PublicNetworkBackend()
+    with pytest.raises(httpcore.ConnectTimeout):
+        await backend.connect_tcp("public.example", 443, timeout=0.01)
+
+
+@pytest.mark.asyncio
+async def test_addresses_share_one_connect_budget(monkeypatch):
+    import asyncio
+
+    from cognee.tasks.web_scraper import public_http_transport as module
+
+    monkeypatch.setattr(
+        module,
+        "validate_outbound_url",
+        AsyncMock(return_value=[ipaddress.ip_address("8.8.8.8"), ipaddress.ip_address("1.1.1.1")]),
+    )
+    backend = module.PublicNetworkBackend()
+    timeouts = []
+
+    async def connect(*args, timeout, **kwargs):
+        timeouts.append(timeout)
+        await asyncio.sleep(0.01)
+        raise httpcore.ConnectTimeout()
+
+    monkeypatch.setattr(backend.backend, "connect_tcp", connect)
+    with pytest.raises(httpcore.ConnectTimeout):
+        await backend.connect_tcp("public.example", 443, timeout=1)
+    assert 0 < timeouts[1] < timeouts[0] <= 1
+
+
+def test_explicit_ca_bundle_is_used_without_disabling_verification(monkeypatch):
+    import ssl
+    from unittest.mock import Mock
+
+    from cognee.tasks.web_scraper import public_http_transport as module
+
+    context = ssl.create_default_context()
+    create = Mock(return_value=context)
+    monkeypatch.setattr(module.ssl, "create_default_context", create)
+    transport = PublicHTTPTransport(ca_bundle="/explicit/ca.pem")
+    create.assert_called_once_with(cafile="/explicit/ca.pem")
+    assert transport._pool._ssl_context is context
+    assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
+
+
+def test_explicit_proxy_is_used_only_when_selected():
+    transport = PublicHTTPTransport(proxy_url="http://127.0.0.1:8080")
+    assert isinstance(transport._pool, httpcore.AsyncHTTPProxy)
+    assert transport._pool._proxy_url.host == b"127.0.0.1"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_requests_share_one_client(monkeypatch):
+    import asyncio
+    from unittest.mock import Mock
+
+    from cognee.tasks.web_scraper import public_http_transport as module
+    from cognee.tasks.web_scraper.default_url_crawler import DefaultUrlCrawler
+
+    factory = Mock(wraps=module.PublicHTTPTransport)
+    monkeypatch.setattr(module, "PublicHTTPTransport", factory)
+    crawler = DefaultUrlCrawler()
+    try:
+        await asyncio.gather(*(crawler._ensure_client() for _ in range(10)))
+        factory.assert_called_once()
+    finally:
+        await crawler.close()

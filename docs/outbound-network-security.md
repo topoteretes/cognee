@@ -9,13 +9,25 @@ the same connection guard. Environment HTTP proxies are ignored because their
 DNS resolution would happen outside that guard.
 
 Playwright routes HTTP requests through this client, blocks service workers and
-closes WebSockets. It requires Playwright with `route_web_socket` (1.48+). The
+closes WebSockets. Chromium launches behind a dead proxy, with its resolver
+disabled and non-proxied WebRTC disabled; loopback is not exempted from the proxy. It requires Playwright with `route_web_socket` (1.48+). The
 browser is not a general sandbox for untrusted JavaScript; use network isolation
 as an additional boundary. Failed request validation aborts the browser route.
 
 HTTP(S) Git clones use validated addresses in `http.curloptResolve`, preserve TLS
-verification and scoped credentials, disable proxies and refuse redirects. This
-requires Git 2.37+ with libcurl support for CURLOPT_RESOLVE. The pin applies to
+verification and scoped credentials, disable proxies and refuse redirects. Git
+2.37+ is checked before HTTP(S) operations so older Git cannot ignore the pin.
+GitHub/GitLab URLs are normalized before validation (`www.`, HTTP, and GitLab's
+missing `.git` suffix). Renamed/transferred repositories require their canonical
+URL; a redirect produces an explicit error. Cache paths include a URL hash;
+refresh verifies the stored origin and always fetches from the validated URL.
+
+Credential-helper settings (including host-scoped helpers), extra auth headers,
+and CA bundle/path settings are copied from Git configuration. Other global/system
+settings, notably `url.*.insteadOf` and proxy settings, are deliberately excluded
+because they can replace the validated destination. Existing unhashed cache
+directories are not reused; a new clone is created, without deleting the old one.
+This requires libcurl support for CURLOPT_RESOLVE. The pin applies to
 the specified origin; it is not a replacement for process/network isolation
 against arbitrary Git helper/alternate transports. Cloud accepts only canonical
 HTTPS GitHub/GitLab repository URLs and also needs its egress policy enabled.
@@ -33,3 +45,24 @@ rebinding between preflight and socket creation, redirects to metadata, mixed
 DNS answers, browser subresource rejection, and real Git/libcurl pinning against
 a local fixture. Cloud must adopt a release containing these changes before the
 hosted service gains the protection; an SDK PR alone does not deploy Cloud.
+
+## Explicit self-hosted settings
+
+`DefaultUrlCrawler` and `DefaultCrawlerConfig` accept `proxy_url`, `ca_bundle`,
+and `max_browser_response_bytes`. The corresponding process settings are
+`WEB_SCRAPER_PROXY_URL`, `WEB_SCRAPER_CA_BUNDLE`, and
+`WEB_SCRAPER_MAX_BROWSER_RESPONSE_BYTES`. These settings belong to the operator;
+never populate them from an untrusted request. Generic `HTTPS_PROXY` and
+`SSL_CERT_FILE` remain ignored. An explicit PEM CA bundle preserves certificate
+and hostname verification. A configured proxy becomes the DNS/egress security
+boundary and **must itself block private/metadata destinations and rebinding**;
+the client's preflight validation alone cannot constrain the proxy's resolver.
+Keep this opt-in unset on Cloud.
+
+Browser image/media/font requests are aborted before download. Remaining
+responses stream through a separate semaphore using the configured crawler
+concurrency (the page-level semaphore cannot be reused without deadlocking).
+When a decompressed response exceeds an explicitly configured positive byte
+limit, the route is aborted; partial content is never returned. No new default
+size cutoff is imposed. DNS resolution and successive IP attempts share the
+existing connect timeout; preflight lookups use the crawler request timeout.

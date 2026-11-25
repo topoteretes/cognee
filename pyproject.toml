@@ -156,7 +156,7 @@ api=[]
 scraping = [
     "tavily-python>=0.7.12",
     "beautifulsoup4>=4.13.1",
-    "playwright>=1.9.0",
+    "playwright>=1.48",
     # GHSA-vfmq-68hx-4jfw is fixed in lxml 6.1.0, which ships wheels for every
     # supported CPython (3.10-3.14), so one floor replaces the old per-version split.
     "lxml>=6.1.0,<7",
