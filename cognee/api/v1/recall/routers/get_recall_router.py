@@ -297,6 +297,8 @@ def get_recall_router() -> APIRouter:
         - **toolsTrigger** (str): When the 'tools' scope runs: 'always', or 'on_empty' to query the
           external database only when every other requested source returned nothing. Defaults to
           'always'.
+        - **recordContextUsage** (bool): Opt in to stamping returned guidance as used; default
+          recall is read-only.
 
         ## Error Codes
         - **402/403/404/409/422**: Cognee errors (payment required, permission

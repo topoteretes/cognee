@@ -79,7 +79,11 @@ def get_provenance_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ) -> dict[str, Any]:
-        """The live row (or current tombstone) for a ledger key; 404 if never tracked."""
+        """The live row (or current tombstone) for a ledger key; 404 if never tracked.
+
+        ## Path Parameters
+        - **entity_id** (str): Ledger key, e.g. `{dataset_id}:data_item:{data_id}`
+        """
         _require_ledger_on()
         await _authorize(authorize_ledger_key(user, entity_id))
         entry = await get_provenance_manager().get_provenance(entity_id)
@@ -94,7 +98,11 @@ def get_provenance_router() -> APIRouter:
         user: User = Depends(get_authenticated_user),
     ) -> list[dict[str, Any]]:
         """Oldest-first versions; tombstone versions carry `invalidated_by` /
-        `invalidation_reason`, so a row reads "asserted by A, retracted by B"."""
+        `invalidation_reason`, so a row reads "asserted by A, retracted by B".
+
+        ## Path Parameters
+        - **entity_id** (str): Ledger key
+        """
         _require_ledger_on()
         await _authorize(authorize_ledger_key(user, entity_id))
         history = await get_provenance_manager().revision_history(entity_id)
@@ -110,7 +118,11 @@ def get_provenance_router() -> APIRouter:
     ) -> dict[str, Any]:
         """Tamper evidence. Without `dataset_id` (superusers) the whole chain is
         walked; with it, each of the dataset's rows is checked against the
-        checksum stored at the previous chain position."""
+        checksum stored at the previous chain position.
+
+        ## Query Parameters
+        - **dataset_id** (Optional[UUID]): UUID of the dataset (from GET /api/v1/datasets).
+        """
         _require_ledger_on()
         await _authorize(authorize_ledger_scope(user, dataset_id))
         return await get_provenance_manager().verify_chain(dataset_id=dataset_id)
@@ -122,7 +134,11 @@ def get_provenance_router() -> APIRouter:
         user: User = Depends(get_authenticated_user),
     ) -> dict[str, Any]:
         """Row counts (total / live / archived), per-type counts, distinct sources,
-        and live tombstones."""
+        and live tombstones.
+
+        ## Query Parameters
+        - **dataset_id** (Optional[UUID]): UUID of the dataset (from GET /api/v1/datasets).
+        """
         _require_ledger_on()
         await _authorize(authorize_ledger_scope(user, dataset_id))
         return await get_provenance_manager().get_statistics(dataset_id=dataset_id)
@@ -137,7 +153,13 @@ def get_provenance_router() -> APIRouter:
         user: User = Depends(get_authenticated_user),
     ):
         """Streams one JSON object per line in chain order, so the export can be
-        re-verified offline with `cognee.modules.provenance.integrity`."""
+        re-verified offline with `cognee.modules.provenance.integrity`.
+
+        ## Query Parameters
+        - **dataset_id** (Optional[UUID]): UUID of the dataset (from GET /api/v1/datasets).
+        - **include_archived** (bool): Include archived versions (needed to re-verify history)
+          Defaults to True.
+        """
         _require_ledger_on()
         await _authorize(authorize_ledger_scope(user, dataset_id))
         manager = get_provenance_manager()
