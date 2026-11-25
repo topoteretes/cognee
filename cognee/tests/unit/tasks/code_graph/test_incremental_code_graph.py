@@ -10,12 +10,11 @@ from cognee.tasks.code_graph.enola import snapshot_identity
 from cognee.tasks.code_graph.extract_code_graph import (
     CODE_GRAPH_MAPPING_VERSION,
     _CodeGraphLoad,
-    _read_code_graph_state,
     add_code_graph_data_points,
     fact_node_id,
 )
 from cognee.tests.utils.code_graph_load import extracted_points, load_with_node_writes_mocked
-from cognee.tests.utils.graph_stream import stream_through_get_graph_data
+from cognee.tests.utils.graph_lookups import lookups_through_get_graph_data
 
 graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
@@ -35,7 +34,7 @@ def _write_snapshot(tmp_path, facts, snapshot_id=SNAPSHOT_ID):
 def _mock_engine(monkeypatch, nodes=(), edges=()):
     engine = AsyncMock()
     engine.get_graph_data.return_value = (list(nodes), list(edges))
-    stream_through_get_graph_data(engine)
+    lookups_through_get_graph_data(engine)
     engine.get_node.return_value = None
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
     return engine
@@ -231,7 +230,7 @@ async def test_delta_write_skips_unchanged_facts(tmp_path, monkeypatch):
         (str(by_name["app/api.handler"].id), {"fact_hash": "sha256:outdated"}),
     ]
     engine = _mock_engine(monkeypatch, existing_nodes, [])
-    load = _CodeGraphLoad(graph_state=await _read_code_graph_state(engine))
+    load = _CodeGraphLoad()
 
     await add_code_graph_data_points(data_points, load)
 

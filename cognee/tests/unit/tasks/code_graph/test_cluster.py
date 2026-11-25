@@ -29,7 +29,7 @@ from cognee.tasks.code_graph.extract_code_graph import (
 )
 from cognee.tasks.code_graph.models import CodeRepository
 from cognee.tests.utils.code_graph_load import extracted_points, load_with_node_writes_mocked
-from cognee.tests.utils.graph_stream import stream_through_get_graph_data
+from cognee.tests.utils.graph_lookups import lookups_through_get_graph_data
 
 cluster_module = importlib.import_module("cognee.tasks.code_graph.cluster")
 extract_module = importlib.import_module("cognee.tasks.code_graph.extract_code_graph")
@@ -105,7 +105,7 @@ def _write_snapshot(
 def _mock_engine(monkeypatch, nodes=(), edges=()):
     engine = AsyncMock()
     engine.get_graph_data.return_value = (list(nodes), list(edges))
-    stream_through_get_graph_data(engine)
+    lookups_through_get_graph_data(engine)
     engine.get_node.return_value = None
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
     monkeypatch.setattr(extract_module, "_invalidate_code_graph_snapshot", lambda ctx=None: None)
@@ -374,7 +374,7 @@ async def test_member_known_ids_do_not_depend_on_the_read_page_size(
     chunk = ("chunk-1", {"type": "DocumentChunk", "text": "x" * 10_000})
     engine = _mock_engine(monkeypatch, nodes=[chunk, *ui_nodes])
 
-    monkeypatch.setattr(extract_module, "DEFAULT_GRAPH_STREAM_BATCH_SIZE", page_size)
+    monkeypatch.setattr(extract_module, "DEFAULT_CODE_GRAPH_BATCH_SIZE", page_size)
     await _load_member(snapshot_dir, "golf", tmp_path)
 
     written = _written_edges(engine)
@@ -842,3 +842,26 @@ async def test_route_leaves_a_single_repository_to_the_caller(route_env):
     assert await load_dataset_cluster(ctx) is False
     env.snapshot_mock.assert_awaited_once()
     assert await load_dataset_cluster(None) is False
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_without_the_lookups_fails_before_the_cluster_enola_run(
+    monkeypatch, tmp_path
+):
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+
+    class NoLookups(GraphDBInterface):
+        pass
+
+    NoLookups.__abstractmethods__ = frozenset()
+    engine = NoLookups()
+    monkeypatch.setattr(graph_engine_module, "create_graph_engine", lambda **config: engine)
+    handle = graph_engine_module._GraphEngineHandle({})
+    monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=handle))
+    run_cluster = AsyncMock()
+    monkeypatch.setattr(cluster_module, "run_enola_cluster", run_cluster)
+    golf, ui = _repos(tmp_path, "golf", "ui")
+
+    with pytest.raises(NotImplementedError, match="get_node_ids_by_property"):
+        await snapshot_dataset_code_repos(DATASET_ID, [(_row(golf), golf), (_row(ui), ui)])
+    run_cluster.assert_not_awaited()

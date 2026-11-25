@@ -12,7 +12,6 @@ from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 from cognee.tasks.code_graph.enola import parse_enola_snapshot
 from cognee.tasks.code_graph.extract_code_graph import (
     _CodeGraphLoad,
-    _CodeGraphState,
     add_code_graph_data_points,
     build_code_graph_edges,
     fact_node_id,
@@ -31,7 +30,7 @@ from cognee.tasks.code_graph.models import (
     StorageResource,
 )
 from cognee.tests.utils.code_graph_load import extracted_points, load_with_node_writes_mocked
-from cognee.tests.utils.graph_stream import stream_through_get_graph_data
+from cognee.tests.utils.graph_lookups import lookups_through_get_graph_data
 
 # importlib.import_module returns the real submodule even though the package
 # __init__ re-exports same-named functions that shadow the submodule attribute.
@@ -580,7 +579,13 @@ async def test_add_code_graph_data_points_invalidates_cached_indexes(monkeypatch
     monkeypatch.setattr(
         code_retriever_module, "invalidate_code_graph_snapshot_cache", invalidate_mock
     )
-    load = _CodeGraphLoad(graph_state=_CodeGraphState())
+    graph_engine_module = importlib.import_module(
+        "cognee.infrastructure.databases.graph.get_graph_engine"
+    )
+    engine = AsyncMock()
+    engine.get_nodes.return_value = []
+    monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
+    load = _CodeGraphLoad()
 
     result = await add_code_graph_data_points(["node"], load)
 
@@ -600,7 +605,7 @@ async def test_add_code_graph_edges_writes_edges_and_passes_data_points_through(
 
     graph_engine = AsyncMock()
     graph_engine.get_graph_data.return_value = ([], [])
-    stream_through_get_graph_data(graph_engine)
+    lookups_through_get_graph_data(graph_engine)
     invalidate_mock = MagicMock()
     monkeypatch.setattr(
         graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
@@ -629,7 +634,7 @@ async def test_add_code_graph_edges_registers_edges_in_rollback_ledger(monkeypat
 
     graph_engine = AsyncMock()
     graph_engine.get_graph_data.return_value = ([], [])
-    stream_through_get_graph_data(graph_engine)
+    lookups_through_get_graph_data(graph_engine)
     monkeypatch.setattr(
         graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
     )
@@ -674,7 +679,7 @@ async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_
 
     graph_engine = AsyncMock()
     graph_engine.get_graph_data.return_value = ([], [])
-    stream_through_get_graph_data(graph_engine)
+    lookups_through_get_graph_data(graph_engine)
     vector_engine = MagicMock()
     unified_engine = SimpleNamespace(
         graph=graph_engine,

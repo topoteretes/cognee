@@ -1,26 +1,23 @@
-"""The code graph load reads the graph as a stream and keeps only what it reads.
+"""The code graph load looks up only the nodes and edges of its own repository.
 
 The load used to hold ``get_graph_data()`` whole, chunk text included, for
-its whole run. It now drains ``stream_graph_data`` into a trimmed state: every
-id and fact_hash, the code-graph and NodeSet nodes with the four properties
-the sweep and detag read, and the edges that start at a code-graph node. The
-page size must not change any outcome, and neither must the snapshot batch
-size, which slices the node write.
+its whole run. It now looks up each node batch's ids before writing them, the
+existing edges of each edge batch's sources, and after the writes the
+repository's code nodes and their edges. Nothing else in the graph is read,
+and the batch size, which slices the node write and the lookups, changes no
+outcome.
 """
 
 import importlib
 import json
+import sys
 from unittest.mock import AsyncMock
 
 import pytest
 
 from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
-from cognee.tasks.code_graph.extract_code_graph import (
-    _read_code_graph_state,
-    fact_node_id,
-    load_code_graph,
-)
-from cognee.tests.utils.graph_stream import stream_through_get_graph_data
+from cognee.tasks.code_graph.extract_code_graph import fact_node_id, load_code_graph
+from cognee.tests.utils.graph_lookups import lookups_through_get_graph_data
 
 graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
@@ -117,7 +114,7 @@ def _mock_engine(monkeypatch):
     nodes, edges = _existing_graph()
     engine = AsyncMock()
     engine.get_graph_data.return_value = (nodes, edges)
-    stream_through_get_graph_data(engine)
+    lookups_through_get_graph_data(engine)
     engine.get_node.return_value = None
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
     monkeypatch.setattr(
@@ -164,13 +161,12 @@ async def _load(tmp_path, monkeypatch, **batch_sizes):
 
 
 @pytest.mark.asyncio
-async def test_read_page_size_changes_no_outcome(tmp_path, monkeypatch):
+async def test_batch_size_changes_no_outcome(tmp_path, monkeypatch):
     default = await _load(tmp_path, monkeypatch)
-    monkeypatch.setattr(extract_module, "DEFAULT_GRAPH_STREAM_BATCH_SIZE", 1)
-    one_row_pages = await _load(tmp_path, monkeypatch)
+    one_at_a_time = await _load(tmp_path, monkeypatch, batch_size=1)
 
     for key in ("edges_added", "nodes_deleted", "edges_deleted", "tags_removed", "delta"):
-        assert one_row_pages[key] == default[key], key
+        assert one_at_a_time[key] == default[key], key
 
     # The outcome itself, so equality is not two empty results.
     assert default["nodes_deleted"] == [STALE_ID]
@@ -191,25 +187,32 @@ async def test_read_page_size_changes_no_outcome(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_state_keeps_no_chunk_content_or_chunk_edges(monkeypatch):
-    monkeypatch.setattr(extract_module, "DEFAULT_GRAPH_STREAM_BATCH_SIZE", 2)
-    state = await _read_code_graph_state(_mock_engine(monkeypatch))
+async def test_lookups_never_touch_the_documents_next_to_the_code(tmp_path, monkeypatch):
+    engine = _mock_engine(monkeypatch)
+    requested_ids, requested_types = set(), set()
 
-    kept_types = {properties.get("type") for _node_id, properties in state.existing_nodes}
-    assert kept_types == {"CodeRepository", "CodeSymbol", "NodeSet"}
-    assert all("text" not in properties for _node_id, properties in state.existing_nodes)
-    assert all(
-        set(properties) <= {"type", "name", "repo", "belongs_to_set"}
-        for _node_id, properties in state.existing_nodes
+    def recording(lookup, collect):
+        async def wrapper(*args):
+            collect(*args)
+            return await lookup(*args)
+
+        return wrapper
+
+    engine.get_nodes = recording(engine.get_nodes, requested_ids.update)
+    engine.get_outgoing_edge_keys = recording(engine.get_outgoing_edge_keys, requested_ids.update)
+    engine.get_node_ids_by_property = recording(
+        engine.get_node_ids_by_property, lambda types, *_: requested_types.update(types)
     )
-    assert {source for source, _target, _name in state.existing_edge_keys} == {
-        REPO_NODE_ID,
-        DATABASE_ID,
-        HANDLER_ID,
-        STALE_ID,
-    }
-    # Every node id is kept, for a cluster member's known ids.
-    assert {CHUNK_ID, DOCUMENT_ID} <= state.existing_node_ids
+    monkeypatch.setattr(add_data_points_module, "add_data_points", AsyncMock())
+
+    await load_code_graph(
+        repo_path=REPO_PATH, snapshot_dir=_write_snapshot(tmp_path), node_set=["new-team"]
+    )
+
+    code_ids = {REPO_NODE_ID, DATABASE_ID, HANDLER_ID, _node_id("symbol", "app/api.new_route")}
+    assert requested_ids <= code_ids | {STALE_ID, OLD_TAG_ID}
+    assert {CHUNK_ID, DOCUMENT_ID}.isdisjoint(requested_ids)
+    assert requested_types <= extract_module._code_graph_node_types()
 
 
 @pytest.mark.asyncio
@@ -237,3 +240,69 @@ async def test_non_positive_batch_size_raises_before_reading(tmp_path, monkeypat
         )
     engine.get_graph_data.assert_not_awaited()
     engine.get_node.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_neptune_node_maps_give_the_same_outcome(tmp_path, monkeypatch):
+    """Neptune's get_nodes returns openCypher node maps: ``~id`` and ``~properties``."""
+    default = await _load(tmp_path, monkeypatch)
+    flat_lookups = lookups_through_get_graph_data
+
+    def neptune_lookups(engine):
+        flat_lookups(engine)
+        flat_get_nodes = engine.get_nodes
+
+        async def get_nodes(node_ids):
+            nodes = await flat_get_nodes(node_ids)
+            return [{"~id": node.pop("id"), "~properties": node} for node in nodes]
+
+        engine.get_nodes = get_nodes
+
+    monkeypatch.setattr(sys.modules[__name__], "lookups_through_get_graph_data", neptune_lookups)
+    neptune = await _load(tmp_path, monkeypatch)
+
+    assert neptune == default
+
+
+@pytest.mark.asyncio
+async def test_neptune_node_map_gives_the_stored_repository_state(monkeypatch):
+    """The skip check reads the repository node off Neptune's ``get_node`` map."""
+    version = extract_module.CODE_GRAPH_MAPPING_VERSION
+    engine = _mock_engine(monkeypatch)
+    engine.get_node.return_value = {
+        "~id": REPO_NODE_ID,
+        "~labels": ["CodeRepository"],
+        "~properties": {
+            "name": REPO,
+            "last_snapshot_id": "sha256:new",
+            "last_mapping_version": version,
+            "belongs_to_set": ["old-team"],
+        },
+    }
+
+    state = await extract_module._stored_repository_state(REPO)
+
+    assert state == ("sha256:new", version, True)
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_without_the_lookups_fails_before_writing(tmp_path, monkeypatch):
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+
+    class NoLookups(GraphDBInterface):
+        pass
+
+    NoLookups.__abstractmethods__ = frozenset()
+    engine = NoLookups()
+    engine.get_node = AsyncMock(return_value=None)
+    # Through the handle get_graph_engine really returns: type() of it is the
+    # handle, so the check must read the adapter's class through __class__.
+    monkeypatch.setattr(graph_engine_module, "create_graph_engine", lambda **config: engine)
+    handle = graph_engine_module._GraphEngineHandle({})
+    monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=handle))
+    write = AsyncMock()
+    monkeypatch.setattr(add_data_points_module, "add_data_points", write)
+
+    with pytest.raises(NotImplementedError, match="get_node_ids_by_property or get_outgoing"):
+        await load_code_graph(repo_path=REPO_PATH, snapshot_dir=_write_snapshot(tmp_path))
+    write.assert_not_awaited()

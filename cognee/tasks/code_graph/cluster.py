@@ -30,10 +30,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
-from cognee.infrastructure.databases.graph.graph_db_interface import (
-    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-)
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.config import DEFAULT_CODE_GRAPH_BATCH_SIZE
 from cognee.tasks.code_graph.enola import (
     ParsedSnapshot,
     parse_enola_snapshot,
@@ -222,7 +220,10 @@ async def snapshot_dataset_code_repos(
     The snapshot is parsed here, once and off the event loop, and the parse
     travels with the result (``parsed``) to every member's load.
     """
-    from cognee.tasks.code_graph.extract_code_graph import build_code_graph_edges
+    from cognee.tasks.code_graph.extract_code_graph import (
+        _require_code_graph_lookups,
+        build_code_graph_edges,
+    )
 
     members = []
     for data, repo_path in repos:
@@ -239,6 +240,9 @@ async def snapshot_dataset_code_repos(
     repo_paths = [repo_path for _data, repo_path in members]
     cluster_timeout = max(timeout, min(timeout * len(members), CLUSTER_ENOLA_TIMEOUT_CAP_SECONDS))
     output_dir = cluster_output_dir(dataset_id)
+    # The members' load_code_graph checks too, but only after this enola run:
+    # an adapter without the lookups must fail before it.
+    await _require_code_graph_lookups()
     snapshot_dir = await run_enola_cluster(repo_paths, output_dir, timeout=cluster_timeout)
 
     facts, receipt = await asyncio.to_thread(parse_enola_snapshot, snapshot_dir)
@@ -539,7 +543,7 @@ def _cluster_run(dataset_id: UUID, run_id: Any) -> _ClusterRun:
 
 async def load_dataset_cluster(
     ctx: Optional["PipelineContext"],
-    batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    batch_size: int = DEFAULT_CODE_GRAPH_BATCH_SIZE,
 ) -> bool:
     """Load the whole cluster of the dataset a CODE_REPO item belongs to.
 
@@ -591,7 +595,7 @@ async def load_dataset_cluster(
 async def _load_cluster_members(
     snapshot: DatasetCodeSnapshot,
     ctx: "PipelineContext",
-    batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    batch_size: int = DEFAULT_CODE_GRAPH_BATCH_SIZE,
 ) -> None:
     """Load every member of a cluster snapshot, one at a time, each under its own Data row.
 

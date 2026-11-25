@@ -1,20 +1,17 @@
 """Neptune Analytics Adapter for Graph Database"""
 
 import json
-from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
 from botocore.config import Config
 
 from cognee.infrastructure.databases.graph.graph_db_interface import (
-    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
     EdgeData,
     EdgeIdentity,
     GraphDBInterface,
     Node,
     NodeData,
-    validate_graph_stream_batch_size,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
@@ -52,21 +49,6 @@ def _quote_relationship_type(relationship_name: str) -> str:
     other characters without breaking the query or allowing injection.
     """
     return "`" + relationship_name.replace("`", "``") + "`"
-
-
-def _format_graph_node(row: dict[str, Any]) -> Node:
-    """A ``node_id`` + ``properties`` row as a get_graph_data node."""
-    return row["node_id"], row["properties"]
-
-
-def _format_graph_edge(row: dict[str, Any]) -> EdgeData:
-    """A ``source_id`` / ``target_id`` / ``relationship_name`` / ``properties`` row as an edge."""
-    return (
-        row["source_id"],
-        row["target_id"],
-        row["relationship_name"],
-        row["properties"],
-    )
 
 
 class NeptuneGraphDB(GraphDBInterface):
@@ -494,6 +476,39 @@ class NeptuneGraphDB(GraphDBInterface):
                     continue
             return nodes
 
+    async def get_node_ids_by_property(
+        self, node_types: list[str], property_name: str, values: list[Any]
+    ) -> list[str]:
+        """Ids of typed nodes whose property is one of ``values``, filtered in openCypher."""
+        if not node_types or not values:
+            return []
+        if not property_name.isidentifier():
+            raise ValueError(f"Invalid property name: {property_name!r}")
+        query = f"""
+        MATCH (n:{self._GRAPH_NODE_LABEL})
+        WHERE n.type IN $types AND toString(n.`{property_name}`) IN $values
+        RETURN id(n) AS node_id
+        """
+        params = {"types": list(node_types), "values": [str(value) for value in values]}
+        result = await self.query(query, params)
+        return [str(record["node_id"]) for record in result]
+
+    async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
+        """Keys of the edges leaving ``source_ids``, each source matched by its id."""
+        if not source_ids:
+            return []
+        query = f"""
+        UNWIND $source_ids AS source_id
+        MATCH (source:{self._GRAPH_NODE_LABEL})-[r]->(target:{self._GRAPH_NODE_LABEL})
+        WHERE id(source) = source_id
+        RETURN id(source) AS source_id, id(target) AS target_id, type(r) AS relationship_name
+        """
+        result = await self.query(query, {"source_ids": [str(i) for i in source_ids]})
+        return [
+            (str(row["source_id"]), str(row["target_id"]), row["relationship_name"])
+            for row in result
+        ]
+
     async def extract_node(self, node_id: str):
         """
         Retrieve a single node based on its ID.
@@ -746,8 +761,19 @@ class NeptuneGraphDB(GraphDBInterface):
             nodes_result = await self.query(nodes_query)
             edges_result = await self.query(edges_query)
 
-            nodes = [_format_graph_node(result) for result in nodes_result]
-            edges = [_format_graph_edge(result) for result in edges_result]
+            # Format nodes as (node_id, properties) tuples
+            nodes = [(result["node_id"], result["properties"]) for result in nodes_result]
+
+            # Format edges as (source_id, target_id, relationship_name, properties) tuples
+            edges = [
+                (
+                    result["source_id"],
+                    result["target_id"],
+                    result["relationship_name"],
+                    result["properties"],
+                )
+                for result in edges_result
+            ]
 
             logger.debug(f"Retrieved {len(nodes)} nodes and {len(edges)} edges from graph")
             return (nodes, edges)
@@ -756,86 +782,6 @@ class NeptuneGraphDB(GraphDBInterface):
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get graph data: {error_msg}")
             raise RuntimeError(f"Failed to get graph data: {error_msg}") from e
-
-    def _stream_node_page_query(self, first_page: bool) -> str:
-        """One keyset page of nodes, ordered by ``id(n)``."""
-        where = "" if first_page else "WHERE id(n) > $last_id "
-        return (
-            f"MATCH (n:{self._GRAPH_NODE_LABEL}) {where}"
-            "RETURN id(n) AS node_id, properties(n) AS properties "
-            "ORDER BY id(n) LIMIT $batch_size"
-        )
-
-    def _stream_source_page_query(self, first_page: bool) -> str:
-        """One keyset page of source node ids, ordered by ``id(n)``."""
-        where = "" if first_page else "WHERE id(n) > $last_id "
-        return (
-            f"MATCH (n:{self._GRAPH_NODE_LABEL}) {where}"
-            "RETURN id(n) AS node_id ORDER BY id(n) LIMIT $batch_size"
-        )
-
-    def _stream_edge_lookup_query(self) -> str:
-        """The outgoing edges of a page of source ids."""
-        return (
-            "UNWIND $source_ids AS source_node_id "
-            f"MATCH (source:{self._GRAPH_NODE_LABEL})-[r]->(target:{self._GRAPH_NODE_LABEL}) "
-            "WHERE id(source) = source_node_id "
-            "RETURN id(source) AS source_id, id(target) AS target_id, "
-            "type(r) AS relationship_name, properties(r) AS properties"
-        )
-
-    async def _stream_query(self, query: str, params: dict[str, Any]) -> list[Any]:
-        """One page read, failing the way get_graph_data does."""
-        try:
-            return await self.query(query, params)
-        except Exception as e:
-            error_msg = format_neptune_error(e)
-            logger.error(f"Failed to get graph data: {error_msg}")
-            raise RuntimeError(f"Failed to get graph data: {error_msg}") from e
-
-    async def stream_graph_data(
-        self, batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE
-    ) -> AsyncIterator[tuple[list[Node], list[EdgeData]]]:
-        """``get_graph_data`` in pages; see ``GraphDBInterface.stream_graph_data``.
-
-        Nodes are paged by keyset on ``id(n)``. Edges are paged by source node:
-        a keyset page of source ids, then their outgoing edges, so a hub's
-        edges arrive in one page. Every page is one ``self.query`` call.
-        """
-        validate_graph_stream_batch_size(batch_size)
-
-        first_page, last_id = True, None
-        while True:
-            rows = await self._stream_query(
-                self._stream_node_page_query(first_page),
-                {"last_id": last_id, "batch_size": batch_size},
-            )
-            if not rows:
-                break
-            nodes = [_format_graph_node(row) for row in rows]
-            first_page, last_id = False, nodes[-1][0]
-            yield nodes, []
-        if first_page:
-            return
-
-        first_page, last_id = True, None
-        while True:
-            rows = await self._stream_query(
-                self._stream_source_page_query(first_page),
-                {"last_id": last_id, "batch_size": batch_size},
-            )
-            if not rows:
-                break
-            source_ids = [row["node_id"] for row in rows]
-            first_page, last_id = False, source_ids[-1]
-            edges = [
-                _format_graph_edge(row)
-                for row in await self._stream_query(
-                    self._stream_edge_lookup_query(), {"source_ids": source_ids}
-                )
-            ]
-            if edges:
-                yield [], edges
 
     async def get_neighborhood(
         self,

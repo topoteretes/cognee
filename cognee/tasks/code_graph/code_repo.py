@@ -40,12 +40,10 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from cognee.infrastructure.databases.graph.graph_db_interface import (
-    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-)
 from cognee.modules.chunking.external_metadata import decode_external_metadata
 from cognee.modules.engine.models.node_set import validate_node_set_names
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.config import DEFAULT_CODE_GRAPH_BATCH_SIZE
 from cognee.tasks.code_graph.resolve_repo import (
     CodeRepositoryError,
     clone_dir,
@@ -452,7 +450,7 @@ async def add_code_repository(
 async def extract_code_repo_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
-    code_graph_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    code_graph_batch_size: int = DEFAULT_CODE_GRAPH_BATCH_SIZE,
 ) -> list:
     """Cognify CODE_REPO-route adapter: one enola run over the whole project.
 
@@ -514,7 +512,7 @@ async def extract_code_repo_graph(
     return data_documents
 
 
-def get_code_repo_tasks(batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE) -> list:
+def get_code_repo_tasks(batch_size: int = DEFAULT_CODE_GRAPH_BATCH_SIZE) -> list:
     """The cognify CODE_REPO-route task list: one adapter task, no LLM stages.
 
     ``batch_size`` is the code graph's (see ``load_code_graph``).
