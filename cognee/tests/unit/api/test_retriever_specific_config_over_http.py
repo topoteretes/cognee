@@ -203,7 +203,7 @@ def test_values_at_the_bounds_and_unknown_keys_pass(search_client):
         "entities_top_k": 0,
         "facts_top_k": None,
         "max_iter": 20,
-        "store_mb": 256,
+        "store_mb": 512,
         "batch_mb": 0.5,
         "context_tokens": 1_000_000,
         "external_metadata_keys": None,

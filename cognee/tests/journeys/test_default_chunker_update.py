@@ -177,7 +177,8 @@ async def test_a_changed_default_chunker_rebuilds_a_document_once(
     # Stored while TextChunker was the default, by this version or by one from
     # before chunks carried a chunker id. Several chunks, so an update that
     # patched the document instead of rebuilding it would leave both cuts in it.
-    dataset_id, row = await _ingest(default_user, chunker=stored_by, chunk_size=48)
+    # A section is about 40 tokens, so 24 cuts each one in two.
+    dataset_id, row = await _ingest(default_user, chunker=stored_by, chunk_size=24)
     chunks = await _stored_chunks(dataset_id, default_user)
     assert len(chunks) > len(WORKSHOPS)
     assert {chunk.get("chunker_id") for chunk in chunks} == {stored_id}
@@ -212,7 +213,7 @@ async def test_chunks_stored_before_chunker_ids_stay_chunk_level_with_text_chunk
     clean_env, default_user, mock_llm
 ):
     """A database from before cognee 1.5.4 keeps updating as it did."""
-    dataset_id, row = await _ingest(default_user, chunker=PreStampTextChunker, chunk_size=48)
+    dataset_id, row = await _ingest(default_user, chunker=PreStampTextChunker, chunk_size=24)
     stored = await _stored_chunks(dataset_id, default_user)
     assert {chunk.get("chunker_id") for chunk in stored} == {None}
 
@@ -236,7 +237,7 @@ async def test_a_chunker_that_does_not_stamp_its_chunks_gets_them_stamped(
     clean_env, default_user, mock_llm, use_chunker
 ):
     """The rebuild drops the document's memory before it cuts; the cut must not fail."""
-    dataset_id, row = await _ingest(default_user, chunker=TextChunker, chunk_size=48)
+    dataset_id, row = await _ingest(default_user, chunker=TextChunker, chunk_size=24)
     use_chunker(UnstampedSectionChunker)
 
     rebuilt = await cognee.update(

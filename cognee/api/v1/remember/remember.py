@@ -113,7 +113,7 @@ class RememberKwargs(TypedDict, total=False):
     extractor: Literal["llm", "gliner_demo", "gliner"]
     summary_method: Literal["llm", "from_extraction"]
     node_set: list[str]
-    preferred_loaders: list
+    preferred_loaders: dict[str, dict[str, Any]] | list[str | dict[str, dict[str, Any]]]
     incremental_loading: bool
     data_cache: bool
     data_per_batch: int
@@ -137,6 +137,8 @@ class RememberKwargs(TypedDict, total=False):
     max_rows_per_table: int
     llm_config: Any
     embedding_config: Any
+    # May run this call's data items in other processes; see cognify().
+    data_item_executor: Any
     # presort options — consumed only by dry_run="presort" (analyze) and by
     # remember(report) (apply); rejected on normal remember paths.
     include_subdirectories: bool
@@ -178,6 +180,7 @@ _COGNIFY_ONLY = frozenset(
         "early_chunk_indexing",
         "chunks_per_batch",
         "config",
+        "data_item_executor",
     }
 )
 _SHARED = frozenset(
@@ -1549,6 +1552,9 @@ async def remember(
     if session_id is not None and kwargs.get("branch") is not None:
         # The session path never calls add(), so the branch would be dropped silently.
         raise ValueError("branch is not supported when session_id is provided.")
+    if session_id is not None and kwargs.get("data_item_executor") is not None:
+        # The session path runs no pipeline over data items.
+        raise ValueError("data_item_executor is not supported when session_id is provided.")
 
     data_size = _estimate_data_size(data)
     item_count = len(data) if isinstance(data, list) else 1
@@ -1682,6 +1688,13 @@ async def _remember_inner(
             raise ValueError(
                 "early_chunk_indexing is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose it locally."
+            )
+        if kwargs.get("data_item_executor") is not None:
+            # Same as extractor: an executor is an object of this process, and
+            # client.remember() would drop it.
+            raise ValueError(
+                "data_item_executor is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to run the pipeline locally."
             )
         if session_ids:
             # Same discipline as extractor: POST /remember carries no

@@ -1,6 +1,9 @@
 """BROAD's routes: a small dataset shown whole, a large one queried with SQL, and reading
 the most similar chunks when a query cannot express the question (SDK-324)."""
 
+import asyncio
+import sqlite3
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -13,7 +16,7 @@ from cognee.modules.retrieval.broad_retriever import (
     DecisionLarge,
     DecisionSmall,
 )
-from cognee.modules.retrieval.broad_store import BroadQueryError
+from cognee.modules.retrieval.broad_store import BroadQueryError, RecordStore
 
 
 class _Graph:
@@ -246,6 +249,175 @@ def test_the_settings_are_positive():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("dataset_bytes", "expected_rows", "partial"),
+    [(32_000_001, 2, False), (512_000_000, 2, False), (512_000_001, 1, True)],
+)
+async def test_default_store_covers_all_records_through_512_mb(
+    monkeypatch, dataset_bytes, expected_rows, partial
+):
+    class Vector:
+        async def search(self, collection, *args, **kwargs):
+            if collection != "DocumentChunk_text":
+                raise CollectionNotFoundError("none")
+            return [SimpleNamespace(id="c1", score=0.1, payload=None)]
+
+        async def retrieve(self, collection, ids):
+            payload = {"text": "Beta only.", "document_id": "d1", "document_name": "b"}
+            return [SimpleNamespace(id="c1", score=0, payload=payload)]
+
+    _use(monkeypatch, {"a": "Alpha only.", "b": "Beta only."}, vector=Vector())
+
+    async def dataset_size(self):
+        return dataset_bytes
+
+    monkeypatch.setattr(BroadRetriever, "dataset_size", dataset_size)
+    _llm(monkeypatch, [DecisionLarge(sql="SELECT COUNT(*) FROM lines")])
+
+    found = await BroadRetriever(context_tokens=1).get_retrieved_objects("How many lines?")
+
+    assert found.rows == [(expected_rows,)]
+    assert bool(found.coverage) is partial
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [None, RuntimeError("decision failed"), asyncio.CancelledError()])
+async def test_record_store_is_closed_after_success_failure_or_cancellation(monkeypatch, error):
+    _use(monkeypatch, {"notes": "The meeting moved to Tuesday."})
+    closed = []
+
+    class TrackedStore(RecordStore):
+        def close(self):
+            super().close()
+            with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+                self.connection.execute("SELECT 1")
+            closed.append(True)
+
+    async def decide(self, *args):
+        if error is not None:
+            raise error
+        return DecisionSmall(answer="Tuesday.")
+
+    monkeypatch.setattr(broad_retriever, "RecordStore", TrackedStore)
+    monkeypatch.setattr(BroadRetriever, "_ask", decide)
+
+    if error is None:
+        found = await BroadRetriever().get_retrieved_objects("When is the meeting?")
+        assert found.answer == "Tuesday."
+    else:
+        with pytest.raises(type(error)):
+            await BroadRetriever().get_retrieved_objects("When is the meeting?")
+
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["add_document", "describe", "run"])
+async def test_server_handles_other_requests_during_broad_cpu_work(monkeypatch, stage):
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    _use(monkeypatch, {"notes": "One line."})
+    _llm(monkeypatch, [DecisionLarge(sql="SELECT COUNT(*) FROM lines")])
+    started, release = threading.Event(), threading.Event()
+    threads = []
+    main_thread = threading.get_ident()
+
+    class BusyStore(RecordStore):
+        def __init__(self):
+            threads.append(threading.get_ident())
+            super().__init__()
+
+        def close(self):
+            threads.append(threading.get_ident())
+            super().close()
+
+    original = getattr(RecordStore, stage)
+
+    def busy(self, *args):
+        threads.append(threading.get_ident())
+        started.set()
+        assert release.wait(5), "The event loop could not release the BROAD worker"
+        return original(self, *args)
+
+    monkeypatch.setattr(BusyStore, stage, busy)
+    monkeypatch.setattr(broad_retriever, "RecordStore", BusyStore)
+    app = FastAPI()
+
+    @app.get("/broad")
+    async def broad():
+        found = await BroadRetriever(context_tokens=1).get_retrieved_objects("Count lines")
+        return {"rows": found.rows}
+
+    @app.get("/health")
+    async def health():
+        return {"ok": True}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        request = asyncio.create_task(client.get("/broad"))
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            response = await asyncio.wait_for(client.get("/health"), timeout=1)
+            assert response.json() == {"ok": True}
+            assert not request.done()
+        finally:
+            release.set()
+            response = await request
+    assert response.json() == {"rows": [[1]]}
+    assert len(threads) == 3 and len(set(threads)) == 1 and threads[0] != main_thread
+
+
+@pytest.mark.asyncio
+async def test_cancellation_interrupts_running_sql_and_closes_on_its_worker(monkeypatch):
+    _use(monkeypatch, {"notes": "One line."})
+    started = threading.Event()
+    closed = []
+    sql = (
+        "WITH RECURSIVE numbers(n) AS (VALUES(1) UNION ALL "
+        "SELECT n+1 FROM numbers WHERE n < 100000000) SELECT SUM(observe(n)) FROM numbers"
+    )
+    _llm(monkeypatch, [DecisionLarge(sql=sql)])
+
+    class SlowStore(RecordStore):
+        def __init__(self):
+            super().__init__()
+            self.thread = threading.get_ident()
+
+            def observe(value):
+                started.set()
+                return value
+
+            self.connection.create_function("observe", 1, observe)
+
+        def close(self):
+            assert threading.get_ident() == self.thread
+            super().close()
+            closed.append(True)
+
+    monkeypatch.setattr(broad_retriever, "RecordStore", SlowStore)
+    request = asyncio.create_task(
+        BroadRetriever(context_tokens=1).get_retrieved_objects("Count lines")
+    )
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+    finally:
+        request.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(request, timeout=2)
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_dlt_rows_are_loaded_through_the_worker(monkeypatch):
+    _use(monkeypatch, {"orders": "Table: orders\nRow Data:\n  id: 7\n  amount: 12"})
+    engine = await broad_retriever.get_unified_engine()
+    engine.graph.nodes[1][1]["type"] = "DltRow"
+    _llm(monkeypatch, [DecisionLarge(sql="SELECT id, amount FROM orders")])
+    found = await BroadRetriever(context_tokens=1).get_retrieved_objects("Orders")
+    assert found.rows == [(7, 12)]
+
+
+@pytest.mark.asyncio
 async def test_a_dataset_over_store_mb_is_represented_by_its_most_similar_parts(monkeypatch):
     texts = {"a": "alpha line\n" * 3, "b": "beta line\n" * 3}
 
@@ -253,15 +425,24 @@ async def test_a_dataset_over_store_mb_is_represented_by_its_most_similar_parts(
         async def search(self, collection, query_text, query_vector=None, limit=None, **kw):
             if collection != "DocumentChunk_text":
                 raise CollectionNotFoundError("none")
-            payload = lambda doc: {
-                "text": texts[doc],
-                "document_id": f"d-{doc}",
-                "document_name": doc,
-                "chunk_index": 0,
-            }
             return [  # b is the better match (lower distance); the 40-char store holds one chunk
-                SimpleNamespace(id="c1", score=0.1, payload=payload("b")),
-                SimpleNamespace(id="c0", score=0.5, payload=payload("a")),
+                SimpleNamespace(id="b", score=0.1, payload=None),
+                SimpleNamespace(id="a", score=0.5, payload=None),
+            ]
+
+        async def retrieve(self, collection, ids):
+            return [  # in no particular order, as the adapters return them
+                SimpleNamespace(
+                    id=doc,
+                    score=0,
+                    payload={
+                        "text": texts[doc],
+                        "document_id": f"d-{doc}",
+                        "document_name": doc,
+                        "chunk_index": 0,
+                    },
+                )
+                for doc in sorted(ids)
             ]
 
     _use(monkeypatch, texts, vector=Vector(), size=30)  # 60 bytes stored > 40-char store
@@ -277,6 +458,50 @@ async def test_a_dataset_over_store_mb_is_represented_by_its_most_similar_parts(
     assert found.route == "sql" and found.rows == [(3, "b")]  # only b's three lines were loaded
     assert "1 parts of the dataset most similar" in found.coverage
     assert "over the 1 parts of the dataset most similar" in found.note
+
+
+@pytest.mark.asyncio
+async def test_the_most_similar_parts_are_ranked_without_text_and_fetched_until_full(monkeypatch):
+    """The search returns ids and scores only; text is fetched best first in batches, and
+    no batch is fetched after the store is full."""
+    texts = {f"doc{n}": f"line {n}\n" for n in range(6)}  # 7 characters each
+    searches, fetched = [], []
+
+    class Vector:
+        async def search(self, collection, query_text, query_vector=None, limit=None, **kw):
+            searches.append((collection, kw.get("include_payload", False)))
+            if collection != "DocumentChunk_text":
+                raise CollectionNotFoundError("none")
+            return [
+                SimpleNamespace(id=doc, score=n / 10, payload=None) for n, doc in enumerate(texts)
+            ]
+
+        async def retrieve(self, collection, ids):
+            fetched.append((collection, list(ids)))
+            return [
+                SimpleNamespace(
+                    id=doc,
+                    score=0,
+                    payload={"text": texts[doc], "document_id": doc, "document_name": doc},
+                )
+                for doc in reversed(ids)
+            ]
+
+    _use(monkeypatch, texts, vector=Vector(), size=30)
+    monkeypatch.setattr(broad_retriever, "_SIMILAR_FETCH_CHUNKS", 2)
+    _llm(monkeypatch, [DecisionLarge(sql="SELECT document FROM lines ORDER BY document")])
+
+    # 180 bytes stored > the 20-character store, which holds two 7-character chunks.
+    found = await BroadRetriever(store_mb=0.00002).get_retrieved_objects("which lines?")
+
+    assert searches == [("DocumentChunk_text", False), ("DltRow_text", False)]
+    # The second batch holds the chunk that no longer fits; the third is never fetched.
+    assert fetched == [
+        ("DocumentChunk_text", ["doc0", "doc1"]),
+        ("DocumentChunk_text", ["doc2", "doc3"]),
+    ]
+    assert found.rows == [("doc0",), ("doc1",)]
+    assert "2 parts of the dataset most similar" in found.coverage
 
 
 def test_broad_reports_no_structured_evidence_as_an_empty_list():
