@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import NamedTuple
 from uuid import UUID
 
@@ -19,6 +20,35 @@ def make_chunk_source_ref_key(dataset_id: UUID, data_id: UUID, chunk_id: UUID) -
     keys.
     """
     return f"{CHUNK_SOURCE_REF_PREFIX}:{dataset_id}:{data_id}:{chunk_id}"
+
+
+def make_chunk_source_ref_key_prefix(dataset_id: UUID, data_id: UUID) -> str:
+    """Build what every v2 chunk key of one dataset document starts with."""
+    return f"{CHUNK_SOURCE_REF_PREFIX}:{dataset_id}:{data_id}:"
+
+
+def data_source_ref_key_selector(
+    dataset_id: UUID, data_id: UUID
+) -> Callable[[list[str]], list[str]]:
+    """Build the function that keeps, of a list of keys, the ones one dataset
+    document owns: its v1 key and its v2 chunk keys.
+
+    This is the rule a graph store applies when it selects a document's refs
+    itself (``find_node_source_refs_by_data``), so an adapter that narrows the rows
+    in its query and one that filters them in Python agree. The key and the prefix
+    are built once here because the function runs for every node and edge.
+    """
+    document_key = make_source_ref_key(dataset_id, data_id)
+    chunk_key_prefix = make_chunk_source_ref_key_prefix(dataset_id, data_id)
+
+    def select(source_ref_keys: list[str]) -> list[str]:
+        return [
+            key
+            for key in source_ref_keys
+            if key == document_key or key.startswith(chunk_key_prefix)
+        ]
+
+    return select
 
 
 class ParsedSourceRef(NamedTuple):

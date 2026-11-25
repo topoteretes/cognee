@@ -100,7 +100,11 @@ class FakeSessionManager:
     async def get_agent_trace_count(self, *, user_id, session_id):
         return len(self.traces)
 
-    async def get_agent_trace_session(self, *, user_id, session_id, last_n=None):
+    async def get_agent_trace_session(
+        self, *, user_id, session_id, last_n=None, start=None, end=None
+    ):
+        if start is not None:
+            return list(self.traces[start:end])
         return list(self.traces[-last_n:]) if last_n else list(self.traces)
 
     async def get_session(self, *, user_id, session_id, last_n=None, formatted=False):
@@ -252,6 +256,10 @@ class TestRepeatedErrors:
         assert candidate.confidence == FAILURE_CANDIDATE_CONFIDENCE
         assert candidate.content.startswith("[state-key: pitfall:Edit:no-changes-to-make:py] ")
         assert "→ Bash python" in candidate.content
+        # The observation it rests on, for the agent-profile evidence gate.
+        assert candidate.evidence.startswith('Edit failed 6 times with "no changes to make')
+        assert "fixed by: Bash python" in candidate.evidence
+        assert len(candidate.evidence) <= 280
         # Deterministic: a second run over the same unit renders the same content.
         assert build_failure_candidates(groups, REPO)[0][1].content == candidate.content
 
@@ -644,8 +652,13 @@ def _unit_manager(trace_count=3):
     return FakeSessionManager(traces=traces, qa=qa)
 
 
-def _candidate(content):
-    return {"section": "success_patterns", "content": content, "confidence": 0.9}
+def _candidate(content, evidence="Seen in the Read traces of this turn."):
+    return {
+        "section": "success_patterns",
+        "content": content,
+        "confidence": 0.9,
+        "evidence": evidence,
+    }
 
 
 @pytest.mark.asyncio
@@ -693,6 +706,24 @@ async def test_concurrent_triggers_extract_once(monkeypatch):
     assert sorted(len(result) for result in results) == [0, 1]
     assert len(calls) == 1
     assert len(manager.lessons()) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_lesson_without_evidence_or_reason_is_not_stored(monkeypatch):
+    """Coding lessons pass the same evidence gate as the default extraction's."""
+    manager = _unit_manager()
+    _llm(
+        monkeypatch,
+        [
+            _candidate("Tests live in tests/.", evidence=""),
+            _candidate("Routes live in api/."),
+        ],
+    )
+
+    await extract_coding_unit_context(session_manager=manager, user_id="u", session_id="s")
+
+    assert [row["content"] for row in manager.lessons()] == ["Routes live in api/."]
+    assert manager.watermark() == 3
 
 
 @pytest.mark.asyncio
@@ -1018,7 +1049,12 @@ async def test_traces_without_an_answer_wait_and_nothing_is_sealed(monkeypatch):
 
 
 def _failure_candidate(content):
-    return {"section": "failure_lessons", "content": content, "confidence": 0.9}
+    return {
+        "section": "failure_lessons",
+        "content": content,
+        "confidence": 0.9,
+        "evidence": "The Edit trace of this turn failed with this error.",
+    }
 
 
 @pytest.mark.asyncio
@@ -1055,3 +1091,23 @@ async def test_a_failure_candidate_without_an_errored_trace_stays_unlinked(monke
 
     (row,) = manager.lessons()
     assert row["section"] == "failure_lessons" and row["source_trace_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_traces_written_after_the_count_wait_for_the_next_backlog(monkeypatch):
+    # Trace writes take no lock: one landing between the count and the read must not
+    # push the oldest pending trace out of the backlog the watermark then seals.
+    sm = FakeSessionManager(traces=[_trace(f"tool-{i}") for i in range(5)])
+    sm.store.append({"id": TRACE_EXTRACTION_STATE_ID, "kind": "state", "processed_trace_count": 2})
+    read_traces = sm.get_agent_trace_session
+
+    async def append_then_read(**kwargs):
+        sm.traces.append(_trace("late"))
+        return await read_traces(**kwargs)
+
+    sm.get_agent_trace_session = append_then_read
+    monkeypatch.setattr(cue, "settled_traces", lambda traces, turns: list(traces))
+
+    backlog = await cue.load_pending_backlog(sm, "u", "s")
+
+    assert [trace.origin_function for trace in backlog.traces] == ["tool-2", "tool-3", "tool-4"]

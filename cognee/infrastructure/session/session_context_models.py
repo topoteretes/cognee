@@ -6,6 +6,13 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 VALID_RATINGS = {"helpful", "harmful"}
 MAX_CONTEXT_CONTENT_CHARS = 280
 
+
+def clip_text(text: str, limit: int) -> str:
+    """``text`` on one line, cut to ``limit`` characters with a trailing ``…``."""
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 # One threshold, declared once here with the models it gates: a candidate must
 # clear it to be stored, and a stored entry must clear it to be served,
 # distilled, or folded into preferences. The harmful-rating rule differs by
@@ -245,6 +252,10 @@ class AgentCandidateContextUpdate(CandidateContextUpdate):
     """A proposed new agent-profile session-context lesson (tool/workflow guidance)."""
 
     context_profile: Literal["agent"] = ContextProfile.AGENT.value
+    # No max_length: one long support string would fail the whole batch's validation.
+    # The applier clips both when it stores the entry.
+    reason: str = Field(default="", description="Why this project fact matters.")
+    evidence: str = Field(default="", description="Supporting trace observation.")
     section: str = Field(
         description=(
             "One of tool_rules, workflow_state, success_patterns, failure_lessons, or "
@@ -435,6 +446,9 @@ class SessionContextEntry(BaseModel):
     harmful_count: int = 0
     priority: int = 0
     last_served_at: str | None = None
+    reason: str = ""
+    evidence: str = ""
+    expired_at: str | None = None
     embedding: list[float] | None = None
     kind: Literal["context"] = "context"
 

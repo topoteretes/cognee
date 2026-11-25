@@ -117,25 +117,6 @@ class VercelStateError(VercelSourceError):
 # ---------------------------------------------------------------------------
 # Transport
 # ---------------------------------------------------------------------------
-class _BearerAuth:
-    """``Authorization: Bearer`` as a requests auth object.
-
-    A header passed in ``headers`` is replaced by a ``~/.netrc`` entry for the host, because
-    requests consults netrc when no ``auth`` is given; an auth object turns that off and leaves
-    the rest of the environment (proxies, CA bundle) as it is.
-    """
-
-    def __init__(self, token: str):
-        self._token = token
-
-    def __call__(self, request: Any) -> Any:
-        request.headers["Authorization"] = f"Bearer {self._token}"
-        return request
-
-    def __repr__(self) -> str:
-        return "_BearerAuth(<redacted>)"
-
-
 class VercelClient:
     """Minimal synchronous REST client for Vercel.
 
@@ -145,17 +126,7 @@ class VercelClient:
     """
 
     def __init__(self, access_token: str, *, sleep: Callable[[float], None] = time.sleep):
-        # requests names the value of a header it rejects, so every token it would reject is
-        # refused here, without echoing it.
-        token = access_token.strip() if isinstance(access_token, str) else ""
-        if (
-            not token
-            or not token.isascii()
-            or not token.isprintable()
-            or any(char.isspace() for char in token)
-        ):
-            raise ValueError("The Vercel access token is empty or has an invalid format")
-        self._access_token = token
+        self._access_token = dlt_utils.bearer_token(access_token, "Vercel access token")
         self._sleep = sleep
 
     def __repr__(self) -> str:
@@ -177,7 +148,7 @@ class VercelClient:
         import requests  # lazy: importing the connectors package loads no client library
 
         path = route.format(**{key: quote(value, safe="") for key, value in (ids or {}).items()})
-        auth = _BearerAuth(self._access_token)
+        auth = dlt_utils.BearerAuth(self._access_token)
 
         def attempt() -> Any:
             try:
