@@ -1,5 +1,5 @@
 """``get_node_ids_by_property`` and ``get_outgoing_edge_keys`` answer what
-``get_graph_data`` holds, as the interface's own fallbacks compute it.
+``get_graph_data`` holds, as a filter over that whole read computes it.
 
 Runs against every in-tree adapter it can reach: Ladybug in-process and in
 subprocess mode and Turso always (local files); Postgres and Neo4j when
@@ -13,12 +13,12 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.engine import DataPoint
 from cognee.tests.integration.infrastructure.graph.conftest import (
     _make_neo4j_adapter,
     _make_postgres_adapter,
 )
+from cognee.tests.utils.graph_lookups import node_ids_by_property, outgoing_edge_keys
 
 pytestmark = pytest.mark.asyncio
 
@@ -26,6 +26,12 @@ pytestmark = pytest.mark.asyncio
 class _Symbol(DataPoint):
     name: str
     repo: str
+    metadata: dict = {"index_fields": ["name"]}
+
+
+class _Line(DataPoint):
+    name: str
+    line: int
     metadata: dict = {"index_fields": ["name"]}
 
 
@@ -109,9 +115,7 @@ async def test_node_ids_by_property_match_the_full_read(
     ids = await _seed(lookup_adapter)
 
     found = await lookup_adapter.get_node_ids_by_property(node_types, property_name, values)
-    fallback = await GraphDBInterface.get_node_ids_by_property(
-        lookup_adapter, node_types, property_name, values
-    )
+    fallback = await node_ids_by_property(lookup_adapter, node_types, property_name, values)
 
     assert sorted(found) == sorted(fallback) == sorted(ids[key] for key in expected)
 
@@ -127,12 +131,22 @@ async def test_node_ids_by_property_match_values_that_need_escaping(lookup_adapt
         assert found == [str(node.id)], node.repo
 
 
+async def test_node_ids_by_property_compare_values_as_text(lookup_adapter):
+    """A numeric property matches its value given as a number or as text."""
+    node = _Line(id=uuid4(), name="at-42", line=42)
+    await lookup_adapter.add_nodes([node, _Line(id=uuid4(), name="at-7", line=7)])
+
+    for wanted in (42, "42"):
+        found = await lookup_adapter.get_node_ids_by_property(["_Line"], "line", [wanted])
+        assert found == [str(node.id)], repr(wanted)
+
+
 async def test_outgoing_edge_keys_match_the_full_read(lookup_adapter):
     ids = await _seed(lookup_adapter)
     sources = [ids["a_sym"], ids["b_sym"], str(uuid4())]
 
     found = await lookup_adapter.get_outgoing_edge_keys(sources)
-    fallback = await GraphDBInterface.get_outgoing_edge_keys(lookup_adapter, sources)
+    fallback = await outgoing_edge_keys(lookup_adapter, sources)
 
     expected = [
         (ids["a_sym"], ids["a_mod"], "calls"),

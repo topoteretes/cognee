@@ -930,17 +930,21 @@ async def extract_code_graph(
 def _read_repo_node_property(node: Any, key: str) -> Any:
     """One property off a ``get_node()`` result.
 
-    ``get_node`` returns either the properties flattened at the top level, or
-    nested inside a ``properties`` key that may itself be JSON text (adapter
-    dependent) -- both shapes are covered so a caller reads a property without
-    caring which adapter answered.
+    ``get_node`` returns either the properties flattened at the top level,
+    nested inside a ``properties`` key that may itself be JSON text, or (on
+    Neptune) an openCypher node map with ``~id`` and ``~properties`` -- every
+    shape is covered so a caller reads a property without caring which
+    adapter answered. Also used for ``get_nodes`` results, which have the
+    same shapes.
     """
     if not isinstance(node, dict):
         return None
     value = node.get(key)
     if value is not None:
         return value
-    properties = node.get("properties")
+    if key == "id" and node.get("~id") is not None:
+        return node["~id"]
+    properties = node.get("properties", node.get("~properties"))
     if isinstance(properties, str):
         try:
             properties = json.loads(properties)
@@ -1068,6 +1072,10 @@ async def load_code_graph(
     """
     if batch_size < 1:
         raise ValueError("batch_size must be >= 1")
+    # Before this load's enola run (a cluster checks before its own) and the
+    # first write: an adapter without the lookups would otherwise fail only
+    # at the edge step, its nodes already written.
+    await _require_code_graph_lookups()
 
     load: _CodeGraphLoad | None = None
     async for item in extract_code_graph(
@@ -1089,6 +1097,28 @@ async def load_code_graph(
         else:
             await add_code_graph_data_points(item, load, ctx=ctx, graph_only=graph_only)
     return data
+
+
+_CODE_GRAPH_LOOKUPS = ("get_node_ids_by_property", "get_outgoing_edge_keys")
+
+
+async def _require_code_graph_lookups() -> None:
+    """Raise unless the graph adapter implements the lookups the load relies on."""
+    from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+
+    # __class__, not type(): get_graph_engine returns a handle that forwards
+    # __class__ to the real adapter, while type() would name the handle.
+    adapter_type = (await get_graph_engine()).__class__
+    missing = [
+        name
+        for name in _CODE_GRAPH_LOOKUPS
+        if getattr(adapter_type, name, None) is getattr(GraphDBInterface, name)
+    ]
+    if missing:
+        raise NotImplementedError(
+            f"{adapter_type.__name__} has no {' or '.join(missing)}, which a code graph load needs."
+        )
 
 
 async def _stored_nodes(node_ids: list[str]) -> dict[str, Any]:
@@ -1268,6 +1298,7 @@ async def add_code_graph_edges(
         # the graph does not already have.
         batch: list[tuple] = []
         new_count = 0
+        checked = 0
         while True:
             try:
                 edge = next(edges)
@@ -1280,15 +1311,18 @@ async def add_code_graph_edges(
                 continue
             batch.append(edge)
             if len(batch) == batch_size:
+                checked += len(batch)
                 new_count += await write_new(batch)
                 batch = []
         if batch:
+            checked += len(batch)
             new_count += await write_new(batch)
         logger.info("Resolved %d code graph edge(s), skipped %d.", len(edge_keys), skipped)
         logger.info(
-            "Code graph edge delta: %d new, %d already present.",
+            "Code graph edge delta: %d new, %d already present%s.",
             new_count,
-            len(edge_keys) - new_count,
+            checked - new_count,
+            "" if scope_ids is None else " or awaiting another member's load",
         )
 
         # Insert-then-sweep: with the current snapshot fully merged, remove

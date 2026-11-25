@@ -35,19 +35,6 @@ _warned_neighborhood_fallbacks: set[type] = set()
 _warned_graph_counts_fallbacks: set[type] = set()
 _warned_data_source_ref_fallbacks: set[type] = set()
 _warned_edge_text_fallbacks: set[type] = set()
-_warned_lookup_fallbacks: set[tuple[type, str]] = set()
-
-
-def _warn_lookup_fallback(adapter: Any, method: str) -> None:
-    """Warn once per adapter type that ``method`` reads the whole graph."""
-    key = (type(adapter), method)
-    if key not in _warned_lookup_fallbacks:
-        _warned_lookup_fallbacks.add(key)
-        logger.warning(
-            "%s has no native %s; falling back to a full graph read. This is O(graph) in memory.",
-            key[0].__name__,
-            method,
-        )
 
 
 def timestamp_overlaps(node: dict, start: int | None, end: int | None) -> bool:
@@ -844,34 +831,31 @@ class GraphDBInterface(ABC):
     ) -> list[str]:
         """Ids of the nodes of one of ``node_types`` whose ``property_name`` is one of ``values``.
 
-        Not abstract: the default filters ``get_graph_data``, so it is O(graph)
-        in memory; overriding adapters filter in the database.
+        Values compare as text: a stored value matches when its text equals
+        ``str(value)`` of a wanted one, and a missing or null property never
+        matches. Only string and integer values are supported: booleans and
+        floats have no text form every backend agrees on (``str(True)`` is
+        "True", a database prints "true").
+
+        Filter in the database; the code graph load calls this to find one
+        repository's nodes, so it must not read the whole graph.
+
+        Required for the code graph, but not abstract: an adapter without it
+        still serves everything else, and only a code graph load fails.
         """
-        _warn_lookup_fallback(self, "get_node_ids_by_property")
-        wanted_types, wanted_values = set(node_types), set(values)
-        nodes, _ = await self.get_graph_data()
-        return [
-            str(node_id)
-            for node_id, properties in nodes
-            if properties.get("type") in wanted_types
-            and properties.get(property_name) in wanted_values
-        ]
+        raise NotImplementedError(f"{type(self).__name__} has no get_node_ids_by_property")
 
     async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
         """``(source_id, target_id, relationship_name)`` of every edge leaving ``source_ids``.
 
-        Ids that are not in the graph have no edges. Not abstract: the default
-        filters ``get_graph_data``, so it is O(graph) in memory; overriding
-        adapters look the sources up by index.
+        Ids that are not in the graph have no edges. Look the sources up by
+        index; the code graph load calls this once per batch of edges, so it
+        must not read the whole graph.
+
+        Required for the code graph, but not abstract: an adapter without it
+        still serves everything else, and only a code graph load fails.
         """
-        _warn_lookup_fallback(self, "get_outgoing_edge_keys")
-        sources = {str(source_id) for source_id in source_ids}
-        _, edges = await self.get_graph_data()
-        return [
-            (str(source), str(target), relationship)
-            for source, target, relationship, _properties in edges
-            if str(source) in sources
-        ]
+        raise NotImplementedError(f"{type(self).__name__} has no get_outgoing_edge_keys")
 
     async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
         """Ids of up to ``top_k`` well-connected nodes, to seed a graph view.

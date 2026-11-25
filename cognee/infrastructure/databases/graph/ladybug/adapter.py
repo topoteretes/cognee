@@ -2434,8 +2434,8 @@ class LadybugAdapter(GraphDBInterface):
         Get multiple nodes by their IDs.
 
         This method retrieves properties for multiple nodes identified by their IDs and returns
-        them as a list of dictionaries. An empty list is returned if no nodes are found or an
-        error occurs.
+        them as a list of dictionaries. An empty list is returned if no nodes are found; a
+        failed query raises.
 
         Parameters:
         -----------
@@ -2460,14 +2460,11 @@ class LadybugAdapter(GraphDBInterface):
             properties: n.properties
         }
         """
-        try:
-            # Each node once, as the IN filter returned it.
-            unique_ids = list(dict.fromkeys(node_ids))
-            results = await self.query(query_str, {"node_ids": unique_ids})
-            return [self._parse_node(row[0]) for row in results if row[0]]
-        except Exception:
-            logger.exception("Failed to get nodes")
-            return []
+        # Each node once, as the IN filter returned it. A failed query raises:
+        # an empty list must mean the nodes are absent, not that the read failed.
+        unique_ids = list(dict.fromkeys(node_ids))
+        results = await self.query(query_str, {"node_ids": unique_ids})
+        return [self._parse_node(row[0]) for row in results if row[0]]
 
     async def get_node_ids_by_property(
         self, node_types: list[str], property_name: str, values: list[Any]

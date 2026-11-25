@@ -325,7 +325,9 @@ class TursoAdapter(GraphDBInterface):
         """
         if not node_types or not values:
             return []
-        field = "name" if property_name == "name" else "json_extract(properties, :path)"
+        field = (
+            "name" if property_name == "name" else "CAST(json_extract(properties, :path) AS TEXT)"
+        )
         statement = text(
             f"SELECT id FROM graph_node WHERE type IN :types AND {field} IN :vals"
         ).bindparams(bindparam("types", expanding=True), bindparam("vals", expanding=True))

@@ -842,3 +842,26 @@ async def test_route_leaves_a_single_repository_to_the_caller(route_env):
     assert await load_dataset_cluster(ctx) is False
     env.snapshot_mock.assert_awaited_once()
     assert await load_dataset_cluster(None) is False
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_without_the_lookups_fails_before_the_cluster_enola_run(
+    monkeypatch, tmp_path
+):
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+
+    class NoLookups(GraphDBInterface):
+        pass
+
+    NoLookups.__abstractmethods__ = frozenset()
+    engine = NoLookups()
+    monkeypatch.setattr(graph_engine_module, "create_graph_engine", lambda **config: engine)
+    handle = graph_engine_module._GraphEngineHandle({})
+    monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=handle))
+    run_cluster = AsyncMock()
+    monkeypatch.setattr(cluster_module, "run_enola_cluster", run_cluster)
+    golf, ui = _repos(tmp_path, "golf", "ui")
+
+    with pytest.raises(NotImplementedError, match="get_node_ids_by_property"):
+        await snapshot_dataset_code_repos(DATASET_ID, [(_row(golf), golf), (_row(ui), ui)])
+    run_cluster.assert_not_awaited()

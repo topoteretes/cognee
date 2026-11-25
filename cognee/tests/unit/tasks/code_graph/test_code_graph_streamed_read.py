@@ -10,6 +10,7 @@ outcome.
 
 import importlib
 import json
+import sys
 from unittest.mock import AsyncMock
 
 import pytest
@@ -239,3 +240,69 @@ async def test_non_positive_batch_size_raises_before_reading(tmp_path, monkeypat
         )
     engine.get_graph_data.assert_not_awaited()
     engine.get_node.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_neptune_node_maps_give_the_same_outcome(tmp_path, monkeypatch):
+    """Neptune's get_nodes returns openCypher node maps: ``~id`` and ``~properties``."""
+    default = await _load(tmp_path, monkeypatch)
+    flat_lookups = lookups_through_get_graph_data
+
+    def neptune_lookups(engine):
+        flat_lookups(engine)
+        flat_get_nodes = engine.get_nodes
+
+        async def get_nodes(node_ids):
+            nodes = await flat_get_nodes(node_ids)
+            return [{"~id": node.pop("id"), "~properties": node} for node in nodes]
+
+        engine.get_nodes = get_nodes
+
+    monkeypatch.setattr(sys.modules[__name__], "lookups_through_get_graph_data", neptune_lookups)
+    neptune = await _load(tmp_path, monkeypatch)
+
+    assert neptune == default
+
+
+@pytest.mark.asyncio
+async def test_neptune_node_map_gives_the_stored_repository_state(monkeypatch):
+    """The skip check reads the repository node off Neptune's ``get_node`` map."""
+    version = extract_module.CODE_GRAPH_MAPPING_VERSION
+    engine = _mock_engine(monkeypatch)
+    engine.get_node.return_value = {
+        "~id": REPO_NODE_ID,
+        "~labels": ["CodeRepository"],
+        "~properties": {
+            "name": REPO,
+            "last_snapshot_id": "sha256:new",
+            "last_mapping_version": version,
+            "belongs_to_set": ["old-team"],
+        },
+    }
+
+    state = await extract_module._stored_repository_state(REPO)
+
+    assert state == ("sha256:new", version, True)
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_without_the_lookups_fails_before_writing(tmp_path, monkeypatch):
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+
+    class NoLookups(GraphDBInterface):
+        pass
+
+    NoLookups.__abstractmethods__ = frozenset()
+    engine = NoLookups()
+    engine.get_node = AsyncMock(return_value=None)
+    # Through the handle get_graph_engine really returns: type() of it is the
+    # handle, so the check must read the adapter's class through __class__.
+    monkeypatch.setattr(graph_engine_module, "create_graph_engine", lambda **config: engine)
+    handle = graph_engine_module._GraphEngineHandle({})
+    monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=handle))
+    write = AsyncMock()
+    monkeypatch.setattr(add_data_points_module, "add_data_points", write)
+
+    with pytest.raises(NotImplementedError, match="get_node_ids_by_property or get_outgoing"):
+        await load_code_graph(repo_path=REPO_PATH, snapshot_dir=_write_snapshot(tmp_path))
+    write.assert_not_awaited()

@@ -486,10 +486,11 @@ class NeptuneGraphDB(GraphDBInterface):
             raise ValueError(f"Invalid property name: {property_name!r}")
         query = f"""
         MATCH (n:{self._GRAPH_NODE_LABEL})
-        WHERE n.type IN $types AND n.`{property_name}` IN $values
+        WHERE n.type IN $types AND toString(n.`{property_name}`) IN $values
         RETURN id(n) AS node_id
         """
-        result = await self.query(query, {"types": list(node_types), "values": list(values)})
+        params = {"types": list(node_types), "values": [str(value) for value in values]}
+        result = await self.query(query, params)
         return [str(record["node_id"]) for record in result]
 
     async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:

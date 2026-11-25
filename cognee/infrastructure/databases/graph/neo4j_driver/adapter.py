@@ -1598,10 +1598,14 @@ class Neo4jAdapter(GraphDBInterface):
             return []
         query = f"""
         MATCH (n:`{BASE_LABEL}`)
-        WHERE n.type IN $types AND n[$property] IN $values
+        WHERE n.type IN $types AND toStringOrNull(n[$property]) IN $values
         RETURN n.id AS id
         """
-        params = {"types": list(node_types), "property": property_name, "values": list(values)}
+        params = {
+            "types": list(node_types),
+            "property": property_name,
+            "values": [str(value) for value in values],
+        }
         return [str(record["id"]) for record in await self.query(query, params)]
 
     async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
