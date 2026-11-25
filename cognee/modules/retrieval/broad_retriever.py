@@ -57,6 +57,8 @@ BROAD_STORE_MB = 512
 # The least text a chunk is assumed to hold, when deciding how many to ask the vector
 # store for; a chunk is rarely shorter.
 _MIN_CHUNK_CHARS = 1_000
+# Chunks whose text one call fetches while the most similar parts are loaded.
+_SIMILAR_FETCH_CHUNKS = 1_000
 # Rows of a query result shown to the answer model; the full result is appended by code.
 BROAD_RESULT_ROWS_SHOWN = 200
 BROAD_TEXT_NODE_TYPES = ("DocumentChunk", "DltRow")
@@ -209,37 +211,59 @@ def _store_batch(
     return whole, chars
 
 
-def _store_similar_parts(
-    store: RecordStore, ranked: list[tuple[str, list]], store_chars: int
-) -> tuple[int, int]:
-    """Assemble the similarity-selected text and parse it on the store's worker."""
-    found = [(kind, result) for kind, results in ranked for result in results]
-    found.sort(key=lambda pair: pair[1].score)
-    by_document: dict[tuple[str, str], list[tuple[int, str, str]]] = {}
-    chars = parts = 0
-    for kind, result in found:
-        payload = result.payload or {}
-        text = str(payload.get("text", ""))
-        if not text or chars + len(text) > store_chars:
-            continue
-        chars += len(text)
-        parts += 1
-        document = str(payload.get("document_id") or result.id)
-        name = str(payload.get("document_name") or document)
-        index = int(payload.get("chunk_index") or 0)
-        by_document.setdefault((name, document), []).append((index, text, kind))
-    for (name, _), pieces in sorted(by_document.items()):
-        pieces.sort()
-        rows = [text for _, text, kind in pieces if kind == "DltRow"]
-        if rows:
-            store.add_dlt_rows(rows)
-            continue
-        text = pieces[0][1] + "".join(
-            ("" if current[0] == previous[0] + 1 else "\n") + current[1]
-            for previous, current in pairwise(pieces)
-        )
-        store.add_document(name, text)
-    return chars, parts
+def _best_first(ranked: list[tuple[str, list]]) -> list[tuple[str, str]]:
+    """The results of one search per collection as one list of (kind, id), best first."""
+    found = [(result.score, kind, str(result.id)) for kind, results in ranked for result in results]
+    found.sort(key=lambda scored: scored[0])
+    return [(kind, point_id) for _, kind, point_id in found]
+
+
+@dataclass
+class _SimilarParts:
+    """The chunks most similar to the question, taken best first until ``budget``
+    characters are held. They are kept by document, because a document is parsed from
+    all of its chosen chunks together."""
+
+    budget: int
+    chars: int = 0
+    parts: int = 0
+    by_document: dict[tuple[str, str], list[tuple[int, str, str]]] = field(default_factory=dict)
+
+    def take(self, batch: list[tuple[str, str]], payloads: dict[tuple[str, str], dict]) -> bool:
+        """Keep the chunks of one fetched batch that fit. False once one did not: the
+        budget is spent, so no further batch needs fetching."""
+        room = True
+        for kind, point_id in batch:
+            payload = payloads.get((kind, point_id)) or {}
+            text = str(payload.get("text", ""))
+            if not text:
+                continue
+            if self.chars + len(text) > self.budget:
+                room = False
+                continue
+            self.chars += len(text)
+            self.parts += 1
+            document = str(payload.get("document_id") or point_id)
+            name = str(payload.get("document_name") or document)
+            index = int(payload.get("chunk_index") or 0)
+            self.by_document.setdefault((name, document), []).append((index, text, kind))
+        return room
+
+    def fill(self, store: RecordStore) -> None:
+        """Parse the chosen text into the store, a document at a time, letting go of each
+        document's text once it is stored."""
+        for key in sorted(self.by_document):
+            pieces = sorted(self.by_document.pop(key))
+            rows = [text for _, text, kind in pieces if kind == "DltRow"]
+            if rows:
+                store.add_dlt_rows(rows)
+                continue
+            # Parts that are not adjacent in their document are separated by a line break.
+            text = pieces[0][1] + "".join(
+                ("" if current[0] == previous[0] + 1 else "\n") + current[1]
+                for previous, current in pairwise(pieces)
+            )
+            store.add_document(key[0], text)
 
 
 def _reading_parts(ranked: list[list], tokenizer, reading_tokens: int) -> list[str]:
@@ -439,20 +463,33 @@ class BroadRetriever(CompletionRetriever):
 
     async def build_most_similar(self, store: BroadWorker, vector, query: str) -> tuple[int, int]:
         """Fill the store with the chunks most similar to the question, up to store_mb of
-        text: one vector search per text collection, the best matches kept until the size is
-        reached. A chunk's payload names its document and position, so no graph call is
-        needed. Returns the characters and parts loaded."""
+        text. One vector search per text collection ranks the chunks without their text;
+        the text is then fetched best first, a batch at a time, until the size is reached,
+        so what is read does not grow with the dataset. A chunk's payload names its
+        document and position, so no graph call is needed. Returns the characters and
+        parts loaded."""
         limit = max(1, self.store_chars // _MIN_CHUNK_CHARS)
         ranked = []
         for kind in BROAD_TEXT_NODE_TYPES:
             try:
-                results = await vector.search(
-                    f"{kind}_text", query, query_vector=None, limit=limit, include_payload=True
-                )
+                results = await vector.search(f"{kind}_text", query, query_vector=None, limit=limit)
             except CollectionNotFoundError:
                 continue
             ranked.append((kind, results))
-        return await store.run(_store_similar_parts, store.store, ranked, self.store_chars)
+        order = await store.run(_best_first, ranked)
+        del ranked
+        similar = _SimilarParts(budget=self.store_chars)
+        for start in range(0, len(order), _SIMILAR_FETCH_CHUNKS):
+            batch = order[start : start + _SIMILAR_FETCH_CHUNKS]
+            payloads = {}
+            for kind in dict.fromkeys(kind for kind, _ in batch):
+                ids = [point_id for batch_kind, point_id in batch if batch_kind == kind]
+                for result in await vector.retrieve(f"{kind}_text", ids):
+                    payloads[(kind, str(result.id))] = result.payload
+            if not await store.run(similar.take, batch, payloads):
+                break
+        await store.run(similar.fill, store.store)
+        return similar.chars, similar.parts
 
     # --- deciding and answering ---------------------------------------------------------
 

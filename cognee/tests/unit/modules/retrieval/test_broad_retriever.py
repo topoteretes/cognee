@@ -260,13 +260,11 @@ async def test_default_store_covers_all_records_through_512_mb(
         async def search(self, collection, *args, **kwargs):
             if collection != "DocumentChunk_text":
                 raise CollectionNotFoundError("none")
-            return [
-                SimpleNamespace(
-                    id="c1",
-                    score=0.1,
-                    payload={"text": "Beta only.", "document_id": "d1", "document_name": "b"},
-                )
-            ]
+            return [SimpleNamespace(id="c1", score=0.1, payload=None)]
+
+        async def retrieve(self, collection, ids):
+            payload = {"text": "Beta only.", "document_id": "d1", "document_name": "b"}
+            return [SimpleNamespace(id="c1", score=0, payload=payload)]
 
     _use(monkeypatch, {"a": "Alpha only.", "b": "Beta only."}, vector=Vector())
 
@@ -427,15 +425,24 @@ async def test_a_dataset_over_store_mb_is_represented_by_its_most_similar_parts(
         async def search(self, collection, query_text, query_vector=None, limit=None, **kw):
             if collection != "DocumentChunk_text":
                 raise CollectionNotFoundError("none")
-            payload = lambda doc: {
-                "text": texts[doc],
-                "document_id": f"d-{doc}",
-                "document_name": doc,
-                "chunk_index": 0,
-            }
             return [  # b is the better match (lower distance); the 40-char store holds one chunk
-                SimpleNamespace(id="c1", score=0.1, payload=payload("b")),
-                SimpleNamespace(id="c0", score=0.5, payload=payload("a")),
+                SimpleNamespace(id="b", score=0.1, payload=None),
+                SimpleNamespace(id="a", score=0.5, payload=None),
+            ]
+
+        async def retrieve(self, collection, ids):
+            return [  # in no particular order, as the adapters return them
+                SimpleNamespace(
+                    id=doc,
+                    score=0,
+                    payload={
+                        "text": texts[doc],
+                        "document_id": f"d-{doc}",
+                        "document_name": doc,
+                        "chunk_index": 0,
+                    },
+                )
+                for doc in sorted(ids)
             ]
 
     _use(monkeypatch, texts, vector=Vector(), size=30)  # 60 bytes stored > 40-char store
@@ -451,6 +458,50 @@ async def test_a_dataset_over_store_mb_is_represented_by_its_most_similar_parts(
     assert found.route == "sql" and found.rows == [(3, "b")]  # only b's three lines were loaded
     assert "1 parts of the dataset most similar" in found.coverage
     assert "over the 1 parts of the dataset most similar" in found.note
+
+
+@pytest.mark.asyncio
+async def test_the_most_similar_parts_are_ranked_without_text_and_fetched_until_full(monkeypatch):
+    """The search returns ids and scores only; text is fetched best first in batches, and
+    no batch is fetched after the store is full."""
+    texts = {f"doc{n}": f"line {n}\n" for n in range(6)}  # 7 characters each
+    searches, fetched = [], []
+
+    class Vector:
+        async def search(self, collection, query_text, query_vector=None, limit=None, **kw):
+            searches.append((collection, kw.get("include_payload", False)))
+            if collection != "DocumentChunk_text":
+                raise CollectionNotFoundError("none")
+            return [
+                SimpleNamespace(id=doc, score=n / 10, payload=None) for n, doc in enumerate(texts)
+            ]
+
+        async def retrieve(self, collection, ids):
+            fetched.append((collection, list(ids)))
+            return [
+                SimpleNamespace(
+                    id=doc,
+                    score=0,
+                    payload={"text": texts[doc], "document_id": doc, "document_name": doc},
+                )
+                for doc in reversed(ids)
+            ]
+
+    _use(monkeypatch, texts, vector=Vector(), size=30)
+    monkeypatch.setattr(broad_retriever, "_SIMILAR_FETCH_CHUNKS", 2)
+    _llm(monkeypatch, [DecisionLarge(sql="SELECT document FROM lines ORDER BY document")])
+
+    # 180 bytes stored > the 20-character store, which holds two 7-character chunks.
+    found = await BroadRetriever(store_mb=0.00002).get_retrieved_objects("which lines?")
+
+    assert searches == [("DocumentChunk_text", False), ("DltRow_text", False)]
+    # The second batch holds the chunk that no longer fits; the third is never fetched.
+    assert fetched == [
+        ("DocumentChunk_text", ["doc0", "doc1"]),
+        ("DocumentChunk_text", ["doc2", "doc3"]),
+    ]
+    assert found.rows == [("doc0",), ("doc1",)]
+    assert "2 parts of the dataset most similar" in found.coverage
 
 
 def test_broad_reports_no_structured_evidence_as_an_empty_list():

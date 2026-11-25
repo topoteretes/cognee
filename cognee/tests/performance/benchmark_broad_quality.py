@@ -262,14 +262,24 @@ class Fixture:
             SimpleNamespace(
                 id=f"chunk-{d['id']}",
                 score=-len(words & self.signatures[d["id"]]),
-                payload={
-                    "text": self.text(d),
-                    "document_id": d["id"],
-                    "document_name": d["name"],
-                    "chunk_index": 0,
-                },
+                payload=self.payload(d) if kwargs.get("include_payload") else None,
             )
             for d in ranked
+        ]
+
+    def payload(self, document):
+        return {
+            "text": self.text(document),
+            "document_id": document["id"],
+            "document_name": document["name"],
+            "chunk_index": 0,
+        }
+
+    async def retrieve(self, collection, ids):
+        documents = [self.documents[point_id.removeprefix("chunk-")] for point_id in ids]
+        return [
+            SimpleNamespace(id=f"chunk-{d['id']}", score=0, payload=self.payload(d))
+            for d in documents
         ]
 
 
