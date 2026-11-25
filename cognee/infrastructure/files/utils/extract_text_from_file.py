@@ -3,6 +3,8 @@ from typing import BinaryIO
 import filetype
 from pypdf import PdfReader
 
+from cognee.infrastructure.files.utils.decode_text_file import decode_text_file
+
 
 def extract_text_from_file(file: BinaryIO, file_type: filetype.Type) -> str | None:
     """
@@ -31,4 +33,6 @@ def extract_text_from_file(file: BinaryIO, file_type: filetype.Type) -> str | No
         return "\n".join([page.extract_text().strip() for page in pages])
 
     if file_type.extension == "txt":
-        return file.read().decode("utf-8")
+        # BOM-aware, same as ingestion in TextLoader: a UTF-16/UTF-32 file saved
+        # by an editor carries a byte order mark that names its encoding.
+        return decode_text_file(file.read())
