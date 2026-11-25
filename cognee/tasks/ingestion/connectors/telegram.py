@@ -61,7 +61,9 @@ Design
 
 import http.client
 import json
+import math
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -126,7 +128,36 @@ _EDIT_KEYS = ("edited_message", "edited_channel_post")
 _REMOVED_STATUSES = {"left", "kicked"}
 # A restricted member with ``is_member`` false is out of the chat too.
 _RESTRICTED = "restricted"
-_MEDIA_KINDS = ("photo", "video", "document", "audio", "voice", "animation")
+# What a message is besides text: the Message fields of Bot API 10.5 that say so
+# (core.telegram.org/bots/api#message, read 2026-11-24). Of all of it only a caption is read,
+# labelled with the first kind listed here that the message carries: ``animation`` comes before
+# ``document``, which Telegram sets on every animation too. A kind Telegram adds later counts as
+# a message without content until it is listed here.
+_CONTENT_KINDS = (
+    "animation",
+    "audio",
+    "document",
+    "live_photo",
+    "paid_media",
+    "photo",
+    "sticker",
+    "story",
+    "video",
+    "video_note",
+    "voice",
+    "widget",
+    "rich_message",
+    "checklist",
+    "contact",
+    "dice",
+    "game",
+    "poll",
+    "venue",
+    "location",
+    "invoice",
+    "giveaway",
+    "giveaway_winners",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +184,8 @@ class TelegramAuthError(TelegramAPIError):
 
 
 class TelegramRateLimitError(TelegramAPIError):
-    """Telegram answered HTTP 429; ``retry_after`` is the wait it named, when it named one."""
+    """Telegram answered HTTP 429; ``retry_after`` is the wait it named, when it named a usable
+    one (``math.inf`` for a wait beyond the largest float, ``None`` for NaN or a negative)."""
 
     def __init__(self, message: str, *, retry_after: float | None = None, description: str = ""):
         super().__init__(message, status=429, description=description)
@@ -188,10 +220,19 @@ class TelegramStagingError(TelegramSourceError):
 def new_stats() -> dict[str, int]:
     """The counts of a run, every key present from its start so a host finds them on any exit.
 
-    ``scanned`` message rows emitted, ``deleted`` tombstones emitted, ``skipped`` updates that
-    became no row (a chat outside the selection, a message without text), ``backlog`` 1 when the
+    ``scanned`` message rows emitted, ``deleted`` tombstones emitted, ``skipped`` message and
+    unread updates that became no row (a ``my_chat_member`` update is never counted), always the
+    sum of ``skipped_unselected`` (a chat outside the selection, private chats included unless
+    ``include_private``), ``skipped_unsupported_type`` (content this source does not read: a
+    file, a sticker, a poll, a location and every other kind but text, unless it has a caption),
+    ``skipped_empty_content`` (a message with no content: a service message, a blank text) and
+    ``skipped_unread_update`` (an update type this source does not read), ``backlog`` 1 when the
     run read a full page, ``gap`` update ids that may have expired at Telegram before this run
-    (see :func:`count_gap`). ``failed`` is 1 when the run stopped or raised, with one reason key
+    (see :func:`count_gap`), ``privacy_mode`` 1 when ``getMe`` said the bot sees only commands
+    and replies in groups. ``privacy_mode`` means something only on a run with ``failed == 0``:
+    a run that failed before or at ``getMe``, or on a bot mismatch, leaves it 0, and so does a
+    ``can_read_all_group_messages`` that is anything but JSON ``false``.
+    ``failed`` is 1 when the run stopped or raised, with one reason key
     set: ``failed_unexpected`` for a failure that is not Telegram's (a defect of this source),
     ``failed_provider`` for any other failure without a reason of its own, a failed staging read
     included.
@@ -211,6 +252,11 @@ def new_stats() -> dict[str, int]:
             "failed_bot_mismatch",
             "backlog",
             "gap",
+            "skipped_unselected",
+            "skipped_unsupported_type",
+            "skipped_empty_content",
+            "skipped_unread_update",
+            "privacy_mode",
         ),
         0,
     )
@@ -393,9 +439,13 @@ def _json_object(raw: bytes) -> dict:
 
 def _retry_after(payload: dict) -> float | None:
     value = (payload.get("parameters") or {}).get("retry_after")
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value)
+    # NaN and a negative wait are no wait, so the backoff applies. Anything beyond the largest
+    # float (Infinity included) is longer than any budget, so the run stops on it.
+    if not 0 <= value:
+        return None
+    return float(value) if value <= sys.float_info.max else math.inf
 
 
 def _retry_wait(error: BaseException, number: int) -> float:
@@ -501,14 +551,20 @@ def _message_url(chat: dict, message_id: int) -> str | None:
     return None
 
 
+def _content_kind(message: dict) -> str | None:
+    """The kind of content a message carries besides text, named as its Bot API field."""
+    return next((kind for kind in _CONTENT_KINDS if message.get(kind) is not None), None)
+
+
 def _message_text(message: dict) -> str:
-    """Text of a message, or the caption of a media message (with its media type)."""
+    """Text of a message, or its caption labelled with the kind it is on; empty when neither
+    says anything, so a blank caption never becomes a document of its label alone."""
     if message.get("text"):
         return message["text"]
     caption = message.get("caption")
-    if not caption:
+    if not caption or not caption.strip():
         return ""
-    kind = next((media for media in _MEDIA_KINDS if message.get(media)), None)
+    kind = _content_kind(message)
     return f"[{kind}] {caption}" if kind else caption
 
 
@@ -539,7 +595,7 @@ def message_to_row(message: dict, root_chat_id: int | None = None) -> dict[str, 
     """
     text = _message_text(message)
     if not text.strip():
-        return None  # service messages (joins, pins, ...) and media without a caption
+        return None  # service messages (joins, pins, ...) and any content without a caption
 
     # Every Bot API message has a chat with an id and a message_id.
     chat = message["chat"]
@@ -736,15 +792,68 @@ def _removed(member: dict) -> bool:
     return status in _REMOVED_STATUSES or (status == _RESTRICTED and new.get("is_member") is False)
 
 
+def _update_item(update: dict) -> dict | None:
+    """The message, post, edit or ``my_chat_member`` an update carries, if it is one read here."""
+    return update.get("my_chat_member") or next(
+        (update[key] for key in _MESSAGE_KEYS if update.get(key)), None
+    )
+
+
 def _update_date(update: dict) -> int | None:
     """When Telegram produced the update: an edit's ``edit_date``, else the ``date`` every
     message and ``my_chat_member`` carries."""
-    item = update.get("my_chat_member") or next(
-        (update[key] for key in _MESSAGE_KEYS if update.get(key)), None
-    )
+    item = _update_item(update)
     if not item:
         return None
     return item.get("edit_date") or item.get("date") or None
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_timestamp(value: Any) -> bool:
+    """An integer the date rendering can convert. The range is the platform's, not ours."""
+    if not _is_int(value):
+        return False
+    try:
+        datetime.fromtimestamp(value, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return False
+    return True
+
+
+def _check_page(updates: Any, offset: int | None) -> None:
+    """Refuse a page the source cannot store, before any of it is planned: a list of objects
+    whose ``update_id`` values are positive, rise strictly and start at ``offset`` or above
+    when one was sent, each carrying an object whose ``date`` and ``edit_date``, unless missing
+    or null, are integers the platform can turn into a time. Counted as ``failed_provider``.
+    """
+    if not isinstance(updates, list):
+        raise _malformed_page("is not a list")
+    # Telegram answers only ids at or above the offset it was sent.
+    previous = 0 if offset is None else offset - 1
+    for update in updates:
+        if not isinstance(update, dict):
+            raise _malformed_page("holds an update that is not an object")
+        update_id = update.get("update_id")
+        if not _is_int(update_id) or update_id <= previous:
+            raise _malformed_page(
+                "holds an update_id that is not a rising positive integer at or above the offset"
+            )
+        previous = update_id
+        item = _update_item(update)
+        if item is None:
+            continue
+        if not isinstance(item, dict):
+            raise _malformed_page("holds an update whose message is not an object")
+        for field in ("date", "edit_date"):
+            if item.get(field) is not None and not _is_timestamp(item[field]):
+                raise _malformed_page(f"holds an update whose {field} is not a timestamp")
+
+
+def _malformed_page(what: str) -> TelegramAPIError:
+    return TelegramAPIError(f"Telegram getUpdates: HTTP 200 with a page that {what}", status=200)
 
 
 # ---------------------------------------------------------------------------
@@ -769,7 +878,9 @@ def fetch_page(
     The offset confirms everything before it, which is safe: those updates were loaded by an
     earlier run whose state dlt saved. After six days without updates the offset is left out,
     because Telegram may restart ``update_id`` below the saved cursor, and an offset above the
-    new ids would confirm (drop) them. Without an offset nothing is confirmed.
+    new ids would confirm (drop) them. Without an offset nothing is confirmed. A page that is
+    not a list of well-formed updates with rising ids, at or above the offset when one was
+    sent, raises (:func:`_check_page`) before any of it is used.
     """
     last = state.get("last_update_id")
     quiet = _quiet(state, now)
@@ -782,7 +893,9 @@ def fetch_page(
         "timeout": 0,
         "allowed_updates": _ALLOWED_UPDATES,
     }
-    return client.call("getUpdates", params, check_active=check_active, budget=budget) or []
+    updates = client.call("getUpdates", params, check_active=check_active, budget=budget) or []
+    _check_page(updates, offset)
+    return updates
 
 
 def _chat_not_found(error: TelegramAPIError) -> bool:
@@ -925,6 +1038,11 @@ def plan_page(
     def selected(chat_key: str) -> bool:
         return selection.selects(int(chat_key), migrated_from, meta, bound)
 
+    def skip(reason: str) -> None:
+        # ``skipped`` stays the total that hosts already read; the reason splits it.
+        stats["skipped"] += 1
+        stats[reason] += 1
+
     saved = state.get("selection")
     if saved is not None and saved != selection.stored():
         dropped = {chat_key for chat_key in stored.by_chat() if not selected(chat_key)}
@@ -954,14 +1072,14 @@ def plan_page(
 
         kind = next((k for k in _MESSAGE_KEYS if update.get(k)), None)
         if kind is None:
-            stats["skipped"] += 1  # an update type this connector does not read
+            skip("skipped_unread_update")  # an update type this connector does not read
             continue
         message = update[kind]
         chat = message["chat"]
         chat_id: int = chat["id"]
         _remember_chat(meta, chat)
         if not selection.selects(chat_id, migrated_from, meta, bound):
-            stats["skipped"] += 1
+            skip("skipped_unselected")
             continue
         row = message_to_row(message, _root(chat_id, migrated_from))
         if row is not None:
@@ -972,8 +1090,10 @@ def plan_page(
         if kind in _EDIT_KEYS and (key in rows or key in stored.by_chat().get(str(chat_id), ())):
             # The old text must not stay in memory.
             rows[key] = deleted_row(key)
+        elif _content_kind(message):
+            skip("skipped_unsupported_type")  # content cognee does not read, a caption aside
         else:
-            stats["skipped"] += 1
+            skip("skipped_empty_content")  # a service message, or a blank text
 
     live = sum(1 for row in rows.values() if not row["_deleted"])
     stats["scanned"] += live
@@ -1005,10 +1125,12 @@ def plan_page(
         "username_chats": bound,
     }
     if updates:
+        # The ids of a page rise (_check_page), so the last one is the highest.
         new_state["last_update_id"] = updates[-1]["update_id"]
-        dates = [date for date in map(_update_date, updates) if date]
         # Telegram's restart clock runs from its last update, not from when this run read it.
-        new_state["last_update_seen_at"] = max(dates) if dates else now
+        # A date of 0 or before 1970 counts as missing, and none is later than this run.
+        dates = [date for date in map(_update_date, updates) if date and date > 0]
+        new_state["last_update_seen_at"] = min(max(dates), now) if dates else now
     return list(rows.values()), new_state
 
 
@@ -1151,7 +1273,9 @@ def sync_rows(
     try:
         me = client.call("getMe", check_active=check_active, budget=budget)
         _check_owner(state, me, resource_name)
-        if me.get("can_read_all_group_messages") is False:
+        # An int, not a bool: hosts keep only int counts.
+        stats["privacy_mode"] = int(me.get("can_read_all_group_messages") is False)
+        if stats["privacy_mode"]:
             logger.warning(
                 "Telegram: privacy mode is on, so in groups this bot only sees commands and "
                 "replies to it. Disable it in @BotFather (/setprivacy) or make the bot an admin "

@@ -915,12 +915,13 @@ async def load_pending_backlog(
     total = await session_manager.get_agent_trace_count(user_id=user_id, session_id=session_id)
     stored = await TRACE_EXTRACTION_WATERMARK.read_count(session_manager, user_id, session_id)
     processed = StateRowWatermark.resolve_effective(stored, total, session_id=session_id)
-    pending = total - processed
-    if pending <= 0:
+    if processed >= total:
         return None
 
+    # By position, not from the tail: a trace written after the count would shift a
+    # tail read (last_n) past the oldest pending trace.
     traces = await session_manager.get_agent_trace_session(
-        user_id=user_id, session_id=session_id, last_n=pending
+        user_id=user_id, session_id=session_id, start=processed, end=total
     )
     rows = await session_manager.get_session(
         user_id=user_id, session_id=session_id, formatted=False

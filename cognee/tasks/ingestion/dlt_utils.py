@@ -127,6 +127,40 @@ def with_retries(
     raise ValueError("with_retries needs at least one attempt")
 
 
+class BearerAuth:
+    """``Authorization: Bearer`` as a requests auth object.
+
+    A header passed in ``headers`` is replaced by a ``~/.netrc`` entry for the host, because
+    requests consults netrc when no ``auth`` is given; an auth object turns that off and leaves
+    the rest of the environment (proxies, CA bundle) as it is.
+    """
+
+    def __init__(self, token: str):
+        self._token = token
+
+    def __call__(self, request):
+        request.headers["Authorization"] = f"Bearer {self._token}"
+        return request
+
+    def __repr__(self) -> str:
+        return "BearerAuth(<redacted>)"
+
+
+def bearer_token(value: object, label: str) -> str:
+    """``value`` stripped, or ``ValueError`` naming ``label`` when requests would reject it as a
+    header value. requests names the value of a header it rejects, so the message never
+    echoes it."""
+    token = value.strip() if isinstance(value, str) else ""
+    if (
+        not token
+        or not token.isascii()
+        or not token.isprintable()
+        or any(c.isspace() for c in token)
+    ):
+        raise ValueError(f"The {label} is empty or has an invalid format")
+    return token
+
+
 def document_source_tag(item) -> str | None:
     """Return the document-source tag a dlt source opted into, else ``None``."""
     tag = getattr(item, DOCUMENT_SOURCE_ATTR, None)
