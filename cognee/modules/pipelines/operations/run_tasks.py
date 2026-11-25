@@ -11,6 +11,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
+from cognee.modules.data.models import Data
 from cognee.modules.operations import scrub_error_message
 from cognee.modules.operations.usage_accumulator import operation_usage_scope, parent_run_scope
 from cognee.modules.pipelines.exceptions import AfterRunHookError, PipelineRunFailedError
@@ -411,7 +412,11 @@ async def run_tasks(
                                 ),
                                 record_progress=_record_item_progress,
                                 portable_item=portable_item_check(task_resolver),
-                                source_fields=lambda item: _source_fields(item, item),
+                                # As where the item runs here: a data row's entry
+                                # names its source, a value's does not.
+                                source_fields=lambda item: (
+                                    _source_fields(item, item) if isinstance(item, Data) else {}
+                                ),
                             ),
                         )
                 except BaseException as gather_error:

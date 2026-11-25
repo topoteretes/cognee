@@ -16,7 +16,14 @@ import pytest
 
 import cognee.modules.pipelines.execution.run_pipeline_shard as shard_module
 import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
-from cognee.modules.pipelines.execution import COMPLETED, ERRORED, ItemOutcome, Shard, ShardResult
+from cognee.modules.pipelines.execution import (
+    COMPLETED,
+    ERRORED,
+    ItemOutcome,
+    Shard,
+    ShardItem,
+    ShardResult,
+)
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 
 
@@ -73,6 +80,14 @@ def shard(monkeypatch, run_spec):
     return state
 
 
+def _shard(spec, data_ids):
+    """The shard of these data rows, by their position in it."""
+    return Shard(
+        spec=spec,
+        items={index: ShardItem(data_id=data_id) for index, data_id in enumerate(data_ids)},
+    )
+
+
 def _completed(spec, dataset, data_item):
     return {
         "run_info": PipelineRunCompleted(
@@ -98,9 +113,7 @@ async def test_each_item_runs_under_the_owners_run_and_one_failure_stays_its_own
 
     monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", run_item)
 
-    result = await shard_module.run_shard_items(
-        Shard(spec=shard.spec, data_ids=[row.id for row in shard.rows])
-    )
+    result = await shard_module.run_shard_items(_shard(shard.spec, [row.id for row in shard.rows]))
 
     assert [outcome.status for outcome in result.outcomes] == [
         COMPLETED,
@@ -134,9 +147,7 @@ async def test_no_more_items_at_once_than_the_run_allows(shard, monkeypatch, run
     monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", run_item)
     spec = run_spec(dataset_id=shard.spec.dataset_id, data_per_batch=2)
 
-    result = await shard_module.run_shard_items(
-        Shard(spec=spec, data_ids=[row.id for row in shard.rows])
-    )
+    result = await shard_module.run_shard_items(_shard(spec, [row.id for row in shard.rows]))
 
     assert len(result.outcomes) == 4
     assert peak == 2
@@ -158,9 +169,7 @@ async def test_an_item_whose_tasks_cannot_be_resolved_fails_alone(shard, monkeyp
     monkeypatch.setattr(shard_module, "build_task_resolver", build_task_resolver)
     monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", run_item)
 
-    result = await shard_module.run_shard_items(
-        Shard(spec=shard.spec, data_ids=[row.id for row in shard.rows])
-    )
+    result = await shard_module.run_shard_items(_shard(shard.spec, [row.id for row in shard.rows]))
 
     assert [outcome.status for outcome in result.outcomes] == [
         COMPLETED,
@@ -187,9 +196,7 @@ async def test_cancelling_the_shard_leaves_no_item_running(shard, monkeypatch):
 
     monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", run_item)
     task = asyncio.create_task(
-        shard_module.run_shard_items(
-            Shard(spec=shard.spec, data_ids=[row.id for row in shard.rows])
-        )
+        shard_module.run_shard_items(_shard(shard.spec, [row.id for row in shard.rows]))
     )
     await started.wait()
     await asyncio.sleep(0)
@@ -217,9 +224,7 @@ async def test_an_id_outside_the_runs_dataset_is_reported_and_never_processed(sh
     present, stranger = shard.rows[0], uuid4()
     shard.rows[:] = [present]  # all the dataset holds of the ids asked for
 
-    result = await shard_module.run_shard_items(
-        Shard(spec=shard.spec, data_ids=[present.id, stranger])
-    )
+    result = await shard_module.run_shard_items(_shard(shard.spec, [present.id, stranger]))
 
     outcomes = {outcome.data_id: outcome for outcome in result.outcomes}
     assert outcomes[present.id].status == COMPLETED
@@ -227,10 +232,69 @@ async def test_an_id_outside_the_runs_dataset_is_reported_and_never_processed(sh
         ERRORED,
         "DataItemNotInDataset",
     )
+    assert (outcomes[present.id].index, outcomes[stranger].index) == (0, 1)
     assert processed == [present.id]
     # The lookup itself is scoped to the run's dataset.
     where = str(shard.statement.whereclause)
     assert "data.dataset_id" in where and "data.id IN" in where
+
+
+@pytest.mark.asyncio
+async def test_values_run_as_they_are_and_are_answered_for_by_position(shard, monkeypatch):
+    """An item that is no data row runs as the value it is, next to the rows of
+    the same shard; each outcome names its item's position, and the data row its
+    tasks stored it as, if any."""
+    ran = []
+    stored_as = uuid4()
+
+    async def run_item(data_item, dataset, *args):
+        ran.append(data_item)
+        if data_item == {"rows": [[10, 20]]}:
+            raise ValueError("bad rows")
+        data_id = data_item.id if data_item is shard.rows[0] else stored_as
+        return {**_completed(shard.spec, dataset, shard.rows[0]), "data_id": data_id}
+
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", run_item)
+    shard.rows[:] = shard.rows[:1]
+
+    result = await shard_module.run_shard_items(
+        Shard(
+            spec=shard.spec,
+            items={
+                0: ShardItem(value={"rows": [[0, 10]]}),
+                1: ShardItem(data_id=shard.rows[0].id),
+                2: ShardItem(value={"rows": [[10, 20]]}),
+            },
+        )
+    )
+
+    assert sorted(map(str, ran)) == sorted(
+        map(str, [{"rows": [[0, 10]]}, shard.rows[0], {"rows": [[10, 20]]}])
+    )
+    by_index = {outcome.index: outcome for outcome in result.outcomes}
+    assert (by_index[0].status, by_index[0].data_id) == (COMPLETED, stored_as)
+    assert (by_index[1].status, by_index[1].data_id) == (COMPLETED, shard.rows[0].id)
+    assert (by_index[2].status, by_index[2].data_id, by_index[2].error_class) == (
+        ERRORED,
+        None,
+        "ValueError",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_shard_of_values_reads_no_data_rows(shard, monkeypatch):
+    async def run_item(data_item, dataset, *args):
+        return {**_completed(shard.spec, dataset, shard.rows[0]), "data_id": None}
+
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", run_item)
+
+    result = await shard_module.run_shard_items(
+        Shard(spec=shard.spec, items={0: ShardItem(value="a"), 1: ShardItem(value="b")})
+    )
+
+    assert sorted(outcome.index for outcome in result.outcomes) == [0, 1]
+    assert {outcome.status for outcome in result.outcomes} == {COMPLETED}
+    assert not hasattr(shard, "statement")
 
 
 # ---- a worker takes its shard and stores its answer ----
@@ -239,7 +303,7 @@ async def test_an_id_outside_the_runs_dataset_is_reported_and_never_processed(sh
 @pytest.fixture
 def rows(monkeypatch, run_spec):
     """The shard's rows replaced: what a worker took, and what it stored."""
-    shard = Shard(spec=run_spec(), data_ids=[uuid4(), uuid4()])
+    shard = _shard(run_spec(), [uuid4(), uuid4()])
     kept = SimpleNamespace(
         shard=shard,
         take_shard=AsyncMock(return_value=shard),
@@ -254,7 +318,10 @@ def rows(monkeypatch, run_spec):
 @pytest.mark.asyncio
 async def test_a_worker_takes_its_shard_by_id_and_stores_how_its_items_ended(rows, monkeypatch):
     result = ShardResult(
-        outcomes=[ItemOutcome(status=COMPLETED, data_id=i) for i in rows.shard.data_ids],
+        outcomes=[
+            ItemOutcome(status=COMPLETED, index=index, data_id=item.data_id)
+            for index, item in rows.shard.items.items()
+        ],
         tokens_in=5,
     )
     run_shard_items = AsyncMock(return_value=result)

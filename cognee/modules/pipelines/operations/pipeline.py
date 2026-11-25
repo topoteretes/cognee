@@ -119,7 +119,8 @@ async def run_pipeline(
     probed). For a task list it is derived from the tasks themselves — the
     union of ``Task.needs_llm`` — and the ``needs_llm`` parameter applies only
     when ``tasks`` is a resolver, whose caller must pass the union over every
-    list the resolver can return.
+    list the resolver can return (registered tasks know theirs:
+    ``RegisteredTasks.needs_llm``).
 
     ``after_run_completed`` is awaited after each dataset's run completes, and
     ``after_items_ran`` also when items in the run failed, both inside that dataset's

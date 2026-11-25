@@ -13,18 +13,13 @@ user may create databases, e.g.:
     COGNEE_PG_TEST_URL=postgres://cognee:cognee@localhost:5432/cognee_db
 """
 
-import asyncio
-import json
 import os
-import subprocess
-import sys
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
-from sqlalchemy.engine import make_url
 
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
+from cognee.tests.e2e.postgres.worker_processes.run_driver import driver_results
 
 PG_URL = os.getenv("COGNEE_PG_TEST_URL")
 
@@ -36,94 +31,11 @@ DRIVER = Path(__file__).resolve().parent / "worker_processes" / "driver.py"
 NOTHING_WITHOUT_A_SOURCE = {"graph_edge": 0, "graph_node": 0}
 
 
-async def _databases(connect: dict) -> set[str]:
-    import asyncpg
-
-    admin = await asyncpg.connect(**connect)
-    try:
-        return {row["datname"] for row in await admin.fetch("select datname from pg_database")}
-    finally:
-        await admin.close()
-
-
-async def _execute(connect: dict, statements: list[str]) -> None:
-    import asyncpg
-
-    admin = await asyncpg.connect(**connect)
-    try:
-        for statement in statements:
-            await admin.execute(statement)
-    finally:
-        await admin.close()
-
-
 @pytest.fixture(scope="module")
 def runs(tmp_path_factory):
     """What the driver reports, from runs on a database of their own."""
-    url = make_url(PG_URL)
-    connect = {
-        "host": url.host,
-        "port": url.port or 5432,
-        "user": url.username,
-        "password": url.password,
-        "database": url.database or "postgres",
-    }
-    root = tmp_path_factory.mktemp("worker_processes")
-    database = f"cognee_workers_{uuid4().hex[:10]}"
-    existing = asyncio.run(_databases(connect))
-    asyncio.run(_execute(connect, [f'create database "{database}"']))
-    stores = {
-        f"{prefix}_{name}": value
-        for prefix in ("DB", "VECTOR_DB", "GRAPH_DATABASE")
-        for name, value in (
-            ("HOST", url.host),
-            ("PORT", str(url.port or 5432)),
-            ("USERNAME", url.username),
-            ("PASSWORD", url.password),
-            ("NAME", database),
-        )
-    }
-    environment = {
-        **os.environ,
-        **stores,
-        "DB_PROVIDER": "postgres",
-        "VECTOR_DB_PROVIDER": "pgvector",
-        "VECTOR_DATASET_DATABASE_HANDLER": "pgvector",
-        "GRAPH_DATABASE_PROVIDER": "postgres",
-        "GRAPH_DATASET_DATABASE_HANDLER": "postgres_graph",
-        "ENABLE_BACKEND_ACCESS_CONTROL": "true",
-        "DATA_ROOT_DIRECTORY": str(root / "data"),
-        "SYSTEM_ROOT_DIRECTORY": str(root / "system"),
-        "LLM_API_KEY": "not-used",
-        "MOCK_EMBEDDING": "true",
-        "COGNEE_SKIP_CONNECTION_TEST": "true",
-        "SUMMARY_METHOD": "from_extraction",
-        "TELEMETRY_DISABLED": "true",
-    }
-    for name in ("GRAPH_DATABASE_URL", "VECTOR_DB_URL", "EARLY_CHUNK_INDEXING", "GRAPH_EXTRACTOR"):
-        environment.pop(name, None)
-    try:
-        driver = subprocess.run(
-            [sys.executable, str(DRIVER)],
-            env=environment,
-            capture_output=True,
-            text=True,
-            timeout=900,
-            check=False,
-        )
-        results = [line for line in driver.stdout.splitlines() if line.startswith("RESULT ")]
-        assert results, (
-            f"the driver ended with code {driver.returncode} and no result:\n"
-            f"{driver.stdout[-2000:]}\n{driver.stderr[-6000:]}"
-        )
-        yield json.loads(results[-1].removeprefix("RESULT "))
-    finally:
-        created = asyncio.run(_databases(connect)) - existing
-        asyncio.run(
-            _execute(
-                connect, [f'drop database if exists "{name}" with (force)' for name in created]
-            )
-        )
+    with driver_results(DRIVER, PG_URL, tmp_path_factory.mktemp("worker_processes")) as results:
+        yield results
 
 
 def _shards(run: dict, pipeline_name: str) -> list[tuple]:
