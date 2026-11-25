@@ -19,12 +19,14 @@ import pytest
 from cognee.tasks.ingestion import connectors as connectors_package
 from cognee.tasks.ingestion.connectors.apollo import apollo_source
 from cognee.tasks.ingestion.connectors.asana import asana_source
+from cognee.tasks.ingestion.connectors.granola import granola_source
 from cognee.tasks.ingestion.connectors.linear import linear_source
 from cognee.tasks.ingestion.connectors.onenote import onenote_source
 from cognee.tasks.ingestion.connectors.slack import slack_source
 from cognee.tasks.ingestion.connectors.vercel import vercel_source
 from cognee.tests.unit.tasks.connectors.fake_apollo import FakeApollo
 from cognee.tests.unit.tasks.connectors.fake_asana import FakeAsana
+from cognee.tests.unit.tasks.connectors.fake_granola import FakeGranola
 from cognee.tests.unit.tasks.connectors.fake_onenote import Graph
 from cognee.tests.unit.tasks.connectors.fake_slack import CHANNEL, TEAM, FakeSlack
 from cognee.tests.unit.tasks.connectors.fake_vercel import FakeVercel
@@ -128,11 +130,26 @@ def _vercel(check_active_for):
     )
 
 
+def _granola(check_active_for):
+    fake = FakeGranola()
+    fake.folder("fol_AAAAAAAAAAAAAA")
+    fake.add(1, folder="fol_AAAAAAAAAAAAAA")
+    fake.add(2, folder="fol_AAAAAAAAAAAAAA")
+    return granola_source(
+        service=fake,
+        scope="fol_AAAAAAAAAAAAAA",
+        resource_name="granola_revocation_test",
+        check_active=check_active_for(fake.calls),
+        max_requests=1,
+    )
+
+
 BUDGETED_SOURCES = {
     "slack_source": _slack,
     "linear_source": _linear,
     "apollo_source": _apollo,
     "asana_source": _asana,
+    "granola_source": _granola,
     "onenote_source": _onenote,
     "vercel_source": _vercel,
 }

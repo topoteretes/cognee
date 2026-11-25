@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, text, update
 
 from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 from cognee.infrastructure.databases.cache.sql.tables import (
@@ -418,6 +418,44 @@ async def test_get_agent_trace_session_last_n_returns_most_recent_in_order(adapt
         )
 
     entries = await adapter.get_agent_trace_session("u1", "s1", last_n=2)
+    assert [entry.trace_id for entry in entries] == ["t1", "t2"]
+
+
+@pytest.mark.asyncio
+async def test_get_agent_trace_session_range_returns_those_positions(adapter):
+    """start/end read the trace steps at those session positions, end exclusive."""
+    for index in range(5):
+        await adapter.append_agent_trace_step(
+            "u1",
+            "s1",
+            trace_id=f"t{index}",
+            origin_function="plan_trip",
+            status="success",
+            session_feedback=f"step {index}.",
+        )
+
+    entries = await adapter.get_agent_trace_session("u1", "s1", start=1, end=3)
+    assert [entry.trace_id for entry in entries] == ["t1", "t2"]
+
+
+@pytest.mark.asyncio
+async def test_get_agent_trace_session_range_skips_expired_steps(adapter):
+    """Positions count live steps only, like get_agent_trace_count."""
+    for index in range(4):
+        await adapter.append_agent_trace_step(
+            "u1",
+            "s1",
+            trace_id=f"t{index}",
+            origin_function="plan_trip",
+            status="success",
+            session_feedback=f"step {index}.",
+        )
+    async with adapter.engine.connect() as connection:
+        oldest = (await connection.execute(select(func.min(cache_trace_entries.c.seq)))).scalar()
+    await _backdate_expirations(adapter, cache_trace_entries, _past(), seq=oldest)
+
+    assert await adapter.get_agent_trace_count("u1", "s1") == 3
+    entries = await adapter.get_agent_trace_session("u1", "s1", start=0, end=2)
     assert [entry.trace_id for entry in entries] == ["t1", "t2"]
 
 

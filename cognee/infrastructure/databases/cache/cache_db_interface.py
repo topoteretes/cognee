@@ -278,10 +278,22 @@ class CacheDBInterface(ABC):
 
     @abstractmethod
     async def get_agent_trace_session(
-        self, user_id: str, session_id: str, last_n: int | None = None
+        self,
+        user_id: str,
+        session_id: str,
+        last_n: int | None = None,
+        start: int | None = None,
+        end: int | None = None,
     ) -> list[SessionAgentTraceEntry]:
         """
-        Retrieve agent trace steps for the given session.
+        Retrieve agent trace steps for the given session: the last ``last_n``, or the
+        steps at positions ``start`` to ``end`` (exclusive, oldest first), or all.
+
+        Positions count live steps only, as ``get_agent_trace_count`` does. A range is
+        read by position because a tail read shifts when steps are appended after the
+        count; ``last_n`` is for showing the newest steps. ``SessionManager`` checks
+        the arguments (``start`` and ``end`` together, ``0 <= start < end``, not with
+        ``last_n``); adapters assume they hold.
         """
 
     @abstractmethod
