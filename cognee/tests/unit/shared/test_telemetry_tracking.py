@@ -4,8 +4,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from cognee.shared import utils
-from cognee.shared.utils import CLOUD_TELEMETRY_EVENTS, _get_api_key_tracking_id, send_telemetry
+from cognee.shared import telemetry_schema, utils
+from cognee.shared.telemetry_schema import CLOUD_EVENT_MODELS
+from cognee.shared.utils import _get_api_key_tracking_id, send_telemetry
 
 
 def test_api_key_tracking_id_uses_full_key_not_visible_tail(monkeypatch):
@@ -89,7 +90,7 @@ def test_send_telemetry_includes_origin_from_env(monkeypatch):
 
     # Set -> honored (the managed cloud sets this to "cloud").
     monkeypatch.setenv("TELEMETRY_ORIGIN", "cloud")
-    send_telemetry("Pipeline Run Started", "user-123")
+    send_telemetry("Pipeline Run Started", "sdk")
     assert payloads[-1]["properties"]["telemetry_origin"] == "cloud"
 
 
@@ -100,8 +101,8 @@ def test_cloud_origin_sends_only_allowlisted_events(monkeypatch):
     monkeypatch.setattr(utils._telemetry_sender, "enqueue", lambda p: sent.append(p["event_name"]))
 
     monkeypatch.setenv("TELEMETRY_ORIGIN", "cloud")
-    send_telemetry("Task Started", "user-123")
-    send_telemetry("Pipeline Run Started", "user-123")
+    send_telemetry("Task Started", "sdk")
+    send_telemetry("Pipeline Run Started", "sdk")
     monkeypatch.setenv("TELEMETRY_ORIGIN", "sdk")
     send_telemetry("Task Started", "user-123")
 
@@ -110,15 +111,14 @@ def test_cloud_origin_sends_only_allowlisted_events(monkeypatch):
 
 def test_cloud_allowlist_names_only_events_cognee_emits():
     package = Path(utils.__file__).resolve().parents[1]
+    listing = {Path(utils.__file__).resolve(), Path(telemetry_schema.__file__).resolve()}
     sources = [
         path.read_text()
         for path in package.rglob("*.py")
-        if "tests" not in path.parts and path != Path(utils.__file__).resolve()
+        if "tests" not in path.parts and path not in listing
     ]
 
-    missing = {
-        name for name in CLOUD_TELEMETRY_EVENTS if not any(f'"{name}"' in s for s in sources)
-    }
+    missing = {name for name in CLOUD_EVENT_MODELS if not any(f'"{name}"' in s for s in sources)}
 
     assert not missing, f"Allowlisted events nothing emits: {missing}"
 
@@ -130,7 +130,7 @@ def test_event_properties_cannot_override_the_origin(monkeypatch):
     monkeypatch.setenv("TELEMETRY_ORIGIN", "cloud")
     monkeypatch.setattr(utils._telemetry_sender, "enqueue", payloads.append)
 
-    send_telemetry("cognee.recall", "user-123", {"telemetry_origin": "sdk"})
+    send_telemetry("cognee.recall", "sdk", {"telemetry_origin": "sdk"})
 
     assert payloads[0]["properties"]["telemetry_origin"] == "cloud"
 

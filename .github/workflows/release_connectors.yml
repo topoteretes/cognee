@@ -46,6 +46,7 @@ on:
           - cognee-connectors-core
           - cognee-connector-apollo
           - cognee-connector-asana
+          - cognee-connector-dropbox
           - cognee-connector-github
           - cognee-connector-gmail
           - cognee-connector-google
@@ -56,6 +57,7 @@ on:
           - cognee-connector-obsidian
           - cognee-connector-onenote
           - cognee-connector-slack
+          - cognee-connector-vercel
 
 # Minimal default permissions (OSSF Scorecard: Token-Permissions). The release
 # jobs opt in to exactly what they need.

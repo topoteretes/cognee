@@ -455,3 +455,25 @@ async def test_updates_within_a_phase_are_throttled_and_changes_publish_at_once(
         await reporter.report(phase="processing")
         await reporter.flush()
         assert sink.call_args.args[0].phase == "processing"
+
+
+@pytest.mark.asyncio
+async def test_a_sync_is_refused_while_outbound_http_is_disabled(storage, credential, monkeypatch):
+    """SDK-832: ALLOW_HTTP_REQUESTS=false stops every connector sync at its entry."""
+    from cognee.modules.integrations.outbound import OutboundHttpDisabledError
+
+    monkeypatch.setenv("ALLOW_HTTP_REQUESTS", "false")
+
+    with pytest.raises(OutboundHttpDisabledError):
+        async with progress.track_sync("github", credential):
+            raise AssertionError("the sync body must not run")
+
+    # A webhook- or scheduler-started sync has no caller to report the 503 to,
+    # so the refusal is recorded as a failed run instead of leaving no trace.
+    async with storage() as db:
+        rows = (await db.execute(select(PipelineRun))).scalars().all()
+    assert len(rows) == 1
+    recorded = progress.SyncProgress.model_validate(rows[0].run_info["sync_progress"])
+    assert recorded.state == "failed"
+    assert recorded.reason == "outbound_http_disabled"
+    assert progress.get_current_sync_progress() is None

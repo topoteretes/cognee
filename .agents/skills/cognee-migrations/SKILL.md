@@ -98,8 +98,11 @@ confidence), `confidence` (outcome, verified_at, verified_by, score),
 stamped by the writer, and provenance as `contributors[]` (role, actor,
 kind, at) with the `accountable` human and `ai_involvement`. The
 cognee exporter fills what it can read from the graph and declares the rest
-in the manifest's `coverage` map; the loader keeps the header in each
-record's external metadata and on fact edges, so a re-export preserves it.
+in the manifest's `coverage` map. The loader keeps the header as one
+`omp_header` JSON in a data item's external metadata, on Entity nodes and on
+fact edges, so a re-export preserves it; a chunk re-exports with its
+document's header. A record with no `origin` originates at its own
+`external_system`/`external_id`, so a Mem0 memory stays Mem0's.
 0.1 archives read unchanged.
 
 Use it to back up and restore a dataset, or to copy one to another cognee

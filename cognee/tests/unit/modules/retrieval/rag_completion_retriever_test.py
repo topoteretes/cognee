@@ -373,3 +373,67 @@ async def test_get_context_missing_text_key(mock_vector_engine):
         objects = await retriever.get_retrieved_objects("test query")
         context = await retriever.get_context_from_objects("test query", objects)
         await retriever.get_completion_from_context("test query", objects, context)
+
+
+@pytest.mark.asyncio
+async def test_graph_scope_goes_through_the_scoped_search_not_the_node_set_filter(
+    mock_vector_engine,
+):
+    from cognee.modules.data.processing.document_types import TextDocument
+
+    graph_engine = AsyncMock()
+    scoped = AsyncMock(return_value=[])
+    retriever = CompletionRetriever(top_k=2, node_type=TextDocument, node_name=["doc_a"])
+
+    with (
+        patch(
+            "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.completion_retriever.get_graph_engine",
+            return_value=graph_engine,
+        ),
+        patch("cognee.modules.retrieval.completion_retriever.search_scoped_chunks", scoped),
+    ):
+        await retriever.get_retrieved_objects("test query")
+
+    scoped.assert_awaited_once_with(
+        mock_vector_engine,
+        graph_engine,
+        "test query",
+        node_type=TextDocument,
+        node_name=["doc_a"],
+        node_name_filter_operator="OR",
+        limit=2,
+    )
+    mock_vector_engine.search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("include_references", [True, False])
+async def test_retrieval_names_the_cited_documents_only_with_references(
+    mock_vector_engine, include_references
+):
+    """The chunks are named where they are retrieved, so every path that builds a
+    reference from them (an answer, only_context, a session lane) sees the names."""
+    chunk = MagicMock()
+    chunk.payload = {"text": "Ana moved the launch.", "document_id": "x"}
+    mock_vector_engine.search.return_value = [chunk]
+    retriever = CompletionRetriever(include_references=include_references)
+    name = AsyncMock()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        patch("cognee.modules.retrieval.completion_retriever.name_chunk_documents", name),
+    ):
+        objects = await retriever.get_retrieved_objects("When is the launch?")
+
+    if include_references:
+        name.assert_awaited_once()
+        assert name.await_args.args[0] == objects
+    else:
+        name.assert_not_awaited()

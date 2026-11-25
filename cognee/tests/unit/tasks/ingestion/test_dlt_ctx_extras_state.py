@@ -82,6 +82,14 @@ async def test_two_contexts_do_not_share_dedup_state(monkeypatch, emit_mock):
     assert (
         ctx_a.extras["dlt_emitted_value_node_ids"] is not ctx_b.extras["dlt_emitted_value_node_ids"]
     )
+    assert (
+        ctx_a.extras["dlt_emitted_column_node_ids"]
+        is not ctx_b.extras["dlt_emitted_column_node_ids"]
+    )
+    assert (
+        ctx_a.extras["dlt_emitted_has_value_edges"]
+        is not ctx_b.extras["dlt_emitted_has_value_edges"]
+    )
 
 
 @pytest.mark.asyncio

@@ -117,20 +117,36 @@ def routing_removals(monkeypatch):
 @pytest.fixture(autouse=True)
 def index_removals(monkeypatch):
     """Record the documents the memory-only helpers remove from the index (the
-    real function opens the dataset's engines)."""
+    real function opens the dataset's engines). ``had_index`` is what the fake
+    reports: whether the dataset had an index to remove from."""
+    index = importlib.import_module("cognee.tasks.memify.global_context_index")
+    removals = SimpleNamespace(calls=[], had_index=True)
+
+    async def remove_document_index(dataset_id, data_ids):
+        removals.calls.append((dataset_id, list(data_ids)))
+        return removals.had_index
+
+    monkeypatch.setattr(index, "remove_document_index", remove_document_index)
+    return removals
+
+
+@pytest.fixture(autouse=True)
+def root_rebuilds(monkeypatch):
+    """Record the datasets whose index root the memory-only helpers rebuild (the
+    real function reads the dataset's graph and embeds the root)."""
     index = importlib.import_module("cognee.tasks.memify.global_context_index")
     calls = []
 
-    async def remove_document_index(dataset_id, data_ids):
-        calls.append((dataset_id, list(data_ids)))
+    async def rebuild_document_index_root(dataset_id, user):
+        calls.append((dataset_id, user))
 
-    monkeypatch.setattr(index, "remove_document_index", remove_document_index)
+    monkeypatch.setattr(index, "rebuild_document_index_root", rebuild_document_index_root)
     return calls
 
 
 @pytest.mark.asyncio
 async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(
-    monkeypatch, routing_removals
+    monkeypatch, routing_removals, root_rebuilds
 ):
     """memory_only=True with dataset clears graph/vector and resets pipeline_status."""
     other_dataset_id = str(uuid4())
@@ -203,8 +219,10 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(
     assert len(data_a.pipeline_status["cognify"]) == 1
 
     assert session.committed
-    # Every routing row of the dataset goes with its memory.
+    # Every routing row of the dataset goes with its memory, and no root is
+    # written again: nothing of the dataset's memory is left to describe.
     assert routing_removals == [(DATASET_ID, [DATA_ID_A, DATA_ID_B])]
+    assert root_rebuilds == []
 
 
 @pytest.mark.asyncio
@@ -252,10 +270,12 @@ async def test_forget_dataset_memory_skips_records_without_pipeline_status(monke
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("had_index", [True, False])
 async def test_forget_data_memory_clears_graph_and_resets_pipeline(
-    monkeypatch, routing_removals, index_removals
+    monkeypatch, routing_removals, index_removals, root_rebuilds, had_index
 ):
     """memory_only=True with dataset+data_id clears graph/vector for the item."""
+    index_removals.had_index = had_index
     other_dataset_id = str(uuid4())
     pipeline_status = {
         "add_pipeline": {str(DATASET_ID): "COMPLETE"},
@@ -310,7 +330,11 @@ async def test_forget_data_memory_clears_graph_and_resets_pipeline(
     # The item's bucket and the dataset's root, whose text named the item, go
     # with its memory, in the graph and in the routing collection.
     assert routing_removals == [(DATASET_ID, [DATA_ID_A])]
-    assert index_removals == [(DATASET_ID, [DATA_ID_A])]
+    assert index_removals.calls == [(DATASET_ID, [DATA_ID_A])]
+    # The root is then written again from the documents that keep their memory,
+    # so a broad query still routes to the dataset before the next improve. A
+    # dataset that had no index gets none: routing searches it always.
+    assert root_rebuilds == ([(DATASET_ID, USER)] if had_index else [])
 
 
 @pytest.mark.asyncio

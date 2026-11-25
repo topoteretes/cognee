@@ -1,20 +1,14 @@
-"""Plugs the Slack connector into a cognee server (cognee >= 1.6.5).
+"""Plugs the Slack connector into a cognee server.
 
 Everything under ``cognee_host/`` may import cognee; it is installed with the
 ``cognee`` extra (``pip install "cognee-connector-slack[cognee]"``). The package
 ``__init__`` never imports this subpackage, and nothing here runs at import: a
 host calls :func:`register` and mounts what :func:`routers` lists.
 
-Copied from cognee.modules.integrations.slack.__init__ (cognee dev, 2026-10-27),
-whose import-time ``use_integration(SlackIntegration())`` became the explicit
-:func:`register`; the two routers cognee's ``api/client.py`` mounted by hand are
-what :func:`routers` returns.
-
-The history import (``history``, ``history_client``) reports its progress through
-``cognee.modules.integrations.sync_progress`` when the installed cognee has it
-(newer than 1.6.6); on an older cognee it runs the same way with every report
-dropped (:mod:`cognee_connector_slack.cognee_host.compat`), so :func:`register`
-and :func:`routers` work on any cognee >= 1.6.5.
+Copied from cognee.modules.integrations.slack.__init__ (cognee dev, 2026-11-12),
+whose import-time ``use_integration`` calls became the explicit :func:`register`;
+the two routers cognee's ``api/client.py`` mounted by hand are what :func:`routers`
+returns.
 """
 
 from __future__ import annotations
@@ -31,12 +25,15 @@ from cognee_connector_slack.cognee_host.routers import routers
 
 
 def register() -> None:
-    """Register this provider with cognee's integration registry (cognee >= 1.6.5)."""
+    """Register the Slack app and Sign in with Slack with cognee's integration registry."""
     from cognee.modules.integrations.registry import use_integration
 
     from cognee_connector_slack.cognee_host.adapter import SlackIntegration
+    from cognee_connector_slack.cognee_host.member_link import SlackMemberIntegration
 
     use_integration(SlackIntegration())
+    # Sign in with Slack, which links one member to the cognee user who started it.
+    use_integration(SlackMemberIntegration())
 
 
 __all__ = ["register", "routers"]

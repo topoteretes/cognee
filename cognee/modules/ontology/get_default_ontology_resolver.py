@@ -9,6 +9,7 @@ from cognee.modules.ontology.ontology_env_config import (
     get_ontology_env_config,
     normalize_ontology_mode,
     normalize_ontology_reasoning,
+    parse_authoritative_sources,
 )
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
@@ -67,6 +68,23 @@ def get_configured_ontology_mode(config: Config | None = None) -> str:
             return normalize_ontology_mode(ontology_config["ontology_mode"])
 
     return get_ontology_env_config().ontology_mode
+
+
+def get_configured_authoritative_sources(
+    config: Config | None = None,
+) -> dict[str, str | None] | None:
+    """Resolve the authoritative-source map: per-call ``ontology_config`` first, then env.
+
+    A per-call ``authoritative_sources`` is returned as given whenever the key is
+    present, so ``{}`` means "none" rather than "use the environment" (see
+    ``OntologyConfig.authoritative_sources``).
+    """
+    if config is not None:
+        ontology_config = config.get("ontology_config")
+        if isinstance(ontology_config, dict) and "authoritative_sources" in ontology_config:
+            return ontology_config["authoritative_sources"]
+
+    return parse_authoritative_sources(get_ontology_env_config().ontology_authoritative_sources)
 
 
 def get_configured_ontology_reasoning(config: Config | None = None) -> str:

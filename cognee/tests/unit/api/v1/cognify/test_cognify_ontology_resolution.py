@@ -37,7 +37,11 @@ async def test_cognify_normalizes_skip_config(
     mock_get_default_tasks.assert_awaited_once()
     passed_config = mock_get_default_tasks.await_args.kwargs["config"]
     assert passed_config == {
-        "ontology_config": {"ontology_resolver": None, "ontology_mode": "annotate"}
+        "ontology_config": {
+            "ontology_resolver": None,
+            "ontology_mode": "annotate",
+            "authoritative_sources": {},
+        }
     }
 
 
@@ -65,7 +69,11 @@ async def test_cognify_resolves_per_call_ontology_path(
 
     mock_get_resolver.assert_called_once_with(None, ontology_file_path="domain.owl")
     assert mock_get_default_tasks.await_args.kwargs["config"] == {
-        "ontology_config": {"ontology_resolver": resolver, "ontology_mode": "annotate"}
+        "ontology_config": {
+            "ontology_resolver": resolver,
+            "ontology_mode": "annotate",
+            "authoritative_sources": {},
+        }
     }
 
 

@@ -151,6 +151,22 @@ There is no debounce timer: held-back entries wait for the next
   preferences never do. The guarantee holds within one worker process (an
   in-process lock); with several workers, send a session's writes to one.
   Example: `examples/guides/session_node_sets.py`.
+- **A session belongs to one dataset.** Its first write (plain text, a
+  typed entry, or a recall that records a turn) binds it to that write's
+  dataset. Every later `remember(..., session_id=...)` goes to the bound
+  dataset; naming another one (`dataset_id`, or a `dataset_name` other than
+  the `main_dataset` default) raises `ValueError` (HTTP 409 on
+  `POST /api/v1/remember`, 400 on `/remember/entry`). Start a new session
+  for another dataset. The turn's Q&A vector is written to that dataset's own
+  vector store, where its recalls read it.
+- **Session writes go through the dataset's databases.** With backend
+  access control on, a session write enters its dataset's database context,
+  like a recall turn: it takes a dataset queue slot
+  (`DATASET_QUEUE_MAX_CONCURRENT`, default 6, per process), so it waits
+  while that many datasets are busy, and the first write to a new dataset
+  provisions the dataset's databases (one database per dataset on
+  pgvector/Postgres, a container with `neo4j_community`). If those
+  databases cannot be bound, the write raises instead of storing the turn.
 - **Typed entries do not auto-improve.** `remember(QAEntry/TraceEntry/
   FeedbackEntry, session_id=...)` stores the entry but never starts an
   improve. Call `improve(session_ids=[...])` yourself.

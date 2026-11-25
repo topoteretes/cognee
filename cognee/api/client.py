@@ -19,6 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 # and Linear mount no routers of their own (webhooks arrive on the generic
 # /api/v1/integrations/{provider}/events routes), so the registration imports
 # are explicit here.
+import cognee.modules.integrations.dropbox
 import cognee.modules.integrations.github
 import cognee.modules.integrations.gmail
 import cognee.modules.integrations.google_calendar
@@ -45,6 +46,7 @@ from cognee.api.v1.memify.routers import get_memify_router
 from cognee.api.v1.ontologies.routers.get_ontology_router import get_ontology_router
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.proposals.routers import get_proposals_router
+from cognee.api.v1.provenance.routers import get_provenance_router
 from cognee.api.v1.recall.routers import get_recall_router
 from cognee.api.v1.remember.routers import get_remember_router
 from cognee.api.v1.responses.routers import get_responses_router
@@ -148,6 +150,14 @@ async def lifespan(app: FastAPI):
 
     get_improve_config()
 
+    from cognee.tasks.ingestion.save_data_item_to_storage import local_file_paths_configured
+
+    if not local_file_paths_configured():
+        logger.info(
+            "Server-side file paths in raw_data are refused for HTTP requests "
+            "(set ACCEPT_LOCAL_FILE_PATH=true to allow them)"
+        )
+
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
@@ -209,10 +219,16 @@ async def _report_unhandled_exceptions(request, call_next):
 @app.middleware("http")
 async def _stamp_operation_origin(request, call_next):
     # Operations executed for this request record origin="api" in
-    # pipeline_runs. ContextVars set here propagate into the handler task.
-    from cognee.modules.operations import ORIGIN_API, operation_origin_scope
+    # pipeline_runs, and run as a remote caller's, which closes the
+    # server-side path and database gates. ContextVars set here propagate
+    # into the handler task.
+    from cognee.modules.operations import (
+        ORIGIN_API,
+        operation_origin_scope,
+        remote_caller_scope,
+    )
 
-    with operation_origin_scope(ORIGIN_API):
+    with operation_origin_scope(ORIGIN_API), remote_caller_scope():
         return await call_next(request)
 
 
@@ -416,6 +432,8 @@ app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["sett
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
 
 app.include_router(get_schema_router(), prefix="/api/v1/schema", tags=["schema"])
+
+app.include_router(get_provenance_router(), prefix="/api/v1/provenance", tags=["provenance"])
 
 app.include_router(get_skills_router(), prefix="/api/v1/skills", tags=["skills"])
 app.include_router(get_proposals_router(), prefix="/api/v1/proposals", tags=["skills"])

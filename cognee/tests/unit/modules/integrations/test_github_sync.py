@@ -51,6 +51,14 @@ def test_clone_url_carries_no_credentials():
     assert sync_module.clone_url("acme/api") == "https://github.com/acme/api.git"
 
 
+@pytest.mark.parametrize(
+    "name", ["acme", "acme/api/extra", "acme/a b", "-acme/api", "acme/api@evil", "", "a/"]
+)
+def test_clone_url_refuses_what_is_not_a_github_name(name):
+    with pytest.raises(ValueError, match="Not a GitHub repository name"):
+        sync_module.clone_url(name)
+
+
 @pytest.fixture
 def mocks(monkeypatch):
     from cognee.modules.integrations.sync_progress import SyncProgressReporter
@@ -198,3 +206,85 @@ async def test_repository_discovery_reports_each_page_without_claiming_a_total(m
     assert [call.kwargs["completed"] for call in report.await_args_list] == [1, 2]
     assert all("total" not in call.kwargs for call in report.await_args_list)
     assert all("secret" not in str(call.kwargs) for call in report.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_repository_discovery_refuses_a_next_page_off_the_api_host(monkeypatch):
+    """SDK-832: the next link is the one request target taken from a response.
+
+    The installation token rides along with every page, so a link that leaves
+    api.github.com fails the listing instead of being followed (or being
+    skipped, which would silently index a prefix of the installation).
+    """
+    response = MagicMock()
+    response.status = 200
+    response.json = AsyncMock(return_value={"repositories": [{"full_name": "acme/api"}]})
+    response.links = {"next": {"url": "https://api.github.com.evil.example/page2"}}
+    response.__aenter__ = AsyncMock(return_value=response)
+    session = MagicMock()
+    # The first page answers; a second request means the link was followed. The
+    # fake fails it outright, since answering the same page again would make a
+    # regression hang the test instead of failing it.
+    session.get.side_effect = [response, AssertionError("the off-origin page was requested")]
+    session.__aenter__ = AsyncMock(return_value=session)
+    monkeypatch.setattr(sync_module.aiohttp, "ClientSession", lambda **kwargs: session)
+    monkeypatch.setattr(sync_module, "report_sync_progress", AsyncMock())
+
+    with pytest.raises(RuntimeError, match="paged off"):
+        await sync_module.list_installation_repositories("secret")
+
+    assert session.get.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("url", "same"),
+    [
+        ("https://api.github.com/installation/repositories?page=2", True),
+        ("https://api.github.com:443/installation/repositories?page=2", True),
+        ("https://api.github.com:8443/installation/repositories?page=2", False),
+        ("http://api.github.com/installation/repositories?page=2", False),
+        ("https://user:pw@api.github.com/installation/repositories", False),
+        ("https://token@api.github.com/installation/repositories", False),
+        ("https://api.github.com.evil.example/page2", False),
+        ("https://evil.example/api.github.com/page2", False),
+        ("https://api.github.com:notaport/page2", False),
+        ("not a url", False),
+        ("", False),
+    ],
+)
+def test_pagination_stays_on_the_exact_api_origin(url, same):
+    """SDK-832 review: scheme, host and effective port, and never userinfo."""
+    assert sync_module._same_origin(url, sync_module.API_BASE_URL) is same
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("setting", [None, ""])
+async def test_api_started_sync_clones_with_the_variable_unset(mocks, monkeypatch, setting):
+    """The URLs are cognee-built on github.com, so the API-request default that refuses
+    caller-chosen clone URLs does not apply: the clone runs as system work."""
+    from cognee.modules.operations.origin import (
+        ORIGIN_API,
+        ORIGIN_BACKGROUND,
+        get_operation_origin,
+        operation_origin_scope,
+    )
+    from cognee.tasks.web_scraper.ssrf_protection import is_http_requests_allowed
+
+    if setting is None:
+        monkeypatch.delenv("ALLOW_HTTP_REQUESTS", raising=False)
+    else:
+        monkeypatch.setenv("ALLOW_HTTP_REQUESTS", setting)
+    seen = {}
+
+    async def remember(*args, **kwargs):
+        seen["origin"] = get_operation_origin()
+        seen["allowed"] = is_http_requests_allowed()
+        return SimpleNamespace(status="completed", error=None)
+
+    mocks.remember.side_effect = remember
+
+    with operation_origin_scope(ORIGIN_API):
+        await sync_module.sync_repositories(_credential(), ["acme/api"])
+        assert get_operation_origin() == ORIGIN_API  # restored after the clone
+
+    assert seen == {"origin": ORIGIN_BACKGROUND, "allowed": True}

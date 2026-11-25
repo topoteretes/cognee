@@ -131,6 +131,19 @@ jobs:
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/e2e/postgres/test_postgres_adapter.py -v
 
+      - name: Run Postgres Graph Source Ref Table Tests
+        env:
+          DB_PROVIDER: postgres
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+          DB_NAME: cognee_db
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/e2e/postgres/test_postgres_graph_source_ref_tables.py -v
+
       - name: Run Shared Schema Isolation Tests
         env:
           DB_PROVIDER: postgres
@@ -158,6 +171,27 @@ jobs:
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/e2e/postgres/test_admin_helpers_concurrency.py -v
+
+      - name: Run Google Drive Postgres Staging Tests
+        env:
+          DB_PROVIDER: postgres
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+          DB_NAME: cognee_db
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/e2e/postgres/test_google_drive_staging.py -v
+
+      - name: Run Restricted Role Database Deletion Test
+        env:
+          COGNEE_PG_TEST_URL: postgres://cognee:cognee@localhost:5432/cognee_db
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/e2e/postgres/test_drop_owned_connections.py -v
 
       - name: Run Postgres Graph E2E Test
         env:

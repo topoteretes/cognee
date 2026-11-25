@@ -1,3 +1,4 @@
+from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -131,6 +132,57 @@ def test_graph_provenance_marker_constants_import_cleanly():
 async def test_graph_provenance_defaults_raise_typed_error(method_name, args):
     with pytest.raises(UnsupportedProvenanceCapability):
         await getattr(GraphDBInterface, method_name)(object(), *args)
+
+
+class _GraphWithoutProvenance(GraphDBInterface):
+    """An adapter that overrides nothing; instantiable only for these tests."""
+
+
+_GraphWithoutProvenance.__abstractmethods__ = frozenset()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method_name", ["find_node_source_refs_by_data", "find_edge_source_refs_by_data"]
+)
+async def test_data_lookup_defaults_raise_typed_error_without_provenance(method_name):
+    """The by-document lookups default to narrowing the by-dataset ones, so a graph
+    without provenance refuses them the same way."""
+    with pytest.raises(UnsupportedProvenanceCapability):
+        await getattr(_GraphWithoutProvenance(), method_name)(str(uuid4()), str(uuid4()))
+
+
+@pytest.mark.asyncio
+async def test_full_read_defaults_warn_once_per_adapter_type(monkeypatch):
+    """An adapter left on the defaults reads the dataset or the graph per delete;
+    the log says so once, like the other full-read defaults of the interface."""
+    import cognee.infrastructure.databases.graph.graph_db_interface as module
+
+    class _OnDefaults(_GraphWithoutProvenance):
+        async def find_node_source_refs_by_dataset(self, dataset_id):
+            return {}
+
+        async def find_edge_source_refs_by_dataset(self, dataset_id):
+            return {}
+
+        async def get_graph_data(self):
+            return [], []
+
+    monkeypatch.setattr(module, "_warned_data_source_ref_fallbacks", set())
+    monkeypatch.setattr(module, "_warned_edge_text_fallbacks", set())
+    warning = MagicMock()
+    monkeypatch.setattr(module.logger, "warning", warning)
+
+    graph = _OnDefaults()
+    for _ in range(2):
+        await graph.find_node_source_refs_by_data(str(uuid4()), str(uuid4()))
+        await graph.find_edge_source_refs_by_data(str(uuid4()), str(uuid4()))
+        await graph.find_edge_texts_in_use(["knows"])
+
+    messages = [call.args[0] for call in warning.call_args_list]
+    assert len(messages) == 2
+    assert "find_node_source_refs_by_data" in messages[0]
+    assert "find_edge_texts_in_use" in messages[1]
 
 
 @pytest.mark.asyncio
