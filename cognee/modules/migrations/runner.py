@@ -28,7 +28,7 @@ import asyncio
 import concurrent.futures
 import logging
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from uuid import UUID
 
 from sqlalchemy import text
@@ -82,6 +82,27 @@ def _file_lock_path(db_engine, key: int) -> str | None:
     return os.path.join(directory, f".cognee-migration-{key}.lock")
 
 
+# How long a wait for a lock lasts before it is said: most migrations take less.
+_LOCK_WAIT_NOTICE_SECONDS = 5
+
+
+@contextmanager
+def _lock_wait_notice(log, message: str):
+    """Log ``message`` if the lock taken inside is still waited for after a while,
+    so a caller waiting on a long migration does not look hung."""
+    notice = asyncio.get_running_loop().call_later(_LOCK_WAIT_NOTICE_SECONDS, log, message)
+    try:
+        yield
+    finally:
+        notice.cancel()
+
+
+_WAITING_FOR_ANOTHER_PROCESS = (
+    "Waiting for database migrations that another process is running. A migration "
+    "that re-embeds datasets can take long; this continues when it is done."
+)
+
+
 @asynccontextmanager
 async def _migration_lock(db_engine, key: int):
     """Cross-process mutex around the migrate-then-stamp sequence.
@@ -100,7 +121,8 @@ async def _migration_lock(db_engine, key: int):
     engine = db_engine.engine
     if engine.dialect.name == "postgresql":
         async with engine.connect() as connection:
-            await connection.execute(text("SELECT pg_advisory_lock(:key)"), {"key": key})
+            with _lock_wait_notice(logger.warning, _WAITING_FOR_ANOTHER_PROCESS):
+                await connection.execute(text("SELECT pg_advisory_lock(:key)"), {"key": key})
             await connection.commit()
             try:
                 yield
@@ -137,7 +159,8 @@ async def _migration_lock(db_engine, key: int):
         max_workers=1, thread_name_prefix="cognee-migration-lock"
     )
     try:
-        await loop.run_in_executor(executor, lock.acquire)
+        with _lock_wait_notice(logger.warning, _WAITING_FOR_ANOTHER_PROCESS):
+            await loop.run_in_executor(executor, lock.acquire)
         try:
             yield
         finally:

@@ -77,6 +77,8 @@ async def migrate(context: MigrationContext) -> None:
 
         record = await _embedding_record(context.dataset_id)
         if record.get(MODEL_KEY) != _PREVIOUS_MODEL:
+            if default_model is not None and record.get(MODEL_KEY) is None:
+                await _warn_of_unnamed_previous_width(context, record, default_model)
             return
         if default_model is None:
             # A model is configured, so the dataset stays as it is. Not half-way,
@@ -182,6 +184,33 @@ async def _embedding_record(dataset_id: UUID) -> dict:
             )
         )
     return info or {}
+
+
+async def _warn_of_unnamed_previous_width(
+    context: MigrationContext, record: dict, default_model: str
+) -> None:
+    """Say that a dataset is left alone whose vectors have the previous default's
+    width while its record names no model: which model built it is not known."""
+    from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import DIMENSIONS_KEY
+
+    stored_dimensions = record.get(DIMENSIONS_KEY)
+    if stored_dimensions is None:
+        read_stored_size = getattr(context.vector_engine, "get_stored_vector_size", None)
+        if read_stored_size is not None:
+            stored_dimensions = await read_stored_size()
+    if stored_dimensions != _PREVIOUS_DIMENSIONS:
+        return
+    logger.warning(
+        "Dataset %s holds %d-dimensional vectors and its record does not name the model "
+        "that built them (it was built before cognee 1.6.0), so it is not re-embedded "
+        "with the new default local model %s and cannot be used with it. If %s built "
+        "it: %s Or re-embed it with reembed_dataset (cognee.modules.data.methods).",
+        context.dataset_id,
+        _PREVIOUS_DIMENSIONS,
+        default_model,
+        _PREVIOUS_MODEL,
+        _KEEP_PREVIOUS_MODEL,
+    )
 
 
 async def _reembed(dataset_id: UUID, model: str) -> None:

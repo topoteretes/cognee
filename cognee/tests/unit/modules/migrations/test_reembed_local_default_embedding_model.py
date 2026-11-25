@@ -379,6 +379,33 @@ async def test_a_dataset_another_model_built_is_left_alone(dataset):
 
 
 @pytest.mark.asyncio
+async def test_a_dataset_of_the_previous_width_that_names_no_model_says_it_is_left_alone(
+    dataset, caplog
+):
+    """Built before the record named a model: which model built it is not known."""
+    async with get_relational_engine().get_async_session() as session:
+        row = await session.scalar(
+            select(DatasetDatabase).where(DatasetDatabase.dataset_id == dataset.id)
+        )
+        row.vector_database_connection_info = {
+            key: value
+            for key, value in row.vector_database_connection_info.items()
+            if key not in (MODEL_KEY, DIMENSIONS_KEY)
+        }
+        await session.commit()
+
+    with caplog.at_level("WARNING"):
+        summary = await _upgrade(dataset.id)
+
+    assert summary["migrations_applied"] == [SLUG]
+    assert DEFAULT_LOCAL_EMBEDDING_MODEL not in _Model.embedded
+    said = [r.getMessage() for r in caplog.records if "does not name the model" in r.getMessage()]
+    assert len(said) == 1
+    assert str(dataset.id) in said[0] and "384-dimensional" in said[0]
+    assert "EMBEDDING_MODEL=BAAI/bge-small-en-v1.5" in said[0] and "reembed_dataset" in said[0]
+
+
+@pytest.mark.asyncio
 async def test_a_failed_reembed_says_how_to_keep_the_previous_model(dataset, installation):
     _Model.down.add(DEFAULT_LOCAL_EMBEDDING_MODEL)
 

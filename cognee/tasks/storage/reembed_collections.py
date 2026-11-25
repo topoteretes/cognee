@@ -162,6 +162,8 @@ async def _stage_unstaged_rows(vector_engine, collection_name: str) -> int:
         if row_id not in staged_ids
     ]
     requests = indexing_budget(vector_engine).requests
+    if unstaged_ids:
+        logger.info("Re-embedding %d row(s) of %s", len(unstaged_ids), collection_name)
     for start in range(0, len(unstaged_ids), ROWS_PER_STEP):
         rows = await vector_engine.retrieve(
             collection_name, unstaged_ids[start : start + ROWS_PER_STEP]
@@ -177,8 +179,12 @@ async def _stage_unstaged_rows(vector_engine, collection_name: str) -> int:
                 for row, vector in zip(rows, vectors, strict=True)
             ],
         )
-    if unstaged_ids:
-        logger.info("Re-embedded %d row(s) of %s", len(unstaged_ids), collection_name)
+        logger.info(
+            "Re-embedded %d of %d row(s) of %s",
+            min(start + ROWS_PER_STEP, len(unstaged_ids)),
+            len(unstaged_ids),
+            collection_name,
+        )
     return len(unstaged_ids)
 
 
