@@ -12,6 +12,7 @@ import pytest_asyncio
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from cognee.infrastructure.background_tasks import wait_for_background_tasks
 from cognee.infrastructure.databases.cache.sql.capture import CaptureConflictError
 from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 from cognee.infrastructure.databases.cache.sql.tables import (
@@ -81,6 +82,10 @@ async def service(tmp_path, monkeypatch):
         index=index,
         args=args,
     )
+    # A trace write starts the pending-extraction batch in the background, on this
+    # adapter. Let it finish before the stores close, or it is left pending on a
+    # closed loop and the process-wide registry counts it for every later test.
+    assert await wait_for_background_tasks(timeout=5)
     await adapter.close()
     await engine.dispose()
 
@@ -403,7 +408,6 @@ async def test_capture_returns_its_receipt_while_the_llm_batch_runs(service, mon
     import asyncio
 
     import cognee.infrastructure.session.agent_context_extraction as ace
-    from cognee.infrastructure.background_tasks import wait_for_background_tasks
     from cognee.infrastructure.session.session_manager import SessionManager
 
     release = asyncio.Event()

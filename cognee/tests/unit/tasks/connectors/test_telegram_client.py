@@ -11,7 +11,9 @@ import http.client
 import http.server
 import io
 import json
+import math
 import threading
+import time
 import urllib.error
 
 import pytest
@@ -320,12 +322,126 @@ def test_the_client_repr_hides_the_token():
     assert TelegramBotClient(TOKEN).bot_id == "111"
 
 
-@pytest.mark.parametrize("retry_after", [-1, True, "5"])
-def test_a_429_with_an_unusable_retry_after_falls_back_to_backoff(retry_after):
-    error = _http_error(429, {"ok": False, "parameters": {"retry_after": retry_after}})
-    client, sleeps = _client(error, {"ok": True, "result": []})
+@pytest.mark.parametrize("raw", [b"-1", b"-Infinity", b"true", b'"5"'])
+def test_a_429_with_an_unusable_retry_after_falls_back_to_backoff(raw):
+    """Two 429s, so the waits are 1 then 2: a value read as a wait (``true`` as 1.0) would give
+    1 then 1."""
+    body = b'{"ok": false, "parameters": {"retry_after": ' + raw + b"}}"
+    client, sleeps = _client(
+        _http_error(429, body), _http_error(429, body), {"ok": True, "result": []}
+    )
+    assert client.call("getUpdates") == []
+    assert sleeps == [1.0, 2.0]
+
+
+def test_a_429_with_a_nan_retry_after_falls_back_to_backoff():
+    """Python's json reads NaN, and a NaN wait is no number of seconds at all."""
+    body = b'{"ok": false, "parameters": {"retry_after": NaN}}'
+    client, sleeps = _client(_http_error(429, body), {"ok": True, "result": []})
     assert client.call("getUpdates") == []
     assert sleeps == [1.0]
+
+
+@pytest.mark.parametrize("raw", [b"Infinity", b"1e400", b"1" + b"0" * 309, b"1" + b"0" * 400])
+def test_a_429_whose_wait_is_beyond_any_number_stops_without_sleeping(raw):
+    """A wait longer than the largest float is longer than any budget, like 1e308: one request,
+    no sleep, and the rate limit raised for the run to stop on."""
+    body = b'{"ok": false, "parameters": {"retry_after": ' + raw + b"}}"
+    client, sleeps = _client(_http_error(429, body), {"ok": True, "result": []})
+    with pytest.raises(TelegramRateLimitError) as info:
+        client.call("getUpdates")
+    assert info.value.retry_after == math.inf
+    assert sleeps == [] and len(client._open.requests) == 1
+
+
+def test_the_largest_finite_retry_after_is_kept_and_stops_without_sleeping():
+    """A boundary guard, not a reproduction: the largest float is a wait, kept as it is."""
+    body = b'{"ok": false, "parameters": {"retry_after": 1.7976931348623157e308}}'
+    client, sleeps = _client(_http_error(429, body))
+    with pytest.raises(TelegramRateLimitError) as info:
+        client.call("getUpdates")
+    assert info.value.retry_after == 1.7976931348623157e308 and sleeps == []
+
+
+def test_a_retry_after_of_0_is_a_wait_of_0_seconds():
+    """A boundary guard: 0 is a valid wait, not a reason to back off."""
+    body = b'{"ok": false, "parameters": {"retry_after": 0}}'
+    client, sleeps = _client(_http_error(429, body), {"ok": True, "result": []})
+    assert client.call("getUpdates") == []
+    assert sleeps == [0.0]
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        (
+            b'{"update_id": NaN, "message": {"message_id": 1, "date": 1700000000, "text": "a",'
+            b' "chat": {"id": -100, "type": "group", "title": "T"}}}'
+        ),
+        (
+            b'{"update_id": 1000, "message": {"message_id": 1, "date": NaN, "text": "a",'
+            b' "chat": {"id": -100, "type": "group", "title": "T"}}}'
+        ),
+    ],
+    ids=["update_id", "date"],
+)
+def test_a_nan_in_a_getupdates_answer_on_the_wire_fails_as_a_provider_defect(update, monkeypatch):
+    """A getUpdates answer whose JSON carries NaN for update_id or date, read through the
+    real client and a real socket, fails the run as failed_provider and emits nothing."""
+    from cognee.tasks.ingestion.connectors import telegram_source
+
+    server, _ = _serve(
+        {
+            "/getMe": (200, json.dumps({"ok": True, "result": {"id": 111}}).encode(), {}),
+            "/getUpdates": (200, b'{"ok": true, "result": [' + update + b"]}", {}),
+        }
+    )
+    monkeypatch.setattr(module, "_API_BASE", f"http://127.0.0.1:{server.server_port}")
+    resource = telegram_source(
+        service=TelegramBotClient(TOKEN, sleep=lambda _: None), resource_name="telegram_111"
+    )
+    try:
+        # dlt wraps what the resource raised; the host reads the reason through the chain.
+        with pytest.raises(Exception) as info:
+            list(resource)
+    finally:
+        server.shutdown()
+    assert module.classify_sync_error(info.value) == "failed_provider"
+    stats = resource.cognee_sync_stats
+    assert [key for key, value in stats.items() if value] == ["failed", "failed_provider"]
+
+
+def test_a_run_whose_429s_name_a_nan_wait_stops_as_a_rate_limit(monkeypatch):
+    """Through the source and a real socket: every getUpdates answers 429 with a NaN wait, so
+    the run backs off 1, 2, 4 and 8 s and stops with failed_rate_limit, not failed_unexpected.
+    The recorded sleep still passes each wait through time.sleep's own argument check (scaled
+    to 0 s), so a NaN reaching it raises as it would in a real run."""
+    from cognee.tasks.ingestion.connectors import telegram_source
+
+    flood = b'{"ok": false, "error_code": 429, "parameters": {"retry_after": NaN}}'
+    server, seen = _serve(
+        {
+            "/getMe": (200, json.dumps({"ok": True, "result": {"id": 111}}).encode(), {}),
+            "/getUpdates": (429, flood, {}),
+        }
+    )
+    monkeypatch.setattr(module, "_API_BASE", f"http://127.0.0.1:{server.server_port}")
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        time.sleep(0 * seconds)
+
+    client = TelegramBotClient(TOKEN, sleep=sleep)
+    resource = telegram_source(service=client, resource_name="telegram_111")
+    try:
+        assert list(resource) == []
+    finally:
+        server.shutdown()
+    stats = resource.cognee_sync_stats
+    assert [key for key, value in stats.items() if value] == ["failed", "failed_rate_limit"]
+    assert sleeps == [1.0, 2.0, 4.0, 8.0]
+    assert seen.count(f"/bot{TOKEN}/getUpdates") == 5
 
 
 def test_a_5xx_whose_body_cannot_be_read_is_unavailable_and_retried():
