@@ -32,6 +32,9 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
     EmbeddingResult,
 )
+from cognee.infrastructure.databases.vector.embeddings.fastembed_models import (
+    fastembed_text_models,
+)
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
     sane_limit,
@@ -112,7 +115,7 @@ def fastembed_model_cached(
     """
     cache_dir = Path(cache_dir or resolve_fastembed_cache_dir())
     description = next(
-        (entry for entry in TextEmbedding.list_supported_models() if entry.get("model") == model),
+        (entry for entry in fastembed_text_models() if entry.get("model") == model),
         None,
     )
     size_gb = (description or {}).get("size_in_GB")

@@ -13,7 +13,7 @@ model actually sees, truncation enabled at its window).
 
 Run: ``python cognee/tests/e2e/keyless/chunk_token_budget_check.py [fastembed model]``
 
-With no argument the keyless default (BAAI/bge-small-en-v1.5) is used. The CI job
+With no argument the keyless default (perplexity-ai/pplx-embed-v1-0.6b) is used. The CI job
 also runs it with ``snowflake/snowflake-arctic-embed-xs``, whose tokenizer.json
 stores truncation at 512 (a counter that honoured it would report at most 512
 tokens for any document), and with ``sentence-transformers/all-MiniLM-L6-v2``,

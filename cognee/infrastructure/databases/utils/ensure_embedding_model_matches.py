@@ -12,6 +12,10 @@ vector-store details, so the comparison happens once per dataset-context entry
 against a row that is already loaded -- no extra call to the vector store on
 any operation. A row from before the keys existed is completed once from the
 store itself (LanceDB and pgvector), and never touched again.
+
+The same JSON carries the progress of a re-embed (``reembed_dataset``) while one
+runs, under ``REEMBED_KEY``. A dataset with that key holds vectors in two states,
+so every other entry into its context is refused until the re-embed finishes.
 """
 
 from sqlalchemy import select
@@ -23,12 +27,19 @@ from cognee.infrastructure.databases.vector.embeddings.config import (
     resolve_embedding_defaults,
 )
 from cognee.infrastructure.databases.vector.embeddings.vector_size import engine_vector_size
-from cognee.infrastructure.databases.vector.exceptions import EmbeddingDimensionMismatchError
+from cognee.infrastructure.databases.vector.exceptions import (
+    DatasetReembedIncompleteError,
+    EmbeddingDimensionMismatchError,
+)
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.modules.users.models import DatasetDatabase
 
 MODEL_KEY = "embedding_model"
 DIMENSIONS_KEY = "embedding_dimensions"
+# While a re-embed runs: the model and width it moves the dataset to, and under
+# STAGED_COLLECTIONS_KEY the collections it has staged and is replacing.
+REEMBED_KEY = "embedding_reembed"
+STAGED_COLLECTIONS_KEY = "staged_collections"
 
 
 def embedding_model_record() -> dict:
@@ -61,7 +72,14 @@ async def ensure_embedding_model_matches(dataset_database: DatasetDatabase) -> N
     no recorded width can ask the store once. An empty store adopts the
     configured model; a store this cannot read (a provider without
     ``get_stored_vector_size``) is left to the store's own errors.
+
+    Raises ``DatasetReembedIncompleteError`` for a dataset whose re-embed has not
+    finished, whatever the configured model.
     """
+    reembed = (dataset_database.vector_database_connection_info or {}).get(REEMBED_KEY)
+    if reembed is not None:
+        raise DatasetReembedIncompleteError(dataset_database.dataset_id, reembed.get(MODEL_KEY))
+
     embedding_record = embedding_model_record()
     configured_model = embedding_record[MODEL_KEY]
     configured_dimensions = embedding_record[DIMENSIONS_KEY]
@@ -103,41 +121,59 @@ async def _engine_vector_size() -> int:
     return await engine_vector_size((await get_vector_engine_async()).embedding_engine)
 
 
-async def _record_embedding_model(dataset_database: DatasetDatabase, record: dict) -> None:
-    """Merge ``record`` into the row's stored connection info.
+async def record_reembed_progress(dataset_database: DatasetDatabase, reembed: dict) -> None:
+    """Record that the dataset is being re-embedded, and how far that has come."""
+    await _record_embedding_model(dataset_database, {REEMBED_KEY: reembed})
+
+
+async def record_reembed_finished(
+    dataset_database: DatasetDatabase, record: dict | None = None
+) -> None:
+    """Remove the re-embed progress; with ``record``, that model now embeds the dataset.
+
+    Without ``record`` the re-embed was undone and the dataset keeps its model.
+    """
+    await _record_embedding_model(dataset_database, record or {}, remove=(REEMBED_KEY,))
+
+
+async def _record_embedding_model(
+    dataset_database: DatasetDatabase, record: dict, remove: tuple[str, ...] = ()
+) -> None:
+    """Merge ``record`` into the row's stored connection info and drop the ``remove`` keys.
 
     Re-reads the row rather than writing the in-memory dict back: handlers add
     runtime-only values to that dict after loading (pgvector injects the
     database credentials), and those must never reach the table.
     """
+
+    def updated(info: dict | None) -> dict:
+        kept = {key: value for key, value in (info or {}).items() if key not in remove}
+        return {**kept, **record}
+
     async with get_relational_engine().get_async_session() as session:
         row = await session.scalar(
             select(DatasetDatabase).where(DatasetDatabase.dataset_id == dataset_database.dataset_id)
         )
-        row.vector_database_connection_info = {
-            **(row.vector_database_connection_info or {}),
-            **record,
-        }
+        row.vector_database_connection_info = updated(row.vector_database_connection_info)
         await session.commit()
-    dataset_database.vector_database_connection_info = {
-        **(dataset_database.vector_database_connection_info or {}),
-        **record,
-    }
+    dataset_database.vector_database_connection_info = updated(
+        dataset_database.vector_database_connection_info
+    )
 
 
 async def clear_embedding_model_records() -> None:
     """Forget every dataset's recorded model: the vectors it described are gone.
 
     Called after a vector prune that keeps the registry rows, so the next use
-    of each dataset records whatever model builds it anew.
+    of each dataset records whatever model builds it anew. An unfinished
+    re-embed goes with them: there is nothing left for it to finish.
     """
+    recorded = (MODEL_KEY, DIMENSIONS_KEY, REEMBED_KEY)
     async with get_relational_engine().get_async_session() as session:
         for row in (await session.scalars(select(DatasetDatabase))).all():
             info = row.vector_database_connection_info or {}
-            if MODEL_KEY in info or DIMENSIONS_KEY in info:
+            if any(key in info for key in recorded):
                 row.vector_database_connection_info = {
-                    key: value
-                    for key, value in info.items()
-                    if key not in (MODEL_KEY, DIMENSIONS_KEY)
+                    key: value for key, value in info.items() if key not in recorded
                 }
         await session.commit()

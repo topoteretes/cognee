@@ -313,6 +313,21 @@ class TursoVectorAdapter(VectorDBInterface):
         )
         return [row[0] for row in rows or [] if not row[0].startswith(_ENGINE_TABLE_PREFIXES)]
 
+    async def get_collection_names(self) -> list[str]:
+        """The tables of this database that are collections (see ``_is_collection``).
+
+        Names come back as the engine stores them, lowercased; it resolves a
+        collection by either spelling.
+        """
+        return [name for name in await self.get_table_names() if await self._is_collection(name)]
+
+    async def get_data_point_ids(self, collection_name: str) -> list[str]:
+        """The id of every row in ``collection_name``; none for a missing table."""
+        if not await self.has_collection(collection_name):
+            return []
+        rows = await self._execute(f'SELECT id FROM "{collection_name}"', fetch=True)
+        return [row[0] for row in rows or []]
+
     # ------------------------------------------------------------------ #
     # Writes
     # ------------------------------------------------------------------ #

@@ -51,6 +51,12 @@ from cognee.modules.migrations.versions.postgres_graph_source_ref_tables import 
 from cognee.modules.migrations.versions.postgres_graph_source_ref_tables import (
     migrate as postgres_graph_source_ref_tables,
 )
+from cognee.modules.migrations.versions.reembed_local_default_embedding_model import (
+    downgrade as reembed_local_default_embedding_model_down,
+)
+from cognee.modules.migrations.versions.reembed_local_default_embedding_model import (
+    migrate as reembed_local_default_embedding_model,
+)
 from cognee.modules.migrations.versions.rekey_fork_document_ids import (
     downgrade as rekey_fork_document_ids_down,
 )
@@ -140,6 +146,17 @@ MIGRATIONS: list[Migration] = [
         up=postgres_graph_source_ref_tables,
         down_revision="pgvector_hnsw_indexes",
         down=postgres_graph_source_ref_tables_down,
+    ),
+    # The default local embedding model (no embedding setting, no LLM key) changed from
+    # BAAI/bge-small-en-v1.5 to perplexity-ai/pplx-embed-v1-0.6b, whose vectors have
+    # another width. Re-embeds the datasets the previous default built. No-op wherever
+    # an embedding model is configured, and for every dataset another model built.
+    Migration(
+        slug="reembed_local_default_embedding_model",
+        cognee_version="1.6.11",
+        up=reembed_local_default_embedding_model,
+        down_revision="postgres_graph_source_ref_tables",
+        down=reembed_local_default_embedding_model_down,
     ),
 ]
 

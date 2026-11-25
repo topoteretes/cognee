@@ -30,6 +30,8 @@ from .publish_updated_data import (
     reset_data_pipeline_status,
 )
 
+from .reembed_dataset import ReembeddedDataset, reembed_dataset
+
 # Delete
 from .delete_dataset import delete_dataset
 from .delete_data import delete_data

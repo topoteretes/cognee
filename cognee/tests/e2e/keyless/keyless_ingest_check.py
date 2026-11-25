@@ -4,7 +4,7 @@ Proves the default routing a fresh install gets with nothing configured:
 ``GRAPH_EXTRACTOR=auto`` resolves to the GLiNER demo, embeddings resolve to fastembed,
 and ``add -> cognify -> search(CHUNKS) -> visualize`` and ``remember`` all
 complete without a single provider call. Needs ``cognee[gliner]``; models
-download on first run (GLiNER ~750 MB, bge-small ~67 MB).
+download on first run (GLiNER ~750 MB, pplx-embed ~710 MB).
 
 Isolation: every ``LLM_*`` / ``EMBEDDING_*`` / ``OPENAI_*`` variable is dropped
 from the environment, the repo ``.env`` (which ``cognee/__init__.py`` loads)
@@ -115,18 +115,19 @@ async def main() -> None:
 
     graph = await get_graph_engine()
     nodes, edges = await graph.get_graph_data()
-    # The default fastembed model reads 512 tokens (2 of them the [CLS]/[SEP] it
-    # adds itself) and truncates the rest without an error (SDK-868), so the
-    # engine's limit must be the model's own and every chunk must fit inside it.
+    # The local default reads far more than the 512 tokens its chunks are capped at
+    # (DEFAULT_LOCAL_EMBEDDING_INPUT_CAP), so the engine's limit must be that cap and
+    # every chunk must fit inside it. A model that reads less would truncate the rest
+    # without an error (SDK-868).
     from cognee.infrastructure.databases.vector.embeddings.input_limit import (
         resolve_input_limit,
     )
 
-    assert await resolve_input_limit(engine) == 510
-    assert engine.model_input_limit == 510, engine.model_input_limit
+    assert await resolve_input_limit(engine) == 512
+    assert engine.model_input_limit > 512, engine.model_input_limit
     chunk_sizes = [n[1]["chunk_size"] for n in nodes if n[1].get("type") == "DocumentChunk"]
     assert chunk_sizes and max(chunk_sizes) <= engine.max_completion_tokens, chunk_sizes
-    print(f"chunks: {len(chunk_sizes)}, largest {max(chunk_sizes)} tokens (limit 510)")
+    print(f"chunks: {len(chunk_sizes)}, largest {max(chunk_sizes)} tokens (limit 512)")
     entities = sorted(
         {n[1].get("name") for n in nodes if n[1].get("type") == "Entity" and n[1].get("name")}
     )

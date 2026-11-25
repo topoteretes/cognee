@@ -33,55 +33,85 @@ def test_resolve_returns_none_for_missing_inputs():
 
 
 def test_resolve_fastembed_uses_registry():
-    # Fake the fastembed import to verify we read both `dim` and `embed_dim`
-    # variants without requiring fastembed to be installed.
-    import sys
-    import types
+    # A registry of our own, to verify that both the `dim` and the `embed_dim`
+    # variant are read. The sizes are not the real models', so only it can answer.
+    from cognee.infrastructure.databases.vector.embeddings import fastembed_models
 
-    fake_module = types.ModuleType("fastembed")
-
-    class _FakeTextEmbedding:
-        @staticmethod
-        def list_supported_models():
-            return [
-                {"model": "BAAI/bge-small-en-v1.5", "dim": 384},
-                {"model": "BAAI/bge-large-en-v1.5", "embed_dim": 1024},
-            ]
-
-    fake_module.TextEmbedding = _FakeTextEmbedding
+    def text_models():
+        return [
+            {"model": "BAAI/bge-small-en-v1.5", "dim": 11},
+            {"model": "BAAI/bge-large-en-v1.5", "embed_dim": 13},
+        ]
 
     # The lookup is cached per (provider, model); clear it so the fake registry answers.
     _resolve_embedding_dimensions.cache_clear()
-    with patch.dict(sys.modules, {"fastembed": fake_module}):
-        assert _resolve_embedding_dimensions("fastembed", "BAAI/bge-small-en-v1.5") == 384
-        assert _resolve_embedding_dimensions("fastembed", "BAAI/bge-large-en-v1.5") == 1024
+    with patch.object(fastembed_models, "fastembed_text_models", text_models):
+        assert _resolve_embedding_dimensions("fastembed", "BAAI/bge-small-en-v1.5") == 11
+        assert _resolve_embedding_dimensions("fastembed", "BAAI/bge-large-en-v1.5") == 13
     # Drop the fake registry's answers so later lookups read the real one.
     _resolve_embedding_dimensions.cache_clear()
 
 
 def test_resolve_dimensions_reads_the_registry_once_per_model():
     """Every embedding-engine lookup resolves the dimensions; the registry scan runs once."""
-    import sys
-    import types
+    from cognee.infrastructure.databases.vector.embeddings import fastembed_models
 
     calls = []
 
-    class _FakeTextEmbedding:
-        @staticmethod
-        def list_supported_models():
-            calls.append(1)
-            return [{"model": "BAAI/bge-small-en-v1.5", "dim": 384}]
-
-    fake_module = types.ModuleType("fastembed")
-    fake_module.TextEmbedding = _FakeTextEmbedding
+    def text_models():
+        calls.append(1)
+        return [{"model": "BAAI/bge-small-en-v1.5", "dim": 384}]
 
     _resolve_embedding_dimensions.cache_clear()
-    with patch.dict(sys.modules, {"fastembed": fake_module}):
+    with patch.object(fastembed_models, "fastembed_text_models", text_models):
         for _ in range(3):
             assert _resolve_embedding_dimensions("fastembed", "BAAI/bge-small-en-v1.5") == 384
     _resolve_embedding_dimensions.cache_clear()
 
     assert len(calls) == 1
+
+
+def test_registering_the_local_default_again_is_harmless():
+    """fastembed refuses a name it already has: a module loaded twice, or a fastembed
+    release that lists the model itself."""
+    import importlib
+
+    from cognee.infrastructure.databases.vector.embeddings import fastembed_models
+
+    importlib.reload(fastembed_models)
+
+    names = [model["model"] for model in fastembed_models.fastembed_text_models()]
+    assert names.count(fastembed_models.PPLX_EMBED_MODEL) == 1
+
+
+def test_the_local_default_is_a_model_fastembed_can_load():
+    """pplx-embed is not in fastembed's own list; cognee registers it."""
+    from cognee.infrastructure.databases.vector.embeddings.config import (
+        DEFAULT_LOCAL_EMBEDDING_MODEL,
+        DEFAULT_LOCAL_EMBEDDING_PROVIDER,
+    )
+    from cognee.infrastructure.databases.vector.embeddings.fastembed_models import (
+        fastembed_text_models,
+    )
+    from cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine import (
+        fastembed_model_cached,
+    )
+
+    described = [m for m in fastembed_text_models() if m["model"] == DEFAULT_LOCAL_EMBEDDING_MODEL]
+    assert len(described) == 1
+    assert described[0]["sources"]["hf"] == DEFAULT_LOCAL_EMBEDDING_MODEL
+    assert described[0]["model_file"] == "onnx/model_quantized.onnx"
+
+    _resolve_embedding_dimensions.cache_clear()
+    assert (
+        _resolve_embedding_dimensions(
+            DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL
+        )
+        == 1024
+    )
+    # The download notice names the size before the 0.7 GB download starts.
+    _cached, _cache_dir, size_hint = fastembed_model_cached(DEFAULT_LOCAL_EMBEDDING_MODEL)
+    assert size_hint == "about 710 MB"
 
 
 def _clear_embedding_env(monkeypatch):
@@ -246,8 +276,13 @@ def test_engine_factory_uses_the_resolved_defaults(monkeypatch):
     config = _default_embeddings(monkeypatch)
     captured = {}
 
-    def fake_create(provider, model, dimensions, *args, **kwargs):
-        captured.update(provider=provider, model=model, dimensions=dimensions)
+    def fake_create(provider, model, dimensions, max_completion_tokens, *args, **kwargs):
+        captured.update(
+            provider=provider,
+            model=model,
+            dimensions=dimensions,
+            max_completion_tokens=max_completion_tokens,
+        )
         return object()
 
     monkeypatch.setattr(factory, "get_embedding_context_config", lambda: config)
@@ -258,9 +293,34 @@ def test_engine_factory_uses_the_resolved_defaults(monkeypatch):
 
     assert captured == {
         "provider": "fastembed",
-        "model": "BAAI/bge-small-en-v1.5",
-        "dimensions": 384,
+        "model": "perplexity-ai/pplx-embed-v1-0.6b",
+        "dimensions": 1024,
+        # The model reads 32,000 tokens; local chunks stay at 512.
+        "max_completion_tokens": 512,
     }
+
+    # EMBEDDING_MAX_COMPLETION_TOKENS is the caller's cap for the local default too.
+    config = _default_embeddings(monkeypatch, embedding_max_completion_tokens=2048)
+    factory.get_embedding_engine()
+    assert captured["model"] == "perplexity-ai/pplx-embed-v1-0.6b"
+    assert captured["max_completion_tokens"] == 2048
+
+    # The cap is the model's, also when the model is named in the settings.
+    config = _default_embeddings(
+        monkeypatch,
+        embedding_provider="fastembed",
+        embedding_model="perplexity-ai/pplx-embed-v1-0.6b",
+    )
+    factory.get_embedding_engine()
+    assert captured["max_completion_tokens"] == 512
+
+    # Another model has no cap but its own.
+    config = _default_embeddings(
+        monkeypatch, embedding_provider="fastembed", embedding_model="BAAI/bge-small-en-v1.5"
+    )
+    factory.get_embedding_engine()
+    assert captured["model"] == "BAAI/bge-small-en-v1.5"
+    assert captured["max_completion_tokens"] is None
 
 
 # ---- EMBEDDING_API_BASE alias (SDK-539 / issue #4871) ----

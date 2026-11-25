@@ -78,8 +78,10 @@ Embedding calls retry transient errors, rate-limit 429s included, with
 exponential jitter for up to 128 s (budget-exhaustion errors are terminal,
 not retried), but `AUTO_RATE_LIMIT` does not apply to them; enable
 `EMBEDDING_RATE_LIMIT_ENABLED` yourself for sustained load. Without any
-credentials cognee embeds locally with fastembed (`BAAI/bge-small-en-v1.5`),
-which runs on the CPU and blocks while it works.
+credentials cognee embeds locally with fastembed (`perplexity-ai/pplx-embed-v1-0.6b`,
+a 0.6B-parameter model), which runs on the CPU and blocks while it works: a few
+chunks per second on a laptop. `EMBEDDING_PROVIDER=fastembed` with
+`EMBEDDING_MODEL=BAAI/bge-small-en-v1.5` is about ten times faster and less accurate.
 
 ### 5. Skip the LLM for extraction
 

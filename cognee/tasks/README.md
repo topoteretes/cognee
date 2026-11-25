@@ -48,7 +48,7 @@ After each dataset's run, `cognify()` reconciles the structure document sources 
 | `presort/` | Pre-organise a folder before ingestion (`remember(dry_run="presort")`): classify, hash, dedup, version and PII detection, proposed groupings | `build_report`, `classify_files`, `detect_duplicates`, `detect_pii`, `group_files`, `apply_presort_graph` |
 | `provenance/` | Record the data item a batch was stored for in the audit ledger; `add_data_points` calls the storage hook, the task form is for custom pipelines that store data points another way | `record_provenance_at_storage`, `record_provenance` |
 | `schema/` | Ingest a relational database schema as graph nodes | `ingest_database_schema` |
-| `storage/` | Persist data points: graph + vector writes, index rebuilds, the indexing pipeline's chunk write | `add_data_points`, `find_indexed_chunks`, `index_chunks_for_search`, `index_data_points`, `index_graph_edges` |
+| `storage/` | Persist data points: graph + vector writes, index rebuilds, the indexing pipeline's chunk write | `add_data_points`, `find_indexed_chunks`, `index_chunks_for_search`, `index_data_points`, `index_graph_edges`, `reembed_collections` |
 | `summarization/` | Chunk summaries (LLM, or relations plus entity types) and code summaries | `summarize_text`, `build_summary_from_extraction`, `summarize_code` |
 | `translation/` | Translate chunk content before extraction (provider-pluggable) | `TranslationConfig`, `TranslatedContent` |
 | `web_scraper/` | Fetch and crawl web pages for URL ingestion | `fetch_page_content`, `DefaultUrlCrawler` |

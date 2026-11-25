@@ -13,6 +13,7 @@ from cognee.infrastructure.databases.vector.exceptions import CollectionNotFound
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.modules.search.dataset_routing import (
     DATASET_ROUTE_COLLECTION,
+    copy_dataset_routes,
     dataset_route_ids,
     route_datasets,
     sync_dataset_routes,
@@ -541,6 +542,96 @@ async def test_sync_on_an_adapter_without_raw_vector_writes_warns_and_moves_on(m
 
     assert "cannot write precomputed vectors" in caplog.text
     assert touched == 0 and engine.created == []
+
+
+def _reembedded_store(vectors, model="deployment-model", width=2):
+    """A dataset's store after a re-embed: its index rows, and the model that embedded them."""
+    store = FakeIndexStore(vectors)
+    store.embedding_engine = types.SimpleNamespace(model=model, get_vector_size=lambda: width)
+    return store
+
+
+def _routing_engine(**kwargs):
+    """The routing store, embedding with the deployment's model (two dimensions)."""
+    engine = FakeEngine(**kwargs)
+    engine.embedding_engine.model = "deployment-model"
+    return engine
+
+
+@pytest.mark.asyncio
+async def test_copy_writes_the_rows_the_dataset_store_holds_now(monkeypatch):
+    """After a re-embed no build follows, so the rows are copied by their derivable ids."""
+    dataset_id, doc, deleted_doc = uuid4(), uuid4(), uuid4()
+    root_id = str(create_root_summary_id(str(dataset_id)))
+    bucket_id = str(create_document_bucket_id(str(dataset_id), str(doc)))
+    # Still in the dataset's store, but its document is gone: recall cannot derive its id.
+    orphan_id = str(create_document_bucket_id(str(dataset_id), str(deleted_doc)))
+    engine = _routing_engine(stored_width=2)
+    _patch(monkeypatch, engine, {dataset_id: [doc]})
+    store = _reembedded_store({root_id: [1.0, 0.0], bucket_id: [0.0, 1.0], orphan_id: [0.5, 0.5]})
+
+    assert await copy_dataset_routes(dataset_id, store) == 2
+
+    assert engine.vectors == {root_id: [1.0, 0.0], bucket_id: [0.0, 1.0]}
+    assert engine.created == [store.stored_row(root_id), store.stored_row(bucket_id)]
+    assert engine.embedded == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "dataset_model",
+    [{"model": "another-model"}, {"width": 3}],
+    ids=["another model of the same width", "the same name with another width"],
+)
+async def test_copy_writes_nothing_from_a_store_of_another_model(monkeypatch, dataset_model):
+    """Routing rows are scored with the deployment's model, so only its vectors are copied."""
+    dataset_id = uuid4()
+    root_id = str(create_root_summary_id(str(dataset_id)))
+    engine = _routing_engine(stored_width=2)
+    _patch(monkeypatch, engine, {dataset_id: []})
+    store = _reembedded_store({root_id: [1.0, 0.0]}, **dataset_model)
+
+    assert await copy_dataset_routes(dataset_id, store) == 0
+    assert engine.created == [] and store.retrieved == []
+
+
+@pytest.mark.asyncio
+async def test_copy_writes_nothing_into_a_collection_of_another_width(monkeypatch):
+    dataset_id = uuid4()
+    root_id = str(create_root_summary_id(str(dataset_id)))
+    engine = _routing_engine(stored_width=3)
+    _patch(monkeypatch, engine, {dataset_id: []})
+
+    assert await copy_dataset_routes(dataset_id, _reembedded_store({root_id: [1.0, 0.0]})) == 0
+    assert engine.created == []
+
+
+@pytest.mark.asyncio
+async def test_copy_on_an_adapter_without_raw_vector_writes_warns_and_moves_on(monkeypatch, caplog):
+    dataset_id = uuid4()
+    root_id = str(create_root_summary_id(str(dataset_id)))
+    engine = _routing_engine(stored_width=2)
+
+    async def no_raw_writes(collection_name, points, payload_schema=None):
+        raise NotImplementedError
+
+    engine.upsert_raw_vectors = no_raw_writes
+    _patch(monkeypatch, engine, {dataset_id: []})
+
+    with caplog.at_level("WARNING"):
+        assert await copy_dataset_routes(dataset_id, _reembedded_store({root_id: [1.0, 0.0]})) == 0
+    assert "cannot write precomputed vectors" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_copy_is_a_no_op_without_backend_access_control(monkeypatch):
+    dataset_id = uuid4()
+    root_id = str(create_root_summary_id(str(dataset_id)))
+    engine = _routing_engine(stored_width=2)
+    _patch(monkeypatch, engine, {dataset_id: []}, access_control=False)
+
+    assert await copy_dataset_routes(dataset_id, _reembedded_store({root_id: [1.0, 0.0]})) == 0
+    assert engine.created == []
 
 
 @pytest.mark.asyncio
