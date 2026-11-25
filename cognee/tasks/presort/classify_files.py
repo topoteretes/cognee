@@ -10,6 +10,7 @@ content taxonomy (``classify_content.txt``) refines text files with a
 
 import asyncio
 
+from cognee.infrastructure.files.utils.decode_text_sample import decode_text_sample
 from cognee.shared.logging_utils import get_logger
 
 from .models import FileRecord
@@ -96,7 +97,10 @@ async def _llm_classify(record: FileRecord) -> None:
 
     try:
         with open(record.path, "rb") as file:
-            sample = file.read(_LLM_SAMPLE_CHARS * 4).decode("utf-8", errors="replace")
+            # BOM-aware: is_text_content now admits UTF-16/UTF-32 files, so a raw
+            # utf-8 decode would hand the LLM interleaved null bytes instead of
+            # text. Decode by the BOM so the classifier sees the characters.
+            sample = decode_text_sample(file.read(_LLM_SAMPLE_CHARS * 4))
     except OSError as error:
         record.warnings.append(f"could not read sample for classification: {error}")
         return
