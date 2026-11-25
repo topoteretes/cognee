@@ -3,7 +3,6 @@ import logging
 import math
 import os
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -55,12 +54,6 @@ litellm.set_verbose = False
 logger = get_logger("FastembedEmbeddingEngine")
 
 observe = get_observe()
-
-# The model runs on the CPU for seconds per batch, so it runs off the event loop.
-# One thread: a run already uses every core, and runs side by side would only
-# multiply the memory held. Embeds therefore still run one at a time, as they did
-# on the loop.
-_embed_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="fastembed")
 
 
 def resolve_fastembed_cache_dir() -> str:
@@ -260,9 +253,13 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 embeddings = [[0.0] * self.dimensions for _ in sanitized_text]
             else:
                 async with embedding_rate_limiter_context_manager():
-                    embeddings = await asyncio.get_running_loop().run_in_executor(
-                        _embed_executor, self._run_model, sanitized_text
+                    embeddings = self.embedding_model.embed(
+                        sanitized_text,
+                        batch_size=len(sanitized_text),
+                        parallel=None,
                     )
+
+                embeddings = [e.tolist() for e in embeddings]
 
         except Exception as error:
             error_str = str(error).lower()
@@ -288,14 +285,6 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             # A mock embeds nothing; fastembed itself reports no usage.
             tokens=0 if self.mock else count_input_tokens(None, sanitized_text, self.tokenizer),
         )
-
-    def _run_model(self, texts: list[str]) -> list[list[float]]:
-        """Embed ``texts`` with the loaded model. Blocks until done: fastembed
-        returns a generator, so the vectors are computed as it is read here."""
-        return [
-            embedding.tolist()
-            for embedding in self.embedding_model.embed(texts, batch_size=len(texts), parallel=None)
-        ]
 
     input_limit_source = "fastembed model tokenizer"
 
