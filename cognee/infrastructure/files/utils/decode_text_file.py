@@ -17,13 +17,10 @@ or a file one admits is refused or garbled by another.
 
 import codecs
 
-# (BOM bytes, codec) in the order they must be tested. UTF-32 comes before
-# UTF-16 because the UTF-16 LE BOM (``ff fe``) is a PREFIX of the UTF-32 LE BOM
-# (``ff fe 00 00``): a UTF-32 LE file tested against UTF-16 first would match
-# and be decoded two bytes at a time, turning every character into a null-laden
-# pair. Longest marks first keeps that from happening.
+# (BOM bytes, codec) in the order they must be tested. UTF-32 LE is handled
+# separately because the UTF-16 LE BOM (``ff fe``) is a PREFIX of the UTF-32 LE
+# BOM (``ff fe 00 00``). Longest marks otherwise come first.
 _BOM_CODECS: tuple[tuple[bytes, str], ...] = (
-    (codecs.BOM_UTF32_LE, "utf-32-le"),  # ff fe 00 00
     (codecs.BOM_UTF32_BE, "utf-32-be"),  # 00 00 fe ff
     (codecs.BOM_UTF8, "utf-8"),  # ef bb bf
     (codecs.BOM_UTF16_LE, "utf-16-le"),  # ff fe
@@ -47,6 +44,20 @@ def decode_text_file(raw: bytes, encoding: str = "utf-8") -> str:
           encoding. Ingestion is a lossless load, so there is no
           ``errors="replace"`` here.
     """
+    if raw.startswith(codecs.BOM_UTF32_LE):
+        try:
+            return raw[len(codecs.BOM_UTF32_LE) :].decode("utf-32-le")
+        except UnicodeDecodeError as utf32_error:
+            # The UTF-32 LE BOM is also a UTF-16 LE BOM plus a first code unit
+            # of U+0000. When the bytes cannot be UTF-32, UTF-16 is the only
+            # valid reading of that ambiguous prefix. If both readings are
+            # valid the bytes do not say which one was intended; UTF-32 keeps
+            # precedence so true UTF-32 files are never misread.
+            try:
+                return raw[len(codecs.BOM_UTF16_LE) :].decode("utf-16-le")
+            except UnicodeDecodeError:
+                raise utf32_error
+
     for bom, codec in _BOM_CODECS:
         if raw.startswith(bom):
             return raw[len(bom) :].decode(codec)

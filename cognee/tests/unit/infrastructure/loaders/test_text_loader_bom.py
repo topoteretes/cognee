@@ -73,6 +73,13 @@ def test_decode_text_file_defaults_to_utf8_without_a_bom():
     assert decode_text_file(TEXT.encode("utf-8")) == TEXT
 
 
+def test_utf16le_leading_nul_is_not_refused_as_invalid_utf32le():
+    text = "\0" + TEXT
+    raw = codecs.BOM_UTF16_LE + text.encode("utf-16-le")
+
+    assert decode_text_file(raw) == text
+
+
 def test_decode_text_file_raises_on_invalid_bytes():
     with pytest.raises(UnicodeDecodeError):
         decode_text_file(b"x\xda" + bytes(range(256)) * 8)
