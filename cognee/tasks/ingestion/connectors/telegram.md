@@ -31,7 +31,7 @@ Use a **dedicated bot** for cognee:
   or while another process polls it. The connector never deletes a webhook.
 - In groups a bot only sees what privacy mode allows: commands and replies to it. Disable
   privacy mode in @BotFather (`/setprivacy`) or make the bot an admin to sync every message.
-  The connector warns when privacy mode is on.
+  The connector warns when privacy mode is on and reports it as `privacy_mode=1` (see Stats).
 - A bot only sees messages sent after it joined. There is no history backfill.
 
 ## Usage
@@ -79,7 +79,7 @@ never kept in state.
 group, supergroup or channel, it is bound to that chat (state key `username_chats`), and from
 then on it selects that chat and its upgrade chain whatever the chat is called: a chat that
 changes its username keeps syncing, and another chat that later takes the freed username is not
-selected by it (its messages count as `skipped`). Replacing the username with the chat's id in
+selected by it (its messages count as `skipped_unselected`). Replacing the username with the chat's id in
 `chats` forgets nothing; dropping it forgets the chat. A username
 with no binding yet is looked up at the start of the run with `getChat` (`chat_id="@name"`), so
 it binds to its chat at once, before any message of that chat arrives. A username is bound from the saved chat meta only
@@ -144,8 +144,11 @@ A channel post's author is the channel.
 A forwarded message is credited to its original author on `Forwarded from:`, while `From:` stays
 the forwarder. A quoted reply is cut at 200 characters (display only: the quoted message is its
 own document). No numeric user id and no phone number is rendered; a sender without a name or
-handle is `unknown`. A media message is its caption, prefixed with the kind (`[photo] ...`);
-files are never downloaded. Service messages (joins, pins) and media without a caption are no
+handle is `unknown`. A media message is its caption, prefixed with the kind as Telegram names it
+(`[photo] ...`, `[paid_media] ...`; a GIF is `[animation]`, though Telegram also marks it a
+document); files are never downloaded. Service messages (joins, pins) and every other kind of
+message without text or a caption (a sticker, a poll, a location, a photo whose caption is
+blank) are no
 document.
 
 The rendering is deterministic, so an unchanged message keeps its content hash. Telegram never
@@ -194,7 +197,7 @@ run). Either way nothing is lost.
 **After a quiet week** Telegram may restart `update_id` at a random value below the stored
 cursor, so after six days without updates the connector reads without an offset, which confirms
 nothing. The six days run from the newest update's own `date` (an edit's `edit_date`), Telegram's
-clock, not from when the run read it.
+clock, not from when the run read it. A date of 0 or before 1970 counts as missing, and the clock is never set later than the run itself.
 
 **Edits** arrive as `edited_message` / `edited_channel_post` with the same message id and
 replace the row; the new text is extracted, the old one leaves memory. An edit that removes the
@@ -257,7 +260,12 @@ exit:
 |---|---|
 | `scanned` | message rows emitted |
 | `deleted` | tombstones emitted |
-| `skipped` | updates that became no row: a chat outside the selection, a message without text, an update type the connector does not read |
+| `skipped` | message updates, and updates of a type the connector does not read, that became no row; always the sum of the four keys below. A `my_chat_member` update is never counted |
+| `skipped_unselected` | messages of a chat outside the selection. With `chats=None` that includes every private chat unless `include_private=True` |
+| `skipped_unsupported_type` | content the connector does not read, as Drive uses the key: a message whose kind is anything but text (a file, a sticker, a video note, a poll, a checklist, a contact, a location, a game, a giveaway: every content field of the Bot API `Message`) and has no caption. Files are never downloaded |
+| `skipped_empty_content` | a message with no content: a service message (a join, a pin, a group upgrade announcement, a forum topic event) or a text that is blank. A content kind Telegram adds after Bot API 10.5 counts here until the connector lists it |
+| `skipped_unread_update` | an update of a type the connector does not ask for, which Telegram can still deliver for a while after the list of asked types changed |
+| `privacy_mode` | 1 when `getMe` says privacy mode is on, so in groups the bot sees only commands and replies to it. It means something only on a run with `failed` 0: a run that fails before or at `getMe`, or with `failed_bot_mismatch`, leaves it 0, so a host keeps the value of the last run with `failed` 0. It is 1 only when `can_read_all_group_messages` is JSON `false`: a missing field, `null`, `0` or `"false"` give 0. A host that adds up several Telegram sources (`add_source_counts`) gets the number of sources in privacy mode |
 | `backlog` | 1 when the run read a full page: more updates may be waiting |
 | `gap` | update ids that may have been lost: the ids skipped between the saved cursor and this run's first update, counted only when the last update the connection saw is more than 24 hours old. 0 otherwise |
 | `failed` | 1 when the run stopped or raised, with one reason key below |
@@ -265,7 +273,7 @@ exit:
 | `failed_conflict` | `getUpdates` answered 409: a webhook is set, or another process polls this bot. Run stops, nothing changes |
 | `failed_rate_limit` | a 429 the retries did not get past, or whose wait does not fit the run's wait budget. Run stops, nothing changes |
 | `failed_unavailable` | a 5xx or no answer after the retries. Run stops, nothing changes |
-| `failed_provider` | any other failure Telegram's side caused: another 4xx, an HTTP 200 that is not a Bot API answer, a `getMe` without a numeric bot id, a staging read that fails, a state of a newer version. The run raises |
+| `failed_provider` | any other failure Telegram's side caused: another 4xx, an HTTP 200 that is not a Bot API answer, a `getMe` without a numeric bot id, a `getUpdates` page that is not a list of objects, or holds an update whose `update_id` is not a positive integer above the one before it (and, when the run sent an offset, at or above it), whose message is not an object, or whose `date` or `edit_date` is not an integer the platform can turn into a time (a missing or null date is read as missing), a staging read that fails, a state of a newer version. The run raises before any row is emitted, and the cursor stays, so the next run reads the same page. A refused page is asked for again on every run; if Telegram keeps sending it, the valid updates on that page, before and after the bad one, and every update queued behind the page expire after Telegram's 24 hours, while `gap` reads 0, because a refused run counts nothing |
 | `failed_unexpected` | a failure that is not Telegram's (a defect of this source), at any point of the run, raised as `TelegramUnexpectedError` with the original as its cause. The run raises and the cursor stays |
 | `failed_bot_mismatch` | the state of this `resource_name` belongs to another bot (`TelegramBotMismatchError`). The run raises |
 
@@ -292,9 +300,9 @@ nonzero value after a quiet day may be nothing.
 | Updates per run | 100 | the Bot API's `getUpdates` `limit` maximum; there is no knob to read less |
 | Requests per run | 2 (`getMe`, `getUpdates`), plus one `getChat` per selected `@username` not bound yet, and, on a run where a selected `@username` is not found, one by id per stored group or channel the run would drop | this connector: a second `getUpdates` would confirm a page before it is loaded |
 | Unconfirmed updates kept | about 24 hours | Telegram: updates "will not be kept longer than 24 hours" |
-| Wait on a 429 | Telegram's `retry_after` | Telegram |
+| Wait on a 429 | Telegram's `retry_after`. NaN, a negative value or anything that is not a number is ignored and the backoff below applies; a value beyond the largest float (Infinity included) is a wait no budget fits, so the run stops | Telegram |
 | Attempts per request | 5 | our decision; it only delays a run |
-| Backoff on a 5xx or no answer | 1, 2, 4, 8 s | our decision; it only delays a run |
+| Backoff on a 5xx, no answer, or a 429 without a usable `retry_after` | 1, 2, 4, 8 s | our decision; it only delays a run |
 | Sleep per run, all requests together | 60 s | our decision (OneNote waits at most 60 s a run too): the walk holds the process-wide staging lock while it sleeps. A wait that does not fit stops the run with `failed_rate_limit` (`failed_unavailable` for a 5xx); it delays the sync, it drops nothing |
 | Socket timeout | 30 s a request | our decision; Telegram documents no latency |
 | Title, quoted reply | 80, 200 characters | display only; the full text stays in the document |

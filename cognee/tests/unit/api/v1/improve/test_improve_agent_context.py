@@ -45,8 +45,8 @@ def _patch_extractor(monkeypatch, behavior):
     ace_mod = importlib.import_module("cognee.infrastructure.session.agent_context_extraction")
     calls = []
 
-    async def fake_extract(*, session_manager, user_id, session_id, min_new_traces):
-        calls.append((session_id, min_new_traces))
+    async def fake_extract(*, session_manager, user_id, session_id, min_new_traces, automatic):
+        calls.append((session_id, min_new_traces, automatic))
         return behavior(session_id)
 
     monkeypatch.setattr(ace_mod, "extract_pending_agent_context", fake_extract)
@@ -63,7 +63,7 @@ async def test_runs_extraction_per_session_and_counts_lessons(monkeypatch):
     assert stage.gate(inputs) is None
     result = await stage.run(inputs)
 
-    assert calls == [("s1", 1), ("s2", 1)]
+    assert calls == [("s1", 1, False), ("s2", 1, False)]
     assert result.status == "completed"
     assert result.counts == {"lessons": 2, "sessions_failed": 0}
 
@@ -91,7 +91,7 @@ async def test_one_failing_session_does_not_block_others(monkeypatch):
 
     result = await ExtractAgentContextStage().run(_inputs(["s1", "s2"]))
 
-    assert calls == [("s1", 1), ("s2", 1)]  # s2 still processed after s1 raised
+    assert calls == [("s1", 1, False), ("s2", 1, False)]  # s2 still processed after s1 raised
     assert result.status == "errored"
     assert result.counts == {"lessons": 1, "sessions_failed": 1}
     assert "boom" in result.error

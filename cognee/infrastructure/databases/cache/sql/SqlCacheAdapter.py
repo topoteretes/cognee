@@ -42,6 +42,8 @@ from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 
 from .tables import (
+    CAPTURE_RECEIPT_RETENTION_DAYS,
+    cache_capture_receipts,
     cache_kv,
     cache_metadata,
     cache_qa_entries,
@@ -219,6 +221,12 @@ class SqlCacheAdapter(CacheDBInterface):
             try:
                 async with self.engine.begin() as connection:
                     await connection.run_sync(cache_metadata.create_all, checkfirst=True)
+                    # create_all skips indexes for pre-existing tables. Upgrade
+                    # installations that already have capture receipts as well.
+                    for index in cache_capture_receipts.indexes:
+                        await connection.run_sync(
+                            lambda conn, idx=index: idx.create(conn, checkfirst=True)
+                        )
             except Exception as error:
                 error_msg = f"Failed to connect to SQL cache database: {error}"
                 logger.error(error_msg)
@@ -341,6 +349,13 @@ class SqlCacheAdapter(CacheDBInterface):
                             table.c.expires_at.isnot(None), table.c.expires_at <= cutoff
                         )
                     )
+                await session.execute(
+                    delete(cache_capture_receipts).where(
+                        cache_capture_receipts.c.created_at
+                        < cutoff - timedelta(days=CAPTURE_RECEIPT_RETENTION_DAYS),
+                        cache_capture_receipts.c.index_lease_until <= time.time(),
+                    )
+                )
         except Exception as error:
             logger.debug(
                 "SQL cache TTL sweep failed (will retry next interval): %s", error, exc_info=True
@@ -937,7 +952,12 @@ class SqlCacheAdapter(CacheDBInterface):
         await self._maybe_purge_expired()
 
     async def get_agent_trace_session(
-        self, user_id: str, session_id: str, last_n: int | None = None
+        self,
+        user_id: str,
+        session_id: str,
+        last_n: int | None = None,
+        start: int | None = None,
+        end: int | None = None,
     ) -> list[SessionAgentTraceEntry]:
         """Retrieve stored trace steps for the given session (reads don't refresh TTL)."""
         await self._ensure_initialized()
@@ -952,6 +972,13 @@ class SqlCacheAdapter(CacheDBInterface):
                         query.order_by(cache_trace_entries.c.seq.desc()).limit(last_n)
                     )
                     rows = list(reversed(result.scalars().all()))
+                elif start is not None:
+                    result = await session.execute(
+                        query.order_by(cache_trace_entries.c.seq.asc())
+                        .offset(start)
+                        .limit(end - start)
+                    )
+                    rows = result.scalars().all()
                 else:
                     result = await session.execute(query.order_by(cache_trace_entries.c.seq.asc()))
                     rows = result.scalars().all()
@@ -1325,15 +1352,26 @@ class SqlCacheAdapter(CacheDBInterface):
     # Maintenance
     # --------------------------------------------------------------------- #
 
+    async def delete_capture_receipts_for_user(self, user_id) -> None:
+        """Remove receipt metadata on account deletion, including standalone caches."""
+        await self._ensure_initialized()
+        async with self.sessionmaker() as session, session.begin():
+            await session.execute(
+                delete(cache_capture_receipts).where(
+                    cache_capture_receipts.c.user_id == str(user_id)
+                )
+            )
+
     async def prune(self) -> None:
         """
-        Empty the cache. Scoped to the four cognee cache tables only — a deliberate,
+        Empty the cache. Scoped to the cognee cache tables only — a deliberate,
         safer divergence from Redis FLUSHDB (which nukes co-tenant keys).
         """
         await self._ensure_initialized()
         try:
             async with self.sessionmaker() as session, session.begin():
                 for table in (
+                    cache_capture_receipts,
                     cache_qa_entries,
                     cache_trace_entries,
                     cache_session_context,

@@ -13,7 +13,7 @@ Known approximations:
   transcription of audio/image items) and embedding costs are not included.
 - Input tokens use the real tokenizer, prompt templates, and response-model
   JSON schema; output tokens use fixed heuristics.
-- Reasoning models (gpt-5 / o-series) bill hidden reasoning tokens as output;
+- Reasoning models (gpt-5 / gpt-6 / o-series) bill hidden reasoning tokens as output;
   their output/cost is scaled by a rough allowance and flagged approximate.
 """
 
@@ -62,7 +62,7 @@ SUMMARY_OUTPUT_TOKENS_PER_CHUNK = 150
 GRAPH_OUTPUT_TOKEN_RATIO = 0.5
 MIN_GRAPH_OUTPUT_TOKENS_PER_CHUNK = 256
 
-# Reasoning models (gpt-5 / o-series and future reasoning families) emit hidden
+# Reasoning models (gpt-5 / gpt-6 / o-series and future reasoning families) emit hidden
 # reasoning tokens that are billed as output. On a real gpt-5-mini run the actual
 # completion tokens were ~20x the visible-output heuristics above (graph ~28x,
 # summary ~14x the base). Since the amount varies with reasoning effort and task,
@@ -70,7 +70,7 @@ MIN_GRAPH_OUTPUT_TOKENS_PER_CHUNK = 256
 # so it is a plausible central figure, not a hard bound) and flag the estimate as
 # approximate for these models rather than pretend to predict it precisely.
 REASONING_OUTPUT_MULTIPLIER = 20
-_REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+_REASONING_MODEL_PREFIXES = ("gpt-5", "gpt-6", "o1", "o3", "o4")
 
 
 def _is_reasoning_model(model: str) -> bool:
