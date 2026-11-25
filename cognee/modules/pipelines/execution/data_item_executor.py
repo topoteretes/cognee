@@ -194,16 +194,19 @@ async def run_items_with(
     entries = await executor.run_items(spec, data_items, item_run)
 
     answered = [entry for entry in entries if isinstance(entry, dict)]
-    data_ids = [entry["data_id"] for entry in answered if entry.get("data_id") is not None]
-    # A data row is answered for under its own id. (Other kinds of item get
-    # their id while they run, so for those the count is all there is to check.)
-    unanswered = {item.id for item in data_items if isinstance(item, Data)} - set(data_ids)
-    if len(entries) != len(data_items) or len(data_ids) != len(set(data_ids)) or unanswered:
+    # A data row is answered for under its own id. Any other item gets its id
+    # while it runs, and two of them may be stored as one row (the same text
+    # twice), so for those the count is all there is to check.
+    rows = {item.id for item in data_items if isinstance(item, Data)}
+    answered_rows = [entry["data_id"] for entry in answered if entry.get("data_id") in rows]
+    unanswered = rows - set(answered_rows)
+    twice = len(answered_rows) - len(set(answered_rows))
+    if len(entries) != len(data_items) or twice or unanswered:
         raise RuntimeError(
             f"The data item executor was handed {len(data_items)} items and returned "
-            f"{len(entries)} entries ({len(data_ids) - len(set(data_ids))} of them for an item "
-            f"already answered for), with none for {len(unanswered)} of the items. Every item "
-            "must be answered for exactly once."
+            f"{len(entries)} entries ({twice} of them for an item already answered for), "
+            f"with none for {len(unanswered)} of the items. Every item must be answered for "
+            "exactly once."
         )
     for entry in answered:
         run_info = entry.get("run_info")
