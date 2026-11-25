@@ -79,7 +79,7 @@ class TextLoader(LoaderInterface):
         with open(file_path, "rb") as f:
             file_metadata = await get_file_metadata(f)
             f.seek(0)
-            bom_codec = None if encoding else bom_encoding(f.read(4))
+            bom_codec = bom_encoding(f.read(4)) if encoding is None else None
         # Backward compatibility: a UTF-8 BOM keeps the plain UTF-8 read, so the text still
         # starts with U+FEFF as before BOM support. Stripping it would change the first
         # chunk's content-hashed id for files that were already ingested.
@@ -88,7 +88,8 @@ class TextLoader(LoaderInterface):
         # Name ingested file of current loader based on original file content hash
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
-        encoding = encoding or bom_codec or "utf-8"
+        if encoding is None:
+            encoding = bom_codec or "utf-8"
         try:
             with open(file_path, encoding=encoding) as f:
                 content = f.read()

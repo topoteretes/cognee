@@ -67,6 +67,16 @@ async def test_explicit_encoding_wins_over_the_bom(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_empty_encoding_is_refused_not_auto_detected(tmp_path):
+    """Only an omitted encoding (None) auto-detects; a blank one is a bad setting."""
+    marked = tmp_path / "contact.txt"
+    marked.write_bytes(TEXT.encode("utf-16"))
+
+    with pytest.raises(LookupError):
+        await TextLoader().load(str(marked), encoding="", persist=False)
+
+
+@pytest.mark.asyncio
 async def test_bomless_utf16_is_still_refused(tmp_path):
     """Out of scope, the same boundary as presort: without a BOM UTF-16 is ambiguous."""
     unmarked = tmp_path / "contact.txt"
