@@ -308,6 +308,7 @@ async def search(
             node_type=node_type,
             node_name=node_name,
             only_context=only_context,
+            session_id=session_id,
             verbose=verbose,
             include_references=include_references,
             code_query=code_query,
