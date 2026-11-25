@@ -23,6 +23,7 @@ JUNK_EXTENSIONS = frozenset(
 )
 
 _SNIFF_BYTES = 8192
+_TEXT_APPLICATION_MIMES = frozenset({"application/json", "application/xml", "application/yaml"})
 
 
 def _claimable_extensions() -> frozenset:
@@ -109,10 +110,12 @@ async def scan_folder(
             if not record.extension:
                 record.extension = file_type.extension
             # A media/archive mime always wins over the byte heuristic (a short
-            # sample of a binary format can look ASCII-ish).
+            # sample of a binary format can look ASCII-ish). JSON, XML and YAML are
+            # text formats under application/, and TextLoader ingests them, so they
+            # stay text and get the PII content scan.
             mime = record.mime_type or ""
             non_text_mime = mime.startswith(("image/", "audio/", "video/")) or (
-                mime.startswith("application/") and mime != "application/json"
+                mime.startswith("application/") and mime not in _TEXT_APPLICATION_MIMES
             )
             record.is_text = is_text_content(sample) and not non_text_mime
         except Exception as error:  # sniffing must never abort the scan

@@ -44,3 +44,27 @@ async def test_scan_without_subdirectories(messy_folder):
     names = {record.name for record in files}
     assert "notes.txt" in names
     assert "invoice_march.pdf" not in names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16"])
+@pytest.mark.parametrize(
+    "name, body",
+    [
+        ("contacts.xml", "<contact>jane.doe@example.com</contact>\n"),
+        ("contacts.yaml", "email: jane.doe@example.com\n"),
+        ("contacts.yml", "email: jane.doe@example.com\n"),
+        ("contacts.json", '{"email": "jane.doe@example.com"}\n'),
+    ],
+)
+async def test_structured_text_files_get_the_pii_content_scan(tmp_path, name, body, encoding):
+    """XML and YAML sniff as application/*, but TextLoader ingests them, so
+    exclude_pii must see their content, as it does for JSON."""
+    from cognee.tasks.presort.detect_pii import detect_pii
+
+    (tmp_path / name).write_text(body, encoding=encoding)
+
+    files, _ = await scan_folder(tmp_path)
+
+    assert files[0].is_text
+    assert {finding.category for finding in await detect_pii(files)} == {"email_address"}
