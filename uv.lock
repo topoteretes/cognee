@@ -1466,6 +1466,7 @@ docling-full = [
 docs = [
     { name = "lxml" },
     { name = "nltk" },
+    { name = "pandas" },
     { name = "unstructured", version = "0.18.32", source = { registry = "https://pypi.org/simple" }, extra = ["csv", "doc", "docx", "epub", "md", "odt", "org", "pdf", "ppt", "pptx", "rst", "rtf", "tsv", "xlsx"], marker = "python_full_version < '3.11' or (python_full_version >= '3.11' and python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'darwin') or (python_full_version >= '3.11' and python_full_version < '3.14' and 'Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin')" },
     { name = "unstructured", version = "0.27.34", source = { registry = "https://pypi.org/simple" }, extra = ["csv", "doc", "docx", "epub", "md", "odt", "org", "pdf", "ppt", "pptx", "rst", "rtf", "tsv", "xlsx"], marker = "python_full_version >= '3.14' or (python_full_version >= '3.11' and python_full_version < '3.14' and platform_machine != 'x86_64' and 'Darwin Kernel Version 22.' not in platform_version) or (python_full_version >= '3.11' and python_full_version < '3.14' and sys_platform != 'darwin')" },
 ]
@@ -1696,7 +1697,8 @@ requires-dist = [
     { name = "opentelemetry-sdk", marker = "extra == 'tracing'", specifier = ">=1.20.0,<2" },
     { name = "owlrl", marker = "extra == 'ontology'", specifier = ">=7.1.4,<7.2" },
     { name = "packaging", specifier = ">=24.0" },
-    { name = "pandas", specifier = ">=2.2.2,<3.0.0" },
+    { name = "pandas", specifier = ">=2.2.2,<4.0.0" },
+    { name = "pandas", marker = "extra == 'docs'", specifier = ">=2.2.2,<3.0.0" },
     { name = "pandas", marker = "extra == 'evals'", specifier = ">=2.2.2,<3.0.0" },
     { name = "pgvector", marker = "extra == 'postgres'", specifier = ">=0.3.5,<0.4" },
     { name = "pgvector", marker = "extra == 'postgres-binary'", specifier = ">=0.3.5,<0.4" },
