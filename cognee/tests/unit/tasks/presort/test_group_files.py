@@ -1,3 +1,4 @@
+import importlib
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -68,9 +69,13 @@ async def test_llm_classify_decodes_utf16_sample(tmp_path):
         path=str(path), name="contract.txt", extension="txt", is_text=True, size_bytes=1
     )
 
-    with patch(
-        "cognee.infrastructure.llm.extraction.extract_categories.extract_categories",
-        new=AsyncMock(return_value=None),
+    # Patch the submodule object: the package re-exports a function under the
+    # submodule's name, so a dotted target resolves to the function on 3.10.
+    extraction_module = importlib.import_module(
+        "cognee.infrastructure.llm.extraction.extract_categories"
+    )
+    with patch.object(
+        extraction_module, "extract_categories", new=AsyncMock(return_value=None)
     ) as llm_mock:
         await classify_files([record], use_llm=True)
 

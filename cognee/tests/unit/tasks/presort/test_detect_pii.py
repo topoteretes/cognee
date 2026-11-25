@@ -95,9 +95,7 @@ async def test_detect_pii_reads_utf16_file(tmp_path):
     """
     path = tmp_path / "contact_utf16.txt"
     path.write_text("Contact: jane.doe@example.com\n", encoding="utf-16")
-    record = FileRecord(
-        path=str(path), name=path.name, extension="txt", is_text=True, size_bytes=1
-    )
+    record = FileRecord(path=str(path), name=path.name, extension="txt", is_text=True, size_bytes=1)
 
     findings = await detect_pii([record])
 
@@ -115,9 +113,7 @@ async def test_detect_pii_bom_prefixed_binary_finds_no_pii(tmp_path):
     # UTF-16 LE BOM followed by null-laden control bytes: valid to decode, but
     # no email/phone/SSN/card/IBAN pattern survives.
     path.write_bytes(b"\xff\xfe" + bytes([0x01, 0x00, 0x02, 0x00, 0x03, 0x00]) * 512)
-    record = FileRecord(
-        path=str(path), name=path.name, extension="bin", is_text=True, size_bytes=1
-    )
+    record = FileRecord(path=str(path), name=path.name, extension="bin", is_text=True, size_bytes=1)
 
     findings = await detect_pii([record])
 
