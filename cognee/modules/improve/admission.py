@@ -14,6 +14,14 @@ returned reason skips the improve and is reported as
 ``RememberResult.improve_skipped``. The data is stored either way, and an
 explicit ``improve()`` call is never gated.
 
+A trace write runs improve's agent-context stage early, every
+``TRACE_EXTRACTION_INTERVAL`` traces, and asks the same check before that LLM
+call (``SessionManager``): a skip is only logged and the window waits for the
+next interval. ``dataset_id`` there is the session manager's, ``None`` for a
+manager built without a dataset (``@agent_memory`` traces).
+It is asked before that session's extraction lock is taken, so a slow check
+holds up only its own trace write's background task.
+
 The check can never break ``remember()``: nothing registered, a check that
 raises, and an answer that is neither ``None`` nor a reason string all mean
 "allow".
@@ -21,6 +29,7 @@ raises, and an answer that is neither ``None`` nor a reason string all mean
 
 from collections.abc import Awaitable, Callable
 from typing import Any
+from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
 
@@ -51,8 +60,8 @@ def register_auto_improve_admission(check: AutoImproveAdmission | None) -> None:
 
     * ``user``: the user the improve would run as.
     * ``dataset_id``: id of the dataset it would improve.
-    * ``session_id``: the session that was written, for the session bridge;
-      ``None`` for the improve that follows a permanent remember.
+    * ``session_id``: the session that was written, for the session bridge and
+      the trace write; ``None`` for the improve that follows a permanent remember.
     * ``session_ids``: the session ids the improve would bridge into the
       graph (empty when none).
     """
@@ -104,3 +113,27 @@ async def auto_improve_skip_reason(**context: Any) -> str | None:
         type(reason).__name__ if not isinstance(reason, str) else "an empty string",
     )
     return None
+
+
+async def auto_improve_skip_reason_for_user_id(*, user_id: str, **context: Any) -> str | None:
+    """``auto_improve_skip_reason`` for a caller that holds only the user's id.
+
+    The user is loaded only when a check is registered, so a process without one
+    pays no database read. A user that cannot be loaded allows the improve, like
+    a check that raises.
+    """
+    if _admission_check is None:
+        return None
+    from cognee.modules.users.methods import get_user
+
+    try:
+        user = await get_user(UUID(user_id))
+    except Exception as error:
+        logger.warning(
+            "improve: could not load user %s for the admission check, allowing the improve: %s",
+            user_id,
+            error,
+            exc_info=True,
+        )
+        return None
+    return await auto_improve_skip_reason(user=user, **context)
