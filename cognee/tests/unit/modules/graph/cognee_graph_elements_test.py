@@ -68,7 +68,9 @@ def test_hub_node_edges_are_linear():
     others = [Node(f"n{i}") for i in range(20_000)]
     for other in others:
         hub.add_skeleton_edge(Edge(hub, other))
-    assert time.perf_counter() - start < 2
+    # About 0.2 s on a laptop, where the O(N^2) check took about 8 s. The limit leaves
+    # room for a slow CI runner: macOS jobs have measured 2.3 and 2.8 s.
+    assert time.perf_counter() - start < 5
     assert len(hub.skeleton_neighbours) == 20_000
 
 
