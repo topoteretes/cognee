@@ -6,19 +6,20 @@ within pipeline operations, supporting both incremental and regular processing m
 """
 
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import aclosing
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.stored_file_claims import holding_stored_files
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules import ingestion
+from cognee.modules.data.methods.get_existing_data_ids import DATA_ID_BATCH_SIZE
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.DataItemStatus import (
@@ -126,6 +127,7 @@ async def run_tasks_data_item_incremental(
     pipeline_run_id: str,
     ctx: PipelineContext | None,
     user: User,
+    pinned_data: Mapping[UUID, Data],
 ) -> AsyncGenerator[dict[str, Any], None]:
     """
     Process a single data item with incremental loading support.
@@ -143,6 +145,7 @@ async def run_tasks_data_item_incremental(
         pipeline_run_id: Unique identifier for this pipeline run
         context: Optional context dictionary
         user: User performing the operation
+        pinned_data: The run's pinned data items, from ``find_pinned_data``
 
     Yields:
         Dict containing run_info and data_id for each processing step
@@ -154,23 +157,23 @@ async def run_tasks_data_item_incremental(
     #
     # Every session below is a fresh connection on the cloud pods (NullPool
     # over Neon: TCP + TLS + SCRAM per session, ~14 ms of CPU before any
-    # latency), and this wrapper runs once PER ITEM — so the pre-check resolves
-    # the row and reads its pipeline_status in ONE lookup instead of
-    # identify()-then-select-by-id, and the post-run status write below
-    # re-resolves fresh content inside the session that records the status.
+    # latency), and this wrapper runs once PER ITEM. A data item whose id is
+    # known before the run starts opens none for the pre-check, and content
+    # resolves its row and pipeline_status in ONE lookup; the post-run status
+    # write below re-resolves fresh content inside the session that records it.
     content_hash = None
     data_point = None
-    if not isinstance(data_item, Data):
+    if isinstance(data_item, Data):
+        data_point = data_item
+        data_id = data_item.id
+    else:
         # If the DataItem carries a stable data_id (e.g. from DLT), prefer it
         # over the content lookup so lookups stay consistent.
         from cognee.tasks.ingestion.data_item import DataItem as DataItemType
 
         if isinstance(data_item, DataItemType) and data_item.data_id is not None:
-            # Resolve the pin as ingest_data does: a legacy id names the data
-            # item it was forked into, which is where the content is stored.
             pin = data_item.data_id
-            async with db_engine.get_async_session() as session:
-                data_point = await _find_pinned_data_item(session, dataset.id, pin)
+            data_point = pinned_data.get(pin)
             data_id = data_point.id if data_point is not None else pin
         else:
             stored = await save_data_item_to_storage_detailed(data_item)
@@ -197,13 +200,6 @@ async def run_tasks_data_item_incremental(
             # Hand the storage work already paid for to ``ingest_data``, which
             # otherwise re-uploads and re-hashes the very same item.
             publish_carried_source(ctx, data_item, stored)
-    else:
-        # If data was already processed by Cognee get data id
-        data_id = data_item.id
-        async with db_engine.get_async_session() as session:
-            data_point = (
-                await session.execute(select(Data).filter(Data.id == data_id))
-            ).scalar_one_or_none()
 
     # Check pipeline status, if Data already processed for pipeline before skip current processing
     if data_point:
@@ -305,21 +301,41 @@ async def run_tasks_data_item_incremental(
             raise
 
 
-async def _find_pinned_data_item(session, dataset_id, pin) -> Data | None:
-    """The data item a pinned id names, resolved as ``resolve_data_id`` does.
+async def find_pinned_data(data: list[Any], dataset_id: UUID) -> dict[UUID, Data]:
+    """The data item each pinned id in ``data`` names, keyed by that id.
 
-    Runs in the caller's session, so a pinned item still costs one session.
+    Read once for the run in one session, since a dlt sync pins every row: a
+    query by id per batch of ids, then by ``legacy_id`` per batch of the pins
+    with no row of their own in the dataset. A pin resolves as ``resolve_data_id``
+    does: its own id in the dataset, else the data item forked from it there.
+    Failing both, the row with that id in another dataset is used, which
+    ``ingest_data`` refuses as a foreign pin. A pin with no data item is left
+    out.
     """
-    statement = select(Data).filter(
-        Data.dataset_id == dataset_id, or_(Data.id == pin, Data.legacy_id == pin)
-    )
-    matches = (await session.execute(statement)).scalars().all()
-    if matches:
-        # The exact id wins over a data item forked from a legacy id.
-        return next((match for match in matches if match.id == pin), matches[0])
+    from cognee.tasks.ingestion.data_item import DataItem as DataItemType
 
-    # Unknown in this dataset: look the id up alone, as before pins were resolved.
-    return (await session.execute(select(Data).filter(Data.id == pin))).scalar_one_or_none()
+    pins = [
+        item.data_id for item in data if isinstance(item, DataItemType) and item.data_id is not None
+    ]
+    if not pins:
+        return {}
+
+    # Each query filters on its indexed column alone and the dataset is checked
+    # here: with dataset_id in the query, SQLite reads every row of the dataset
+    # through ix_data_dataset_id once per batch.
+    by_id: dict[UUID, Data] = {}
+    async with get_relational_engine().get_async_session() as session:
+        for start in range(0, len(pins), DATA_ID_BATCH_SIZE):
+            statement = select(Data).filter(Data.id.in_(pins[start : start + DATA_ID_BATCH_SIZE]))
+            by_id.update({row.id: row for row in await session.scalars(statement)})
+        in_dataset = {pin: row for pin, row in by_id.items() if row.dataset_id == dataset_id}
+
+        unresolved = [pin for pin in pins if pin not in in_dataset]
+        for start in range(0, len(unresolved), DATA_ID_BATCH_SIZE):
+            batch = unresolved[start : start + DATA_ID_BATCH_SIZE]
+            forks = await session.scalars(select(Data).filter(Data.legacy_id.in_(batch)))
+            in_dataset.update({row.legacy_id: row for row in forks if row.dataset_id == dataset_id})
+    return by_id | in_dataset
 
 
 def _source_fields(data_point: Data | None, data_item: Any) -> dict[str, Any]:
@@ -470,6 +486,7 @@ async def run_tasks_data_item(
     user: User,
     incremental_loading: bool,
     data_cache: bool,
+    pinned_data: Mapping[UUID, Data],
     progress_state: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """
@@ -489,6 +506,8 @@ async def run_tasks_data_item(
         user: User performing the operation
         incremental_loading: Whether to use incremental processing
         data_cache: Whether to use incremental processing (data caching)
+        pinned_data: The run's pinned data items, from ``find_pinned_data``;
+            incremental processing reads a pinned item's status from it
         progress_state: Optional shared dict (owned by run_tasks.py) that this
             item's stage-progress ticks record ``current_stage`` into, so the
             item-level progress log picks up the most recent stage name.
@@ -510,6 +529,7 @@ async def run_tasks_data_item(
             pipeline_run_id=pipeline_run_id,
             ctx=ctx,
             user=user,
+            pinned_data=pinned_data,
         )
     else:
         events = run_tasks_data_item_regular(

@@ -29,6 +29,7 @@ async def test_provenance_flushes_once_at_data_item_completion(monkeypatch):
         user=object(),
         incremental_loading=False,
         data_cache=False,
+        pinned_data={},
     )
 
     assert "run_info" in result

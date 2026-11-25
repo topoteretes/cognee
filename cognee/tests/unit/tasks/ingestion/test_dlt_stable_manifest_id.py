@@ -49,7 +49,6 @@ def _incremental_run(monkeypatch, completed=True):
     session = MagicMock()
     result = MagicMock()
     result.scalar_one_or_none.return_value = data_point
-    result.scalars.return_value.all.return_value = [data_point]
     session.execute = AsyncMock(return_value=result)
     session.merge = AsyncMock()
     session.commit = AsyncMock()
@@ -79,6 +78,7 @@ def _incremental_run(monkeypatch, completed=True):
             pipeline_run_id=uuid4(),
             ctx=None,
             user=SimpleNamespace(id=uuid4()),
+            pinned_data={data_id: data_point},
         ):
             events.append(event)
         return events

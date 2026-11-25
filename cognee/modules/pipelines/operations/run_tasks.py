@@ -35,7 +35,7 @@ from cognee.shared.utils import send_telemetry, telemetry_exception_properties, 
 from cognee.tasks.ingestion import resolve_data_directories
 
 from ..tasks.task import Task
-from .run_tasks_data_item import run_tasks_data_item
+from .run_tasks_data_item import find_pinned_data, run_tasks_data_item
 from .run_tasks_with_telemetry import (
     PIPELINE_RUN_COMPLETED,
     PIPELINE_RUN_ERRORED,
@@ -99,6 +99,14 @@ async def run_tasks(
     domain-blind). A constant list is just the degenerate resolver; items
     resolved to different lists still share this run's lifecycle — one run
     record, one database context, one rollback, one terminal status.
+
+    With ``incremental_loading`` or ``data_cache`` an item this pipeline already
+    completed is skipped. A ``Data`` row or a pinned ``DataItem`` is judged by its
+    state when the run starts: the row as given (``run_pipeline_per_dataset``
+    reads them under the dataset lock), a pin as ``find_pinned_data`` read it
+    with all the run's pins. So such an item listed twice is processed once per
+    copy, as copies running at the same time always were, and a change another
+    process makes during the run is not seen.
 
     ``after_run_completed`` is awaited once the run is recorded and reported
     complete, still inside this dataset's database context (cognify uses it
@@ -181,6 +189,7 @@ async def run_tasks(
                 if not isinstance(data, list):
                     data = [data]
 
+                pinned_data = {}
                 if data_cache or incremental_loading:
                     data = await resolve_data_directories(
                         data,
@@ -188,6 +197,7 @@ async def run_tasks(
                         dataset_id=dataset.id,
                         branch=(extras or {}).get("repo_branch"),
                     )
+                    pinned_data = await find_pinned_data(data, dataset.id)
 
                 # Build (item, item_tasks) work pairs: a resolver picks each
                 # item's task list; a plain list applies uniformly. Validate each
@@ -288,6 +298,7 @@ async def run_tasks(
                                 user,
                                 incremental_loading,
                                 data_cache,
+                                pinned_data,
                                 progress_state,
                             )
                     finally:

@@ -103,6 +103,13 @@ async def test_resolve_dlt_sources_cleanup_passes_dataset_id_through():
             new=AsyncMock(side_effect=lambda rows, *_: [uuid4() for _ in rows]),
         ),
         patch.object(resolve, "_refresh_row_structure", new=AsyncMock()),
+        # A stored document whose row is no longer staged gives the document sync
+        # something to clean up.
+        patch.object(
+            resolve,
+            "_stored_documents",
+            new=AsyncMock(return_value={("pages", "gone"): [uuid4()]}),
+        ),
     ):
         _, cleanup = await resolve.resolve_dlt_sources(
             [dlt_source], dataset_name="notes", user=user, dataset_id=shared_dataset_id

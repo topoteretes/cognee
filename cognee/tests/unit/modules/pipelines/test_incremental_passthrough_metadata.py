@@ -73,6 +73,7 @@ async def test_passthrough_item_is_hashed_while_its_file_is_open(tmp_path, monke
         pipeline_run_id=uuid4(),
         ctx=ctx,
         user=SimpleNamespace(id=uuid4()),
+        pinned_data={},
     ):
         outputs.append(out)
         break  # identity resolution happens before the first yield

@@ -428,9 +428,10 @@ async def add(
 
     # Expand DLT resources (and auto-detected CSV/connection strings) into
     # standard DataItems before the pipeline sees them. orphan_cleanup (when
-    # not None) deletes dlt rows no longer present in the source; it is
-    # deferred until after the fresh rows are committed to avoid a data-loss
-    # window on a mid-ingest failure.
+    # not None) deletes dlt rows no longer present in the source and records
+    # the dlt loads each document source committed; it is deferred until after
+    # the fresh rows are committed to avoid a data-loss window on a mid-ingest
+    # failure.
     # The dataset's stored name, not the caller's argument: a DLT manifest's
     # identity is seeded from (dataset name, source name), and update()'s
     # rebuild re-adds by dataset_id alone. Passing None there would mint a
@@ -455,8 +456,9 @@ async def add(
         # Never delete the previous data without proof its replacement succeeded.
         if orphan_cleanup is not None:
             logger.warning(
-                "Skipping DLT orphan cleanup for background ingestion; "
-                "reload the affected source in the foreground to propagate upstream deletions."
+                "Skipping DLT orphan cleanup for background ingestion: upstream deletions are "
+                "not propagated and document syncs record no committed loads, so the next sync "
+                "reads every staged row again; reload the affected source in the foreground."
             )
             orphan_cleanup = None
         data = await materialize_stream_for_background(data)

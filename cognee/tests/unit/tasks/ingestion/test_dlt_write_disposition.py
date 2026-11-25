@@ -48,10 +48,16 @@ def _resource(declares=None, document=True):
 )
 async def test_write_disposition_passed_to_the_staging_run(declares, document, passed, expected):
     kwargs = {"write_disposition": passed} if passed else {}
+    nothing_synced = resolve._DocumentSync(
+        items=[], fresh_ids=set(), stale_ids=set(), scopes=set(), staged=None, loads=None
+    )
     with (
         patch.object(
             resolve, "ingest_dlt_source", new=AsyncMock(return_value=DltRows([], loaded_tables=[]))
         ) as ingest,
+        patch.object(
+            resolve, "_sync_document_source", new=AsyncMock(return_value=nothing_synced)
+        ) as sync,
         patch.object(resolve, "_build_source_manifest_item", new=AsyncMock(return_value=None)),
     ):
         await resolve.resolve_dlt_sources(
@@ -61,7 +67,9 @@ async def test_write_disposition_passed_to_the_staging_run(declares, document, p
             dataset_id=uuid4(),
             **kwargs,
         )
-    assert ingest.await_args.kwargs["write_disposition"] == expected
+    # Document sources stage through their sync, relational ones through ingest_dlt_source.
+    staging = sync if document else ingest
+    assert staging.await_args.kwargs["write_disposition"] == expected
 
 
 def test_source_keeps_merge_only_when_every_resource_declares_it():

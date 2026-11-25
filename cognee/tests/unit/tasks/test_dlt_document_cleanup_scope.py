@@ -1,4 +1,8 @@
-"""Document orphan cleanup requires evidence for the exact staging table."""
+"""Document orphan cleanup requires evidence for the exact staging table.
+
+The sync side of this (a table emptied by tombstones, a source that staged nothing) runs on
+the real stack in tasks/ingestion/test_dlt_document_sync.py.
+"""
 
 import importlib
 from contextlib import asynccontextmanager
@@ -12,41 +16,6 @@ from cognee.tasks.ingestion.dlt_row_data import DltRows
 from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR
 
 resolve = importlib.import_module("cognee.tasks.ingestion.resolve_dlt_sources")
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("tables,cleans", [([], False), (["drive_a"], True)])
-async def test_empty_read_cleans_only_a_successfully_loaded_table(tables, cleans):
-    dlt = pytest.importorskip("dlt")
-
-    @dlt.resource(name="drive_a")
-    def source():
-        yield from ()
-
-    resource = source()
-    setattr(resource, DOCUMENT_SOURCE_ATTR, "google_drive")
-    with (
-        patch.object(
-            resolve,
-            "ingest_dlt_source",
-            new=AsyncMock(return_value=DltRows([], loaded_tables=tables)),
-        ),
-        patch.object(resolve, "_delete_dlt_orphans", new=AsyncMock()) as delete,
-    ):
-        items, cleanup = await resolve.resolve_dlt_sources(
-            resource,
-            "dataset",
-            SimpleNamespace(id=uuid4()),
-            dataset_id=uuid4(),
-        )
-        assert items == []
-        assert (cleanup is not None) is cleans
-        if cleanup is not None:
-            await cleanup()
-            assert delete.await_args.kwargs["document_scopes"] == {("google_drive", "drive_a")}
-            assert delete.await_args.args[2] == set()
-        else:
-            delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
