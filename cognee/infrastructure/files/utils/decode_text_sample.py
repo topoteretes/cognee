@@ -8,9 +8,9 @@ file and decodes with the encoding it names, so the recovered string is the
 actual text — which is what makes a regex scan (e.g. presort PII detection)
 find anything in it.
 
-The BOM table is the single source of truth shared with ``is_text_content``:
-the two must agree on which leading bytes mean "text", or a file one accepts is
-decoded as garbage by the other.
+The BOM table is the single source of truth shared with ``is_text_content`` and
+``TextLoader``: they must agree on which leading bytes mean "text", or a file one
+accepts is decoded as garbage, or refused, by another.
 """
 
 import codecs
@@ -34,15 +34,24 @@ _BOM_CODECS: tuple[tuple[bytes, str], ...] = (
 TEXT_BOMS: tuple[bytes, ...] = tuple(bom for bom, _ in _BOM_CODECS)
 
 
-def decode_text_sample(raw: bytes) -> str:
-    """Decode ``raw`` as text, honouring a leading BOM, defaulting to UTF-8.
+def bom_encoding(raw: bytes) -> str | None:
+    """Return the codec named by the BOM at the start of ``raw``, or None if there is none.
 
-    The BOM bytes are stripped before decoding so they never reach the caller as
-    a stray ``\\ufeff``. ``errors="replace"`` keeps a sample that was cut mid
-    character (a bounded read of a larger file) from raising — the point is a
-    best-effort scan, not a lossless load.
+    The codec keeps the BOM as a leading ``\\ufeff`` when decoding; callers strip it.
     """
     for bom, codec in _BOM_CODECS:
         if raw.startswith(bom):
-            return raw[len(bom) :].decode(codec, errors="replace")
-    return raw.decode("utf-8", errors="replace")
+            return codec
+    return None
+
+
+def decode_text_sample(raw: bytes) -> str:
+    """Decode ``raw`` as text, honouring a leading BOM, defaulting to UTF-8.
+
+    The BOM is stripped so it never reaches the caller as a stray ``\\ufeff``.
+    ``errors="replace"`` keeps a sample that was cut mid character (a bounded
+    read of a larger file) from raising — the point is a best-effort scan, not a
+    lossless load.
+    """
+    codec = bom_encoding(raw) or "utf-8"
+    return raw.decode(codec, errors="replace").removeprefix("\ufeff")

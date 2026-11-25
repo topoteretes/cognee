@@ -1,6 +1,9 @@
 import pytest
 
-from cognee.infrastructure.files.utils.decode_text_sample import decode_text_sample
+from cognee.infrastructure.files.utils.decode_text_sample import (
+    bom_encoding,
+    decode_text_sample,
+)
 from cognee.infrastructure.files.utils.is_text_content import is_text_content
 
 TEXT = "Contact: jane.doe@example.com\n"
@@ -24,6 +27,18 @@ def test_bom_encodings_round_trip_to_real_text(encoding):
 
 def test_default_is_utf8_when_no_bom():
     assert decode_text_sample(TEXT.encode("utf-8")) == TEXT
+
+
+@pytest.mark.parametrize(
+    "encoding, codec",
+    [("utf-8-sig", "utf-8"), ("utf-16", "utf-16-le"), ("utf-32", "utf-32-le")],
+)
+def test_bom_encoding_names_the_codec(encoding, codec):
+    assert bom_encoding(TEXT.encode(encoding)) == codec
+
+
+def test_bom_encoding_is_none_without_a_bom():
+    assert bom_encoding(TEXT.encode("utf-8")) is None
 
 
 def test_utf32_le_is_not_read_as_utf16():
