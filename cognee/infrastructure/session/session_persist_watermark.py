@@ -13,7 +13,9 @@ and the concrete watermarks built on it:
 * ``SESSION_PERSIST_WATERMARK`` — stage 2, persisted Q&A entry count;
 * ``TRACE_PERSIST_WATERMARK`` — stage 3, persisted agent-trace step count;
 * ``TRACE_EXTRACTION_WATERMARK`` (declared in ``agent_context_extraction``) —
-  stage 4, trace steps already turned into agent lessons;
+  stage 4, trace steps already turned into agent lessons; the same row holds
+  ``TRACE_EXTRACTION_ATTEMPT``, the count at which the last window started,
+  so the trace-write path waits an interval before retrying a failed one;
 * ``distill_watermark(dataset_id)`` — stage 5, gated context-entry ids already
   distilled into that dataset.
 
