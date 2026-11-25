@@ -642,6 +642,7 @@ class _DocumentSync:
 
     ``loads`` are the (table, dlt load) pairs its staged rows carry, recorded once the add
     committed; None when the source staged no table, so there is nothing to record.
+    ``seen`` are the ids of the source's stored documents when the sync resolved.
     """
 
     items: list[DataItem]
@@ -650,6 +651,7 @@ class _DocumentSync:
     scopes: set[tuple[str, str]]
     staged: StagedSource
     loads: frozenset[tuple[str, str]] | None
+    seen: frozenset[UUID] = frozenset()
 
 
 async def _sync_document_source(
@@ -720,6 +722,7 @@ async def _sync_document_source(
             if table_keys
             for _, load in table_keys.values()
         ),
+        seen=frozenset(data_id for data_ids in stored.values() for data_id in data_ids),
     )
 
 
@@ -744,14 +747,14 @@ async def _settle_document_syncs(
 ) -> None:
     """Forget the stale documents of committed syncs, then record their loads.
 
-    A sync's loads are recorded only while every document it resolved is still stored.
-    Two syncs of one source can resolve before either add commits; ids derive from
-    content, so an edit reverted between them gets its stored id back, and the first
-    sync's sweep forgets the version the second one kept. Recording the second sync's
-    loads then would hide that row from every later sync. Under the dataset lock, so no
+    A sync's loads are recorded only if its tables now hold what its own view predicts: the
+    documents it saw, less the stale ones, plus its fresh ones. Syncs of one source can
+    resolve before either add commits, and ids derive from content, so another sync's sweep
+    or add may have changed a key this sync read nothing for, or forgotten one it kept.
+    Recording its loads then would hide that key from every later sync, so none are
+    recorded and the next sync reads the tables again. Under the dataset lock, so no
     other sync's sweep runs between the check and the record.
     """
-    from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.infrastructure.locks import dataset_lock
 
     async with dataset_lock(dataset_id):
@@ -768,10 +771,21 @@ async def _settle_document_syncs(
                 dataset_id=dataset_id,
                 candidate_ids=stale_ids,
             )
-        async with get_relational_engine().get_async_session() as session:
-            stored = await get_existing_data_ids(session, list(fresh_ids), dataset_id)
         for sync in syncs:
-            if sync.loads is not None and sync.fresh_ids <= stored:
+            if sync.loads is None:
+                continue
+            (source_tag,) = {source for source, _ in sync.scopes}
+            tables = {table for _, table in sync.scopes}
+            stored = await _stored_documents(dataset_id, source_tag, tables)
+            holds = {data_id for data_ids in stored.values() for data_id in data_ids}
+            if holds != (sync.seen - stale_ids) | sync.fresh_ids:
+                logger.info(
+                    "Not recording the dlt loads of '%s': another sync changed its documents "
+                    "since this one resolved; the next sync reads the tables again.",
+                    source_tag,
+                )
+                await record_committed_document_loads(sync.staged, dataset_id, frozenset())
+            else:
                 await record_committed_document_loads(sync.staged, dataset_id, sync.loads)
 
 

@@ -9,6 +9,8 @@ runs once that pipeline completed is awaited after it.
 """
 
 import importlib
+from contextlib import asynccontextmanager
+from functools import partial
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -69,18 +71,34 @@ async def sync(tmp_path, monkeypatch):
     )
 
     forgotten: list[set[UUID]] = []
+    sweeps: list[dict] = []
 
-    async def record_sweep(*_args, candidate_ids=frozenset(), **_kwargs):
+    async def record_sweep(
+        _dataset_name, _user, fresh_data_ids, *, candidate_ids=frozenset(), **kwargs
+    ):
+        """The orphan sweep as far as a sync is concerned: forget its candidates, keep what it
+        was asked (the sweep itself runs in test_dlt_document_cleanup_scope.py)."""
+        sweeps.append({"fresh": set(fresh_data_ids), "candidates": set(candidate_ids), **kwargs})
         forgotten.append(set(candidate_ids))
         await _forget(engine, candidate_ids)
 
     monkeypatch.setattr(resolve, "_delete_dlt_orphans", record_sweep)
 
     async def sync_source(source, commit, dataset_id, key="id"):
-        setattr(source, DOCUMENT_SOURCE_ATTR, "notes")
+        return await sync_sources([(source, "notes")], commit, dataset_id, key)
+
+    async def sync_sources(sources, commit, dataset_id, key="id"):
+        """One add of several (source, tag) pairs."""
+        for source, tag in sources:
+            setattr(source, DOCUMENT_SOURCE_ATTR, tag)
         forgotten.clear()
+        sweeps.clear()
         items, cleanup = await resolve.resolve_dlt_sources(
-            [source], dataset_name="brain", user=USER, dataset_id=dataset_id, primary_key=key
+            [source for source, _ in sources],
+            dataset_name="brain",
+            user=USER,
+            dataset_id=dataset_id,
+            primary_key=key,
         )
         if commit:
             await _commit(engine, items, dataset_id)
@@ -94,6 +112,7 @@ async def sync(tmp_path, monkeypatch):
                 if "external_id" in item.system_metadata
             ),
             forgotten=set().union(*forgotten) if forgotten else set(),
+            sweeps=list(sweeps),
         )
 
     def resource(rows, name="docs", key="id"):
@@ -133,6 +152,8 @@ async def sync(tmp_path, monkeypatch):
     run.earlier_release = earlier_release
     run.commit = lambda items: _commit(engine, items)
     run.source = lambda source, commit=True: sync_source(source, commit, DATASET)
+    run.resource = resource
+    run.sources = lambda sources: sync_sources(sources, True, DATASET)
     run.engine = engine
     run.stored = lambda dataset_id=DATASET: _stored(engine, dataset_id)
     run.names = lambda: _names(engine)
@@ -275,6 +296,102 @@ async def test_a_load_is_not_committed_while_its_document_is_missing(sync):
 
     assert healed.ids == ["a"]
     assert await sync.stored() == {"a": original}
+
+
+@pytest.mark.asyncio
+async def test_a_sync_that_read_nothing_does_not_vouch_for_a_changed_key(sync):
+    """A third sync resolves after the second one committed, so it reads nothing for the key
+    and its presence check passes on an empty set; recording its loads would put back the
+    pair the first sync replaced, and no later sync would read the key again."""
+    await sync([_row("a")])
+    original = (await sync.stored())["a"]
+    first = await sync([_row("a", "v2")], commit=False)
+    second = await sync([_row("a")], commit=False)
+    await sync.commit(second.items)
+    await second.cleanup()
+    third = await sync([], commit=False)
+    await sync.commit(first.items)
+    await first.cleanup()
+    await sync.commit(third.items)
+    await third.cleanup()
+
+    await sync([])
+
+    assert await sync.stored() == {"a": original}
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_is_asked_for_exactly_the_stale_documents(sync):
+    """What the orphan sweep is given decides what it may forget: its candidates, the ids to
+    keep, and the sources and tables it may touch."""
+    await sync([_row("a"), _row("b")])
+    before = await sync.stored()
+
+    edited = await sync([_row("a", "v2")])
+
+    (sweep,) = edited.sweeps
+    assert sweep["candidates"] == {before["a"]}
+    assert sweep["fresh"] == {item.data_id for item in edited.items}
+    assert sweep["sources"] == ("notes",)
+    assert sweep["document_scopes"] == {("notes", "docs")}
+
+
+@pytest.mark.asyncio
+async def test_settling_checks_and_records_under_the_dataset_lock(sync, monkeypatch):
+    """The check that a sync's documents are all there and the record that follows must not
+    interleave with another sync's sweep."""
+    await sync([_row("a")])
+    events: list[str] = []
+    sweep, record = resolve._delete_dlt_orphans, resolve.record_committed_document_loads
+    stored = resolve._stored_documents
+
+    @asynccontextmanager
+    async def lock(_dataset_id):
+        events.append("lock")
+        yield
+        events.append("unlock")
+
+    async def logged(name, function, *args, **kwargs):
+        events.append(name)
+        return await function(*args, **kwargs)
+
+    monkeypatch.setattr("cognee.infrastructure.locks.dataset_lock", lock)
+    monkeypatch.setattr(resolve, "_delete_dlt_orphans", partial(logged, "sweep", sweep))
+    monkeypatch.setattr(
+        resolve, "record_committed_document_loads", partial(logged, "record", record)
+    )
+    monkeypatch.setattr(resolve, "_stored_documents", partial(logged, "read", stored))
+
+    await sync([_row("a", "v2")])
+
+    assert events[events.index("lock") :] == ["lock", "sweep", "read", "record", "unlock"]
+
+
+@pytest.mark.asyncio
+async def test_two_sources_in_one_add_are_swept_and_recorded_together(sync):
+    """A stale document of the second source is forgotten, the first source's fresh ids are
+    kept for the whole sweep, and both sources' loads are recorded."""
+
+    def both(version):
+        """The two sources emitting their row at ``version``; None emits nothing."""
+        rows = lambda key: [] if version is None else [_row(key, version)]
+        return [
+            (sync.resource(rows("a"), name="docs"), "notes"),
+            (sync.resource(rows("w"), name="wikis"), "wiki"),
+        ]
+
+    await sync.sources(both("v1"))
+    before = await sync.stored()
+
+    edited = await sync.sources(both("v2"))
+
+    (sweep,) = edited.sweeps
+    assert sweep["candidates"] == {before["a"], before["w"]}
+    assert sweep["fresh"] == {item.data_id for item in edited.items}
+    assert sweep["document_scopes"] == {("notes", "docs"), ("wiki", "wikis")}
+    assert set(sweep["sources"]) == {"notes", "wiki"}
+    assert sorted(await sync.names()) == ["t-a", "t-w"]
+    assert (await sync.sources(both(None))).items == []
 
 
 @pytest.mark.asyncio
