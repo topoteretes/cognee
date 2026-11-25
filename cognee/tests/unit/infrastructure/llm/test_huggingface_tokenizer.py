@@ -146,3 +146,61 @@ def test_raises_naming_both_the_missing_file_and_transformers_when_neither_helps
     assert "no tokenizer.json" in message  # the underlying cause
     assert "transformers" in message and "not installed" in message
     assert raised.value.name == "transformers"  # what the resolver's hint keys on
+
+
+@pytest.fixture
+def bpe_tokenizer_json(tmp_path):
+    """A real byte-level BPE tokenizer.json, the kind GPT- and Qwen-style embedding
+    models ship: a space is part of the word after it ("Ġwas"), and a token of its
+    own where nothing joins it: at the end of a text, or in front of a digit."""
+    from tokenizers import Tokenizer
+    from tokenizers.models import BPE
+    from tokenizers.pre_tokenizers import ByteLevel
+
+    pieces = ["Ġ", "w", "a", "s", "i", "t", "5", "wa", "was", "Ġwas", "it", "Ġit"]
+    merges = [("w", "a"), ("wa", "s"), ("Ġ", "was"), ("i", "t"), ("Ġ", "it")]
+    tokenizer = Tokenizer(BPE({piece: i for i, piece in enumerate(pieces)}, merges))
+    tokenizer.pre_tokenizer = ByteLevel(add_prefix_space=False)
+    path = tmp_path / "bpe_tokenizer.json"
+    tokenizer.save(str(path))
+    return str(path)
+
+
+def test_a_space_that_ends_the_text_is_counted_where_running_text_has_it(
+    bpe_tokenizer_json, tokenizer_config
+):
+    """The chunker adds up the counts of words, each handed over with the space after it.
+
+    Behind the word that space was always a token of its own, so every word counted
+    double. In front of it the tokenizer decides as it does in running text.
+    """
+    with _no_transformers(), _hub(bpe_tokenizer_json, tokenizer_config(None)):
+        tokenizer = HuggingFaceTokenizer(model="org/bpe-model")
+    assert tokenizer.extract_tokens("was ") == ["was", "Ġ"], "fixture: a trailing space is a token"
+
+    assert tokenizer.count_tokens("was") == 1
+    assert tokenizer.count_tokens("was ") == 1
+    # In front of a digit the space stays a token of its own, so it stays counted.
+    assert tokenizer.count_tokens("5 ") == 2
+    # White space alone is counted as it is.
+    assert tokenizer.count_tokens(" ") == 1
+    assert tokenizer.count_tokens("") == 0
+
+
+def test_word_counts_add_up_to_the_text(bpe_tokenizer_json, tokenizer_json, tokenizer_config):
+    """Never to less than the text holds: a chunk sized by the sum must fit its limit."""
+    from cognee.tasks.chunks.chunk_by_word import chunk_by_word
+
+    def added_up(tokenizer, text):
+        return sum(tokenizer.count_tokens(word) for word, _ in chunk_by_word(text))
+
+    with _no_transformers(), _hub(bpe_tokenizer_json, tokenizer_config(None)):
+        bpe = HuggingFaceTokenizer(model="org/bpe-model")
+    for text in ("it was it was", "it was 5 5 was", "5 5 5"):
+        assert added_up(bpe, text) == len(bpe.extract_tokens(text)), text
+
+    # A tokenizer that drops white space counted right before and counts the same now.
+    with _no_transformers(), _hub(tokenizer_json, tokenizer_config(None)):
+        whitespace = HuggingFaceTokenizer(model="org/minilm-like")
+    assert whitespace.count_tokens("w1 ") == 1
+    assert added_up(whitespace, TWELVE_WORDS) == 12
