@@ -129,6 +129,17 @@ def require_http_requests_allowed_for(data) -> None:
 
 def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
     """Return True if ``ip`` is not a routable, public address."""
+    # RFC 6052 well-known NAT64 can translate a globally classified IPv6
+    # address into loopback, metadata or RFC1918 IPv4 on a dual-stack network.
+    if isinstance(ip, ipaddress.IPv6Address) and ip in ipaddress.ip_network("64:ff9b::/96"):
+        return _is_blocked_ip(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF))
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            return _is_blocked_ip(ip.ipv4_mapped)
+        if ip.sixtofour is not None:
+            return _is_blocked_ip(ip.sixtofour)
+        if ip.teredo is not None:
+            return any(_is_blocked_ip(address) for address in ip.teredo)
     return (
         not ip.is_global
         or ip.is_private

@@ -46,7 +46,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.config import DEFAULT_CODE_GRAPH_BATCH_SIZE
 from cognee.tasks.code_graph.resolve_repo import (
     CodeRepositoryError,
-    clone_dir,
+    repository_identity,
     code_repo_clone_url,
     redact_repo_spec,
     resolve_repo_source,
@@ -392,7 +392,7 @@ async def resolve_code_repository_url(
         # Keyed on the default branch's clone, as every URL row was before branches:
         # existing rows keep their ids, and branches of one URL share the row, since
         # their code graphs share the repository's node ids.
-        identity=clone_dir(source_url),
+        identity=repository_identity(str(spec)),
     )
 
 
@@ -420,6 +420,7 @@ async def add_code_repository(
         user=user,
         dataset_id=dataset.id,
         source_url=source_url,
+        identity=repository_identity(source_url) if source_url else None,
         include_documents=False,
     )
     add_result = await add(

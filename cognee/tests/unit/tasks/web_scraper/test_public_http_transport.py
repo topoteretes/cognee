@@ -332,3 +332,52 @@ async def test_concurrent_first_requests_share_one_client(monkeypatch):
         factory.assert_called_once()
     finally:
         await crawler.close()
+
+
+@pytest.mark.parametrize(
+    "ipv4", ["127.0.0.1", "10.0.0.1", "169.254.169.254", "192.168.1.1", "100.64.0.1"]
+)
+def test_nat64_cannot_hide_a_blocked_ipv4(ipv4):
+    translated = ipaddress.IPv6Address(
+        int(ipaddress.IPv6Address("64:ff9b::")) | int(ipaddress.IPv4Address(ipv4))
+    )
+    assert ssrf._is_blocked_ip(translated)
+
+
+def test_nat64_public_ipv4_remains_public():
+    assert not ssrf._is_blocked_ip(ipaddress.ip_address("64:ff9b::5db8:d822"))
+
+
+@pytest.mark.asyncio
+async def test_browser_route_waiting_for_slot_obeys_navigation_deadline():
+    import asyncio
+    import time
+    from types import SimpleNamespace
+    from cognee.tasks.web_scraper.default_url_crawler import DefaultUrlCrawler
+
+    route = SimpleNamespace(request=SimpleNamespace(resource_type="fetch"), abort=AsyncMock())
+    with pytest.raises(TimeoutError):
+        await DefaultUrlCrawler()._fetch_browser_route(
+            route, semaphore=asyncio.Semaphore(0), deadline=time.monotonic() + 0.01
+        )
+    route.abort.assert_awaited_once_with("blockedbyclient")
+
+
+@pytest.mark.asyncio
+async def test_playwright_serialization_runs_off_caller_loop(monkeypatch):
+    import threading
+    from cognee.tasks.web_scraper.default_url_crawler import DefaultUrlCrawler
+
+    caller = threading.get_ident()
+
+    async def render(self, *args):
+        assert threading.get_ident() != caller
+        return "rendered"
+
+    monkeypatch.setattr(DefaultUrlCrawler, "_render_browser", render)
+    assert await DefaultUrlCrawler()._render_with_playwright("https://example.test") == "rendered"
+
+
+@pytest.mark.parametrize("address", ["::ffff:127.0.0.1", "2002:7f00:1::", "2002:a9fe:a9fe::"])
+def test_tunneled_ipv6_cannot_hide_non_public_ipv4(address):
+    assert ssrf._is_blocked_ip(ipaddress.ip_address(address))

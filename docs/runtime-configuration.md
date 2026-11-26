@@ -288,3 +288,21 @@ For production deployments, review and tighten these settings.
 **Local LLM server times out during ingestion**
 - Issue: cognify sends one extraction call per chunk at once, so a serial server (Ollama, llama.cpp, a small vLLM deployment) queues them until callers time out and retry. The RPM limiter does not help: it limits how many calls start per interval, not how many are running
 - Solution: set `LLM_MAX_CONCURRENT_REQUESTS` to what the server runs in parallel (Ollama's `OLLAMA_NUM_PARALLEL`), usually 1 to 4. It applies per model and per process, so N workers can send N times that
+
+
+### Outbound browser fetching (CLO-1742)
+
+Browser routes use the same checked socket transport as HTTP ingestion. Redirects,
+service workers and WebSockets cannot bypass it. Route concurrency is local to each
+render and all routes share that render's navigation deadline. Playwright and its
+body serialization run on a worker event loop, keeping the caller's loop responsive.
+`WEB_SCRAPER_MAX_BROWSER_RESPONSE_BYTES` caps decompressed bytes per response when
+configured; oversized responses fail, rather than being truncated. No SDK default
+cap is selected yet; deployments must set their approved budget.
+
+An explicit `WEB_SCRAPER_PROXY_URL` delegates destination enforcement to the trusted
+proxy and logs a policy warning without its credentials. Record proxy settings
+(unset, or proxy policy evidence) with SSRF test evidence; a proxy deployment cannot
+claim the direct transport's socket-pinning guarantee. Ambient HTTP(S)_PROXY and
+NO_PROXY settings are ignored. Allowing SSH repositories similarly delegates host
+restrictions to the caller's SSH allowlist; do not enable it for untrusted requests.

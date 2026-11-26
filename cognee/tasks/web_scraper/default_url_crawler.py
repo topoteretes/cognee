@@ -89,7 +89,6 @@ class DefaultUrlCrawler:
         )
         if self.max_browser_response_bytes is not None and self.max_browser_response_bytes <= 0:
             raise ValueError("max_browser_response_bytes must be positive")
-        self._browser_sem = asyncio.Semaphore(concurrency)
         self.concurrency = concurrency
         self._sem = asyncio.Semaphore(concurrency)
         self.crawl_delay = crawl_delay
@@ -356,38 +355,47 @@ class DefaultUrlCrawler:
                 )
                 await asyncio.sleep(delay)
 
-    async def _fetch_browser_route(self, route):
+    async def _fetch_browser_route(self, route, *, semaphore=None, deadline=None):
         """Fulfil browser traffic through the pinned transport; never route.continue_."""
         request = route.request
         if request.resource_type in {"image", "media", "font"}:
             await route.abort("blockedbyclient")
             return
-        try:
-            async with (
-                self._browser_sem,
-                self._client.stream(
+
+        async def fetch():
+            async with semaphore or asyncio.Semaphore(self.concurrency):
+                async with self._client.stream(
                     request.method,
                     request.url,
                     headers=await request.all_headers(),
                     content=request.post_data_buffer,
-                ) as response,
-            ):
-                body = bytearray()
-                async for chunk in response.aiter_bytes():
-                    if (
-                        self.max_browser_response_bytes is not None
-                        and len(body) + len(chunk) > self.max_browser_response_bytes
-                    ):
-                        raise ValueError("Browser response exceeds max_browser_response_bytes")
-                    body.extend(chunk)
-                # HTTPX decompresses content; do not decode it a second time.
-                headers = {
-                    key: value
-                    for key, value in response.headers.items()
-                    if key.lower()
-                    not in {"content-encoding", "content-length", "transfer-encoding"}
-                }
-                await route.fulfill(status=response.status_code, headers=headers, body=bytes(body))
+                ) as response:
+                    # Chromium does not reroute every native redirect. Refuse it
+                    # explicitly instead of relying only on the dead proxy.
+                    if response.is_redirect:
+                        raise ValueError("Browser redirects are disabled by the outbound policy")
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        if (
+                            self.max_browser_response_bytes is not None
+                            and len(body) + len(chunk) > self.max_browser_response_bytes
+                        ):
+                            raise ValueError("Browser response exceeds max_browser_response_bytes")
+                        body.extend(chunk)
+                    # HTTPX decompresses content; do not decode it a second time.
+                    headers = {
+                        key: value
+                        for key, value in response.headers.items()
+                        if key.lower()
+                        not in {"content-encoding", "content-length", "transfer-encoding"}
+                    }
+                    await route.fulfill(status=response.status_code, headers=headers, body=body)
+
+        remaining = self.timeout if deadline is None else max(0.0, deadline - time.monotonic())
+        try:
+            # wait_for also supports Python 3.10. The budget includes waiting
+            # for a route slot, headers, and the complete streamed response.
+            await asyncio.wait_for(fetch(), timeout=remaining)
         except Exception:
             await route.abort("blockedbyclient")
             raise
@@ -397,6 +405,27 @@ class DefaultUrlCrawler:
         await socket.close()
 
     async def _render_with_playwright(
+        self, url: str, js_wait: float = 1.0, timeout: float | None = None
+    ) -> str:
+        # Playwright's Python transport base64/JSON-encodes full bodies inline.
+        # Its own event loop and HTTP client keep that work off the caller's
+        # event loop; no asyncio objects/connections cross thread boundaries.
+        async def render():
+            async with DefaultUrlCrawler(
+                concurrency=self.concurrency,
+                timeout=self.timeout,
+                max_retries=self.max_retries,
+                retry_delay_factor=self.retry_delay_factor,
+                headers=self.headers,
+                proxy_url=self.proxy_url,
+                ca_bundle=self.ca_bundle,
+                max_browser_response_bytes=self.max_browser_response_bytes,
+            ) as worker:
+                return await worker._render_browser(url, js_wait, timeout)
+
+        return await asyncio.to_thread(lambda: asyncio.run(render()))
+
+    async def _render_browser(
         self, url: str, js_wait: float = 1.0, timeout: float | None = None
     ) -> str:
         """Fetch and render a URL using Playwright for JavaScript content.
@@ -443,7 +472,21 @@ class DefaultUrlCrawler:
                         # Service workers and WebSockets must not bypass routing.
                         context = await browser.new_context(service_workers="block")
                         await self._ensure_client()
-                        await context.route("**/*", self._fetch_browser_route)
+                        semaphore = asyncio.Semaphore(self.concurrency)
+                        deadline = time.monotonic() + timeout_val
+
+                        async def fetch_route(route):
+                            try:
+                                await self._fetch_browser_route(
+                                    route, semaphore=semaphore, deadline=deadline
+                                )
+                            except Exception as error:
+                                # The route has already been aborted. Let Chromium
+                                # surface a failed navigation/resource, not an
+                                # uncaught event-listener error during teardown.
+                                logger.warning("Browser route refused: %s", type(error).__name__)
+
+                        await context.route("**/*", fetch_route)
                         await context.route_web_socket("**/*", self._close_browser_socket)
                         page = await context.new_page()
                         logger.info(f"Navigating to {url} and waiting for network idle")

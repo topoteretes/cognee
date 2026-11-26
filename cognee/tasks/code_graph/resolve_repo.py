@@ -146,7 +146,7 @@ def is_remote_repo(spec) -> bool:
     return isinstance(spec, str) and spec.startswith(_REMOTE_PREFIXES)
 
 
-def code_repo_clone_url(spec) -> str | None:
+def code_repo_clone_url(spec, *, normalize_transport: bool = True) -> str | None:
     """The clone URL when an http(s) string names a whole git repository, else None.
 
     This is what lets ``add()`` treat ``https://github.com/<owner>/<repo>`` as a
@@ -166,7 +166,11 @@ def code_repo_clone_url(spec) -> str | None:
     """
     if not isinstance(spec, str):
         return None
-    parts = urlsplit(spec.strip())
+    try:
+        parts = urlsplit(spec.strip())
+        port = parts.port
+    except ValueError:
+        return None
     if parts.scheme not in ("http", "https") or not parts.hostname:
         return None
     host = parts.hostname.lower()
@@ -186,7 +190,7 @@ def code_repo_clone_url(spec) -> str | None:
     if not is_repo:
         return None
     scheme, netloc = parts.scheme, parts.netloc
-    if host in {"github.com", "gitlab.com"} and parts.port in {None, 80, 443}:
+    if normalize_transport and host in {"github.com", "gitlab.com"} and port in {None, 80, 443}:
         scheme = "https"
         userinfo = parts.netloc.rpartition("@")[0]
         netloc = (userinfo + "@" if userinfo else "") + host
@@ -229,6 +233,18 @@ def _clone_slug(url: str, branch: str | None = None) -> str:
         return slug
     readable = re.sub(r"[^A-Za-z0-9._-]+", "-", branch)[:40]
     return f"{slug}@{readable}-{hashlib.sha256(branch.encode()).hexdigest()[:8]}"
+
+
+def repository_identity(url: str) -> Path:
+    """Pre-pinning row identity, independent of the hardened clone cache path.
+
+    This path is only a database identity input, never a directory to open.
+    Preserve the caller's historical scheme/host and unhashed slug so existing
+    Data rows and their graph ownership survive the cache hardening.
+    """
+    legacy_url = redact_repo_spec(code_repo_clone_url(url, normalize_transport=False) or url)
+    tail = legacy_url.split("://")[-1].replace(":", "/").rstrip("/").removesuffix(".git")
+    return default_clones_dir() / re.sub(r"[^A-Za-z0-9._-]+", "-", tail).strip("-.")
 
 
 def clone_dir(url: str, branch: str | None = None, clones_dir: Path | None = None) -> Path:
@@ -429,6 +445,10 @@ async def resolve_repo_source(
     its own (see :func:`_clone_slug`); reusing it fetches and resets, which follows a
     force push. A branch the remote does not have raises, and a local path rejects
     ``branch``.
+
+    Hosted callers accepting untrusted specs must allowlist HTTPS repositories
+    before calling this function. SSH/git@ and local paths remain trusted-SDK
+    features and are not protected by the HTTP destination policy.
 
     ``credentials`` is the preferred way to authenticate against a private
     https remote (e.g. a GitHub App installation token): it reaches git only

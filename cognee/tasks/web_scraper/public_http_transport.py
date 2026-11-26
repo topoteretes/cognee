@@ -14,6 +14,8 @@ import ssl
 import httpcore
 import httpx
 
+from cognee.shared.logging_utils import get_logger
+
 from .ssrf_protection import require_http_requests_allowed, validate_outbound_url
 
 
@@ -63,6 +65,11 @@ class PublicHTTPTransport(httpx.AsyncHTTPTransport):
         context = ssl.create_default_context(cafile=ca_bundle) if ca_bundle else True
         super().__init__(trust_env=False, proxy=proxy_url, verify=context)
         self.proxy_url = proxy_url
+        if proxy_url is not None:
+            get_logger().warning(
+                "Explicit scraper proxy selected: local DNS pinning is disabled; "
+                "the proxy must enforce the destination policy."
+            )
         # HTTPX does not expose httpcore's network_backend constructor argument.
         # Keep its SSL context, limits and exception mapping; replace only DNS/TCP.
         # The transport integration tests cover this hook on dependency upgrades.

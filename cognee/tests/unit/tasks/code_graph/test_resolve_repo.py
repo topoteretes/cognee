@@ -344,3 +344,21 @@ def test_default_clones_dir_comes_from_base_config():
     from cognee.base_config import get_base_config
 
     assert resolve_module.default_clones_dir() == Path(get_base_config().repos_root_directory)
+
+
+@pytest.mark.parametrize("port", ["bad", "99999", "-1"])
+def test_malformed_port_is_not_a_repository(port):
+    assert resolve_module.code_repo_clone_url(f"https://github.com:{port}/org/repo") is None
+
+
+@pytest.mark.parametrize(
+    "url,slug",
+    [
+        ("https://github.com/org/repo", "github.com-org-repo"),
+        ("http://www.github.com/org/repo.git?q=x", "www.github.com-org-repo"),
+        ("https://gitlab.com/group/project", "gitlab.com-group-project"),
+    ],
+)
+def test_data_identity_keeps_pre_pinning_slug(url, slug):
+    assert resolve_module.repository_identity(url) == resolve_module.default_clones_dir() / slug
+    assert resolve_module.clone_dir(url) != resolve_module.repository_identity(url)

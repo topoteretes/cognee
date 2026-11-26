@@ -412,7 +412,7 @@ async def test_a_repository_url_keeps_one_data_row_whatever_the_branch(tmp_path,
     from uuid import uuid4
 
     import cognee.tasks.code_graph.code_repo as code_repo_module
-    from cognee.tasks.code_graph.resolve_repo import clone_dir
+    from cognee.tasks.code_graph.resolve_repo import default_clones_dir
 
     async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         directory = tmp_path / (branch or "default")
@@ -442,7 +442,7 @@ async def test_a_repository_url_keeps_one_data_row_whatever_the_branch(tmp_path,
             "https://github.com/org/repo", user=Mock(), dataset_id=uuid4(), branch=branch
         )
 
-    assert keys == [f"code_repo:{clone_dir('https://github.com/org/repo')}"] * 2
+    assert keys == [f"code_repo:{default_clones_dir() / 'github.com-org-repo'}"] * 2
 
 
 @pytest.mark.asyncio
