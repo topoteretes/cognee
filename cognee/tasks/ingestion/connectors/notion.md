@@ -81,7 +81,9 @@ mass deletion. A 403/404 when fetching a page or database reached *through* the 
 item is gone and is tombstoned; the same error on one of your explicit roots aborts the sync
 instead, since that is a configuration problem, not a deletion. A failure while listing a
 readable page's blocks or querying a data source also aborts the sync, because it does not prove
-anything below it is gone.
+anything below it is gone. So does an answer that omits what it must carry (a listing's
+`results` or `has_more`, a block's `type` or `has_children`, a database's `data_sources`) or that
+is not a JSON object: a missing field is never read as empty.
 
 Moving a page between two of your selected roots, or changing the roots so that another one
 reaches it, changes its `cognee_node_set` (part of the row's identity), so it is re-ingested once
@@ -164,3 +166,42 @@ uv run pytest cognee/tests/integration/tasks/connectors/test_notion_ingestion.py
 Both mock the Notion API over `httpx.MockTransport` (no live credentials, no network). The
 integration test runs the real source through `cognee.add()`, dlt staging on sqlite and orphan
 cleanup; it needs no LLM because it does not cognify.
+
+## API-unsupported blocks
+
+If Notion rejects a block's children with `400 validation_error` and `Block type <type> is
+not supported via the API.` (or the `for your bot type` variant), the connector skips those
+children, keeps the block's own text and the rest of the page, and logs a warning with the
+block ID and type, never document content. This applies to discovery and rendering,
+including synced copies. These two messages are the ones the production sync logged
+(CLO-1400): another wording, any other error, a failed page or table listing, and an error
+after the first page of a listing still abort the sync.
+
+A page stored without such children is marked in its sync state, not in the stored row or
+its content hash, counted in `pages_incomplete` of `cognee_sync_stats` and logged by ID.
+Every sync lists its blocks again, so a page is rendered again when it turns incomplete or
+complete, not on every sync. A synced copy is listed only while its page is rendered, so a
+block that is unsupported inside a copy is skipped and logged but does not mark the page: the
+page is rendered again when it is edited, not when that block becomes readable. Nested text that
+was ingested before a block turned unsupported is dropped in that run: the document holds what
+the API returns.
+
+A page that disappears from below an incompletely read page is not proof of a deletion,
+because the stored ancestry names pages and databases, not container blocks. Such a page,
+and everything below it, is kept as stored and counted in `deletions_withheld`, with a
+warning naming the IDs. The rest of the sync goes on and its state advances. When the tree
+reads completely, the pages that are really gone are forgotten. State stored before
+ancestors were recorded withholds by root instead. Child pages inside synced copies are
+never discovered, so an unreadable block inside a copy withholds nothing.
+
+What the sync itself proved gone is never withheld: a page or database it reached and found
+gone (403/404, archived or in the trash), everything below it, and a row missing from a data
+source it queried to the end. Rows live in the data source, not under blocks, so a complete
+query is proof.
+
+A block Notion lists as `"type": "unsupported"` is matched by the type in its
+`unsupported.block_type`, the type Notion's error names.
+
+In Cognee Cloud, a selected root nested inside another selected root is normally synced
+through the outer one. When the outer root's sync leaves blocks unread, the nested root may
+be behind one of them, so it is synced as its own source and its pages are kept.
