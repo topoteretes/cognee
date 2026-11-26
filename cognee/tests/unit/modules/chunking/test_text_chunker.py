@@ -30,12 +30,12 @@ def _pinned_tokenizer():
     """Count tokens with the default engine's tiktoken, whatever ran before.
 
     The expected chunk counts below assume tiktoken on text-embedding-3-large
-    (a word plus its trailing space is 2 tokens). chunk_by_sentence reads the
-    engine through the context-scoped embedding config, and an earlier test in
-    the same process can leave that pointing at a provider with no tokenizer,
-    where chunk_by_row falls back to one token per word and every count here
-    halves. That only showed up once the suite was sharded and this file
-    stopped running early. Pin the engine so the file is order-independent.
+    (a word and the space after it are one token, as in running text).
+    chunk_by_sentence reads the engine through the context-scoped embedding
+    config, and an earlier test in the same process can leave that pointing at
+    another provider's tokenizer, or at none. That only showed up once the
+    suite was sharded and this file stopped running early. Pin the engine so
+    the file is order-independent.
     """
     engine = SimpleNamespace(
         tokenizer=TikTokenTokenizer(model="text-embedding-3-large", max_completion_tokens=8191)
@@ -170,7 +170,8 @@ async def test_overflow_on_next_paragraph_emits_separate_chunk(chunker_class, ma
         mime_type="text/plain",
     )
     get_text = make_text_generator(text)
-    chunker = chunker_class(document, get_text, max_chunk_size=10)
+    # The first paragraph is 5 tokens, one per word.
+    chunker = chunker_class(document, get_text, max_chunk_size=5)
     chunks = await collect_chunks(chunker)
 
     assert len(chunks) == 2, "Should produce 2 chunks due to overflow"
@@ -180,6 +181,47 @@ async def test_overflow_on_next_paragraph_emits_separate_chunk(chunker_class, ma
     )
     assert chunks[0].chunk_index == 0, "First chunk should have index 0"
     assert chunks[1].chunk_index == 1, "Second chunk should have index 1"
+
+
+NUMBERS = "\n".join(
+    " ".join(str((row * 37 + column * 911) % 100000) for column in range(12)) for row in range(40)
+)
+PROSE = " ".join(
+    "Alice was beginning to get very tired of sitting by her sister on the bank, and of "
+    "having nothing to do: once or twice she had peeped into the book her sister was reading."
+    for _ in range(40)
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", [PROSE, NUMBERS], ids=["prose", "numbers"])
+async def test_a_chunk_is_recorded_at_the_size_it_has(chunker_class, make_text_generator, text):
+    """The chunker adds up word counts; the sum must be what the chunk's text counts as.
+
+    A word used to be counted with the space after it, which is two tokens taken
+    alone and one in running text, so a chunk was recorded at twice its size and was
+    half as long as the limit allows. A space in front of a number is a token of its
+    own, though, so leaving the space out would count too few there.
+    """
+    counter = TikTokenTokenizer(model="text-embedding-3-large", max_completion_tokens=8191)
+    document = Document(
+        id=uuid4(),
+        name="test_document",
+        raw_data_location="/test/path",
+        external_metadata=None,
+        mime_type="text/plain",
+    )
+    chunker = chunker_class(document, make_text_generator(text), max_chunk_size=128)
+
+    chunks = await collect_chunks(chunker)
+
+    assert len(chunks) > 3
+    for chunk in chunks:
+        held = counter.count_tokens(chunk.text)
+        assert held <= chunk.chunk_size <= 128, (chunk.chunk_index, held, chunk.chunk_size)
+        assert chunk.chunk_size <= held * 1.05 + 2, (chunk.chunk_index, held, chunk.chunk_size)
+    # Chunks fill the limit: none but the last one is far below it.
+    assert min(chunk.chunk_size for chunk in chunks[:-1]) > 96
 
 
 @pytest.mark.asyncio
@@ -195,11 +237,11 @@ async def test_small_paragraphs_batch_correctly(chunker_class, make_text_generat
         mime_type="text/plain",
     )
     get_text = make_text_generator(text)
-    chunker = chunker_class(document, get_text, max_chunk_size=49)
+    chunker = chunker_class(document, get_text, max_chunk_size=24)
     chunks = await collect_chunks(chunker)
 
     assert len(chunks) == 20, (
-        "Should batch paragraphs (2 per chunk: 12 words × 2 tokens = 24, 24 + 1 joiner + 24 = 49)"
+        "Should batch paragraphs (2 per chunk: 12 words × 1 token = 12, 12 + 12 = 24)"
     )
     assert all(c.chunk_index == i for i, c in enumerate(chunks)), (
         "Chunk indices should be sequential"
@@ -254,7 +296,8 @@ async def test_chunk_indices_and_ids_are_deterministic(chunker_class, make_text_
     sentence4 = "two " * 4 + ". "
     text = sentence1 + sentence2 + sentence3 + sentence4
     doc_id = uuid4()
-    max_chunk_size = 20
+    # A sentence is 5 tokens: four words and the full stop.
+    max_chunk_size = 10
 
     document1 = Document(
         id=doc_id,

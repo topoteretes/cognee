@@ -1590,6 +1590,36 @@ class Neo4jAdapter(GraphDBInterface):
         results = await self.query(query, {"node_ids": node_ids})
         return [_strip_provenance(result["node"]) for result in results]
 
+    async def get_node_ids_by_property(
+        self, node_types: list[str], property_name: str, values: list[Any]
+    ) -> list[str]:
+        """Ids of typed nodes whose property is one of ``values``, filtered in Cypher."""
+        if not node_types or not values:
+            return []
+        query = f"""
+        MATCH (n:`{BASE_LABEL}`)
+        WHERE n.type IN $types AND toStringOrNull(n[$property]) IN $values
+        RETURN n.id AS id
+        """
+        params = {
+            "types": list(node_types),
+            "property": property_name,
+            "values": [str(value) for value in values],
+        }
+        return [str(record["id"]) for record in await self.query(query, params)]
+
+    async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
+        """Keys of the edges leaving ``source_ids``, each source matched by its id index."""
+        if not source_ids:
+            return []
+        query = f"""
+        UNWIND $ids AS source_id
+        MATCH (n:`{BASE_LABEL}` {{id: source_id}})-[r]->(m:`{BASE_LABEL}`)
+        RETURN n.id AS source, m.id AS target, type(r) AS relationship
+        """
+        records = await self.query(query, {"ids": [str(source_id) for source_id in source_ids]})
+        return [(str(r["source"]), str(r["target"]), r["relationship"]) for r in records]
+
     def _build_node_feedback_items(
         self, node_feedback_weights: dict[str, float]
     ) -> list[dict[str, Any]]:

@@ -107,6 +107,22 @@ async def test_ensure_skips_nonempty_graph():
     assert graph.marked_with is None
 
 
+async def test_graph_marked_by_another_writer_between_the_two_reads_is_graph_provenance():
+    """Several writers start on one empty graph at once. One that read the marker
+    before another writer set it, and looks for nodes after that writer stored its
+    first, must not take the graph for an old one: its nodes and edges would be
+    written without their source refs."""
+
+    class _MarkedAndWrittenMeanwhile(_FakeGraph):
+        async def is_empty(self):
+            self._metadata.update(_full_marker())
+            return False
+
+    graph = _MarkedAndWrittenMeanwhile()
+    assert await mark_graph_provenance_if_empty(graph) is True
+    assert graph.marked_with is None  # the other writer's mark stands
+
+
 async def test_ensure_already_graph_provenance_is_idempotent():
     graph = _FakeGraph(_full_marker(), empty=False)
     assert await mark_graph_provenance_if_empty(graph) is True

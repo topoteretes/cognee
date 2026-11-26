@@ -16,7 +16,8 @@ def _new_executor() -> ThreadPoolExecutor:
 # One thread for the whole process, not the loop's default executor. CPU-bound Python
 # holds the GIL, so more threads would not finish the work sooner: several documents
 # cutting chunks at once on their own threads only contend for the GIL, and they also
-# fill the default executor that DNS lookups and file I/O wait on.
+# fill the default executor that DNS lookups and file I/O wait on. A local model
+# (fastembed) runs here too: it releases the GIL but already uses every core.
 _executor = _new_executor()
 
 

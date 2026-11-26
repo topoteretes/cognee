@@ -246,7 +246,11 @@ def _render_competing_lines(
 def _render_value_names(
     scope: ReviewScope, node_labels: dict[str, str], subject_ids: list[str]
 ) -> list[str]:
-    """Values are named once, after the sections, with their types."""
+    """Values are named once, after the sections, with their types.
+
+    Each line opens with `Value`: without it a value line reads like a subject heading
+    minus one word, and the LLM lists values under `reviewed`, which rejects its response.
+    """
     subjects = set(subject_ids)
     lines = []
     for label, node_id in node_labels.items():
@@ -255,7 +259,7 @@ def _render_value_names(
         node = scope.nodes.get(node_id, {})
         types = ", ".join(node.get("types", []))
         lines.append(
-            f"[{label}] {node.get('name', node_id)}" + (f" (types: {types})" if types else "")
+            f"Value [{label}] {node.get('name', node_id)}" + (f" (types: {types})" if types else "")
         )
     return lines
 

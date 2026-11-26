@@ -68,13 +68,14 @@ streaming, not a map over a list:
 
 Package layout
 --------------
-``operations/`` runners and run-lifecycle logging; ``layers/`` the checks a
-run passes through (environment setup, dataset authorization, task
-validation, qualification); ``methods/`` relational-DB reads and resets of
-``PipelineRun`` rows; ``models/`` SQLAlchemy models plus ``PipelineContext``
-and the ``PipelineRunInfo`` event types; ``queues/`` in-process progress
-queues for background runs; ``utils/`` deterministic pipeline/run id
-generation.
+``operations/`` runners and run-lifecycle logging; ``execution/`` running a
+run's data items in worker processes (off unless an executor is registered or
+handed to a call); ``layers/`` the checks a run passes through (environment
+setup, dataset authorization, task validation, qualification); ``methods/``
+relational-DB reads and resets of ``PipelineRun`` rows; ``models/`` SQLAlchemy
+models plus ``PipelineContext`` and the ``PipelineRunInfo`` event types;
+``queues/`` in-process progress queues for background runs; ``utils/``
+deterministic pipeline/run id generation.
 """
 
 from .tasks.task import Task

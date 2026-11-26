@@ -314,6 +314,49 @@ class TursoAdapter(GraphDBInterface):
             )
             return [self._parse_node_row(row) for row in result.fetchall()]
 
+    async def get_node_ids_by_property(
+        self, node_types: list[str], property_name: str, values: list[Any]
+    ) -> list[str]:
+        """Ids of typed nodes whose property is one of ``values``, filtered in SQL.
+
+        The lists are bound one placeholder per item, not through
+        ``_id_subquery``: Turso's json_each returns a string with a quote still
+        JSON-escaped, so such a value would never match.
+        """
+        if not node_types or not values:
+            return []
+        field = (
+            "name" if property_name == "name" else "CAST(json_extract(properties, :path) AS TEXT)"
+        )
+        statement = text(
+            f"SELECT id FROM graph_node WHERE type IN :types AND {field} IN :vals"
+        ).bindparams(bindparam("types", expanding=True), bindparam("vals", expanding=True))
+        async with self._session() as session:
+            result = await session.execute(
+                statement,
+                {
+                    "types": list(node_types),
+                    "vals": [str(value) for value in values],
+                    "path": f"$.{property_name}",
+                },
+            )
+            return [str(row[0]) for row in result.fetchall()]
+
+    async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
+        """Keys of the edges leaving ``source_ids``, read off the edge primary key."""
+        if not source_ids:
+            return []
+        subquery, params = _id_subquery("sources", source_ids)
+        async with self._session() as session:
+            result = await session.execute(
+                text(
+                    "SELECT source_id, target_id, relationship_name FROM graph_edge "
+                    f"WHERE source_id IN {subquery}"
+                ),
+                params,
+            )
+            return [(str(row[0]), str(row[1]), row[2]) for row in result.fetchall()]
+
     async def add_edge(
         self,
         source_id: str,
@@ -789,7 +832,7 @@ class TursoAdapter(GraphDBInterface):
             mean_degree = (2 * num_edges) / num_nodes if num_nodes else None
             edge_density = num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0
 
-            # The Turso engine has no recursive CTEs (0.7.x), so connected
+            # The adapter avoids recursive CTEs (see docs/turso-local.md), so connected
             # components are computed here with union-find over the edge list.
             # Isolated nodes count as components of size one, as before.
             node_ids = [row[0] for row in await session.execute(text("SELECT id FROM graph_node"))]

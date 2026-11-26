@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from cognee.infrastructure.databases.vector.embeddings.vector_size import engine_vector_size
 from cognee.modules.data.methods.get_data_ids_by_dataset import get_data_ids_by_dataset
 from cognee.shared.logging_utils import get_logger
 
@@ -165,6 +166,74 @@ async def _index_rows(
             "is mirrored, so the routing rows copy its vectors instead of embedding again."
         )
     return stored
+
+
+async def copy_dataset_routes(dataset_id: UUID | str, index_engine) -> int:
+    """Write the dataset's routing rows from the index rows its store holds now.
+
+    For when the dataset's vectors were computed again (``reembed_dataset``): the
+    routing rows are copies of them, and no index build follows to copy them
+    anew. The rows are the ones a build mirrors, the index rows whose id the read
+    path can derive (see ``sync_dataset_routes``).
+
+    Nothing is written when ``index_engine`` embeds with another model than the
+    routing store, the deployment's, which every routing row is scored against;
+    nor, as in a build, while the routing collection's vector width differs from
+    that model's. Returns the rows written.
+    """
+    if not backend_access_control_enabled():
+        return 0
+
+    engine = await get_dataset_route_engine()
+    if not await _embed_with_one_model(index_engine, engine):
+        return 0
+    if not await routing_width_matches(engine):
+        return 0
+
+    from cognee.tasks.memify.global_context_index.constants import (
+        GLOBAL_CONTEXT_SUMMARY_COLLECTION,
+    )
+
+    dataset_key = UUID(str(dataset_id))
+    documents = await get_data_ids_by_dataset([dataset_key])
+    rows = await index_engine.retrieve(
+        GLOBAL_CONTEXT_SUMMARY_COLLECTION,
+        dataset_route_ids(dataset_key, documents.get(dataset_key, [])),
+        include_vector=True,
+    )
+    if not rows:
+        return 0
+    try:
+        await engine.upsert_raw_vectors(
+            DATASET_ROUTE_COLLECTION,
+            [
+                {
+                    "id": row.id,
+                    "vector": row.payload["vector"],
+                    "payload": {
+                        key: value for key, value in row.payload.items() if key != "vector"
+                    },
+                }
+                for row in rows
+            ],
+        )
+    except NotImplementedError:
+        logger.warning(
+            "The %s vector adapter cannot write precomputed vectors; the dataset routing "
+            "rows of %s were not written and the dataset is searched without routing.",
+            type(engine).__name__,
+            dataset_id,
+        )
+        return 0
+    return len(rows)
+
+
+async def _embed_with_one_model(index_engine, route_engine) -> bool:
+    """Whether a dataset's store and the routing store embed with the same model."""
+    index_embedder, route_embedder = index_engine.embedding_engine, route_engine.embedding_engine
+    return index_embedder.model == route_embedder.model and await engine_vector_size(
+        index_embedder
+    ) == await engine_vector_size(route_embedder)
 
 
 async def remove_dataset_routes(dataset_id: UUID | str, document_ids: list[UUID | str]) -> None:

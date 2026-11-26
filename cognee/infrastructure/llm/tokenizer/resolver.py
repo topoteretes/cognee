@@ -94,9 +94,11 @@ def _fastembed_hf_repo(model: str | None) -> str | None:
         return None
 
     try:
-        from fastembed import TextEmbedding
+        from cognee.infrastructure.databases.vector.embeddings.fastembed_models import (
+            fastembed_text_models,
+        )
 
-        supported = TextEmbedding.list_supported_models()
+        supported = fastembed_text_models()
     except Exception:
         # fastembed not installed here (e.g. CI unit tests): best-effort treat a
         # namespaced id as an HF repo, otherwise give up so the caller warns.

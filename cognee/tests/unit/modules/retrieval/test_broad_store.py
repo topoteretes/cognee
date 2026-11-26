@@ -1,6 +1,7 @@
 """BROAD's record store: documents as SQLite tables, queried read-only (SDK-324)."""
 
 import json
+import sqlite3
 
 import pytest
 
@@ -24,6 +25,24 @@ def store():
     records = RecordStore()
     yield records
     records.close()
+
+
+@pytest.mark.parametrize("provider", ["sqlite", "postgres"])
+def test_record_stores_are_private_in_memory_and_discarded_on_close(monkeypatch, provider):
+    monkeypatch.setenv("DB_PROVIDER", provider)
+    first, second = RecordStore(), RecordStore()
+    try:
+        assert first.connection.execute("PRAGMA database_list").fetchall() == [(0, "main", "")]
+        assert first.connection.execute("PRAGMA temp_store").fetchone() == (2,)
+        first.add_document("private.txt", "Only the first search can see this.")
+        assert first.run("SELECT COUNT(*) FROM lines")[1] == [(1,)]
+        assert second.run("SELECT COUNT(*) FROM lines")[1] == [(0,)]
+    finally:
+        first.close()
+        second.close()
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        first.connection.execute("SELECT 1")
 
 
 def test_delimited_json_markdown_and_mail_documents_are_records():
