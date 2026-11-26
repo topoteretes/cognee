@@ -11,6 +11,7 @@ import pytest
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval import broad_retriever
 from cognee.modules.retrieval.broad_retriever import (
+    BroadLimitError,
     BroadNoTextError,
     BroadRetriever,
     DecisionLarge,
@@ -356,6 +357,43 @@ async def test_a_document_over_a_batch_in_a_dataset_over_the_store_is_not_an_err
 
     assert found.rows == [(1,)]
     assert found.coverage
+
+
+@pytest.mark.asyncio
+async def test_a_document_over_a_batch_before_the_store_limit_is_met_is_not_an_error(monkeypatch):
+    """The large document comes first by name, while the text read is still under
+    store_mb; the documents after it take the dataset over, so the most similar parts
+    are loaded."""
+    line = "alpha line\n"  # 11 characters
+    texts = {"a": line * 4, **{f"b{n:02d}": line for n in range(20)}}  # 264 characters
+    _use(monkeypatch, texts, vector=_OneChunkVector({"c": line}), size=30)
+    _llm(monkeypatch, [DecisionLarge(sql="SELECT COUNT(*) FROM lines")])
+
+    found = await BroadRetriever(
+        context_tokens=1, batch_mb=0.00003, store_mb=0.0001
+    ).get_retrieved_objects("How many lines?")
+
+    assert found.rows == [(1,)]
+    assert found.coverage
+
+
+@pytest.mark.asyncio
+async def test_a_document_over_a_batch_in_a_dataset_under_the_store_names_batch_mb(monkeypatch):
+    line = "alpha line\n"
+    _use(monkeypatch, {"a": line * 4, "b": line}, size=30)  # 55 characters
+
+    with pytest.raises(BroadLimitError, match="document a holds 44 .*batch_mb"):
+        await BroadRetriever(
+            context_tokens=1, batch_mb=0.00003, store_mb=0.0001
+        ).get_retrieved_objects("How many lines?")
+
+
+def test_a_broad_limit_error_is_not_logged(caplog):
+    """recall catches it on a routed guess and answers another way."""
+    with caplog.at_level("DEBUG"):
+        BroadLimitError("BROAD: over a limit.")
+
+    assert not caplog.records
 
 
 @pytest.mark.asyncio

@@ -74,7 +74,8 @@ _MIN_CHUNK_TOKENS = 256
 
 
 class BroadLimitError(CogneeValidationError):
-    """The dataset exceeds a BROAD limit; the message names the setting to raise."""
+    """The dataset exceeds a BROAD limit; the message names the setting to raise. Not
+    logged when raised: recall catches it on a routed guess and answers another way."""
 
     def __init__(
         self,
@@ -82,7 +83,7 @@ class BroadLimitError(CogneeValidationError):
         name: str = "BroadLimitError",
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
-        super().__init__(message, name, status_code)
+        super().__init__(message, name, status_code, log=False)
 
 
 class BroadNoTextError(NoDataError):
@@ -157,9 +158,10 @@ def _units_of(nodes: list, edges: list, names: dict[str, str]) -> list[Unit]:
 class Corpus:
     """A dataset's documents, fetched from the graph in batches of whole documents so the
     text held at once stays near ``batch_chars``. Batches are planned from each document's
-    stored size, scaled by how much text a stored byte turned out to hold; a document
-    larger than a batch raises. The batches end early once the text read passes
-    ``store_chars``: the dataset is then too large to load whole (``over_store``)."""
+    stored size, scaled by how much text a stored byte turned out to hold. The batches
+    end early once the text read passes ``store_chars``: the dataset is then too large to
+    load whole (``over_store``). A document larger than a batch is left out and raises
+    once the rest is read, so only when the dataset would otherwise load whole."""
 
     graph: Any
     documents: list[str]
@@ -189,6 +191,8 @@ class Corpus:
 
     async def batches(self) -> AsyncIterator[list[Unit]]:
         ratio, start = 1.0, 0
+        # The first document larger than a batch, and its text in characters.
+        oversized: tuple[str, int] | None = None
         while start < len(self.documents):
             batch = [self.documents[start]]
             planned = self.sizes.get(batch[0], 0) * ratio
@@ -205,16 +209,20 @@ class Corpus:
             self.read_stored += stored
             if self.over_store:
                 return
-            if len(batch) == 1 and text > self.batch_chars:
-                raise BroadLimitError(
-                    f"BROAD: document {self.names.get(batch[0], batch[0])} holds {text:,} "
-                    f"characters of text, more than one batch of {self.batch_chars:,} "
-                    "(batch_mb). Raise batch_mb in retriever_specific_config."
-                )
             if stored:
                 ratio = max(ratio, text / stored)
             start += len(batch)
+            if len(batch) == 1 and text > self.batch_chars:
+                oversized = oversized or (batch[0], text)
+                continue
             yield units
+        if oversized:
+            document, text = oversized
+            raise BroadLimitError(
+                f"BROAD: document {self.names.get(document, document)} holds {text:,} "
+                f"characters of text, more than one batch of {self.batch_chars:,} "
+                "(batch_mb). Raise batch_mb in retriever_specific_config."
+            )
 
 
 def _documents_of(units: list[Unit]) -> list[tuple[str, list[Unit]]]:
