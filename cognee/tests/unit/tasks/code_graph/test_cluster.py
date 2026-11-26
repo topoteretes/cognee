@@ -14,6 +14,7 @@ from cognee.tasks.code_graph.cluster import (
     ClusterMember,
     DatasetCodeSnapshot,
     cluster_output_dir,
+    cluster_snapshot_dir,
     code_repo_path,
     load_dataset_cluster,
     mark_dataset_code_repos_for_rebuild,
@@ -32,6 +33,7 @@ from cognee.tests.utils.code_graph_load import extracted_points, load_with_node_
 from cognee.tests.utils.graph_lookups import lookups_through_get_graph_data
 
 cluster_module = importlib.import_module("cognee.tasks.code_graph.cluster")
+resolve_repo_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
 extract_module = importlib.import_module("cognee.tasks.code_graph.extract_code_graph")
 graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
@@ -75,31 +77,22 @@ GOLF_ROUTE = str(fact_node_id("golf", "route", "/api/rounds"))
 REACHES = (UI_ROUTE, GOLF_ROUTE, "reaches_route")
 
 
-def _write_snapshot(
-    directory,
-    facts=CLUSTER_FACTS,
-    snapshot_id=SNAPSHOT_ID,
-    remote=None,
-    label=None,
-    label_snapshot_id=None,
-):
-    """A member's cluster output directory (``OUTPUT_DIR``) as a cluster run leaves it.
+def _write_snapshot(directory, facts=CLUSTER_FACTS, snapshot_id=SNAPSHOT_ID, members=()):
+    """A cluster snapshot directory as an enola run leaves it.
 
-    ``label`` adds the ``snapshot.meta.json`` enola writes, carrying the
-    member's own ``repo_label`` (for ``label_snapshot_id``, default this
-    snapshot). Without it only the contract files are present.
+    ``members`` are the (label, repository path) pairs the receipt lists.
     """
-    snapshot_dir = directory / OUTPUT_DIR
+    snapshot_dir = directory / "cluster-snapshot"
     snapshot_dir.mkdir(parents=True, exist_ok=True)
     (snapshot_dir / "facts.jsonl").write_text("\n".join(json.dumps(fact) for fact in facts) + "\n")
-    receipt = {"snapshot_id": snapshot_id}
-    if remote:
-        receipt["git"] = {"remote": remote}
-    (snapshot_dir / "receipt.json").write_text(json.dumps(receipt))
-    if label is not None:
-        meta = {"repo_label": label, "snapshot_id": label_snapshot_id or snapshot_id}
-        (snapshot_dir / "snapshot.meta.json").write_text(json.dumps(meta))
+    (snapshot_dir / "receipt.json").write_text(
+        json.dumps({"snapshot_id": snapshot_id, "members": _receipt_members(members)})
+    )
     return snapshot_dir
+
+
+def _receipt_members(members):
+    return [{"repo": label, "repo_path": str(path)} for label, path in members]
 
 
 def _mock_engine(monkeypatch, nodes=(), edges=()):
@@ -138,90 +131,41 @@ def test_code_repo_path_reads_metadata_as_dict_or_json_string(tmp_path):
     assert code_repo_path(SimpleNamespace(system_metadata=None)) is None
 
 
-def test_each_dataset_has_its_own_cluster_output_dir():
-    """A clone is shared by datasets: their cluster snapshots must not overwrite each other."""
+def test_each_dataset_has_its_own_cluster_directories(monkeypatch, tmp_path):
+    """A clone is shared by datasets: their cluster runs must not overwrite each other."""
+    monkeypatch.setattr(resolve_repo_module, "default_clones_dir", lambda: tmp_path)
     other = UUID("7d4e1c2a-0000-4000-8000-000000000001")
 
     assert OUTPUT_DIR != cluster_output_dir(other)
     assert ".enola" not in {OUTPUT_DIR, cluster_output_dir(other)}
+    assert cluster_snapshot_dir(DATASET_ID) != cluster_snapshot_dir(other)
+    # Next to the clones, under a name no clone can have.
+    assert cluster_snapshot_dir(DATASET_ID) == tmp_path / ".enola-clusters" / str(DATASET_ID)
 
 
-def test_member_label_is_the_one_enola_wrote_for_this_snapshot(tmp_path):
-    """enola records each member's label; it wins over anything derivable."""
+def test_member_label_is_the_one_the_receipt_lists_for_its_path(tmp_path):
     first, second = _repos(tmp_path, "one", "two")
-    _write_snapshot(first, remote="github.com/acme/golf", label="golf-api")
-    _write_snapshot(second, label="ui")
+    receipt = {"members": _receipt_members([("ui", second), ("golf-api", first)])}
 
-    labels = resolve_member_labels(
-        [first, second], {"golf-api", "ui"}, OUTPUT_DIR, snapshot_id=SNAPSHOT_ID
-    )
-
-    assert labels == ["golf-api", "ui"]
+    assert resolve_member_labels([first, second], receipt) == ["golf-api", "ui"]
 
 
-def test_members_with_the_same_written_label_are_not_a_cluster(tmp_path):
-    first, second = _repos(tmp_path, "one", "two")
-    _write_snapshot(first, label="web")
-    _write_snapshot(second, label="web")
-
-    assert (
-        resolve_member_labels([first, second], {"web"}, OUTPUT_DIR, snapshot_id=SNAPSHOT_ID) is None
-    )
-
-
-def test_stale_written_label_is_ignored_and_derived_instead(tmp_path):
-    """A meta file from an earlier run describes another snapshot: not trusted."""
-    golf, ui = _repos(tmp_path, "golf", "ui")
-    _write_snapshot(golf, label="old-golf", label_snapshot_id="sha256:older")
-    _write_snapshot(ui, label="ui")
-
-    labels = resolve_member_labels([golf, ui], {"golf", "ui"}, OUTPUT_DIR, snapshot_id=SNAPSHOT_ID)
-
-    assert labels == ["golf", "ui"]
-
-
-def test_derived_label_avoids_one_another_member_was_written(tmp_path):
-    """A member without a meta file never takes a label a written member holds."""
-    first, second = _repos(tmp_path, "web", "web-b")
-    _write_snapshot(first)
-    _write_snapshot(second, label="web")
-
-    labels = resolve_member_labels(
-        [first, second], {"web", "web-b"}, OUTPUT_DIR, snapshot_id=SNAPSHOT_ID
-    )
-
-    assert labels is None  # "web" is taken and the directory name is the only candidate
-
-
-def test_member_label_is_the_remote_name_else_the_directory_name(tmp_path):
-    """Without a written label: the git remote's name, else the directory name."""
-    golf, ui = _repos(tmp_path, "checkout-1", "ui")
-    _write_snapshot(golf, remote="github.com/acme/golf")
-    _write_snapshot(ui)
-
-    assert resolve_member_labels([golf, ui], {"golf", "ui"}, OUTPUT_DIR) == ["golf", "ui"]
-
-
-def test_member_label_follows_the_facts_when_enola_fell_back_to_the_directory(tmp_path):
-    """Two remotes named alike: enola labels the second one by its directory."""
-    first, second = _repos(tmp_path, "web-a", "web-b")
-    _write_snapshot(first, remote="github.com/acme/web")
-    _write_snapshot(second, remote="github.com/other/web")
-
-    assert resolve_member_labels([first, second], {"web", "web-b"}, OUTPUT_DIR) == [
-        "web",
-        "web-b",
-    ]
-
-
-def test_members_that_cannot_be_told_apart_are_not_a_cluster(tmp_path):
-    """Two checkouts sharing both a remote name and a directory name."""
+def test_members_under_one_label_are_not_a_cluster(tmp_path):
+    """Two checkouts of the same name: enola gives both the same label."""
     first = tmp_path / "one" / "web"
     second = tmp_path / "two" / "web"
-    _write_snapshot(first, remote="github.com/acme/web")
-    _write_snapshot(second, remote="github.com/other/web")
+    receipt = {"members": _receipt_members([("web", first), ("web", second)])}
 
-    assert resolve_member_labels([first, second], {"web"}, OUTPUT_DIR) is None
+    assert resolve_member_labels([first, second], receipt) is None
+
+
+def test_a_member_the_receipt_does_not_list_means_no_cluster(tmp_path):
+    first, second = _repos(tmp_path, "one", "two")
+
+    assert resolve_member_labels([first, second], None) is None
+    assert resolve_member_labels([first, second], {"snapshot_id": SNAPSHOT_ID}) is None
+    listed = {"members": _receipt_members([("one", first)])}
+    assert resolve_member_labels([first, second], listed) is None
 
 
 @pytest.mark.asyncio
@@ -238,8 +182,7 @@ async def test_a_single_repository_is_not_snapshotted_as_a_cluster(monkeypatch, 
 @pytest.mark.asyncio
 async def test_cluster_snapshot_runs_enola_once_and_labels_each_member(monkeypatch, tmp_path):
     golf, ui = _repos(tmp_path, "checkout", "ui")
-    snapshot_dir = _write_snapshot(golf, label="golf")
-    _write_snapshot(ui, label="ui")
+    snapshot_dir = _write_snapshot(tmp_path, members=[("golf", golf), ("ui", ui)])
     run_cluster = AsyncMock(return_value=snapshot_dir)
     monkeypatch.setattr(cluster_module, "run_enola_cluster", run_cluster)
     golf_row, ui_row = _row(golf), _row(ui)
@@ -250,8 +193,10 @@ async def test_cluster_snapshot_runs_enola_once_and_labels_each_member(monkeypat
 
     # One enola run over both directories, no config written anywhere: the
     # timeout covers the whole cluster, per repository, and the snapshot goes
-    # to the dataset's own directory, not the shared .enola.
-    run_cluster.assert_awaited_once_with([golf, ui], OUTPUT_DIR, timeout=20.0)
+    # to the dataset's own directory, outside the repositories.
+    run_cluster.assert_awaited_once_with(
+        [golf, ui], OUTPUT_DIR, cluster_snapshot_dir(DATASET_ID), timeout=20.0
+    )
     assert not list(tmp_path.rglob("cluster.yaml"))
     assert snapshot.snapshot_dir == snapshot_dir
     assert [(member.data, member.label) for member in snapshot.members] == [
@@ -270,8 +215,7 @@ async def test_cluster_snapshot_runs_enola_once_and_labels_each_member(monkeypat
 @pytest.mark.asyncio
 async def test_cluster_timeout_scales_with_the_members_up_to_the_cap(monkeypatch, tmp_path):
     golf, ui = _repos(tmp_path, "golf", "ui")
-    snapshot_dir = _write_snapshot(golf, label="golf")
-    _write_snapshot(ui, label="ui")
+    snapshot_dir = _write_snapshot(tmp_path, members=[("golf", golf), ("ui", ui)])
     run_cluster = AsyncMock(return_value=snapshot_dir)
     monkeypatch.setattr(cluster_module, "run_enola_cluster", run_cluster)
     repos = [(_row(golf), golf), (_row(ui), ui)]
@@ -788,8 +732,7 @@ async def test_cluster_load_parses_the_snapshot_once_for_all_members(monkeypatch
     extract and edge tasks, instead of one per task per member."""
     cluster_module._cluster_runs.clear()
     golf, ui = _repos(tmp_path, "golf", "ui")
-    snapshot_dir = _write_snapshot(golf, label="golf")
-    _write_snapshot(ui, label="ui")
+    snapshot_dir = _write_snapshot(tmp_path, members=[("golf", golf), ("ui", ui)])
     golf_row, ui_row = _row(golf), _row(ui)
     monkeypatch.setattr(cluster_module, "run_enola_cluster", AsyncMock(return_value=snapshot_dir))
     monkeypatch.setattr(
