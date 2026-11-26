@@ -26,8 +26,12 @@ layers:
 
 components:
   # Where LLM calls are made: the gateway, the structured-output frameworks
-  # behind it, and the extraction and streaming helpers that call them. The rest
-  # of cognee/infrastructure/llm (config, tokenizer, utils) makes no call.
+  # behind it, and the extraction and streaming helpers that call them.
+  # cognee/infrastructure/llm/utils.py is left out, although its connection
+  # checks (test_llm_connection, test_embedding_connection) call the LLM and the
+  # embedder: a component selects whole files, and the rest of utils.py (chunk
+  # sizes, token limits) is what the tasks below read. A call into those two
+  # checks is not seen.
   - name: llm-calls
     match:
       - "cognee/infrastructure/llm/LLMGateway.py"

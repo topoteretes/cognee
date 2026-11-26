@@ -54,12 +54,15 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           set +e
+          # enola writes one format per run, so the check runs twice: once for
+          # the annotations, once for the job summary.
           enola check --base "origin/${BASE_REF}" --format annotations --host github .
           code=$?
           enola check --base "origin/${BASE_REF}" --summary . >> "$GITHUB_STEP_SUMMARY"
+          summary_code=$?
           # 0 clean, 1 a finding (reported, not enforced), 3 the base could not
           # be compared (not a statement about the change), 2 enola could not run.
-          if [ "$code" -eq 2 ]; then
+          if [ "$code" -eq 2 ] || [ "$summary_code" -eq 2 ]; then
             echo "::error::enola check could not run"
             exit 1
           fi
