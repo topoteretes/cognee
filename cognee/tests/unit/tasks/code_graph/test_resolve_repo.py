@@ -26,10 +26,14 @@ def test_clone_slug_is_stable_and_filesystem_safe():
     url = "https://github.com/org/repo.git"
     assert resolve_module._clone_slug(url) == resolve_module._clone_slug(url)
     assert "/" not in resolve_module._clone_slug(url)
-    assert resolve_module._clone_slug(
-        "http://evil.example:6379/a/b.git"
-    ) != resolve_module._clone_slug("https://evil.example/6379/a/b.git")
-    assert resolve_module._clone_slug("http://example.com/o/r.git") != resolve_module._clone_slug(
+    assert resolve_module._clone_slug(url) == "github.com-org-repo"
+
+
+def test_cache_paths_separate_urls_with_colliding_readable_slugs():
+    assert resolve_module.clone_dir("http://evil.example:6379/a/b.git") != resolve_module.clone_dir(
+        "https://evil.example/6379/a/b.git"
+    )
+    assert resolve_module.clone_dir("http://example.com/o/r.git") != resolve_module.clone_dir(
         "https://example.com/o/r.git"
     )
 
@@ -99,7 +103,7 @@ async def test_explicit_opt_in_allows_api_repo_cloning(monkeypatch, tmp_path):
             "https://8.8.8.8/org/repo.git", clones_dir=tmp_path
         )
 
-    assert resolved.parent == tmp_path
+    assert resolved.parent.parent == tmp_path
     assert run_git.await_count == 1
 
 

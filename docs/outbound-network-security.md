@@ -19,7 +19,9 @@ verification and scoped credentials, disable proxies and refuse redirects. Git
 2.37+ is checked before HTTP(S) operations so older Git cannot ignore the pin.
 GitHub/GitLab URLs are normalized before validation (`www.`, HTTP, and GitLab's
 missing `.git` suffix). Renamed/transferred repositories require their canonical
-URL; a redirect produces an explicit error. Cache paths include a URL hash;
+URL; a redirect produces an explicit error. Cache paths use a URL-hashed parent
+directory and retain the historical repository basename (including branch suffixes),
+so existing code-graph node IDs survive the cache change;
 refresh verifies the stored origin and always fetches from the validated URL.
 
 Credential-helper settings (including host-scoped helpers), extra auth headers,

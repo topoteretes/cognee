@@ -334,8 +334,9 @@ def llm_key_set(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("host", ["github.com", "www.github.com"])
 async def test_repository_url_is_cloned_and_resolved_like_a_project(
-    tmp_path, monkeypatch, llm_key_set
+    tmp_path, monkeypatch, llm_key_set, host
 ):
     """A GitHub URL in add() is a code project, not a web page: it is cloned and
     then partitioned exactly like a local project directory."""
@@ -355,11 +356,12 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
 
     resolved = await resolve_data_directories(
-        ["https://github.com/org/repo?tab=readme-ov-file", "plain text note"], branch="dev"
+        [f"https://{host}/org/repo?tab=readme-ov-file", "plain text note"], branch="dev"
     )
 
-    # The clone gets the normalised URL, not the browser one, and the branch asked for.
-    assert cloned_specs == [("https://github.com/org/repo", "dev")]
+    # Strip browser query parameters, but retain the historical host spelling
+    # until the resolver derives the graph identity and canonicalizes transport.
+    assert cloned_specs == [(f"https://{host}/org/repo", "dev")]
     manifest_items = [
         item for item in resolved if isinstance(item, DataItem) and not item.cognee_path
     ]
@@ -367,7 +369,7 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
     manifest = manifest_items[0]
     assert manifest.system_metadata["source"] == "code_repo"
     assert manifest.system_metadata["repo_path"] == str(clone)
-    assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo"
+    assert manifest.system_metadata["repo_url"] == f"https://{host}/org/repo"
     assert manifest.system_metadata["file_count"] == 3
     # The repo's documents ride along individually, as cognee-produced paths
     # the server-path gate does not apply to; unrelated items pass through.

@@ -45,7 +45,8 @@ def test_each_branch_has_a_directory_of_its_own(tmp_path):
 
     # Apart even where the file system folds case or the name had to be rewritten.
     assert len({str(path).lower() for path in [default, *dirs]}) == len(branches) + 1
-    assert all(path.parent == tmp_path and len(path.name) < 100 for path in dirs)
+    assert all(path.parent == default.parent and len(path.name) < 100 for path in dirs)
+    assert default.parent.parent == tmp_path
 
 
 @pytest.mark.asyncio

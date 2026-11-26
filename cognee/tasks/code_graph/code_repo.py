@@ -376,7 +376,9 @@ async def resolve_code_repository_url(
     that branch instead of the remote's default; a dataset still holds one data
     row per URL, so adding it on another branch replaces that row's code graph.
     """
-    clone_url = code_repo_clone_url(spec)
+    # The resolver canonicalizes the transport after deriving the legacy graph
+    # identity; do not discard the caller's historical host spelling here.
+    clone_url = code_repo_clone_url(spec, normalize_transport=False)
     if clone_url is None:
         raise ValueError(
             f"'{redact_repo_spec(spec)}' is not a repository URL add() can clone; "

@@ -218,9 +218,9 @@ def redact_repo_spec(spec: str | Path) -> str:
 
 
 def _clone_slug(url: str, branch: str | None = None) -> str:
-    """A readable directory name plus a hash of the exact credential-free URL.
+    """The historical directory basename used as the code-graph repository name.
 
-    A chosen branch gets its own directory beside it, e.g. 'github.com-org-repo-<urlhash>@dev-<hash>',
+    A chosen branch gets its own directory beside it, e.g. 'github.com-org-repo@dev-<hash>',
     so no clone is ever replaced under another caller. The hash of the exact name keeps
     apart branches the readable part merges: case-insensitive file systems, and the
     characters replaced here.
@@ -228,7 +228,6 @@ def _clone_slug(url: str, branch: str | None = None) -> str:
     tail = url.split("://")[-1].replace(":", "/").rstrip("/")
     tail = tail.removesuffix(".git")
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", tail).strip("-.")
-    slug += "-" + hashlib.sha256(url.encode()).hexdigest()[:16]
     if branch is None:
         return slug
     readable = re.sub(r"[^A-Za-z0-9._-]+", "-", branch)[:40]
@@ -243,14 +242,18 @@ def repository_identity(url: str) -> Path:
     Data rows and their graph ownership survive the cache hardening.
     """
     legacy_url = redact_repo_spec(code_repo_clone_url(url, normalize_transport=False) or url)
-    tail = legacy_url.split("://")[-1].replace(":", "/").rstrip("/").removesuffix(".git")
-    return default_clones_dir() / re.sub(r"[^A-Za-z0-9._-]+", "-", tail).strip("-.")
+    return default_clones_dir() / _clone_slug(legacy_url)
 
 
 def clone_dir(url: str, branch: str | None = None, clones_dir: Path | None = None) -> Path:
     """Where :func:`resolve_repo_source` clones the credential-free ``url`` on ``branch``
-    (None selects the remote's default branch)."""
-    return (Path(clones_dir) if clones_dir else default_clones_dir()) / _clone_slug(url, branch)
+    (None selects the remote's default branch).
+
+    The parent hashes the exact URL to separate colliding readable slugs. Keep
+    the basename unchanged: enola and the graph mapper use it for node identity.
+    """
+    base = Path(clones_dir) if clones_dir else default_clones_dir()
+    return base / hashlib.sha256(url.encode()).hexdigest()[:16] / _clone_slug(url, branch)
 
 
 # git's refname rules that cannot appear anywhere in a branch name: control
@@ -544,7 +547,12 @@ async def resolve_repo_source(
         )
 
     base = Path(clones_dir) if clones_dir else default_clones_dir()
-    target = clone_dir(clean_url, branch, base)
+    # Transport canonicalization must not rename an already-indexed repository
+    # (e.g. www.github.com -> github.com). Preserve its historical basename.
+    identity_url = redact_repo_spec(
+        code_repo_clone_url(str(spec), normalize_transport=False) or spec
+    )
+    target = clone_dir(identity_url, branch, base)
     # The slug regex already forbids separators and dot-runs; keep an
     # explicit containment check so a clone can never land outside the
     # clones directory regardless of what the URL decomposed into.
