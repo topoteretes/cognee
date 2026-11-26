@@ -22,6 +22,13 @@ def _collect_chunk_data(get_chunk_data: Callable, text: str) -> list[dict]:
 
 
 class TextChunkerWithOverlap(Chunker):
+    """Text chunker that retains overlap between consecutive chunks.
+
+    The configured overlap ratio is an upper bound. Retained overlap is reduced
+    as needed so it does not cause the next item to exceed max_chunk_size.
+    Individually oversized items are handled without carrying previous overlap.
+    """
+
     chunker_id = "text_chunker_overlap_v1"
 
     def __init__(
