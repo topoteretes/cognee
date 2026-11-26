@@ -357,9 +357,6 @@ async def run(args):
             responses = decisions
             fixed_sql = reference_sql
 
-            async def dataset_size(self):
-                return fixture.manifest["bytes"]
-
             async def document_sizes(self, documents):
                 return {doc: fixture.documents[doc]["bytes"] for doc in documents}
 

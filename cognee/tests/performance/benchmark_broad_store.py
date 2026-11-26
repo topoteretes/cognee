@@ -224,9 +224,6 @@ async def benchmark(args):
             timings["close"] += time.perf_counter() - started
 
     class FixedSQLRetriever(BroadRetriever):
-        async def dataset_size(self):
-            return sum(graph.sizes.values())
-
         async def document_sizes(self, documents):
             return {document: graph.sizes[document] for document in documents}
 
