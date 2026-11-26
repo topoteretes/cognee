@@ -882,6 +882,7 @@ async def improve(
     session_ids: str | None = None,
     build_global_context_index: bool = False,
     build_truth_subspace: bool = False,
+    dataset_id: str | None = None,
 ) -> list:
     """Run the self-improvement loop over a dataset and report what each stage did.
 
@@ -914,7 +915,18 @@ async def improve(
     build_truth_subspace : bool
         Also build the truth subspace from the sessions' distilled learnings
         (needs session_ids and a graph backend with truth state).
+    dataset_id : str, optional
+        UUID of the dataset to process; takes precedence over dataset_name.
+        A name resolves only among the datasets you own, so use the id for
+        a dataset shared with you.
     """
+    from uuid import UUID
+
+    try:
+        parsed_dataset_id = UUID(dataset_id) if dataset_id else None
+    except ValueError as e:
+        return [types.TextContent(type="text", text=f"Error: invalid UUID ({e}).")]
+
     dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
         try:
@@ -924,9 +936,12 @@ async def improve(
                 session_ids=session_list,
                 build_global_context_index=build_global_context_index,
                 build_truth_subspace=build_truth_subspace,
+                dataset_id=parsed_dataset_id,
             )
             return [
-                types.TextContent(type="text", text=format_improve_result(result, dataset_name))
+                types.TextContent(
+                    type="text", text=format_improve_result(result, dataset_id or dataset_name)
+                )
             ]
         except Exception as e:
             error_msg = f"Improve failed: {e!s}"
