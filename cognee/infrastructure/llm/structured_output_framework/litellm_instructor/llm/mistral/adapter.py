@@ -113,6 +113,9 @@ class MistralAdapter(GenericAPIAdapter):
         """
         try:
             merged_kwargs = {**self.llm_args, **kwargs}
+            # Send LLM_ENDPOINT to LiteLLM; an api_base from llm_args or kwargs wins.
+            if self.endpoint:
+                merged_kwargs.setdefault("api_base", self.endpoint)
             try:
                 async with llm_rate_limiter_context_manager():
                     # instructor validates the answer against response_model and returns
