@@ -49,7 +49,7 @@ hosted service gains the protection; an SDK PR alone does not deploy Cloud.
 ## Explicit self-hosted settings
 
 `DefaultUrlCrawler` and `DefaultCrawlerConfig` accept `proxy_url`, `ca_bundle`,
-and `max_browser_response_bytes`. The corresponding process settings are
+`browser_route_concurrency`, and `max_browser_response_bytes`. The corresponding process settings are
 `WEB_SCRAPER_PROXY_URL`, `WEB_SCRAPER_CA_BUNDLE`, and
 `WEB_SCRAPER_MAX_BROWSER_RESPONSE_BYTES`. These settings belong to the operator;
 never populate them from an untrusted request. Generic `HTTPS_PROXY` and
@@ -60,9 +60,12 @@ the client's preflight validation alone cannot constrain the proxy's resolver.
 Keep this opt-in unset on Cloud.
 
 Browser image/media/font requests are aborted before download. Remaining
-responses stream through a separate semaphore using the configured crawler
-concurrency (the page-level semaphore cannot be reused without deadlocking).
-When a decompressed response exceeds an explicitly configured positive byte
-limit, the route is aborted; partial content is never returned. No new default
-size cutoff is imposed. DNS resolution and successive IP attempts share the
+responses stream through a separate semaphore, configured with
+`browser_route_concurrency` (defaults to crawler concurrency). Fetch slots are
+released before Playwright serializes the response. Renders use a dedicated
+executor sized by crawler concurrency, keeping the default DNS executor free.
+Cancellation stops the render on its own event loop.
+The default decompressed response limit is 25 MiB (26214400 bytes), as agreed
+in the PR review. An oversized route is aborted; partial content is never returned.
+Set a positive `max_browser_response_bytes` to override it. DNS resolution and successive IP attempts share the
 existing connect timeout; preflight lookups use the crawler request timeout.

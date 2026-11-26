@@ -383,3 +383,98 @@ async def test_playwright_serialization_runs_off_caller_loop(monkeypatch):
 @pytest.mark.parametrize("address", ["::ffff:127.0.0.1", "2002:7f00:1::", "2002:a9fe:a9fe::"])
 def test_tunneled_ipv6_cannot_hide_non_public_ipv4(address):
     assert ssrf._is_blocked_ip(ipaddress.ip_address(address))
+
+
+@pytest.mark.asyncio
+async def test_renders_leave_default_executor_free_for_dns_and_cancel(monkeypatch):
+    import asyncio
+    import socket
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from cognee.tasks.web_scraper.default_url_crawler import DefaultUrlCrawler
+
+    loop = asyncio.get_running_loop()
+    previous = loop._default_executor
+    pool = ThreadPoolExecutor(max_workers=1)
+    loop.set_default_executor(pool)
+    entered = [asyncio.Event(), asyncio.Event()]
+    stopped = [asyncio.Event(), asyncio.Event()]
+
+    async def render(self, url, *args):
+        index = int(url)
+        loop.call_soon_threadsafe(entered[index].set)
+        try:
+            await asyncio.Event().wait()
+        finally:
+            loop.call_soon_threadsafe(stopped[index].set)
+
+    async def client(self):
+        pass
+
+    monkeypatch.setattr(DefaultUrlCrawler, "_render_browser", render)
+    monkeypatch.setattr(DefaultUrlCrawler, "_ensure_client", client)
+    crawler = DefaultUrlCrawler(concurrency=2)
+    tasks = [asyncio.create_task(crawler._render_with_playwright(str(i))) for i in range(2)]
+    try:
+        await asyncio.wait_for(asyncio.gather(*(e.wait() for e in entered)), 2)
+        result = await asyncio.wait_for(
+            loop.getaddrinfo("localhost", 443, type=socket.SOCK_STREAM), 2
+        )
+        assert result
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.wait_for(asyncio.gather(*(e.wait() for e in stopped)), 2)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await crawler.close()
+        loop._default_executor = previous
+        pool.shutdown(wait=False)
+
+
+def test_browser_response_default_and_configured_overrides(monkeypatch):
+    from cognee.tasks.web_scraper.default_url_crawler import DefaultUrlCrawler
+
+    monkeypatch.delenv("WEB_SCRAPER_MAX_BROWSER_RESPONSE_BYTES", raising=False)
+    assert DefaultUrlCrawler().max_browser_response_bytes == 26214400
+    monkeypatch.setenv("WEB_SCRAPER_MAX_BROWSER_RESPONSE_BYTES", "1024")
+    assert DefaultUrlCrawler().max_browser_response_bytes == 1024
+    assert DefaultUrlCrawler(max_browser_response_bytes=2048).max_browser_response_bytes == 2048
+
+
+@pytest.mark.asyncio
+async def test_browser_fetch_slot_is_released_before_fulfill():
+    import asyncio
+    from types import SimpleNamespace
+
+    from cognee.tasks.web_scraper.default_url_crawler import DefaultUrlCrawler
+
+    semaphore = asyncio.Semaphore(1)
+
+    async def fulfill(**kwargs):
+        async with semaphore:
+            assert kwargs["body"] == b"body"
+
+    route = SimpleNamespace(
+        request=SimpleNamespace(
+            resource_type="script",
+            method="GET",
+            url="https://public.example/script.js",
+            all_headers=AsyncMock(return_value={}),
+            post_data_buffer=None,
+        ),
+        abort=AsyncMock(),
+        fulfill=fulfill,
+    )
+    crawler = DefaultUrlCrawler()
+    crawler._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, content=b"body"))
+    )
+    try:
+        await asyncio.wait_for(crawler._fetch_browser_route(route, semaphore=semaphore), 1)
+        route.abort.assert_not_awaited()
+    finally:
+        await crawler.close()

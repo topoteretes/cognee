@@ -57,3 +57,49 @@ async def test_chromium_redirect_never_connects_to_loopback(monkeypatch):
         await asyncio.to_thread(server.shutdown)
         server.server_close()
         thread.join()
+
+
+@pytest.mark.asyncio
+async def test_many_subresources_render_with_independent_route_concurrency(monkeypatch):
+    playwright = pytest.importorskip("playwright.async_api")
+    from cognee.tasks.web_scraper.default_url_crawler import DefaultUrlCrawler
+
+    async with playwright.async_playwright() as driver:
+        if not Path(driver.chromium.executable_path).exists():
+            pytest.skip("Chromium is not installed; run playwright install chromium")
+    active = peak = 0
+
+    async def public_response(request):
+        nonlocal active, peak
+        if request.url.path == "/":
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                text=(
+                    "<script>window.loaded = 0</script>"
+                    + "".join(f'<script async src="/part-{i}.js"></script>' for i in range(30))
+                ),
+            )
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0.1)
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/javascript"},
+                text="window.loaded++;document.title=String(window.loaded)",
+            )
+        finally:
+            active -= 1
+
+    async def client(self):
+        if self._client is None:
+            self._client = httpx.AsyncClient(transport=httpx.MockTransport(public_response))
+
+    monkeypatch.setattr(DefaultUrlCrawler, "_ensure_client", client)
+    async with DefaultUrlCrawler(
+        concurrency=1, browser_route_concurrency=10, timeout=3, max_retries=0
+    ) as crawler:
+        html = await crawler._render_with_playwright("https://public.example/", js_wait=0)
+    assert "<title>30</title>" in html
+    assert 1 < peak <= 10

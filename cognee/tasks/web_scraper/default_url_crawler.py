@@ -1,6 +1,8 @@
 import asyncio
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
@@ -63,6 +65,7 @@ class DefaultUrlCrawler:
         proxy_url: str | None = None,
         ca_bundle: str | None = None,
         max_browser_response_bytes: int | None = None,
+        browser_route_concurrency: int | None = None,
     ):
         """Initialize the DefaultUrlCrawler.
 
@@ -77,7 +80,8 @@ class DefaultUrlCrawler:
             robots_cache_ttl: Time-to-live for robots.txt cache in seconds.
             proxy_url: Explicit trusted egress proxy; it must enforce destination policy.
             ca_bundle: Explicit PEM trust bundle; certificate verification stays enabled.
-            max_browser_response_bytes: Optional decompressed response cap; oversized
+            browser_route_concurrency: Concurrent subresource fetches per page; defaults to concurrency.
+            max_browser_response_bytes: Decompressed response cap (25 MiB by default); oversized
                 browser routes fail rather than returning truncated content.
         """
         self.proxy_url = proxy_url or os.getenv("WEB_SCRAPER_PROXY_URL")
@@ -86,11 +90,17 @@ class DefaultUrlCrawler:
         self.max_browser_response_bytes = (
             max_browser_response_bytes
             if max_browser_response_bytes is not None
-            else (int(configured_limit) if configured_limit else None)
+            else (int(configured_limit) if configured_limit else 25 * 1024 * 1024)
         )
         if self.max_browser_response_bytes is not None and self.max_browser_response_bytes <= 0:
             raise ValueError("max_browser_response_bytes must be positive")
         self.concurrency = concurrency
+        self.browser_route_concurrency = (
+            concurrency if browser_route_concurrency is None else browser_route_concurrency
+        )
+        if concurrency <= 0 or self.browser_route_concurrency <= 0:
+            raise ValueError("Crawler and browser route concurrency must be positive")
+        self._browser_executor: ThreadPoolExecutor | None = None
         self._sem = asyncio.Semaphore(concurrency)
         self.crawl_delay = crawl_delay
         self.max_crawl_delay = max_crawl_delay
@@ -129,6 +139,9 @@ class DefaultUrlCrawler:
 
     async def close(self):
         """Close the HTTP client."""
+        if self._browser_executor is not None:
+            self._browser_executor.shutdown(wait=False, cancel_futures=True)
+            self._browser_executor = None
         if self._client:
             await self._client.aclose()
             self._client = None
@@ -365,7 +378,7 @@ class DefaultUrlCrawler:
 
         async def fetch():
             async with (
-                semaphore or asyncio.Semaphore(self.concurrency),
+                semaphore or asyncio.Semaphore(self.browser_route_concurrency),
                 self._client.stream(
                     request.method,
                     request.url,
@@ -392,7 +405,8 @@ class DefaultUrlCrawler:
                     if key.lower()
                     not in {"content-encoding", "content-length", "transfer-encoding"}
                 }
-                await route.fulfill(status=response.status_code, headers=headers, body=body)
+            # Encoding/fulfilling may yield to the browser; release the fetch slot first.
+            await route.fulfill(status=response.status_code, headers=headers, body=body)
 
         remaining = self.timeout if deadline is None else max(0.0, deadline - time.monotonic())
         try:
@@ -413,20 +427,49 @@ class DefaultUrlCrawler:
         # Playwright's Python transport base64/JSON-encodes full bodies inline.
         # Its own event loop and HTTP client keep that work off the caller's
         # event loop; no asyncio objects/connections cross thread boundaries.
-        async def render():
-            async with DefaultUrlCrawler(
-                concurrency=self.concurrency,
-                timeout=self.timeout,
-                max_retries=self.max_retries,
-                retry_delay_factor=self.retry_delay_factor,
-                headers=self.headers,
-                proxy_url=self.proxy_url,
-                ca_bundle=self.ca_bundle,
-                max_browser_response_bytes=self.max_browser_response_bytes,
-            ) as worker:
-                return await worker._render_browser(url, js_wait, timeout)
+        if self._browser_executor is None:
+            self._browser_executor = ThreadPoolExecutor(
+                max_workers=self.concurrency, thread_name_prefix="cognee-browser"
+            )
+        cancelled = threading.Event()
+        lock = threading.Lock()
+        running = []
 
-        return await asyncio.to_thread(lambda: asyncio.run(render()))
+        async def render():
+            with lock:
+                if cancelled.is_set():
+                    raise asyncio.CancelledError
+                running.append((asyncio.get_running_loop(), asyncio.current_task()))
+            try:
+                async with DefaultUrlCrawler(
+                    concurrency=self.concurrency,
+                    browser_route_concurrency=self.browser_route_concurrency,
+                    timeout=self.timeout,
+                    max_retries=self.max_retries,
+                    retry_delay_factor=self.retry_delay_factor,
+                    headers=self.headers,
+                    proxy_url=self.proxy_url,
+                    ca_bundle=self.ca_bundle,
+                    max_browser_response_bytes=self.max_browser_response_bytes,
+                ) as worker:
+                    return await worker._render_browser(url, js_wait, timeout)
+            finally:
+                with lock:
+                    running.clear()
+
+        try:
+            return await asyncio.get_running_loop().run_in_executor(
+                self._browser_executor, lambda: asyncio.run(render())
+            )
+        except asyncio.CancelledError:
+            # Cancel the render on its own loop as well as its awaiting caller.
+            # The lock prevents scheduling on a loop that is already closing.
+            cancelled.set()
+            with lock:
+                if running:
+                    loop, task = running[0]
+                    loop.call_soon_threadsafe(task.cancel)
+            raise
 
     async def _render_browser(
         self, url: str, js_wait: float = 1.0, timeout: float | None = None
@@ -475,7 +518,7 @@ class DefaultUrlCrawler:
                         # Service workers and WebSockets must not bypass routing.
                         context = await browser.new_context(service_workers="block")
                         await self._ensure_client()
-                        semaphore = asyncio.Semaphore(self.concurrency)
+                        semaphore = asyncio.Semaphore(self.browser_route_concurrency)
                         deadline = time.monotonic() + timeout_val
 
                         async def fetch_route(route, *, semaphore=semaphore, deadline=deadline):
