@@ -19,11 +19,6 @@ concurrency:
   group: enola-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  # 0.5.4 is the first release with `check --base`. This is the CI copy of enola;
-  # the code-graph route pins its own enola-cli in pyproject.toml.
-  ENOLA_VERSION: "0.5.4"
-
 jobs:
   enola:
     name: Architecture (enola)
@@ -40,8 +35,16 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
 
       - name: Install enola
+        # The enola-cli pin lives only in pyproject.toml (the code-graph route
+        # uses the same binary), so CI installs that version without the rest
+        # of cognee's dependencies. `check --base` needs 0.5.4 or later.
         run: |
-          uv tool install "enola-cli==${ENOLA_VERSION}"
+          version="$(sed -nE 's/.*"enola-cli==([0-9][0-9.]*)".*/\1/p' pyproject.toml | head -n 1)"
+          if [ -z "$version" ]; then
+            echo "::error::no enola-cli pin found in pyproject.toml"
+            exit 1
+          fi
+          uv tool install "enola-cli==${version}"
           echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
 
       - name: Lint the declared architecture

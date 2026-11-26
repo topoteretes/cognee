@@ -60,10 +60,10 @@ Use the [test guide](cognee/tests/README.md) to choose integration and end-to-en
 
 If you do not already use enola while developing, run it locally:
 
-- Install the version CI uses: `uv tool install enola-cli==0.5.4`. It is separate from the `enola-cli` that `pyproject.toml` pins for the code-graph route.
+- enola comes with cognee: `uv sync --dev` installs the `enola-cli` that `pyproject.toml` pins, the version CI uses. Run the commands below as `uv run enola …`.
 - Before changing shared code, see what depends on it: `enola impact <symbol>`, or `enola plan --paths <files>` for the declared rules that govern those files.
 - Before opening a pull request, grade the branch: `enola check --base origin/dev`. It writes nothing. In a checkout whose directory is not named `cognee` (a `git worktree`, for example), it declines to compare (exit 3); there, run `enola baseline pin` before you start editing and `enola check` when done.
-- With a coding agent, serve the graph over MCP: `claude mcp add enola -- enola <path to this repository>`.
+- With a coding agent, serve the graph over MCP: `claude mcp add enola -- <repo>/.venv/bin/enola <repo>`, where `<repo>` is the path to this repository.
 - After editing `enola-intent.yaml`, `enola --generate . && enola constraints lint --fail-empty .` must exit 0. Every rule needs a `because:` that says why it exists.
 
 `.enola/` holds local snapshots and is gitignored.
