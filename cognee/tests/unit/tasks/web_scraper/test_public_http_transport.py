@@ -353,6 +353,7 @@ async def test_browser_route_waiting_for_slot_obeys_navigation_deadline():
     import asyncio
     import time
     from types import SimpleNamespace
+
     from cognee.tasks.web_scraper.default_url_crawler import DefaultUrlCrawler
 
     route = SimpleNamespace(request=SimpleNamespace(resource_type="fetch"), abort=AsyncMock())
@@ -366,6 +367,7 @@ async def test_browser_route_waiting_for_slot_obeys_navigation_deadline():
 @pytest.mark.asyncio
 async def test_playwright_serialization_runs_off_caller_loop(monkeypatch):
     import threading
+
     from cognee.tasks.web_scraper.default_url_crawler import DefaultUrlCrawler
 
     caller = threading.get_ident()

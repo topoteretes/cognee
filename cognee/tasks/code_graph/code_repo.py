@@ -46,9 +46,9 @@ from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.config import DEFAULT_CODE_GRAPH_BATCH_SIZE
 from cognee.tasks.code_graph.resolve_repo import (
     CodeRepositoryError,
-    repository_identity,
     code_repo_clone_url,
     redact_repo_spec,
+    repository_identity,
     resolve_repo_source,
 )
 from cognee.tasks.ingestion.dlt_utils import metadata_source

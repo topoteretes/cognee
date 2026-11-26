@@ -475,12 +475,12 @@ class DefaultUrlCrawler:
                         semaphore = asyncio.Semaphore(self.concurrency)
                         deadline = time.monotonic() + timeout_val
 
-                        async def fetch_route(route):
+                        async def fetch_route(route, semaphore=semaphore, deadline=deadline):
                             try:
                                 await self._fetch_browser_route(
                                     route, semaphore=semaphore, deadline=deadline
                                 )
-                            except Exception as error:
+                            except Exception as error:  # noqa: BLE001 -- abort is already reported
                                 # The route has already been aborted. Let Chromium
                                 # surface a failed navigation/resource, not an
                                 # uncaught event-listener error during teardown.
