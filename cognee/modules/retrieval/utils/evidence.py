@@ -1,8 +1,10 @@
 """Build structured evidence from objects already included in LLM context.
 
-These helpers perform no database, vector, embedding, or LLM calls. They describe
-``used_as_context`` lineage only; they do not claim that every context artifact
-supports a particular statement in the generated answer.
+These helpers perform no database, vector, embedding, or LLM calls. By default they
+describe ``used_as_context`` lineage: they do not claim that every context artifact
+supports a particular statement in the generated answer. ``chunk_context_evidence``
+marks ``supports_assertion`` only when its caller passes the chunks an answer was
+grounded in (the hybrid retriever's cited chunks).
 """
 
 from typing import Any
@@ -10,7 +12,7 @@ from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import make_source_ref_key
 from cognee.modules.engine.utils import generate_edge_object_id
-from cognee.modules.search.models.EvidenceReference import EvidenceReference
+from cognee.modules.search.models.EvidenceReference import EvidenceReference, EvidenceRole
 
 
 def _payload(obj: Any) -> dict:
@@ -46,8 +48,14 @@ def _source_ref_key(dataset_id: Any, data_id: str | None) -> str | None:
 def chunk_context_evidence(
     retrieved_objects: Any,
     dataset_id: Any = None,
+    role: EvidenceRole = "used_as_context",
 ) -> list[EvidenceReference]:
-    """Describe the exact vector chunks that were available to a RAG completion."""
+    """Describe the given vector chunks as segment evidence.
+
+    With the default role these are the chunks a completion had in context
+    (RAG). ``role="supports_assertion"`` marks chunks an answer was grounded
+    in rather than everything that was in context.
+    """
     if not isinstance(retrieved_objects, (list, tuple)):
         return []
 
@@ -77,6 +85,7 @@ def chunk_context_evidence(
             EvidenceReference(
                 kind="segment",
                 artifact_id=chunk_id,
+                role=role,
                 dataset_id=normalized_dataset_id,
                 source_ref_key=source_ref_key,
                 data_id=data_id,

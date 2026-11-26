@@ -122,6 +122,26 @@ class VectorDBInterface(Protocol):
         """
         raise NotImplementedError
 
+    async def get_collection_names(self) -> list[str]:
+        """The name of every collection in this store, and of nothing else.
+
+        A store that shares its database with other tables (pgvector in the relational
+        database) lists only the tables that are collections. With
+        ``get_data_point_ids`` this is what lets a whole store be read without knowing
+        its ids, as re-embedding a dataset needs (``reembed_collections``). The in-tree
+        adapters implement it; an adapter that does not raises ``NotImplementedError``.
+        """
+        raise NotImplementedError("get_collection_names is not implemented for this adapter")
+
+    async def get_data_point_ids(self, collection_name: str) -> list[str]:
+        """The id of every row in a collection, as ``retrieve`` takes them; no row is left out.
+
+        Ids only, so a collection of any size is listed without loading its payloads
+        or vectors. A collection that does not exist has no rows. The in-tree adapters
+        implement it; an adapter that does not raises ``NotImplementedError``.
+        """
+        raise NotImplementedError("get_data_point_ids is not implemented for this adapter")
+
     """ Data points """
 
     @abstractmethod

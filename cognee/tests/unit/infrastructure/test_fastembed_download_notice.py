@@ -107,9 +107,10 @@ def _engine(monkeypatch, tmp_path):
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path))
     with (
         patch.object(engine_module, "TextEmbedding") as text_embedding,
+        # The engine reads fastembed's model list through this, not through TextEmbedding.
+        patch.object(engine_module, "fastembed_text_models", return_value=REGISTRY),
         patch.object(FastembedEmbeddingEngine, "get_tokenizer", return_value=MagicMock()),
     ):
-        text_embedding.list_supported_models.return_value = REGISTRY
         FastembedEmbeddingEngine(model=MODEL, dimensions=384)
         # The resolved directory is handed to fastembed explicitly; its own
         # default would be the system temp directory.
@@ -133,10 +134,10 @@ def test_engine_download_notice_names_hf_home_for_the_hub_cache(tmp_path, monkey
     _hub_cache(monkeypatch, tmp_path / "hub")
     with (
         caplog.at_level(logging.INFO, logger="FastembedEmbeddingEngine"),
-        patch.object(engine_module, "TextEmbedding") as text_embedding,
+        patch.object(engine_module, "TextEmbedding"),
+        patch.object(engine_module, "fastembed_text_models", return_value=REGISTRY),
         patch.object(FastembedEmbeddingEngine, "get_tokenizer", return_value=MagicMock()),
     ):
-        text_embedding.list_supported_models.return_value = REGISTRY
         FastembedEmbeddingEngine(model=MODEL, dimensions=384)
 
     warnings = [record for record in caplog.records if record.levelno == logging.WARNING]

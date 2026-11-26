@@ -38,6 +38,91 @@ def test_remove_skeleton_neighbor():
     assert node2 not in node1.skeleton_neighbours
 
 
+def test_add_skeleton_neighbor_skips_duplicates():
+    """Adding the same neighbor twice, or an equal node, keeps one entry."""
+    node1 = Node("node1")
+    node1.add_skeleton_neighbor(Node("node2"))
+    node1.add_skeleton_neighbor(Node("node2"))
+    assert [n.id for n in node1.skeleton_neighbours] == ["node2"]
+
+
+def test_neighbor_can_be_added_again_after_removal():
+    node1 = Node("node1")
+    node2 = Node("node2")
+    node1.add_skeleton_neighbor(node2)
+    node1.remove_skeleton_neighbor(node2)
+    node1.add_skeleton_neighbor(node2)
+    assert node1.skeleton_neighbours == [node2]
+
+
+def test_hub_node_edges_are_linear():
+    """A node with tens of thousands of edges projects in well under a second.
+
+    The duplicate check used to scan the neighbour list, so a hub of N edges
+    cost O(N^2) comparisons: about 8 s for 20k edges, minutes on a pod.
+    """
+    import time
+
+    start = time.perf_counter()
+    hub = Node("hub")
+    others = [Node(f"n{i}") for i in range(20_000)]
+    for other in others:
+        hub.add_skeleton_edge(Edge(hub, other))
+    # About 0.2 s on a laptop, where the O(N^2) check took about 8 s. The limit leaves
+    # room for a slow CI runner: macOS jobs have measured 2.3 and 2.8 s.
+    assert time.perf_counter() - start < 5
+    assert len(hub.skeleton_neighbours) == 20_000
+
+
+def test_skeleton_neighbours_keep_the_order_they_were_added():
+    """Neighbours come back in insertion order, once each, whatever the edges repeat."""
+    hub = Node("hub")
+    for name in ("b", "a", "c", "a", "b"):
+        hub.add_skeleton_edge(Edge(hub, Node(name)))
+    assert [n.id for n in hub.skeleton_neighbours] == ["b", "a", "c"]
+    assert [n.id for n in hub.get_skeleton_neighbours()] == ["b", "a", "c"]
+
+
+def test_skeleton_neighbours_is_a_copy():
+    """The list is built on read: changing it, or assigning it, does not change the node."""
+    node1 = Node("node1")
+    node2 = Node("node2")
+    node1.add_skeleton_neighbor(node2)
+
+    node1.skeleton_neighbours.clear()
+    assert node1.skeleton_neighbours == [node2]
+
+    with pytest.raises(AttributeError):
+        node1.skeleton_neighbours = []
+
+
+def test_node_serialization_lists_its_neighbours():
+    """A serialized node still carries its neighbours as a list, in order."""
+    node1 = Node("node1", {"label": "A"})
+    node1.add_skeleton_edge(Edge(node1, Node("node2", {"label": "B"})))
+    node1.add_skeleton_edge(Edge(Node("node3"), node1))
+
+    encoded = jsonable_encoder(node1)
+
+    assert [n["node_id"] for n in encoded["skeleton_neighbours"]] == ["node2", "node3"]
+    assert encoded["skeleton_neighbours"][0]["node_attributes"]["label"] == "B"
+    assert len(encoded["skeleton_edges"]) == 2
+    assert set(encoded) == {"id", "attributes", "skeleton_neighbours", "skeleton_edges", "status"}
+
+
+def test_copied_node_keeps_its_neighbours():
+    """Pickling and deep copying a node keep its neighbours and the duplicate check."""
+    import copy
+    import pickle
+
+    node1 = Node("node1")
+    node1.add_skeleton_neighbor(Node("node2"))
+
+    for clone in (pickle.loads(pickle.dumps(node1)), copy.deepcopy(node1)):
+        clone.add_skeleton_neighbor(Node("node2"))
+        assert [n.id for n in clone.skeleton_neighbours] == ["node2"]
+
+
 def test_add_skeleton_edge():
     """Test adding an edge updates both skeleton_edges and skeleton_neighbours."""
     node1 = Node("node1")

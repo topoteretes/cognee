@@ -1,8 +1,11 @@
+import asyncio
 import uuid
 from datetime import datetime
+from functools import partial
 from typing import Any
 
 from cognee.context_global_variables import current_dataset_id, session_user
+from cognee.infrastructure.background_tasks import register_background_task
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.config import CacheConfig
@@ -40,6 +43,9 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 
 logger = get_logger("SessionManager")
+
+# (user_id, session_id) pairs with a pending-trace LLM batch running in the background.
+_PENDING_EXTRACTIONS: set[tuple[str, str]] = set()
 
 
 class SessionManager:
@@ -275,6 +281,30 @@ class SessionManager:
             session_feedback=session_feedback,
             time=time,
         )
+        await self.after_trace_stored(
+            user_id=user_id,
+            session_id=session_id,
+            trace_id=trace_id,
+            origin_function=origin_function,
+            status=status,
+            error_message=error_message,
+        )
+        return trace_id
+
+    async def after_trace_stored(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        trace_id: str,
+        origin_function: str,
+        status: str,
+        error_message: str,
+    ) -> None:
+        """Run what follows a stored trace step: session activity (counting an error
+        step) and agent-context extraction. Shared by the plain trace write and
+        idempotent capture, which calls it once per admitted event. Fail-open.
+        """
         await record_session_activity(
             user_id, session_id, dataset_id=self.dataset_id, errored=status == "error"
         )
@@ -286,7 +316,6 @@ class SessionManager:
             status=status,
             error_message=error_message,
         )
-        return trace_id
 
     async def _maybe_extract_agent_context(
         self,
@@ -301,7 +330,10 @@ class SessionManager:
         """Derive agent-profile lessons from a just-stored trace step. Gated and fail-open.
 
         Runs only when automatic session context is enabled, and never lets an extraction
-        failure escape — the trace row is already saved by the time this runs.
+        failure escape — the trace row is already saved by the time this runs. The live
+        failure lesson needs no LLM and is written before this returns; the periodic LLM
+        batch runs in the background, so a write (and a capture's receipt) never waits
+        for it.
         """
         if not self.is_auto_feedback_enabled():
             return
@@ -316,7 +348,6 @@ class SessionManager:
                 return
             from cognee.infrastructure.session.agent_context_extraction import (
                 extract_live_agent_context,
-                extract_pending_agent_context,
             )
 
             await extract_live_agent_context(
@@ -328,13 +359,49 @@ class SessionManager:
                 status=status,
                 error_message=error_message,
             )
-            await extract_pending_agent_context(
-                session_manager=self,
-                user_id=user_id,
-                session_id=session_id,
-            )
         except Exception as error:
             logger.warning("Agent-context extraction skipped: %s", error, exc_info=True)
+        self._start_pending_extraction(user_id=user_id, session_id=session_id)
+
+    def _start_pending_extraction(self, *, user_id: str, session_id: str) -> None:
+        """Run the pending-trace LLM batch as a background task, one per session at a time.
+
+        A trace stored while a batch runs starts none: the batch's watermark leaves that
+        trace pending, so a later trace or improve's ``extract_agent_context`` stage
+        picks it up. ``wait_for_background_tasks()`` and server shutdown drain the task.
+        """
+        key = (str(user_id), session_id)
+        if key in _PENDING_EXTRACTIONS:
+            return
+        _PENDING_EXTRACTIONS.add(key)
+
+        async def run() -> None:
+            try:
+                from cognee.infrastructure.session.agent_context_extraction import (
+                    extract_pending_agent_context,
+                )
+                from cognee.modules.improve.admission import (
+                    auto_improve_skip_reason_for_user_id,
+                )
+
+                await extract_pending_agent_context(
+                    session_manager=self,
+                    user_id=user_id,
+                    session_id=session_id,
+                    admission=partial(
+                        auto_improve_skip_reason_for_user_id,
+                        user_id=user_id,
+                        dataset_id=self.dataset_id,
+                        session_id=session_id,
+                        session_ids=[session_id],
+                    ),
+                )
+            except Exception as error:
+                logger.warning("Agent-context extraction skipped: %s", error, exc_info=True)
+            finally:
+                _PENDING_EXTRACTIONS.discard(key)
+
+        register_background_task(asyncio.create_task(run()))
 
     def is_session_available_for_completion(self, user_id: str | None) -> bool:
         """Return True if session (history + save) is available for completion."""
@@ -610,17 +677,30 @@ class SessionManager:
         user_id: str,
         session_id: str | None = None,
         last_n: int | None = None,
+        start: int | None = None,
+        end: int | None = None,
     ) -> list[SessionAgentTraceEntry]:
         """
-        Get the agent trace session for the given user/session pair.
+        Get the agent trace session for the given user/session pair: the last ``last_n``
+        steps, or the steps at positions ``start`` to ``end`` (exclusive), or all.
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
+        if (start is None) != (end is None) or (start is not None and last_n is not None):
+            raise SessionParameterValidationError(
+                message="start and end go together and exclude last_n"
+            )
+        if start is not None and end is not None and not 0 <= start < end:
+            raise SessionParameterValidationError(
+                message=f"need 0 <= start < end, got start={start}, end={end}"
+            )
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace session")
             return []
 
-        entries = await self._cache.get_agent_trace_session(user_id, session_id, last_n=last_n)
+        entries = await self._cache.get_agent_trace_session(
+            user_id, session_id, last_n=last_n, start=start, end=end
+        )
         return entries
 
     async def get_agent_trace_feedback(

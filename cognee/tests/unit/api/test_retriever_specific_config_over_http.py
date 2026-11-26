@@ -1,7 +1,8 @@
 """POST /api/v1/search and /recall forward retriever_specific_config to the SDK call,
 the way the SDK's own search()/recall() already accept it. The known keys are checked
 for type and upper bound, and the one key JSON cannot carry (response_model) is rejected.
-A rejected request answers 400: the app maps every request validation error to 400."""
+A rejected request answers 400: the app maps every request validation error to 400.
+A BROAD limit the dataset exceeds answers 422 with the setting to raise."""
 
 import importlib
 from types import SimpleNamespace
@@ -12,7 +13,9 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 
-from cognee.api.client import request_validation_exception_handler
+from cognee.api.client import exception_handler, request_validation_exception_handler
+from cognee.exceptions import CogneeApiError
+from cognee.modules.retrieval.broad_retriever import BroadLimitError
 
 search_router_module = importlib.import_module("cognee.api.v1.search.routers.get_search_router")
 recall_router_module = importlib.import_module("cognee.api.v1.recall.routers.get_recall_router")
@@ -29,11 +32,12 @@ SENTINEL = "metadata-key-sentinel-7f3a"
 def _app(router_module, name):
     """An app serving ``get_<name>_router()`` under ``/api/v1/<name>`` for a stub user.
 
-    It registers the production validation handler, so a rejected body answers with the
-    status a real client gets.
+    It registers the production error handlers, so a rejected body or a cognee error
+    answers with the status a real client gets.
     """
     app = FastAPI()
     app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
+    app.add_exception_handler(CogneeApiError, exception_handler)
     app.include_router(getattr(router_module, f"get_{name}_router")(), prefix=f"/api/v1/{name}")
     app.dependency_overrides[router_module.get_authenticated_user] = lambda: SimpleNamespace(
         id=uuid4(), tenant_id=None
@@ -203,7 +207,7 @@ def test_values_at_the_bounds_and_unknown_keys_pass(search_client):
         "entities_top_k": 0,
         "facts_top_k": None,
         "max_iter": 20,
-        "store_mb": 256,
+        "store_mb": 512,
         "batch_mb": 0.5,
         "context_tokens": 1_000_000,
         "external_metadata_keys": None,
@@ -214,3 +218,43 @@ def test_values_at_the_bounds_and_unknown_keys_pass(search_client):
 
     assert response.status_code == 200, response.text
     assert captured["retriever_specific_config"] == config
+
+
+@pytest.mark.parametrize("route", ["search", "recall"])
+@pytest.mark.parametrize("key", ["store_mb", "batch_mb"])
+@pytest.mark.parametrize("number", ["NaN", "Infinity", "-Infinity", "1e999"])
+def test_non_finite_limits_are_rejected_with_a_readable_400(
+    search_client, recall_client, route, key, number
+):
+    """JSON cannot hold the rejected NaN or Infinity, so the 400 echoes it as text."""
+    client = search_client[0] if route == "search" else recall_client[0]
+    captured = search_client[1] if route == "search" else recall_client[1]
+    body = f'{{"query": "q", "retrieverSpecificConfig": {{"{key}": {number}}}}}'
+
+    response = client.post(
+        f"/api/v1/{route}", content=body, headers={"Content-Type": "application/json"}
+    )
+
+    assert response.status_code == 400, response.text
+    assert key in response.json()["detail"][0]["msg"]
+    assert "Traceback" not in response.text
+    assert captured == {}
+
+
+@pytest.mark.parametrize("route", ["search", "recall"])
+def test_a_broad_limit_answers_422_with_the_setting_to_raise(
+    monkeypatch, search_client, recall_client, route
+):
+    message = "BROAD: document a.csv holds too much text. Raise batch_mb."
+
+    async def over_the_limit(**kwargs):
+        raise BroadLimitError(message)
+
+    package = importlib.import_module(f"cognee.api.v1.{route}")
+    monkeypatch.setattr(package, route, over_the_limit)
+    client = search_client[0] if route == "search" else recall_client[0]
+
+    response = client.post(f"/api/v1/{route}", json={"query": "q", "searchType": "BROAD"})
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == f"{message} [BroadLimitError]"

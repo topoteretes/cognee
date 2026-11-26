@@ -18,7 +18,7 @@ together.
 | `GRAPH_SUMMARY_COMPLETION` | `GraphSummaryCompletionRetriever` | `graph_summary_completion_retriever.py` | yes | Graph context built from summaries |
 | `TEMPORAL` | `TemporalHybridRetriever` | `temporal_hybrid_retriever.py` | yes | Hybrid retrieval reranked by time: the adapter returns the `Timestamp` nodes overlapping the window the LLM extracts from the question (`GraphDBInterface.get_timestamps_in_range`), the chunks and entities anchored to them move to the front of the candidate set, nothing is dropped; plain hybrid when the question carries no time or nothing overlaps (`temporal_hybrid/matching.py`) |
 | `RAG_COMPLETION` | `CompletionRetriever` | `completion_retriever.py` | yes | Chunk vector search + completion |
-| `BROAD` | `BroadRetriever` | `broad_retriever.py` | yes | Questions over a whole dataset (counts, totals, lists, lookups): a small dataset is shown whole; a large one is loaded into SQLite (`broad_store.py`) and answered by one model-written query |
+| `BROAD` | `BroadRetriever` | `broad_retriever.py` | yes | Questions over a whole dataset (counts, totals, lists, lookups): a small dataset is shown whole; a large one is loaded into private in-memory SQLite (`broad_store.py`) and answered by one model-written query |
 | `TRIPLET_COMPLETION` | `GraphCompletionRetriever` | `graph_completion_retriever.py` | yes | Deprecated, removed in the next release: triplet embeddings were removed, so `search()` / `recall()` resolve it to `GRAPH_COMPLETION` with a `FutureWarning` (`DEPRECATED_SEARCH_TYPES`) |
 | `AGENTIC_COMPLETION` | `AgenticRetriever` | `agentic_retriever.py` | yes | Special-cased in the factory (not in the dict): tool loop with `skills`, `tools`, `max_iter` |
 | `CHUNKS` | `ChunksRetriever` | `chunks_retriever.py` | no | Vector search over `DocumentChunk_text` |
@@ -36,6 +36,30 @@ Not wired to any `SearchType`: `LexicalRetriever` (`lexical_retriever.py`, the b
 for BM25) and `JaccardChunksRetriever` (`jaccard_retrival.py`, unused). Community
 retrievers register through `register_retriever.py` and take precedence for their type.
 
+## BROAD record storage
+
+BROAD builds a private in-memory SQLite record store for each retrieval, including when
+Cognee's relational backend is PostgreSQL. The store and SQLite temporary tables/indexes
+stay in RAM; closing the connection discards the store after retrieval, including on
+errors or cancellation.
+
+Each retrieval owns a worker thread. Parsing, joining chunks, describing the store,
+token counting and SQL execution run there, including creation and closure of the SQLite
+connection. Graph/vector I/O and LLM calls remain on the caller's async event loop.
+Cancelling a retrieval interrupts active SQLite work; any running Python stage must
+finish before the queued close can release its store. Waiting for cleanup is asynchronous.
+
+`retriever_specific_config["store_mb"]` defaults to `512` and counts megabytes of text
+(million characters), the same on both sides of the threshold. A dataset holding at most
+that much text is loaded whole. Above it, the parts most similar to the question are
+loaded up to the same size, and the answer reports partial coverage as the text held and
+an estimate of the dataset's text. The stored file sizes do not decide this: a CSV holds
+more text than bytes, a PDF far less. The text is measured as it is read, so a dataset
+over the threshold is read up to it once before its most similar parts are loaded. This
+setting does not cap process RAM: SQLite storage, parsed rows and document batches also
+consume memory, and concurrent retrievals each own a separate store. The 256 MB batching
+budget and token and result-row limits are independent of this threshold.
+
 ## The contract
 
 All retrievers subclass `BaseRetriever` (`base_retriever.py`) and implement three
@@ -50,6 +74,9 @@ Optional hooks: `extract_context_object_ids` (which nodes/edges fed a session an
 `merge_retrieved_objects` (combine the raw-query and rewritten-query lanes of a session
 turn), `append_references` / `get_context_evidence` (`include_references=True`), and the
 class flags `supports_session_turn_preparation` / `supports_prompt_preview`.
+`get_context_evidence` runs after the answer. Most retrievers derive it from
+`retrieved_objects`; `HybridRetriever` reports the chunks its `append_references`
+cited for that answer, so it is empty when no answer was generated.
 
 ### Explicit typed graph scopes
 

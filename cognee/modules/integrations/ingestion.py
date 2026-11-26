@@ -99,6 +99,12 @@ def _vercel_service(access_token: str) -> Any:
     return build_vercel_service(access_token)
 
 
+def _granola_service(api_key: str) -> Any:
+    from cognee.tasks.ingestion.connectors.granola import build_granola_service
+
+    return build_granola_service(api_key)
+
+
 def _telegram_service(bot_token: str) -> Any:
     from cognee.tasks.ingestion.connectors.telegram import build_telegram_service
 
@@ -188,6 +194,14 @@ _PROVIDERS: dict[str, _Provider] = {
         source_module="cognee.tasks.ingestion.connectors.vercel",
         source_name="vercel_source",
         service_builder=_vercel_service,
+    ),
+    # An API key (personal or workspace), sent as ``Authorization: Bearer``: Granola has no
+    # OAuth for its REST API, so a host passes the key the user pasted. One source per scope.
+    "granola": _Provider(
+        prefix="granola",
+        source_module="cognee.tasks.ingestion.connectors.granola",
+        source_name="granola_source",
+        service_builder=_granola_service,
     ),
     # A bot token from @BotFather, not an OAuth access token: Telegram has no OAuth for bots,
     # so a host passes the token the user pasted (Cloud: its API-key connect flow).

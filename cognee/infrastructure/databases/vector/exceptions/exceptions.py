@@ -45,10 +45,64 @@ class EmbeddingDimensionMismatchError(CogneeValidationError):
             name=name,
             status_code=status_code,
             remediation=(
+                "If cognee was just upgraded, run `cognee-cli upgrade` first: a pending "
+                "migration may re-embed this dataset with the current model. Otherwise: "
                 f"{keep_using} to keep using this dataset, or delete the dataset "
                 "(forget(dataset=...) / cognee-cli forget) and ingest it again with the "
                 "current model."
             ),
+        )
+
+
+class DatasetReembedIncompleteError(CogneeValidationError):
+    """A re-embed of the dataset started and did not finish, so its vectors are in two states."""
+
+    def __init__(
+        self,
+        dataset_id,
+        target_model: str | None,
+        name: str = "DatasetReembedIncompleteError",
+        status_code: int = status.HTTP_409_CONFLICT,
+    ):
+        self.dataset_id = dataset_id
+        self.target_model = target_model
+        super().__init__(
+            message=(
+                f"Dataset {dataset_id} is being re-embedded with '{target_model}', or a "
+                "re-embed of it stopped before it finished. It cannot be used until the "
+                "re-embed completes."
+            ),
+            name=name,
+            status_code=status_code,
+            remediation=(
+                "If a cognee upgrade or a reembed_dataset call is re-embedding it now, wait "
+                "for that to finish. If none is running, continue where it stopped: run "
+                "`cognee-cli upgrade` if it began during an upgrade, else run reembed_dataset "
+                f"for it again with '{target_model}'."
+            ),
+        )
+
+
+class CollectionNotReembeddableError(CogneeValidationError):
+    """A collection holds a row that was not embedded from its own ``text``."""
+
+    def __init__(
+        self,
+        collection_name: str,
+        data_point_id,
+        name: str = "CollectionNotReembeddableError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        self.collection_name = collection_name
+        self.data_point_id = data_point_id
+        super().__init__(
+            message=(
+                f"Row {data_point_id} of collection '{collection_name}' has no text in its "
+                "payload, so its vector cannot be computed again from the store. No "
+                "collection was changed."
+            ),
+            name=name,
+            status_code=status_code,
         )
 
 

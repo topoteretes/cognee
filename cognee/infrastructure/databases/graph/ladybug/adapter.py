@@ -36,9 +36,12 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_attach_inputs,
 )
 from cognee.infrastructure.databases.provenance.source_refs import (
+    data_source_ref_key_selector,
     get_dataset_id_from_source_ref_key,
     get_pipeline_run_id_from_source_run_ref,
     get_source_ref_key_from_source_run_ref,
+    make_chunk_source_ref_key_prefix,
+    make_source_ref_key,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.files.storage import get_file_storage
@@ -331,6 +334,20 @@ def _json_string(value: Any) -> str:
         return ""
     text = str(value)
     return text[1:-1] if len(text) >= 2 and text[0] == text[-1] == '"' else text
+
+
+def _decoded_json_text(value: Any) -> str | None:
+    """A json_extract result as text: a string unescaped, a number or boolean as
+    its JSON text, None for a JSON null or a missing property."""
+    if value is None or value == "":
+        return None
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if decoded is None:
+        return None
+    return decoded if isinstance(decoded, str) else str(value)
 
 
 class LadybugAdapter(GraphDBInterface):
@@ -1208,6 +1225,8 @@ class LadybugAdapter(GraphDBInterface):
         nodes: list[DataPoint],
         source_ref_key: str | dict[str, str] | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """
         Add multiple nodes to the graph in a batch operation.
@@ -1229,6 +1248,7 @@ class LadybugAdapter(GraphDBInterface):
               non-graph-provenance writes.
             - pipeline_run_id (Optional[str]): Run id recorded alongside the provenance
               stamp, so the write is rollbackable by run. Ignored when source_ref_key is None.
+            - replace (bool): Ignored: every write stores the incoming properties.
         """
         if not nodes:
             return
@@ -1770,6 +1790,61 @@ class LadybugAdapter(GraphDBInterface):
                 for key in _decode_refs(row[3])
                 if str(get_dataset_id_from_source_ref_key(key)) == dataset_id
             ]
+            if owned:
+                edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
+                result[edge] = owned
+        return result
+
+    @staticmethod
+    def _data_source_ref_tokens(dataset_id: str, data_id: str) -> dict[str, str]:
+        """What one dataset document's keys look like inside a stored ref list: its
+        whole v1 key, and the start of any of its v2 chunk keys (a key always
+        follows a ``|``)."""
+        dataset, data = UUID(str(dataset_id)), UUID(str(data_id))
+        return {
+            "document_token": _provenance_token(make_source_ref_key(dataset, data)),
+            "chunk_token": f"|{make_chunk_source_ref_key_prefix(dataset, data)}",
+        }
+
+    async def find_node_source_refs_by_data(
+        self, dataset_id: str, data_id: str
+    ) -> dict[str, list[str]]:
+        """The source refs one dataset document owns on nodes. The engine picks the
+        nodes that carry one, so only those reach Python."""
+        rows = await self.query(
+            """
+            MATCH (n:Node)
+            WHERE coalesce(n.source_ref_keys, '|') CONTAINS $document_token
+               OR coalesce(n.source_ref_keys, '|') CONTAINS $chunk_token
+            RETURN n.id, n.source_ref_keys
+            """,
+            self._data_source_ref_tokens(dataset_id, data_id),
+        )
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            owned = select(_decode_refs(row[1]))
+            if owned:
+                result[row[0]] = owned
+        return result
+
+    async def find_edge_source_refs_by_data(
+        self, dataset_id: str, data_id: str
+    ) -> dict[EdgeIdentity, list[str]]:
+        """The source refs one dataset document owns on edges; see the node lookup."""
+        rows = await self.query(
+            """
+            MATCH (a:Node)-[r:EDGE]->(b:Node)
+            WHERE coalesce(r.source_ref_keys, '|') CONTAINS $document_token
+               OR coalesce(r.source_ref_keys, '|') CONTAINS $chunk_token
+            RETURN a.id, b.id, r.relationship_name, r.source_ref_keys
+            """,
+            self._data_source_ref_tokens(dataset_id, data_id),
+        )
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
+        result: dict[EdgeIdentity, list[str]] = {}
+        for row in rows:
+            owned = select(_decode_refs(row[3]))
             if owned:
                 edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
                 result[edge] = owned
@@ -2359,8 +2434,8 @@ class LadybugAdapter(GraphDBInterface):
         Get multiple nodes by their IDs.
 
         This method retrieves properties for multiple nodes identified by their IDs and returns
-        them as a list of dictionaries. An empty list is returned if no nodes are found or an
-        error occurs.
+        them as a list of dictionaries. An empty list is returned if no nodes are found; a
+        failed query raises.
 
         Parameters:
         -----------
@@ -2373,9 +2448,11 @@ class LadybugAdapter(GraphDBInterface):
             - List[Dict[str, Any]]: A list of dictionaries containing properties of each
               retrieved node.
         """
+        # Each id through the primary key: a filter over the table (WHERE n.id IN
+        # $node_ids) reads every node per call, whatever the list's size.
         query_str = """
-        MATCH (n:Node)
-        WHERE n.id IN $node_ids
+        UNWIND $node_ids AS node_id
+        MATCH (n:Node {id: node_id})
         RETURN {
             id: n.id,
             name: n.name,
@@ -2383,12 +2460,55 @@ class LadybugAdapter(GraphDBInterface):
             properties: n.properties
         }
         """
-        try:
-            results = await self.query(query_str, {"node_ids": node_ids})
-            return [self._parse_node(row[0]) for row in results if row[0]]
-        except Exception:
-            logger.exception("Failed to get nodes")
+        # Each node once, as the IN filter returned it. A failed query raises:
+        # an empty list must mean the nodes are absent, not that the read failed.
+        unique_ids = list(dict.fromkeys(node_ids))
+        results = await self.query(query_str, {"node_ids": unique_ids})
+        return [self._parse_node(row[0]) for row in results if row[0]]
+
+    async def get_node_ids_by_property(
+        self, node_types: list[str], property_name: str, values: list[Any]
+    ) -> list[str]:
+        """Ids of typed nodes whose property is one of ``values``.
+
+        Only the id and that property cross the worker pipe; the values are
+        matched here, since a string parameter would be read as JSON.
+        """
+        if not node_types or not values:
             return []
+        if not property_name.isidentifier():
+            raise ValueError(f"Invalid property name: {property_name!r}")
+        column = property_name in ("name", "type")
+        field = (
+            f"n.{property_name}"
+            if column
+            else f"CAST(json_extract(n.properties, '$.{property_name}') AS STRING)"
+        )
+        rows = await self.query(
+            f"MATCH (n:Node) WHERE n.type IN $types RETURN n.id, {field}",
+            {"types": list(node_types)},
+        )
+        wanted = {str(value) for value in values}
+        return [
+            str(row[0])
+            for row in rows
+            if (row[1] if column else _decoded_json_text(row[1])) in wanted
+        ]
+
+    async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
+        """Keys of the edges leaving ``source_ids``, in statements of
+        _EDGE_LOOKUP_IDS_PER_STATEMENT sources (see ``_existing_edges``)."""
+        ids = [str(source_id) for source_id in source_ids]
+        keys: list[tuple[str, str, str]] = []
+        for start in range(0, len(ids), _EDGE_LOOKUP_IDS_PER_STATEMENT):
+            rows = await self.query(
+                "UNWIND $source_ids AS node_id "
+                "MATCH (from:Node {id: node_id})-[r:EDGE]->(to:Node) "
+                "RETURN from.id, to.id, r.relationship_name",
+                {"source_ids": ids[start : start + _EDGE_LOOKUP_IDS_PER_STATEMENT]},
+            )
+            keys.extend((str(row[0]), str(row[1]), str(row[2])) for row in rows)
+        return keys
 
     def _rows_to_dicts(self, rows: list, column_names: list[str]) -> list[dict[str, Any]]:
         """Convert query result rows to a list of dicts keyed by column names."""

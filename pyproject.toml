@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.6.10"
+version = "1.6.11"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -76,7 +76,9 @@ dependencies = [
     # warning instead of writing to the tables. pylance 12 requires
     # lance-namespace<0.12, so the lockfile holds lance-namespace at 0.11.x.
     "lancedb>=0.39.0,<0.40.0",
-    "dateparser>=1.2,<2",  # temporal hints and date normalization in default graph extraction
+    # Temporal hints and date normalization in default graph extraction. They can parse on
+    # two threads at once (the CPU worker and the event loop); 1.4.3 made that thread-safe.
+    "dateparser>=1.4.3,<2",
     "nbformat>=5.7.0,<6.0.0",
     "alembic>=1.13.3,<2",
     "limits>=4.4.1,<6",
@@ -96,9 +98,11 @@ dependencies = [
     # dev before this change. Intel Macs need no clause: lancedb has shipped no
     # x86_64 macOS wheel since 0.25.3, so cognee does not install there anyway.
     # Everywhere else the resolver takes the newest release; fastembed and
-    # unstructured carry their own onnxruntime floors.
+    # unstructured carry their own onnxruntime floors. 1.23 is the first release
+    # that loads the default local embedding model (pplx-embed-v1-0.6b, 8-bit
+    # weights): 1.20-1.22 reject its quantized embedding table, older ones lack the op.
     "onnxruntime<=1.23.2 ; python_version < '3.11' or (python_version < '3.14' and sys_platform == 'darwin' and 'Darwin Kernel Version 22.' in platform_version)",
-    "onnxruntime>=1.17",
+    "onnxruntime>=1.23",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "pylance>=12.0.0,<12.1.0",  # same Lance release line as lancedb, see above
@@ -137,11 +141,11 @@ dependencies = [
     "datamodel-code-generator>=0.56.0",
     # Enola powers the built-in deterministic code-graph route. Keep this pinned:
     # its snapshot contract and known answers are validated by test_code_graph_e2e.py.
-    "enola-cli==0.5.1",
+    "enola-cli==0.5.4",
     # dlt powers database, CSV and Google Drive/Gmail ingestion.
     "dlt[sqlalchemy]>=1.9.0,<1.31",
     # dlt's filesystem read_csv reader requires pandas but does not declare it
-    "pandas>=2.2.2,<3.0.0",
+    "pandas>=2.2.2,<4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -173,7 +177,7 @@ postgres-binary = [
     "pgvector>=0.3.5,<0.4",
     "asyncpg>=0.30.0,<1.0.0",
 ]
-turso = ["pyturso>=0.7.2,<0.8"]
+turso = ["pyturso>=0.8.3,<0.9"]
 notebook = ["notebook>=7.1.0,<8"]
 langchain = [
     "langsmith>=0.2.3,<1.0.0",
@@ -202,6 +206,9 @@ docs = [
     # 0.24+ itself is 3.11-3.13 only, so Python 3.10, 3.14 and macOS 13 fall back to
     # the 0.18 line (see onnxruntime above) and stay exposed to those advisories.
     "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<1",
+    # unstructured 0.24+ caps pandas<3 on its csv/tsv/xlsx extras. Without this cap a
+    # resolver can take pandas 3 and fall back to the unpatched unstructured 0.18 line.
+    "pandas>=2.2.2,<3.0.0",
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
 # enola-cli is a core dependency. The empty extra keeps `cognee[codegraph]` installable.

@@ -150,6 +150,8 @@ def test_shipped_slugs_are_pinned():
         "ladybug_graph_provenance_columns",
         "rekey_fork_document_ids",
         "pgvector_hnsw_indexes",
+        "postgres_graph_source_ref_tables",
+        "reembed_local_default_embedding_model",
     ]
 
 
@@ -436,6 +438,35 @@ def test_sqlite_migration_lock_is_a_real_cross_process_file_lock(tmp_path):
         await eng.engine.dispose(close=True)
 
     asyncio.run(scenario())
+
+
+def test_waiting_for_the_migration_lock_is_logged(tmp_path, monkeypatch, caplog):
+    """A caller that waits on another holder's migrations says so, once the wait
+    is longer than a migration usually takes; a lock that is free logs nothing."""
+    from cognee.infrastructure.databases.relational.create_relational_engine import (
+        create_relational_engine,
+    )
+    from cognee.modules.migrations import runner
+
+    monkeypatch.setattr(runner, "_LOCK_WAIT_NOTICE_SECONDS", 0.05)
+
+    async def scenario():
+        eng = create_relational_engine(str(tmp_path), "lock.db", "", "", "", "", "sqlite")
+
+        async def waiter():
+            async with runner._migration_lock(eng, 7):
+                pass
+
+        async with runner._migration_lock(eng, 7):
+            assert "Waiting for database migrations" not in caplog.text
+            waiting = asyncio.create_task(waiter())
+            await asyncio.sleep(0.3)
+            assert caplog.text.count("Waiting for database migrations") == 1
+        await waiting
+        await eng.engine.dispose(close=True)
+
+    with caplog.at_level("WARNING"):
+        asyncio.run(scenario())
 
 
 def test_migration_lock_path_skips_in_memory_sqlite():

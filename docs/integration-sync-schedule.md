@@ -71,6 +71,8 @@ PUT /api/v1/integrations/sync/policy
 
 ## Running the schedule
 
+The scheduler lives in `cognee/modules/integrations/sync_policy/`.
+
 Set `INTEGRATIONS_SYNC_SCHEDULER_ENABLED=true` and run that API as one process per
 database (one worker, one replica). It checks for due slots every 60 seconds and
 starts each through the provider's `sync_now`, the same call as a manual sync; the
@@ -81,11 +83,11 @@ statement timeout through `DATABASE_CONNECT_ARGS`.
 
 The claim of a slot is a conditional update, so even several processes start a
 slot once. Two runs of one connection, though, are kept apart only inside one
-process. With the scheduler, manual syncs and webhooks spread over several
-processes, two runs of a connection can share one dlt working directory (one's
-cleanup deletes the other's files), read the same cursor and pay the provider's
-API twice, and leave the connection's status of whichever finished last.
-GitHub webhook syncs of named repositories are not held by that guard, so a push
-during a full sync is still indexed.
+process (`ingestion.exclusive_sync`). With the scheduler, manual syncs and
+webhooks spread over several processes, two runs of a connection can share one
+dlt working directory (one's cleanup deletes the other's files), read the same
+cursor and pay the provider's API twice, and leave the connection's status of
+whichever finished last. GitHub webhook syncs of named repositories are not held
+by that guard, so a push during a full sync is still indexed.
 
 Run history stays where it is: see [integration-sync-progress.md](integration-sync-progress.md).

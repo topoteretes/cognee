@@ -48,7 +48,9 @@ async def add(
     vector_db_config: dict | None = None,
     graph_db_config: dict | None = None,
     dataset_id: UUID | None = None,
-    preferred_loaders: list[str | dict[str, dict[str, Any]]] | None = None,
+    preferred_loaders: dict[str, dict[str, Any]]
+    | list[str | dict[str, dict[str, Any]]]
+    | None = None,
     dlt_config: dict | None = None,
     incremental_loading: bool = True,
     data_per_batch: int | None = 20,
@@ -196,9 +198,11 @@ async def add(
                     way to write to a dataset another user shared with you. An id that
                     matches no dataset raises ``DatasetNotFoundError``.
         preferred_loaders: Loader names to try first, each optionally with that loader's
-                           options: ``["csv_loader"]`` or ``[{"dlt_csv_loader": {...}}]``.
+                           options, as a dict ``{"dlt_csv_loader": {...}}`` or a list
+                           ``["csv_loader"]`` / ``[{"dlt_csv_loader": {...}}]`` (strings and
+                           dicts may be mixed; a loader named twice keeps its last options).
                            Web-page extraction rules go here too, with the ``scraping``
-                           extra: ``[{"beautiful_soup_loader": {"extraction_rules": ...}}]``.
+                           extra: ``{"beautiful_soup_loader": {"extraction_rules": ...}}``.
         dlt_config: Options that apply only to dlt sources (connection strings, dlt
                     resources, CSV files): ``primary_key``, ``write_disposition``,
                     ``query``, ``max_rows_per_table``, ``column_value_columns``,
@@ -308,7 +312,7 @@ async def add(
 
         Optional:
         - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama", "mistral", "bedrock"
-        - LLM_MODEL: Model name (default: "openai/gpt-5.6-luna")
+        - LLM_MODEL: Model name (default: "openai/gpt-6-luna")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
         - VECTOR_DB_PROVIDER: "lancedb" (default), "pgvector"
@@ -354,6 +358,10 @@ async def add(
     data = screen_server_paths(data)
 
     if preferred_loaders is not None:
+        # A dict is one entry mapping loader names to their options; iterating it
+        # directly would yield only the names and drop the options.
+        if isinstance(preferred_loaders, dict):
+            preferred_loaders = [preferred_loaders]
         transformed = {}
         for item in preferred_loaders:
             if isinstance(item, dict):

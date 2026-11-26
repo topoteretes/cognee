@@ -20,6 +20,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import (
     DIMENSIONS_KEY,
     MODEL_KEY,
+    REEMBED_KEY,
     clear_embedding_model_records,
     embedding_model_record,
     ensure_embedding_model_matches,
@@ -28,7 +29,10 @@ from cognee.infrastructure.databases.utils.get_or_create_dataset_database import
     get_or_create_dataset_database,
 )
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
-from cognee.infrastructure.databases.vector.exceptions import EmbeddingDimensionMismatchError
+from cognee.infrastructure.databases.vector.exceptions import (
+    DatasetReembedIncompleteError,
+    EmbeddingDimensionMismatchError,
+)
 from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.data.methods import create_dataset
@@ -40,6 +44,7 @@ preflight_mod = importlib.import_module("cognee.modules.preflight.config_preflig
 
 SMALL = {MODEL_KEY: "BAAI/bge-small-en-v1.5", DIMENSIONS_KEY: 384}
 LARGE = {MODEL_KEY: "openai/text-embedding-3-large", DIMENSIONS_KEY: 3072}
+LOCAL_DEFAULT = {MODEL_KEY: "perplexity-ai/pplx-embed-v1-0.6b", DIMENSIONS_KEY: 1024}
 
 
 def _row(**info):
@@ -88,6 +93,25 @@ async def test_a_different_width_is_refused_with_both_models_named(store):
     assert "BAAI/bge-small-en-v1.5" in error.message and "384" in error.message
     assert "openai/text-embedding-3-large" in error.message and "3072" in error.message
     assert "EMBEDDING_MODEL" in error.remediation and "forget" in error.remediation
+    # After an upgrade a pending migration may be what moves the dataset.
+    assert "cognee-cli upgrade" in error.remediation
+
+
+@pytest.mark.asyncio
+async def test_an_unfinished_reembed_is_refused_even_with_a_matching_model(store):
+    """The collections are part old model, part new: no configured model fits them."""
+    store["engine"] = SimpleNamespace(get_stored_vector_size=AsyncMock(return_value=3072))
+    row = _row(**LARGE, **{REEMBED_KEY: {MODEL_KEY: "the-new-model", DIMENSIONS_KEY: 3072}})
+
+    with pytest.raises(DatasetReembedIncompleteError) as refused:
+        await ensure_embedding_model_matches(row)
+
+    assert refused.value.target_model == "the-new-model"
+    assert "reembed_dataset" in refused.value.remediation
+    # One that began during an upgrade is continued by the migrations.
+    assert "wait" in refused.value.remediation
+    assert "cognee-cli upgrade" in refused.value.remediation
+    store["engine"].get_stored_vector_size.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -281,9 +305,14 @@ async def test_creation_records_the_model_and_prune_clears_it(monkeypatch):
         with pytest.raises(EmbeddingDimensionMismatchError):
             await ensure_embedding_model_matches(row)
 
+        # An unfinished re-embed is cleared with the model: the prune left it nothing to finish.
+        await ensure_mod.record_reembed_progress(row, {MODEL_KEY: "m", DIMENSIONS_KEY: 7})
+        assert REEMBED_KEY in await _info()
+
         await clear_embedding_model_records()
         cleared = await _info()
         assert MODEL_KEY not in cleared and DIMENSIONS_KEY not in cleared
+        assert REEMBED_KEY not in cleared
         assert set(cleared) == other_keys  # nothing else was touched
 
         # A runtime-only value must never be persisted by the record step
@@ -305,7 +334,7 @@ async def test_creation_records_the_model_and_prune_clears_it(monkeypatch):
 @pytest.mark.parametrize(
     ("llm_api_key", "expected"),
     [
-        (None, SMALL),  # keyless: embeddings are rerouted to the local model
+        (None, LOCAL_DEFAULT),  # keyless: embeddings are rerouted to the local model
         ("sk-a-real-key", LARGE),  # a usable key keeps the configured embedder
     ],
 )

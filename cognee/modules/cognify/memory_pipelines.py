@@ -26,7 +26,9 @@ nothing in the pipeline package knows about the chain.
 The indexing run rolls back per item: an item that failed loses its chunks,
 the items that completed keep theirs, and the cognify run stores the failed
 item's chunks itself in its final write. That holds while the indexing run
-records failed items and carries on (``RAISE_INCREMENTAL_LOADING_ERRORS=false``).
+records failed items and carries on (``RAISE_INCREMENTAL_LOADING_ERRORS=false``,
+or its items ran in other processes through a data item executor, where a
+failed item arrives recorded).
 A failure it raises (its setup, the vector store, or by default any failed
 item, the policy the cognify run applies to its own items) fails the cognify
 run at once with that cause: extraction would hit it again after re-reading
@@ -82,6 +84,7 @@ _SHARED_RUN_PARAMS = (
     "embedding_config",
     "data_cache",
     "skip_connection_test",
+    "data_item_executor",
 )
 
 # The stage name the cognify run's subscribers see while the indexing run works.
@@ -279,13 +282,15 @@ async def _dataset_chain(
             _push_stage_progress(started, 0, len(selected))
             try:
                 # The ledger row of an item the indexing run stores first names
-                # the cognify run: the one callers follow and roll back.
+                # the cognify run: the one callers follow and roll back. As
+                # text: a run's extras go to its workers as JSON, and a run
+                # whose extras do not survive it keeps its items here.
                 indexed = await _run_indexing(
                     indexing_tasks,
                     {
                         **run_params,
                         "data": selected,
-                        "extras": {LEDGER_RUN_ID: started.pipeline_run_id},
+                        "extras": {LEDGER_RUN_ID: str(started.pipeline_run_id)},
                     },
                 )
             except Exception as error:

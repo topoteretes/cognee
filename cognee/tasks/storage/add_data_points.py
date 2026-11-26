@@ -95,6 +95,7 @@ async def add_data_points(
     ctx: Optional["PipelineContext"] = None,
     graph_only: bool = False,
     index_edges: bool = True,
+    replace_nodes: bool = False,
 ) -> list[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
@@ -113,6 +114,9 @@ async def add_data_points(
             (the ``EdgeType_relationship_name`` index). ``index_chunks_for_search``
             passes False: its edges are structural only and the final write of
             the same chunks indexes them.
+        replace_nodes: Store every node that already exists with the incoming
+            properties (``add_nodes(replace=True)``), for tasks that change an
+            existing node on purpose, such as a rewritten description.
     """
     if embed_triplets is not None:
         warnings.warn(
@@ -280,6 +284,9 @@ async def add_data_points(
     # default backend than one add_nodes/add_edges call per owner group.
     per_row_refs = bool(ownership and getattr(graph_engine, "supports_per_row_source_refs", False))
 
+    # Passed only when set: adapters outside this repository may not take ``replace``.
+    replace_kwargs = {"replace": True} if replace_nodes else {}
+
     async def _write_nodes_grouped():
         if per_row_refs:
             mapping = {
@@ -287,12 +294,12 @@ async def add_data_points(
                 for node in nodes
             }
             await graph_engine.add_nodes(
-                nodes, source_ref_key=mapping, pipeline_run_id=fold_run_arg
+                nodes, source_ref_key=mapping, pipeline_run_id=fold_run_arg, **replace_kwargs
             )
         else:
             for key, group in _group_nodes().items():
                 await graph_engine.add_nodes(
-                    group, source_ref_key=key, pipeline_run_id=fold_run_arg
+                    group, source_ref_key=key, pipeline_run_id=fold_run_arg, **replace_kwargs
                 )
         if ownership:
             # Group by the SET of extra keys, not by individual key. Each call
@@ -386,7 +393,7 @@ async def add_data_points(
         # nodes are written without vectors and only the rest with them.
         if len(nodes_to_embed) != len(nodes):
             await graph_engine.add_nodes(
-                [node for node in nodes if str(node.id) in already_indexed]
+                [node for node in nodes if str(node.id) in already_indexed], **replace_kwargs
             )
         if nodes_to_embed:
             await graph_engine.add_nodes_with_vectors(nodes_to_embed)

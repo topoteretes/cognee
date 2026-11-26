@@ -67,7 +67,7 @@ _CONFIG_INTEGER_RANGES: dict[str, tuple[int, int]] = {
     "context_tokens": (1, 1_000_000),
     "reading_tokens": (1, 200_000),
 }
-_CONFIG_NUMBER_LIMITS: dict[str, float] = {"batch_mb": 1_024, "store_mb": 256}
+_CONFIG_NUMBER_LIMITS: dict[str, float] = {"batch_mb": 1_024, "store_mb": 512}
 _CONFIG_BOOLEANS = (
     "include_external_metadata",
     "include_global_context_index",

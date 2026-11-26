@@ -420,7 +420,10 @@ async def run_migrations() -> list[str]:
     if _startup_migrations_done:
         return []
 
-    async with _get_startup_lock():
+    startup_lock = _get_startup_lock()
+    if startup_lock.locked():
+        logger.info("Waiting for the database migrations another call in this process started.")
+    async with startup_lock:
         if _startup_migrations_done:
             return []
 

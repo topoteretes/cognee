@@ -44,8 +44,10 @@ about test results and single runs.
 
 Return a list of lessons (at most 10). Each item names the `turn` the lesson was learned in (the
 number from TRACES and FINAL MESSAGE) and holds the `lesson`: a `section`, a one-sentence
-`content`, and a `confidence` from 0 to 1. Keep only lessons that would help a different task in
-this repository; prefer fewer lessons, and none to a weak one.
+`content`, a `confidence` from 0 to 1, and an `evidence` or a `reason`: evidence cites the
+observation in the supplied traces that shows the lesson; a reason says why the project decision
+matters. Never invent either; a lesson with neither is discarded. Keep only lessons that would
+help a different task in this repository; prefer fewer lessons, and none to a weak one.
 
 Keep a lesson only if ALL of these hold:
 - ANCHORED: it names at least one concrete file path, module, class, function, command, test or

@@ -2,6 +2,9 @@ from functools import lru_cache
 
 from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.vector.embeddings.config import (
+    DEFAULT_LOCAL_EMBEDDING_INPUT_CAP,
+    DEFAULT_LOCAL_EMBEDDING_MODEL,
+    DEFAULT_LOCAL_EMBEDDING_PROVIDER,
     get_embedding_context_config,
     keyless_embedding_defaults_apply,
     resolve_embedding_defaults,
@@ -34,6 +37,14 @@ def get_embedding_engine() -> EmbeddingEngine:
     config = get_embedding_context_config()
     llm_config = get_llm_context_config()
     provider, model, dimensions = resolve_embedding_defaults(config, llm_config)
+    max_completion_tokens = config.embedding_max_completion_tokens
+    # Whether the local default model runs because nothing is configured or because
+    # it was named: it is as slow on long chunks either way.
+    if max_completion_tokens is None and (provider, model) == (
+        DEFAULT_LOCAL_EMBEDDING_PROVIDER,
+        DEFAULT_LOCAL_EMBEDDING_MODEL,
+    ):
+        max_completion_tokens = DEFAULT_LOCAL_EMBEDDING_INPUT_CAP
     encoding_format = validate_encoding_format(config.embedding_encoding_format)
     if encoding_format == "base64" and keyless_embedding_defaults_apply(config, llm_config):
         # With no key configured, embeddings run on local fastembed, which has no wire
@@ -45,7 +56,7 @@ def get_embedding_engine() -> EmbeddingEngine:
         provider,
         model,
         dimensions,
-        config.embedding_max_completion_tokens,
+        max_completion_tokens,
         config.embedding_endpoint,
         config.embedding_api_key,
         config.embedding_api_version,

@@ -15,6 +15,7 @@ from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
     NodeDeleteData,
+    data_source_ref_key_selector,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger
@@ -32,6 +33,8 @@ Node = tuple[str, NodeData]  # (node_id, properties)
 _warned_degree_fallbacks: set[type] = set()
 _warned_neighborhood_fallbacks: set[type] = set()
 _warned_graph_counts_fallbacks: set[type] = set()
+_warned_data_source_ref_fallbacks: set[type] = set()
+_warned_edge_text_fallbacks: set[type] = set()
 
 
 def timestamp_overlaps(node: dict, start: int | None, end: int | None) -> bool:
@@ -238,6 +241,8 @@ class GraphDBInterface(ABC):
         nodes: list[Node] | list[DataPoint],
         source_ref_key: str | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """
         Add multiple nodes to the graph in a single operation.
@@ -256,6 +261,11 @@ class GraphDBInterface(ABC):
               also receive a mapping of node id -> ref key here. (default None)
             - pipeline_run_id (Optional[str]): Run id recorded with the provenance stamp so
               the write is rollbackable by run. Ignored when source_ref_key is None. (default None)
+            - replace (bool): When True, every node that already exists is stored with the
+              incoming properties, even where the adapter would otherwise keep the stored
+              node. An adapter that always replaces may ignore it, but must accept it:
+              entity consolidation and the consolidate_entity_descriptions pipeline pass
+              it, and fail with TypeError on an adapter that does not. (default False)
         """
         raise NotImplementedError
 
@@ -547,6 +557,127 @@ class GraphDBInterface(ABC):
         """
         raise UnsupportedProvenanceCapability()
 
+    async def find_node_source_refs_by_data(
+        self,
+        dataset_id: str,
+        data_id: str,
+    ) -> dict[str, list[str]]:
+        """
+        Find the node source refs one data item of a dataset owns: its v1
+        document key and every v2 chunk key of that data item.
+
+        This default reads every ref of the dataset and keeps the data item's,
+        so its cost follows the dataset. An adapter that can select the rows in
+        its store overrides it, and deleting or replacing one document then
+        costs what that document holds.
+
+        Parameters:
+        -----------
+
+            - dataset_id (str): Dataset id to match.
+            - data_id (str): Data item id to match.
+
+        Returns:
+        --------
+
+            - dict[str, list[str]]: The data item's source refs keyed by node id.
+        """
+        self._warn_data_source_ref_fallback()
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
+        refs_by_node = await self.find_node_source_refs_by_dataset(dataset_id)
+        return {
+            node_id: data_refs
+            for node_id, refs in refs_by_node.items()
+            if (data_refs := select(refs))
+        }
+
+    async def find_edge_source_refs_by_data(
+        self,
+        dataset_id: str,
+        data_id: str,
+    ) -> dict[EdgeIdentity, list[str]]:
+        """
+        Find the edge source refs one data item of a dataset owns: its v1
+        document key and every v2 chunk key of that data item.
+
+        Same default and same reason to override as
+        ``find_node_source_refs_by_data``.
+
+        Parameters:
+        -----------
+
+            - dataset_id (str): Dataset id to match.
+            - data_id (str): Data item id to match.
+
+        Returns:
+        --------
+
+            - dict[EdgeIdentity, list[str]]: The data item's source refs keyed by
+              edge identity.
+        """
+        self._warn_data_source_ref_fallback()
+        select = data_source_ref_key_selector(UUID(str(dataset_id)), UUID(str(data_id)))
+        refs_by_edge = await self.find_edge_source_refs_by_dataset(dataset_id)
+        return {
+            edge: data_refs for edge, refs in refs_by_edge.items() if (data_refs := select(refs))
+        }
+
+    def _warn_data_source_ref_fallback(self) -> None:
+        adapter_type = type(self)
+        if adapter_type not in _warned_data_source_ref_fallbacks:
+            _warned_data_source_ref_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native find_node_source_refs_by_data / "
+                "find_edge_source_refs_by_data; deleting one document reads every source "
+                "ref of its dataset. This is O(dataset) in memory.",
+                adapter_type.__name__,
+            )
+
+    async def find_edge_texts_in_use(self, edge_texts: list[str]) -> set[str]:
+        """
+        Find which of the given retrieval texts a stored edge still has.
+
+        An edge's retrieval text is ``get_edge_retrieval_text`` of its
+        ``edge_text`` property and its relationship name. Graph-provenance
+        delete asks this after removing edges, to drop the EdgeType of a text no
+        edge uses any more.
+
+        This default reads every edge of the graph. An adapter that can ask its
+        store overrides it.
+
+        Parameters:
+        -----------
+
+            - edge_texts (list[str]): Retrieval texts to look for.
+
+        Returns:
+        --------
+
+            - set[str]: The given texts that at least one stored edge has.
+        """
+        from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+
+        wanted = set(edge_texts)
+        if not wanted:
+            return set()
+
+        adapter_type = type(self)
+        if adapter_type not in _warned_edge_text_fallbacks:
+            _warned_edge_text_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native find_edge_texts_in_use; a delete that removes edges "
+                "reads the whole graph. This is O(graph) in memory.",
+                adapter_type.__name__,
+            )
+        _, edges = await self.get_graph_data()
+        in_use: set[str] = set()
+        for edge in edges:
+            properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
+            edge_text = get_edge_retrieval_text(properties.get("edge_text"), edge[2])
+            if edge_text in wanted:
+                in_use.add(edge_text)
+        return in_use
+
     async def find_node_source_refs_by_pipeline_run(
         self,
         pipeline_run_id: str,
@@ -694,6 +825,37 @@ class GraphDBInterface(ABC):
         Retrieve all nodes and edges within the graph.
         """
         raise NotImplementedError
+
+    async def get_node_ids_by_property(
+        self, node_types: list[str], property_name: str, values: list[Any]
+    ) -> list[str]:
+        """Ids of the nodes of one of ``node_types`` whose ``property_name`` is one of ``values``.
+
+        Values compare as text: a stored value matches when its text equals
+        ``str(value)`` of a wanted one, and a missing or null property never
+        matches. Only string and integer values are supported: booleans and
+        floats have no text form every backend agrees on (``str(True)`` is
+        "True", a database prints "true").
+
+        Filter in the database; the code graph load calls this to find one
+        repository's nodes, so it must not read the whole graph.
+
+        Required for the code graph, but not abstract: an adapter without it
+        still serves everything else, and only a code graph load fails.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no get_node_ids_by_property")
+
+    async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
+        """``(source_id, target_id, relationship_name)`` of every edge leaving ``source_ids``.
+
+        Ids that are not in the graph have no edges. Look the sources up by
+        index; the code graph load calls this once per batch of edges, so it
+        must not read the whole graph.
+
+        Required for the code graph, but not abstract: an adapter without it
+        still serves everything else, and only a code graph load fails.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no get_outgoing_edge_keys")
 
     async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
         """Ids of up to ``top_k`` well-connected nodes, to seed a graph view.

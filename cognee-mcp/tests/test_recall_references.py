@@ -13,7 +13,6 @@ from src.server_utils import (
     MAX_RECALL_REFS,
     format_recall_body,
     format_recall_results,
-    recall_item_dataset,
     recall_item_refs,
 )
 
@@ -150,30 +149,53 @@ def test_evidence_is_taken_best_rank_first():
     assert [ref["data_id"] for ref in recall_item_refs(hit)] == [ids[2], ids[3], ids[0], ids[1]]
 
 
-def _hybrid_hit(dataset_id: str | None = DATASET) -> dict:
-    # The default hybrid answer: no structured evidence, data_ids cited in the text.
+def _hybrid_hit(evidence: list[dict], dataset_id: str | None = DATASET, cited=(DATA_A,)) -> dict:
+    # The default hybrid answer: its Evidence block cites data_ids in the text, and
+    # (since SDK-1226) the same citations arrive as structured segment evidence.
+    bullets = "\n".join(
+        f'- chunk {index + 1} of document t {index + 1} (data_id: {data_id}, chunk_id: {DATASET}): "..."'
+        for index, data_id in enumerate(cited)
+    )
     return {
         "source": "graph",
         "kind": "graph_completion",
-        "text": f'amber-falcon-42\n\nEvidence:\n- chunk 1 of document t (data_id: {DATA_A}): "..."',
+        "text": f"amber-falcon-42\n\nEvidence:\n{bullets}",
         "dataset_id": dataset_id,
         "dataset_name": "main_dataset",
-        "metadata": {},
+        "metadata": {"evidence": evidence} if evidence else {},
     }
 
 
-def test_hit_without_refs_gets_a_dataset_line():
-    hit = _hybrid_hit()
-    assert recall_item_dataset(hit) == f"dataset: main_dataset (dataset_id={DATASET})"
+def test_default_answer_refs_come_from_its_structured_citations():
+    hit = _hybrid_hit(
+        [
+            {
+                "kind": "segment",
+                "role": "supports_assertion",
+                "data_id": DATA_A,
+                "dataset_id": DATASET,
+                "document_name": "t",
+                "rank": 0,
+            }
+        ]
+    )
     body = format_recall_body([hit], include_references=True)
-    assert body == f"[graph] {hit['text']}\n  dataset: main_dataset (dataset_id={DATASET})"
+    assert body == (
+        f"[graph] {hit['text']}\n  refs: data_id={DATA_A}, dataset_id={DATASET}, document=t"
+    )
     assert format_recall_body([hit]) == f"[graph] {hit['text']}"
 
 
-def test_no_dataset_line_without_a_dataset_id():
-    # Access control off and an unscoped recall: search knows no dataset.
-    hit = _hybrid_hit(dataset_id=None)
-    assert recall_item_dataset(hit) is None
+def test_structured_refs_win_over_the_evidence_text():
+    # Text cites A, structured evidence names B: the structured list is the source.
+    hit = _hybrid_hit([{"kind": "segment", "data_id": DATA_B, "dataset_id": DATASET}])
+    assert [ref["data_id"] for ref in recall_item_refs(hit)] == [DATA_B]
+
+
+def test_evidence_text_is_never_read_for_refs():
+    # Ids cited only in the answer text are not refs: they come from structured evidence.
+    hit = _hybrid_hit([], cited=(DATA_A, DATA_B))
+    assert recall_item_refs(hit) == []
     assert format_recall_body([hit], include_references=True) == f"[graph] {hit['text']}"
 
 

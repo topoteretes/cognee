@@ -15,21 +15,24 @@ The four layers are independent: any one of them can be Turso while the others s
 The session cache mirrors the `sqlite` backend exactly (a `cache.db` next to the relational
 database, same tables and upserts) and only swaps the driver; it is not switched automatically
 with `DB_PROVIDER`, so set `CACHE_BACKEND=turso` explicitly, as with `postgres`.
-All three share `cognee/infrastructure/databases/turso/`: the SQLAlchemy dialect
-(`sqlite+cognee_turso://`), the `TURSO_*` settings, the transaction/retry policy and the
-file-cleanup rule.
+All four use the shared `TURSO_*` settings, transaction and retry policy, and
+file-cleanup rule in `cognee/infrastructure/databases/turso/`. The relational DB,
+graph store, and session cache use the `sqlite+cognee_turso://` SQLAlchemy dialect.
+The vector store uses synchronous `pyturso` connections directly.
 
 ## Versions
 
 | Component | Version | Notes |
 |---|---|---|
-| `pyturso` (import name `turso`) | `>=0.7.2,<0.8` (pinned in the `turso` extra) | the Turso rewrite engine and its Python bindings; `SELECT turso_version()` proves it is the executing engine |
+| `pyturso` (import name `turso`) | `>=0.8.3,<0.9` (pinned in the `turso` extra) | the Turso rewrite engine and its Python bindings; `SELECT turso_version()` proves it is the executing engine |
 | SQL dialect tracked by the engine | SQLite 3.50.4 | `SELECT sqlite_version()` |
 | SQLAlchemy | 2.0.x (cognee's pin) | the bundled `sqlite+aioturso` dialect fails on 2.0.4x+, see "Upstream findings" |
 | Python | 3.10 – 3.14 | wheels for Linux x86_64/aarch64, macOS, Windows |
 
-`pyturso` 0.8.0 release candidates exist. They add recursive CTEs, but 0.8.0rc11 aborts the
-process on the neighborhood query cognee used, so cognee stays on 0.7.x and avoids recursive CTEs.
+The adapters were written against `pyturso` 0.7.2 and re-validated on 0.8.3, which fixed three
+of the findings below (the dropped join condition, `json_each().value`, the dialect's reflection)
+and added recursive CTEs. cognee still avoids recursive CTEs: 0.8.3 aborts the process on the
+neighborhood query cognee used (finding 5).
 
 ## Setup
 
@@ -160,16 +163,14 @@ that silently ran on SQLite would fail.
 | Limitation | Effect on cognee | Handling |
 |---|---|---|
 | No approximate vector index (`libsql_vector_idx` / `vector_top_k` are not supported) | similarity search is an exact `vector_distance_cos` scan | ~16–20 ms for top-15 over 20k × 384-dim rows on a laptop; fine for local datasets, not for millions of rows |
-| No recursive CTEs (0.7.x) | k-hop neighborhoods, connected components | one query per hop; union-find in Python |
+| Recursive CTEs exist since 0.8, but one seeded from `json_each()` and read twice in the query aborts the process (0.8.3) | k-hop neighborhoods (that shape), connected components | one query per hop; union-find in Python; `test_turso_engine_bugs.py` reproduces the abort and starts failing once a pyturso release fixes it |
 | No scalar subquery in `ON CONFLICT DO UPDATE SET` | vector upsert that merged `belongs_to_set` in SQL | tags are read and merged in Python, then a plain `excluded.payload` upsert |
-| `json_each().value` returns a string element's raw JSON text, escapes included (`B\u00fccher` for `Bücher`); payloads are written with `json.dumps`, which escapes non-ASCII characters, quotes and backslashes | node set names in vector search filters and tag removal | names are compared on the decoded element (`payload ->> je.fullkey`); tag removal filters the names in Python inside one write transaction |
 | Bind parameters must be `None`, numbers, `str` or `bytes` (no `register_adapter`) | raw `text()` statements binding `datetime`/`UUID` | SQLAlchemy-typed columns are unaffected; raw statements use a typed `bindparam` |
 | Quoted identifiers are stored lowercased in `sqlite_master` | `has_collection` by exact name, PascalCase collection detection | case-insensitive lookup; collections detected by schema (`id, payload, vector`) |
 | Parenthesized joins in a FROM clause (`JOIN (a JOIN b ON …)`) are rejected | SQLAlchemy emits them for joined-table inheritance (`User`/`Tenant` are `Principal` subclasses) | the dialect's compiler (`turso/compiler.py`) flattens the tree into a left-deep join chain |
-| A join chain that combines several inner joins, a constant filter and a `LEFT JOIN` can drop a join condition and return extra rows; an affected query returns the wrong rows on every run | none known: no current cognee query has the shape, but users and permissions are read through joins on this engine | avoid the shape in new SQL, or check its rows against stock SQLite; `test_turso_engine_bugs.py` reproduces the smallest case and starts failing once a pyturso release fixes it |
 | `VACUUM` requires an experimental engine flag | none (cognee never runs `VACUUM`) | – |
 | MVCC files are unreadable by stock SQLite | external tooling on a live `mvcc` database | switch the file to `wal` first |
-| One synchronous connection used from two threads at once aborts the process (Rust panic) | the vector adapter shares one connection | every call runs under `_connection_lock`; keep it that way |
+| One synchronous connection used from several threads at once aborts the process (Rust panic `end_write_tx called while write lock not held`, 0.7.2 and 0.8.3) | the vector adapter shares one connection | every call runs under `_connection_lock`; keep it that way |
 | A database file can be open in one process at a time, in both journal modes. The engine holds the file lock until that process exits (closing its connections does not release it), and it also blocks stock `sqlite3` | the API server and a separate SDK/CLI process, or several server workers, cannot share one Turso deployment; the stock SQLite backends allow this. cognee raises `TursoDatabaseInUseError`, naming the file, instead of the engine's `Locking error` | run one cognee process per set of Turso files (the server's default `gunicorn -w 1` is fine), or give each process its own `SYSTEM_ROOT_DIRECTORY` |
 
 ## Upstream findings
@@ -182,28 +183,36 @@ be retired.
    attribute 'has_stop'`. cognee's dialect sets it.
 2. The dialect's reflection mixin returns `[]` for indexes, foreign keys and unique constraints
    although `PRAGMA index_list` / `foreign_key_list` work; with it, cognee's idempotent migrations
-   collide on existing indexes and Alembic batch operations would drop constraints. cognee's
-   dialect restores stock SQLite reflection. Fixed upstream in the 0.8.0 release candidates.
+   collide on existing indexes and Alembic batch operations would drop constraints (0.7.2).
+   Fixed upstream in 0.8; cognee's dialect restored stock SQLite reflection until the pin moved
+   to 0.8.3.
 3. Scalar subquery in `ON CONFLICT DO UPDATE SET`: `Parse error: Subquery is not supported in this
-   position` (0.7.2 and 0.8.0rc11).
+   position` (0.7.2 and 0.8.3).
 4. An outer `json_each()` over an unaliased column is misresolved inside `UPDATE`/`DELETE`: on
    0.7.2 the tag-removal `UPDATE ... json_each(payload, ...)` runs without error but changes no rows
    (stock SQLite strips the tag), and qualifying the column with a quoted mixed-case table name fails
    with `no such table` (finding 6). Aliasing the table (`AS t`, `json_each(t.payload, ...)`) works.
-   Earlier shapes failed with `bind index 1 is out of bounds`; 0.8.0rc11 reports `'json_each' is not
-   a function`.
-5. `WITH RECURSIVE`: `Recursive CTEs are not yet supported` (0.7.2); 0.8.0rc11 accepts the syntax
-   but aborts the process (`Fatal Python error: Abort`) on cognee's neighborhood query.
+   Earlier shapes failed with `bind index 1 is out of bounds`. On 0.8.3 the unaliased shapes we
+   tried strip the tag; the quoted mixed-case qualifier still fails with `no such table`.
+5. `WITH RECURSIVE`: `Recursive CTEs are not yet supported` (0.7.2). 0.8.3 runs recursive CTEs,
+   connected components included, but aborts the process on cognee's neighborhood query (`panicked
+   at core/vdbe/builder.rs: duplicate cursor key`). Smallest case, with `e(s, t)` holding
+   `('a','b'), ('b','c')`: `WITH RECURSIVE r(id) AS (SELECT value FROM json_each('["a"]') UNION
+   SELECT e.t FROM r JOIN e ON e.s = r.id) SELECT s, t FROM e WHERE s IN (SELECT id FROM r) AND
+   t IN (SELECT id FROM r)`. A literal seed, or reading `r` once, works.
 6. Quoted identifiers lowercased in `sqlite_master` (stock SQLite preserves case).
 7. Only primitive bind parameter types; no `register_adapter` equivalent.
 8. `JOIN (a JOIN b ON …)`: `Parenthesized FROM clause subqueries are not supported`, although
    the engine reports SQLite 3.50 (SQLite has accepted the form since 3.7.16).
-9. `json_each().value` returns a string element's raw JSON text instead of the decoded string
-   (0.7.2): for the stored array `["B\u00fccher"]` (how `json.dumps` writes `["Bücher"]`) it
-   returns the escape text `B\u00fccher` itself, where stock SQLite returns `Bücher`.
-   `payload ->> je.fullkey` and `json_extract(payload, je.fullkey)` decode correctly.
-10. A join condition is dropped (0.7.2): with `u=(2,1)`, `a=(1,1)`, `p=(3,1)` and `b` empty
+9. `json_each().value` returned a string element's raw JSON text instead of the decoded string
+   (0.7.2; fixed in 0.8, which returns `Bücher`): for the stored array `["B\u00fccher"]` (how `json.dumps` writes `["Bücher"]`) it
+   returned the escape text `B\u00fccher` itself, where stock SQLite returns `Bücher`.
+   cognee compared names on `payload ->> je.fullkey` until the pin moved to 0.8.3.
+10. A join condition was dropped (0.7.2; fixed in 0.8, pinned by `test_turso_engine_bugs.py`): with `u=(2,1)`, `a=(1,1)`, `p=(3,1)` and `b` empty
     (`id INTEGER PRIMARY KEY, k INTEGER`), `SELECT u.id, a.id FROM u JOIN a ON u.id = a.id AND
-    a.k = 1 JOIN p ON p.k = a.k LEFT JOIN b ON u.k = b.k` returns `(2, 1)`; stock SQLite returns
-    no rows. Removing the constant filter, the third inner table or the `LEFT JOIN` gives the
-    right result; moving the conditions to `WHERE` does not.
+    a.k = 1 JOIN p ON p.k = a.k LEFT JOIN b ON u.k = b.k` returned `(2, 1)`; stock SQLite returns
+    no rows. Removing the constant filter, the third inner table or the `LEFT JOIN` gave the
+    right result; moving the conditions to `WHERE` did not.
+11. One connection used from several threads at once aborts the process instead of raising
+    (0.7.2 and 0.8.3): eight threads that each insert, count and commit on one shared connection
+    panic with `end_write_tx called while write lock not held according to connection state`.

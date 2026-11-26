@@ -37,7 +37,7 @@ After each dataset's run, `cognify()` reconciles the structure document sources 
 |---|---|---|
 | `chunks/` | Split text into chunks and manage chunk relations | `chunk_by_paragraph`, `chunk_by_sentence`, `chunk_by_word`, `chunk_by_row`, `create_chunk_associations` |
 | `cleanup/` | Remove data that no dataset references any more | `cleanup_unused_data` |
-| `code_graph/` | Build the deterministic code graph with the bundled enola CLI (no LLM): `CodeSymbol`/`CodeModule` nodes, `calls`/`imports` edges | `extract_code_graph`, `extract_code_files_graph` |
+| `code_graph/` | Build the deterministic code graph with the bundled enola CLI (no LLM): `CodeSymbol`/`CodeModule` nodes, `calls`/`imports` edges | `load_code_graph` (the CODE_REPO, per-file CODE and cluster routes' one driver; `extract_code_graph` streams its batches), `extract_code_repo_graph`, `extract_code_files_graph` |
 | `codingagents/` | Distil coding-agent traces into reusable coding rules (`CODING_RULES` search) | see its `README.md` |
 | `completion/` | Exceptions shared by completion-style tasks | — |
 | `documents/` | Classify `Data` rows into `Document` types and chunk them | `classify_documents`, `extract_chunks_from_documents` |
@@ -48,7 +48,7 @@ After each dataset's run, `cognify()` reconciles the structure document sources 
 | `presort/` | Pre-organise a folder before ingestion (`remember(dry_run="presort")`): classify, hash, dedup, version and PII detection, proposed groupings | `build_report`, `classify_files`, `detect_duplicates`, `detect_pii`, `group_files`, `apply_presort_graph` |
 | `provenance/` | Record the data item a batch was stored for in the audit ledger; `add_data_points` calls the storage hook, the task form is for custom pipelines that store data points another way | `record_provenance_at_storage`, `record_provenance` |
 | `schema/` | Ingest a relational database schema as graph nodes | `ingest_database_schema` |
-| `storage/` | Persist data points: graph + vector writes, index rebuilds, the indexing pipeline's chunk write | `add_data_points`, `find_indexed_chunks`, `index_chunks_for_search`, `index_data_points`, `index_graph_edges` |
+| `storage/` | Persist data points: graph + vector writes, index rebuilds, the indexing pipeline's chunk write | `add_data_points`, `find_indexed_chunks`, `index_chunks_for_search`, `index_data_points`, `index_graph_edges`, `reembed_collections` |
 | `summarization/` | Chunk summaries (LLM, or relations plus entity types) and code summaries | `summarize_text`, `build_summary_from_extraction`, `summarize_code` |
 | `translation/` | Translate chunk content before extraction (provider-pluggable) | `TranslationConfig`, `TranslatedContent` |
 | `web_scraper/` | Fetch and crawl web pages for URL ingestion | `fetch_page_content`, `DefaultUrlCrawler` |

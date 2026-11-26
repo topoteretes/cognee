@@ -18,6 +18,7 @@ import platform
 import shutil
 import sysconfig
 import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -214,19 +215,26 @@ def _config_via_stdin() -> bool:
     return os.name != "nt"
 
 
-def render_cluster_config(repo_paths: list[Path], output_dir: str) -> str:
+def render_cluster_config(repo_paths: list[Path], output_dir: str, cluster_dir: Path) -> str:
     """The enola cluster config for these repositories, as YAML text.
 
     enola accepts a cluster only as a ``repos:`` config, whose entries must be
     plain path strings. Paths are written absolute, so the config means the
     same thing wherever enola resolves it from, and as JSON strings, which are
-    valid YAML scalars and quote any path safely. ``output_dir`` replaces
-    ``.enola`` as the snapshot directory; enola joins it to each repository
-    path and refuses an absolute one. enola's per-repository
+    valid YAML scalars and quote any path safely. ``cluster_dir`` is where
+    enola writes the cluster's graph; enola refuses a directory inside one of
+    the repositories. ``output_dir`` replaces ``.enola`` as each member's own
+    working directory (its extractor cache); enola joins it to each
+    repository path and refuses an absolute one. enola's per-repository
     architecture history (revisions under ``~/.enola/graphs``) is switched
     off: cognee keeps its own record of the snapshot it loaded.
     """
-    lines = ["output:", f"  dir: {json.dumps(output_dir)}", "repos:"]
+    lines = [
+        "output:",
+        f"  dir: {json.dumps(output_dir)}",
+        f"  cluster_dir: {json.dumps(str(cluster_dir))}",
+        "repos:",
+    ]
     lines.extend(f"  - {json.dumps(str(path))}" for path in repo_paths)
     lines.extend(["history:", "  enabled: false"])
     return "\n".join(lines) + "\n"
@@ -235,13 +243,15 @@ def render_cluster_config(repo_paths: list[Path], output_dir: str) -> str:
 async def run_enola_cluster(
     repo_paths: list[Path],
     output_dir: str,
+    cluster_dir: Path,
     timeout: float = 600.0,
 ) -> Path:
-    """Run `enola --generate` over a cluster of repositories; return one snapshot directory.
+    """Run `enola --generate` over a cluster of repositories; return its snapshot directory.
 
     enola links the repositories of a cluster config into one graph and
-    writes that whole graph to every member's ``output_dir``, so any member's
-    directory is the cluster's snapshot. The first member's is returned.
+    writes that graph once, to ``cluster_dir``, which must lie outside every
+    member repository (enola 0.5.3 and later; before, each member's
+    ``output_dir`` received a copy).
 
     The config is built from the repositories' paths and handed to enola on
     its standard input (``--generate /dev/stdin``): enola reads the config
@@ -257,7 +267,7 @@ async def run_enola_cluster(
         if not repo_path.is_dir():
             raise EnolaSnapshotError(message=f"Repository path '{repo_path}' is not a directory.")
 
-    config_text = render_cluster_config(repo_paths, output_dir)
+    config_text = render_cluster_config(repo_paths, output_dir, cluster_dir)
     subject = f"the {len(repo_paths)}-repository cluster {[path.name for path in repo_paths]}"
     cwd = Path(tempfile.gettempdir())
 
@@ -282,13 +292,12 @@ async def run_enola_cluster(
             stdin_data=config_text.encode("utf-8"),
         )
 
-    snapshot_dir = repo_paths[0] / output_dir
-    if not (snapshot_dir / "facts.jsonl").is_file():
+    if not (cluster_dir / "facts.jsonl").is_file():
         raise EnolaSnapshotError(
-            message=f"enola completed but no facts.jsonl was found in '{snapshot_dir}'."
+            message=f"enola completed but no facts.jsonl was found in '{cluster_dir}'."
         )
 
-    return snapshot_dir
+    return cluster_dir
 
 
 @dataclass(frozen=True)
@@ -307,6 +316,65 @@ class ParsedSnapshot:
     receipt: dict | None
     edges: list | None = None
 
+    @property
+    def fact_count(self) -> int:
+        return len(self.facts)
+
+    def iter_facts(self) -> Iterator[dict]:
+        """The facts, in snapshot order (the same reader API as ``EnolaSnapshot``)."""
+        return iter(self.facts)
+
+
+class EnolaSnapshot:
+    """A snapshot read as a stream: facts.jsonl is never held whole.
+
+    Opening it reads facts.jsonl once to count its facts and collect their
+    repo labels (what receipt validation and flow synthesis need), loads and
+    validates receipt.json, and synthesizes the insight and flow facts, which
+    are small. ``iter_facts`` then reads facts.jsonl again, line by line, on
+    every call: the facts in snapshot order, then the synthesized ones, the
+    order ``parse_enola_snapshot`` returns them in.
+
+    ``keep`` collects the facts of that first read, for a caller that holds
+    them anyway (``parse_enola_snapshot``), so facts.jsonl is read once.
+    """
+
+    def __init__(self, snapshot_dir: str | Path, keep: list | None = None) -> None:
+        self.snapshot_dir = Path(snapshot_dir)
+        self._facts_path = self.snapshot_dir / "facts.jsonl"
+        if not self._facts_path.is_file():
+            raise EnolaSnapshotError(message=f"No facts.jsonl found in '{self.snapshot_dir}'.")
+
+        line_count = 0
+        repos: set[str] = set()
+        for fact in _read_fact_lines(self._facts_path, warn=True):
+            line_count += 1
+            if keep is not None:
+                keep.append(fact)
+            repo = fact.get("repo")
+            if isinstance(repo, str) and repo:
+                repos.add(repo)
+
+        self.receipt = _read_receipt(self.snapshot_dir)
+        validate_receipt(self.receipt, self.snapshot_dir, fact_count=line_count)
+
+        insight_facts = _synthesize_insight_facts(self.snapshot_dir)
+        flow_facts = _synthesize_flow_facts(self.snapshot_dir, repos, self.receipt)
+        self.synthesized = insight_facts + flow_facts
+        self.fact_count = line_count + len(self.synthesized)
+        logger.info(
+            "Parsed %d fact(s) (%d from insights.json, %d from flows.json) from %s",
+            self.fact_count,
+            len(insight_facts),
+            len(flow_facts),
+            self._facts_path,
+        )
+
+    def iter_facts(self) -> Iterator[dict]:
+        """Read every fact again, facts.jsonl line by line, then the synthesized ones."""
+        yield from _read_fact_lines(self._facts_path, warn=False)
+        yield from self.synthesized
+
 
 def parse_enola_snapshot(
     snapshot_dir: str | Path,
@@ -317,15 +385,19 @@ def parse_enola_snapshot(
     unparseable receipt.json is not fatal. Findings from insights.json and
     flows from flows.json follow as synthesized facts. Returns (facts, receipt).
     """
-    snapshot_dir = Path(snapshot_dir)
-    facts_path = snapshot_dir / "facts.jsonl"
+    facts: list = []
+    snapshot = EnolaSnapshot(snapshot_dir, keep=facts)
+    return facts + snapshot.synthesized, snapshot.receipt
 
-    if not facts_path.is_file():
-        raise EnolaSnapshotError(message=f"No facts.jsonl found in '{snapshot_dir}'.")
 
-    facts = []
+def _read_fact_lines(facts_path: Path, warn: bool) -> Iterator[dict]:
+    """The fact objects of facts.jsonl, one line at a time.
+
+    Blank lines are skipped; corrupt and non-object lines too, each with a
+    warning and a closing count when ``warn`` (the first read of a snapshot),
+    silently on the reads after it.
+    """
     corrupt_lines = 0
-
     with open(facts_path, "r", encoding="utf-8") as facts_file:
         for line_number, line in enumerate(facts_file, start=1):
             line = line.strip()
@@ -335,43 +407,36 @@ def parse_enola_snapshot(
                 fact = json.loads(line)
             except json.JSONDecodeError:
                 corrupt_lines += 1
-                logger.warning("Skipping corrupt JSON on line %d of %s", line_number, facts_path)
+                if warn:
+                    logger.warning(
+                        "Skipping corrupt JSON on line %d of %s", line_number, facts_path
+                    )
                 continue
             if not isinstance(fact, dict):
                 corrupt_lines += 1
-                logger.warning("Skipping non-object fact on line %d of %s", line_number, facts_path)
+                if warn:
+                    logger.warning(
+                        "Skipping non-object fact on line %d of %s", line_number, facts_path
+                    )
                 continue
-            facts.append(fact)
+            yield fact
 
-    if corrupt_lines:
+    if corrupt_lines and warn:
         logger.warning("Skipped %d corrupt line(s) in %s", corrupt_lines, facts_path)
 
-    receipt = None
+
+def _read_receipt(snapshot_dir: Path) -> dict | None:
+    """receipt.json as a dict; a missing or unparseable one is not fatal."""
     receipt_path = snapshot_dir / "receipt.json"
-    if receipt_path.is_file():
-        try:
-            with open(receipt_path, "r", encoding="utf-8") as receipt_file:
-                loaded = json.load(receipt_file)
-            receipt = loaded if isinstance(loaded, dict) else None
-        except (json.JSONDecodeError, OSError):
-            logger.warning("Could not parse receipt.json in %s; ignoring it.", snapshot_dir)
-
-    validate_receipt(receipt, snapshot_dir, fact_count=len(facts))
-
-    repos = {fact["repo"] for fact in facts if isinstance(fact.get("repo"), str) and fact["repo"]}
-    insight_facts = _synthesize_insight_facts(snapshot_dir)
-    flow_facts = _synthesize_flow_facts(snapshot_dir, repos, receipt)
-    if insight_facts or flow_facts:
-        facts = facts + insight_facts + flow_facts
-
-    logger.info(
-        "Parsed %d fact(s) (%d from insights.json, %d from flows.json) from %s",
-        len(facts),
-        len(insight_facts),
-        len(flow_facts),
-        facts_path,
-    )
-    return facts, receipt
+    if not receipt_path.is_file():
+        return None
+    try:
+        with open(receipt_path, "r", encoding="utf-8") as receipt_file:
+            loaded = json.load(receipt_file)
+    except (json.JSONDecodeError, OSError):
+        logger.warning("Could not parse receipt.json in %s; ignoring it.", snapshot_dir)
+        return None
+    return loaded if isinstance(loaded, dict) else None
 
 
 def validate_receipt(
