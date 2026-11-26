@@ -535,23 +535,21 @@ jobs:
       # The legacy version runs ladybug 0.17.1, which downloads its JSON
       # extension from extension.ladybugdb.com/v0.17.0. Ladybug deleted that
       # line from the server on 21 Nov 2026 (LadybugDB/ladybug#1706), so the
-      # download is a 404. Ladybug's extension-repo image built before the
-      # purge still holds the file; copying it into ladybug's extension
-      # directory makes the legacy INSTALL JSON / LOAD EXTENSION JSON find it
-      # installed. The container is created to copy from, never started.
-      # Keep this digest (tag 0.22.0, built 25 Oct 2026): an image built after
-      # the purge is not expected to hold v0.17.0.
+      # download is a 404. The cognee 1.6.10 wheel on PyPI bundles the same
+      # binary; copying it into ladybug's extension directory makes the legacy
+      # INSTALL JSON / LOAD EXTENSION JSON find it installed.
       - name: Provide the Ladybug v0.17.0 JSON extension
         if: ${{ matrix.graph_provider == 'ladybug' }}
         env:
-          EXTENSION_REPO_IMAGE: ghcr.io/ladybugdb/extension-repo@sha256:9a491e040608fa49bae944f655f3412df46f54a0c1fc898fd82ecce3ea1d2ce0
-          EXTENSION_FILE: v0.17.0/linux_amd64/json/libjson.lbug_extension
+          COGNEE_WHEEL_URL: https://files.pythonhosted.org/packages/79/b7/d7d3c029fbbddca34a8c847500d3a5e190f23c60e3bfcfc9393249506aa7/cognee-1.6.10-py3-none-any.whl
+          EXTENSION_FILE: cognee_db_workers/ladybug_extensions/v0.17.0/linux_amd64/libjson.lbug_extension
+          EXTENSION_SHA256: 8a5eb3c6c70cc86ea34aea777e9fc78687f69d1396055d878d2b9e0a79cb5114
         run: |
           extension_dir="$HOME/.lbdb/extension/0.17.0/linux_amd64/json"
           mkdir -p "$extension_dir"
-          container=$(docker create "$EXTENSION_REPO_IMAGE")
-          docker cp "$container:/usr/share/nginx/html/$EXTENSION_FILE" "$extension_dir/"
-          docker rm "$container"
+          curl -fsSL --retry 3 --max-time 300 -o /tmp/cognee-1.6.10.whl "$COGNEE_WHEEL_URL"
+          unzip -p /tmp/cognee-1.6.10.whl "$EXTENSION_FILE" > "$extension_dir/libjson.lbug_extension"
+          echo "$EXTENSION_SHA256  $extension_dir/libjson.lbug_extension" | sha256sum -c -
 
       - name: "Phase 1 — mock-replay ingest 2 datasets (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }})"
         env:
