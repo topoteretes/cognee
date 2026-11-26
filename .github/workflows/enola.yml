@@ -1,0 +1,69 @@
+name: Architecture (enola)
+
+# Reports what a pull request does to the architecture declared in
+# enola-intent.yaml: layers crossed the wrong way, new cycles, new coupling.
+# Report-only: findings show as annotations and in the job summary, and never
+# fail the job. It fails only when enola-intent.yaml itself is invalid or one of
+# its layers or components selects nothing. Turning on enforcement (--fail-on)
+# is a team decision, not this workflow's.
+
+on:
+  pull_request:
+    branches: [main, dev]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: enola-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 0.5.4 is the first release with `check --base`. This is the CI copy of enola;
+  # the code-graph route pins its own enola-cli in pyproject.toml.
+  ENOLA_VERSION: "0.5.4"
+
+jobs:
+  enola:
+    name: Architecture (enola)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # check --base snapshots the merge-base with the base branch.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+
+      - name: Install enola
+        run: |
+          uv tool install "enola-cli==${ENOLA_VERSION}"
+          echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
+
+      - name: Lint the declared architecture
+        run: |
+          enola --generate .
+          enola constraints lint --fail-empty .
+
+      - name: Report what this pull request changes
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set +e
+          enola check --base "origin/${BASE_REF}" --format annotations --host github .
+          code=$?
+          enola check --base "origin/${BASE_REF}" --summary . >> "$GITHUB_STEP_SUMMARY"
+          # 0 clean, 1 a finding (reported, not enforced), 3 the base could not
+          # be compared (not a statement about the change), 2 enola could not run.
+          if [ "$code" -eq 2 ]; then
+            echo "::error::enola check could not run"
+            exit 1
+          fi
+          if [ "$code" -eq 3 ]; then
+            echo "::notice::enola declined to compare this branch with ${BASE_REF}; see the job summary"
+          fi
+          exit 0

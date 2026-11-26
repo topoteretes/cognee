@@ -1,0 +1,80 @@
+# Intended architecture of cognee core, for enola (https://github.com/enola-labs/enola).
+# CI (.github/workflows/enola.yml) grades every pull request against it; the rules
+# run in enola's default ratchet mode, so only breaches a change adds are reported.
+# Lint after editing: enola --generate . && enola constraints lint --fail-empty .
+
+# The layer order from docs/architecture.md "Layer Structure", outermost first: a
+# layer may import itself and the layers below it.
+#
+# One departure from that diagram: it lists the pipeline orchestrator
+# (cognee/modules/pipelines) above the task layer. That describes calls at run
+# time; imports go the other way, because tasks are built from the orchestrator's
+# Task class. So the orchestrator sits with the domain modules here.
+#
+# The diagram's memory API (remember, recall, improve, forget) and low-level
+# operations (add, cognify, search, memify) both live under cognee/api/v1, so
+# they form one layer with the HTTP routers and the CLI.
+layers:
+  # API layer: SDK entry points, HTTP routers and the CLI.
+  - {name: interfaces, paths: ["cognee/api/**", "cognee/cli/**"]}
+  # Task execution layer: the units pipelines are composed of.
+  - {name: tasks, paths: ["cognee/tasks/**"]}
+  # Domain modules, the pipeline orchestrator included.
+  - {name: modules, paths: ["cognee/modules/**"]}
+  # Infrastructure adapters: LLM gateway, databases, loaders, storage.
+  - {name: infrastructure, paths: ["cognee/infrastructure/**"]}
+
+components:
+  # Where LLM calls are made: the gateway, the structured-output frameworks
+  # behind it, and the extraction and streaming helpers that call them. The rest
+  # of cognee/infrastructure/llm (config, tokenizer, utils) makes no call.
+  - name: llm-calls
+    match:
+      - "cognee/infrastructure/llm/LLMGateway.py"
+      - "cognee/infrastructure/llm/extraction/**"
+      - "cognee/infrastructure/llm/structured_output_framework/**"
+      - "cognee/infrastructure/llm/streaming/**"
+  - name: code-graph-tasks
+    match: ["cognee/tasks/code_graph/**"]
+  - name: gliner-demo
+    match: ["cognee/tasks/graph/gliner_demo/**"]
+  - name: recall-routing
+    match:
+      - "cognee/api/v1/recall/query_router.py"
+      - "cognee/api/v1/recall/skill_gate.py"
+  - name: code-graph-diagram
+    match: ["cognee/modules/retrieval/code_graph_diagram.py"]
+
+# Code paths the docs describe as making no LLM call. Each rule forbids a
+# direct call into llm-calls; a call through another module is not seen.
+rules:
+  - id: code-graph-makes-no-llm-calls
+    forbid: code-graph-tasks
+    to: llm-calls
+    via: calls
+    because: >-
+      The CODE route runs the deterministic enola code graph pipeline per file,
+      with no LLM calls (docs/memory-internals.md, "Code Files").
+  - id: gliner-demo-makes-no-llm-calls
+    forbid: gliner-demo
+    to: llm-calls
+    via: calls
+    because: >-
+      The GLiNER demo replaces the LLM extract-and-summarize step: no
+      extract_content_graph / extract_summary calls (docs/memory-internals.md,
+      "LLM-free Graph Extraction").
+  - id: recall-routing-makes-no-llm-calls
+    forbid: recall-routing
+    to: llm-calls
+    via: calls
+    because: >-
+      recall() routes with an ordered table of regex rules, first match wins, no
+      LLM call (docs/recall-vs-search.md); the skill gate is a deterministic regex
+      gate (docs/memory-internals.md, "Skills").
+  - id: code-diagrams-make-no-llm-calls
+    forbid: code-graph-diagram
+    to: llm-calls
+    via: calls
+    because: >-
+      Code-graph diagrams are deterministic diagram source: no LLM, no network
+      (docs/memory-internals.md, "Code Files").
