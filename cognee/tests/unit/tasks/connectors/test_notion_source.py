@@ -15,6 +15,8 @@ import pytest
 from cognee.tasks.ingestion.connectors import notion as notion_module
 from cognee.tasks.ingestion.connectors.notion import (
     NotionAPIError,
+    NotionResponseError,
+    _is_gone,
     _iter_rows,
     _NotionClient,
     _resolve_workspace_id,
@@ -465,12 +467,144 @@ def test_an_incomplete_data_source_query_aborts_without_tombstones():
     previous = {ROOT_PAGE_ID: {}, CHILD_PAGE_ID: {}, ROW_PAGE_ID: {}}
     state: dict = {}
     rows = []
-    with pytest.raises(NotionAPIError, match="incomplete"):
+    with pytest.raises(NotionResponseError, match="incomplete"):
         rows.extend(
             _iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, state, {})
         )
     assert not any(row.get("_deleted") for row in rows)
     assert state == {}
+
+
+def _resync_aborts(fake, answer_for, message, *, roots=([ROOT_PAGE_ID], [])):
+    """Sync once, then walk again where ``answer_for(request)`` may replace an answer; the walk
+    must raise ``message`` before any tombstone is emitted and before state is written."""
+    state: dict = {}
+    list(_iter_rows(_client(fake), *roots, WORKSPACE_ID, {}, state, {}))
+    previous = dict(state["pages"])
+    original, requests = fake.handler, []
+
+    def handler(request):
+        requests.append(request)
+        # A walk that reads the bad page as "more" asks for the next one for ever.
+        assert len(requests) < 200, "the walk did not stop"
+        return answer_for(request) or original(request)
+
+    fake.handler = handler
+    rows, new_state = [], {}
+    with pytest.raises(NotionResponseError, match=message):
+        rows.extend(_iter_rows(_client(fake), *roots, WORKSPACE_ID, previous, new_state, {}))
+    assert not any(row.get("_deleted") for row in rows)
+    assert new_state == {}
+
+
+_BLOCKS = f"blocks/{ROOT_PAGE_ID}/children"
+_QUERY = f"data_sources/{DATA_SOURCE_ID}/query"
+_NO_RESULTS = "without a results list"
+_NO_HAS_MORE = "without a has_more flag"
+# A page whose answer cannot be read as a page of results, and the error that says why.
+_BAD_PAGES = [
+    ({"has_more": False}, _NO_RESULTS),
+    ({"results": None}, _NO_RESULTS),
+    ({"results": {}}, _NO_RESULTS),
+    ({"results": [None], "has_more": False}, "not an object"),
+    ({"results": []}, _NO_HAS_MORE),
+    ({"results": [], "next_cursor": "c"}, _NO_HAS_MORE),
+    # Truthy, so only the type check stops it from reading as "more pages".
+    ({"results": [], "has_more": "false", "next_cursor": "c"}, _NO_HAS_MORE),
+    ({"results": [], "has_more": True}, "more results without a next_cursor"),
+]
+
+
+@pytest.mark.parametrize(("body", "message"), _BAD_PAGES)
+@pytest.mark.parametrize("listing", [_BLOCKS, _QUERY])
+def test_a_listing_page_that_cannot_be_read_aborts_without_tombstones(listing, body, message):
+    """A missing field is not an empty or last page: reading it as one would end the walk and
+    tombstone every page synced from below it."""
+
+    def answer_for(request):
+        if request.url.path.endswith(listing):
+            return httpx.Response(200, json={"object": "list", **body})
+
+    _resync_aborts(_tree_with_database(), answer_for, message)
+
+
+@pytest.mark.parametrize(("body", "message"), _BAD_PAGES)
+@pytest.mark.parametrize("listing", [_BLOCKS, _QUERY])
+def test_a_later_page_that_cannot_be_read_aborts_without_tombstones(listing, body, message):
+    """The page that is cut short is the second one: the first is complete and well formed."""
+
+    def answer_for(request):
+        if not request.url.path.endswith(listing):
+            return None
+        sent = request.url.params.get("start_cursor") or json.loads(request.content or b"{}").get(
+            "start_cursor"
+        )
+        if sent:
+            return httpx.Response(200, json={"object": "list", **body})
+        return httpx.Response(
+            200, json={"object": "list", "results": [], "has_more": True, "next_cursor": "c2"}
+        )
+
+    _resync_aborts(_tree_with_database(), answer_for, message)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"[]", b'"x"', b"1", b"null", b"not json"],
+    ids=["list", "str", "int", "null", "raw"],
+)
+@pytest.mark.parametrize("listing", [_BLOCKS, _QUERY])
+def test_an_answer_that_is_not_a_json_object_aborts_without_tombstones(listing, content):
+    def answer_for(request):
+        if request.url.path.endswith(listing):
+            return httpx.Response(200, content=content)
+
+    _resync_aborts(_tree_with_database(), answer_for, "without a JSON object")
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"id": "b", "has_children": False},
+        {"id": "b", "type": "toggle"},
+        {"id": "b", "type": "toggle", "has_children": "false"},
+        {"id": "b", "type": None, "has_children": False},
+    ],
+    ids=["no-type", "no-has_children", "has_children-not-bool", "type-null"],
+)
+def test_a_block_missing_its_type_or_has_children_aborts_without_tombstones(block):
+    """Without ``has_children`` a toggle's nested page is never listed, and without ``type`` a
+    child page is not recognised: both would be tombstoned."""
+
+    def answer_for(request):
+        if request.url.path.endswith(_BLOCKS):
+            return httpx.Response(
+                200, json={"object": "list", "results": [block], "has_more": False}
+            )
+
+    _resync_aborts(_tree_with_database(), answer_for, "block lacking type or has_children")
+
+
+@pytest.mark.parametrize("database", [{"object": "database"}, {"data_sources": None}])
+@pytest.mark.parametrize(
+    "roots", [([ROOT_PAGE_ID], []), ([], [DB_BLOCK_ID])], ids=["child database", "root database"]
+)
+def test_a_database_without_its_data_sources_aborts_without_tombstones(database, roots):
+    """A database answers at least one data source; a missing list is not a database without
+    rows, which would tombstone every row synced from it."""
+
+    def answer_for(request):
+        if request.url.path.endswith(f"databases/{DB_BLOCK_ID}"):
+            return httpx.Response(200, json=database)
+
+    _resync_aborts(_tree_with_database(), answer_for, "without data_sources", roots=roots)
+
+
+def test_a_response_error_has_no_http_status_and_is_not_read_as_gone():
+    error = NotionResponseError("Notion answered x without a results list.")
+    assert isinstance(error, NotionAPIError)
+    assert error.status_code == 0
+    assert not _is_gone(error)
 
 
 def test_a_wiki_data_source_in_query_results_is_walked_as_a_data_source():
@@ -559,6 +693,28 @@ def test_explicit_root_gone_raises():
     client = _client(fake)
     with pytest.raises(NotionAPIError):
         list(_iter_rows(client, ["missing-root"], [], WORKSPACE_ID, {}, {}, {}))
+
+
+def test_a_root_that_is_neither_data_source_nor_database_names_both_misses():
+    with pytest.raises(NotionAPIError, match="is not a page, data source, or database") as raised:
+        list(_iter_rows(_client(FakeNotion()), [], ["missing-db"], WORKSPACE_ID, {}, {}, {}))
+    assert raised.value.status_code == 404
+    # The cause is the database lookup, the last thing that was tried.
+    assert "databases/missing-db" in str(raised.value.__cause__)
+
+
+def test_a_database_root_failing_for_another_reason_is_not_called_inaccessible():
+    fake = FakeNotion()
+    original = fake.handler
+    fake.handler = lambda request: (
+        httpx.Response(400, json={"code": "validation_error", "message": "bad database"})
+        if request.url.path.endswith("databases/some-db")
+        else original(request)
+    )
+    with pytest.raises(NotionAPIError) as raised:
+        list(_iter_rows(_client(fake), [], ["some-db"], WORKSPACE_ID, {}, {}, {}))
+    assert raised.value.status_code == 400
+    assert "can access" not in str(raised.value)
 
 
 def test_429_is_retried_then_succeeds():
@@ -819,11 +975,13 @@ def test_table_cells_with_pipes_and_newlines_keep_the_table_shape():
         {
             "id": "r1",
             "type": "table_row",
+            "has_children": False,
             "table_row": {"cells": [[{"plain_text": "a|b"}], [{"plain_text": "x"}]]},
         },
         {
             "id": "r2",
             "type": "table_row",
+            "has_children": False,
             "table_row": {"cells": [[{"plain_text": "line1\nline2"}], [{"plain_text": "y"}]]},
         },
     ]
@@ -1185,3 +1343,454 @@ def test_state_stored_before_structure_existed_emits_every_page_again():
     )
 
     assert _structure_by_id(rows) == {ROOT_PAGE_ID: [], CHILD_PAGE_ID: [_PAGE_ANCESTOR]}
+
+
+_UNSUPPORTED_TYPES = ("external_object_instance_page", "ai_block")
+
+
+def _with_block_response(fake, block_id, response):
+    def handler(request):
+        if request.url.path == f"/v1/blocks/{block_id}/children":
+            fake.requests.append((request.method, f"blocks/{block_id}/children"))
+            return response(request)
+        return fake.handler(request)
+
+    return _NotionClient(httpx.Client(transport=httpx.MockTransport(handler)), "secret")
+
+
+def _unsupported_response(block_type, for_bot_type=None):
+    # The production sync logged the suffix for ai_block and not for the other type.
+    if for_bot_type is None:
+        for_bot_type = block_type == "ai_block"
+    suffix = " for your bot type" if for_bot_type else ""
+    return httpx.Response(
+        400,
+        json={
+            "code": "validation_error",
+            "message": f"Block type {block_type} is not supported via the API{suffix}.",
+        },
+    )
+
+
+@pytest.mark.parametrize("block_type", _UNSUPPORTED_TYPES)
+@pytest.mark.parametrize("for_bot_type", [False, True])
+@pytest.mark.parametrize("inside_copy", [False, True])
+def test_unsupported_children_keep_surrounding_text_and_retry_without_page_edit(
+    block_type, for_bot_type, inside_copy, caplog
+):
+    fake = _basic_tree()
+    block = _rich_text_block("unsupported", block_type, "available own text", has_children=True)
+    siblings = [
+        _rich_text_block("before", "paragraph", "before"),
+        block,
+        _rich_text_block("after", "paragraph", "after"),
+    ]
+    if inside_copy:
+        fake.blocks[ROOT_PAGE_ID].append(
+            {
+                "id": "copy",
+                "type": "synced_block",
+                "has_children": True,
+                "synced_block": {"synced_from": {"block_id": "original"}},
+            }
+        )
+        fake.blocks["copy"] = siblings
+    else:
+        fake.blocks[ROOT_PAGE_ID].append(
+            _rich_text_block("toggle", "toggle", "container", has_children=True)
+        )
+        fake.blocks["toggle"] = siblings
+    client = _with_block_response(
+        fake, "unsupported", lambda _: _unsupported_response(block_type, for_bot_type)
+    )
+    state = {}
+    with caplog.at_level("WARNING"):
+        rows = list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, state, {}))
+    content = next(row["content"] for row in rows if row["id"] == ROOT_PAGE_ID)
+    assert "before\navailable own text\nafter" in content
+    # A synced copy is listed while rendering alone, so it never marks the page.
+    assert ("incomplete_content" in state["pages"][ROOT_PAGE_ID]) is (not inside_copy)
+    skipped = f"skipping unavailable children of block unsupported (type {block_type})"
+    assert sum(skipped in message for message in caplog.messages) == 1
+    assert fake.requests.count(("GET", "blocks/unsupported/children")) == 1
+
+    fake.blocks["unsupported"] = [_rich_text_block("recovered", "paragraph", "now available")]
+    previous = state["pages"]
+    rows = list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, state, {}))
+    if inside_copy:
+        assert rows == []  # rendered again when the page is edited, see notion.md
+        return
+    assert len(rows) == 1
+    assert "now available" in rows[0]["content"]
+    assert "incomplete_content" not in state["pages"][ROOT_PAGE_ID]
+    assert (
+        list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, state["pages"], {}, {}))
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "status,code,message",
+    [
+        (400, "validation_error", "body failed validation"),
+        (400, "validation_error", "Block type other is not supported via the API."),
+        (400, "other_error", "Block type ai_block is not supported via the API."),
+        (401, "validation_error", "Block type ai_block is not supported via the API."),
+        (403, "validation_error", "Block type ai_block is not supported via the API."),
+        (404, "validation_error", "Block type ai_block is not supported via the API."),
+    ],
+)
+@pytest.mark.parametrize("render_only", [False, True])
+def test_other_block_errors_still_fail(status, code, message, render_only):
+    fake = _basic_tree()
+    block = _rich_text_block("bad", "ai_block", "", has_children=True)
+    client = _with_block_response(
+        fake, "bad", lambda _: httpx.Response(status, json={"code": code, "message": message})
+    )
+    with pytest.raises(NotionAPIError) as raised:
+        if render_only:
+            notion_module._render_blocks_list(client, [block])
+        else:
+            notion_module._collect_nested_children(client, [block], {})
+    assert raised.value.status_code == status
+    assert raised.value.code == code
+    assert raised.value.api_message == message
+
+
+@pytest.mark.parametrize("payload", [[], None, "not json"])
+def test_unstructured_error_response_preserves_api_error(payload):
+    fake = _basic_tree()
+    response = (
+        httpx.Response(400, text=payload)
+        if isinstance(payload, str)
+        else httpx.Response(400, json=payload)
+    )
+    client = _with_block_response(fake, "bad", lambda _: response)
+    with pytest.raises(NotionAPIError) as raised:
+        notion_module._list_block_children(client, "bad", block_type="ai_block")
+    assert raised.value.status_code == 400
+    assert raised.value.code is None
+
+
+@pytest.mark.parametrize("first_results", [[], [_rich_text_block("first", "paragraph", "keep")]])
+def test_unsupported_error_after_first_page_is_not_swallowed(first_results):
+    fake = _basic_tree()
+
+    def response(request):
+        if "start_cursor" in request.url.params:
+            return _unsupported_response("ai_block")
+        return httpx.Response(
+            200, json={"results": first_results, "has_more": True, "next_cursor": "next"}
+        )
+
+    client = _with_block_response(fake, "bad", response)
+    with pytest.raises(NotionAPIError):
+        notion_module._list_block_children(client, "bad", block_type="ai_block")
+
+
+def _child_page_block(page_id):
+    return {
+        "id": page_id,
+        "type": "child_page",
+        "has_children": False,
+        "child_page": {"title": page_id},
+    }
+
+
+def _add_page(fake, page_id, parent_id, blocks=()):
+    fake.pages[page_id] = _page_object(
+        page_id, page_id, parent={"type": "page_id", "page_id": parent_id}
+    )
+    fake.blocks[page_id] = list(blocks)
+
+
+def _unsupported_client(fake):
+    return _with_block_response(fake, "bad", lambda _: _unsupported_response("ai_block"))
+
+
+def _sync(client, previous, stats=None):
+    state = {}
+    stats = {} if stats is None else stats
+    rows = list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, state, stats))
+    return rows, state, stats
+
+
+@pytest.mark.parametrize("legacy_state", [False, True])
+def test_incomplete_discovery_withholds_deletions_and_still_advances(legacy_state, caplog):
+    fake = _basic_tree()
+    _, state, _ = _sync(_client(fake), {})
+    previous = state["pages"]
+    if legacy_state:
+        for page in previous.values():
+            page.pop("ancestors")
+    child_before = dict(previous[CHILD_PAGE_ID])
+    fake.blocks[ROOT_PAGE_ID] = [_rich_text_block("bad", "ai_block", "", has_children=True)]
+    with caplog.at_level("WARNING"):
+        rows, state, stats = _sync(_unsupported_client(fake), previous)
+    assert not any(row["_deleted"] for row in rows)
+    assert [row["id"] for row in rows] == [ROOT_PAGE_ID]  # the sync goes on and advances
+    assert state["pages"][CHILD_PAGE_ID] == child_before
+    assert state["pages"][ROOT_PAGE_ID]["incomplete_content"] is True
+    assert (stats["deleted"], stats["deletions_withheld"], stats["pages_incomplete"]) == (0, 1, 1)
+    assert any(f"page {ROOT_PAGE_ID} is stored without" in m for m in caplog.messages)
+    assert any("keeping 1 page(s)" in m and CHILD_PAGE_ID in m for m in caplog.messages)
+
+    # Once the block reads completely, the page that is really gone is forgotten.
+    fake.blocks[ROOT_PAGE_ID] = [_rich_text_block("b1", "paragraph", "hello root")]
+    rows, state, stats = _sync(_client(fake), state["pages"])
+    assert {row["id"] for row in rows if row["_deleted"]} == {CHILD_PAGE_ID}
+    assert CHILD_PAGE_ID not in state["pages"]
+    assert stats["deletions_withheld"] == 0
+
+
+def test_a_withheld_page_withholds_everything_below_it():
+    fake = _basic_tree()
+    _add_page(fake, "page-grand", CHILD_PAGE_ID)
+    fake.blocks[CHILD_PAGE_ID].append(_child_page_block("page-grand"))
+    _, state, _ = _sync(_client(fake), {})
+    assert state["pages"]["page-grand"]["ancestors"][0]["id"] == CHILD_PAGE_ID
+    fake.blocks[ROOT_PAGE_ID] = [_rich_text_block("bad", "ai_block", "", has_children=True)]
+    rows, state, stats = _sync(_unsupported_client(fake), state["pages"])
+    assert not any(row["_deleted"] for row in rows)
+    assert {CHILD_PAGE_ID, "page-grand"} <= set(state["pages"])
+    assert stats["deletions_withheld"] == 2
+
+
+def test_only_pages_below_the_incomplete_page_are_withheld():
+    fake = _basic_tree()
+    _add_page(fake, "page-sibling", ROOT_PAGE_ID)
+    _add_page(fake, "page-gone", "page-sibling")
+    fake.blocks[ROOT_PAGE_ID].append(_child_page_block("page-sibling"))
+    fake.blocks["page-sibling"].append(_child_page_block("page-gone"))
+    _, state, _ = _sync(_client(fake), {})
+    # The child page now holds the unsupported block; a page under the readable sibling is
+    # really deleted, and the same root must not make that ambiguous.
+    fake.blocks[CHILD_PAGE_ID] = [_rich_text_block("bad", "ai_block", "", has_children=True)]
+    fake.blocks["page-sibling"] = []
+    fake.pages.pop("page-gone")
+    rows, state, stats = _sync(_unsupported_client(fake), state["pages"])
+    assert {row["id"] for row in rows if row["_deleted"]} == {"page-gone"}
+    assert "page-gone" not in state["pages"]
+    assert stats["deletions_withheld"] == 0
+
+
+def test_a_blocked_page_is_not_rendered_again_until_it_reads_completely():
+    fake = _basic_tree()
+    fake.blocks[ROOT_PAGE_ID].append(_rich_text_block("bad", "ai_block", "", has_children=True))
+    client = _unsupported_client(fake)
+    _, state, _ = _sync(client, {})
+    for _ in range(2):
+        rows, state, stats = _sync(client, state["pages"])
+        assert rows == []
+        assert (stats["pages_changed"], stats["pages_incomplete"]) == (0, 1)
+    fake.blocks["bad"] = [_rich_text_block("ok", "paragraph", "now readable")]
+    rows, state, _ = _sync(_client(fake), state["pages"])
+    assert [row["id"] for row in rows] == [ROOT_PAGE_ID]
+    assert "incomplete_content" not in state["pages"][ROOT_PAGE_ID]
+
+
+def test_a_page_blocked_only_inside_a_synced_copy_is_not_rendered_again():
+    """Discovery does not expand a synced copy, so the blocked block inside it is first met
+    while rendering. Marking the page then would make the next run's comparison differ from
+    the stored state for as long as the block stays blocked."""
+    fake = _basic_tree()
+    fake.blocks[ROOT_PAGE_ID].append(
+        {
+            "id": "copy",
+            "type": "synced_block",
+            "has_children": True,
+            "synced_block": {"synced_from": {"block_id": "original"}},
+        }
+    )
+    fake.blocks["copy"] = [_rich_text_block("bad", "ai_block", "own text", has_children=True)]
+    client = _unsupported_client(fake)
+    rows, state, _ = _sync(client, {})
+    assert "own text" in next(r["content"] for r in rows if r["id"] == ROOT_PAGE_ID)
+    for _ in range(2):
+        rows, state, stats = _sync(client, state["pages"])
+        assert rows == []
+        assert stats["pages_changed"] == 0
+
+
+def test_a_page_that_turns_incomplete_is_rendered_in_the_same_run():
+    fake = _basic_tree()
+    fake.blocks[ROOT_PAGE_ID].append(_rich_text_block("toggle", "toggle", "t", has_children=True))
+    fake.blocks["toggle"] = [_rich_text_block("secret", "paragraph", "secret text")]
+    rows, state, _ = _sync(_client(fake), {})
+    assert "secret text" in next(r["content"] for r in rows if r["id"] == ROOT_PAGE_ID)
+    # Same last_edited_time: only the API's willingness to list the toggle changed.
+    client = _with_block_response(fake, "toggle", lambda _: _unsupported_response("toggle"))
+    rows, state, _ = _sync(client, state["pages"])
+    content = next(r["content"] for r in rows if r["id"] == ROOT_PAGE_ID)
+    assert "secret text" not in content
+    assert state["pages"][ROOT_PAGE_ID]["incomplete_content"] is True
+
+
+def _listed_as_unsupported(block_id, block_type):
+    """A block the way Notion lists a type its API does not support."""
+    return {
+        "id": block_id,
+        "type": "unsupported",
+        "has_children": True,
+        "unsupported": {"block_type": block_type},
+    }
+
+
+@pytest.mark.parametrize("block_type", _UNSUPPORTED_TYPES)
+@pytest.mark.parametrize("for_bot_type", [False, True])
+def test_a_block_listed_as_unsupported_is_skipped_by_its_own_type(block_type, for_bot_type, caplog):
+    """Notion's error names the block's own type, not the "unsupported" it is listed as."""
+    fake = _basic_tree()
+    fake.blocks[ROOT_PAGE_ID].extend(
+        [
+            _rich_text_block("before", "paragraph", "before"),
+            _listed_as_unsupported("unsupported", block_type),
+            _rich_text_block("after", "paragraph", "after"),
+        ]
+    )
+    client = _with_block_response(
+        fake, "unsupported", lambda _: _unsupported_response(block_type, for_bot_type)
+    )
+    state = {}
+    with caplog.at_level("WARNING"):
+        rows = list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, state, {}))
+    content = next(row["content"] for row in rows if row["id"] == ROOT_PAGE_ID)
+    assert "before" in content and "after" in content
+    assert state["pages"][ROOT_PAGE_ID]["incomplete_content"] is True
+    skipped = f"skipping unavailable children of block unsupported (type {block_type})"
+    assert sum(skipped in message for message in caplog.messages) == 1
+
+
+def test_a_block_listed_as_unsupported_without_its_type_still_fails():
+    fake = _basic_tree()
+    block = _listed_as_unsupported("unsupported", "ai_block")
+    block["unsupported"] = {}
+    fake.blocks[ROOT_PAGE_ID].append(block)
+    client = _with_block_response(fake, "unsupported", lambda _: _unsupported_response("ai_block"))
+    with pytest.raises(NotionAPIError, match="ai_block is not supported"):
+        list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, {}, {}))
+
+
+@pytest.mark.parametrize("how", ["404", "in_trash", "archived"])
+def test_a_child_the_walk_finds_gone_under_an_incomplete_page_is_forgotten(how):
+    """The walk itself proved the child gone, so the unreadable block on its parent does not
+    make its deletion uncertain; nor that of the page below it."""
+    fake = _basic_tree()
+    grandchild = "page-grandchild"
+    fake.blocks[CHILD_PAGE_ID].append(
+        {"id": grandchild, "type": "child_page", "has_children": False, "child_page": {}}
+    )
+    fake.pages[grandchild] = _page_object(
+        grandchild, "Grandchild", parent={"type": "page_id", "page_id": CHILD_PAGE_ID}
+    )
+    fake.blocks[grandchild] = []
+    _, state, _ = _sync(_client(fake), {})
+    assert {CHILD_PAGE_ID, grandchild} <= set(state["pages"])
+
+    fake.blocks[ROOT_PAGE_ID].append(_rich_text_block("bad", "ai_block", "", has_children=True))
+    if how == "404":
+        fake.gone.add(CHILD_PAGE_ID)
+    else:
+        fake.pages[CHILD_PAGE_ID][how] = True
+    rows, state, stats = _sync(_unsupported_client(fake), state["pages"])
+
+    assert {row["id"] for row in rows if row["_deleted"]} == {CHILD_PAGE_ID, grandchild}
+    assert stats["deletions_withheld"] == 0
+    assert state["pages"][ROOT_PAGE_ID]["incomplete_content"] is True
+
+
+def test_rows_of_a_database_the_walk_finds_gone_under_an_incomplete_page_are_forgotten():
+    fake = _tree_with_database()
+    _, state, _ = _sync(_client(fake), {})
+    assert ROW_PAGE_ID in state["pages"]
+
+    fake.blocks[ROOT_PAGE_ID].append(_rich_text_block("bad", "ai_block", "", has_children=True))
+    fake.gone.add(DB_BLOCK_ID)
+    rows, state, stats = _sync(_unsupported_client(fake), state["pages"])
+
+    assert [row["id"] for row in rows if row["_deleted"]] == [ROW_PAGE_ID]
+    assert stats["deletions_withheld"] == 0
+
+
+def test_a_row_deleted_from_a_queried_data_source_on_an_incomplete_page_is_forgotten():
+    """The query reads the data source to the end, so a missing row is gone, whatever
+    else on the page holding the database could not be read."""
+    fake = _tree_with_database()
+    second_row = "row-2"
+    fake.pages[second_row] = dict(fake.pages[ROW_PAGE_ID], id=second_row)
+    fake.blocks[second_row] = []
+    fake.data_source_rows[DATA_SOURCE_ID] = [ROW_PAGE_ID, second_row]
+    _, state, _ = _sync(_client(fake), {})
+
+    fake.blocks[ROOT_PAGE_ID].append(_rich_text_block("bad", "ai_block", "", has_children=True))
+    fake.data_source_rows[DATA_SOURCE_ID] = [ROW_PAGE_ID]
+    rows, state, stats = _sync(_unsupported_client(fake), state["pages"])
+
+    assert [row["id"] for row in rows if row["_deleted"]] == [second_row]
+    assert stats["deletions_withheld"] == 0
+    assert second_row not in state["pages"]
+    assert state["pages"][ROOT_PAGE_ID]["incomplete_content"] is True
+
+
+def test_a_row_of_a_data_source_hidden_by_an_unsupported_block_is_withheld():
+    """A database inside the unreadable block is not reached, so its rows cannot be
+    proved gone."""
+    fake = _tree_with_database()
+    database_block = fake.blocks[ROOT_PAGE_ID].pop()
+    fake.blocks[ROOT_PAGE_ID].append(_rich_text_block("bad", "ai_block", "", has_children=True))
+    fake.blocks["bad"] = [database_block]
+    _, state, _ = _sync(_client(fake), {})
+    assert ROW_PAGE_ID in state["pages"]
+
+    rows, state, stats = _sync(_unsupported_client(fake), state["pages"])
+
+    assert not any(row["_deleted"] for row in rows)
+    assert stats["deletions_withheld"] == 1
+    assert ROW_PAGE_ID in state["pages"]
+
+
+def test_unsupported_block_does_not_prevent_deletion_under_another_page():
+    fake = _basic_tree()
+    fake.pages["other"] = _page_object("other", "Other", parent={"type": "workspace"})
+    fake.blocks["other"] = []
+    state = {}
+    roots = [ROOT_PAGE_ID, "other"]
+    list(_iter_rows(_client(fake), roots, [], WORKSPACE_ID, {}, state, {}))
+    fake.blocks["other"] = [_rich_text_block("bad", "ai_block", "", has_children=True)]
+    fake.blocks[ROOT_PAGE_ID] = []
+    client = _with_block_response(fake, "bad", lambda _: _unsupported_response("ai_block"))
+    rows = list(_iter_rows(client, roots, [], WORKSPACE_ID, state["pages"], {}, {}))
+    assert {row["id"] for row in rows if row["_deleted"]} == {CHILD_PAGE_ID}
+
+
+def test_page_listing_never_uses_unsupported_block_exception():
+    fake = _basic_tree()
+    client = _with_block_response(fake, ROOT_PAGE_ID, lambda _: _unsupported_response("ai_block"))
+    with pytest.raises(NotionAPIError):
+        list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, {}, {}))
+
+
+def test_unsupported_synced_copy_does_not_block_real_child_deletion():
+    fake = _basic_tree()
+    state = {}
+    list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, state, {}))
+    fake.blocks[ROOT_PAGE_ID] = [
+        {
+            "id": "copy",
+            "type": "synced_block",
+            "has_children": True,
+            "synced_block": {"synced_from": {"block_id": "original"}},
+        }
+    ]
+    fake.blocks["copy"] = [_rich_text_block("bad", "ai_block", "", has_children=True)]
+    fake.pages[ROOT_PAGE_ID]["last_edited_time"] = "2026-10-29T00:00:00.000Z"
+    client = _with_block_response(fake, "bad", lambda _: _unsupported_response("ai_block"))
+    rows = list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, state["pages"], {}, {}))
+    assert {row["id"] for row in rows if row["_deleted"]} == {CHILD_PAGE_ID}
+
+
+def test_table_listing_is_still_required():
+    fake = _basic_tree()
+    client = _with_block_response(fake, "table", lambda _: _unsupported_response("table"))
+    with pytest.raises(NotionAPIError):
+        notion_module._render_blocks_list(client, [{"id": "table", "type": "table", "table": {}}])
