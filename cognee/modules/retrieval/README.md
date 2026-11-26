@@ -49,13 +49,16 @@ connection. Graph/vector I/O and LLM calls remain on the caller's async event lo
 Cancelling a retrieval interrupts active SQLite work; any running Python stage must
 finish before the queued close can release its store. Waiting for cleanup is asynchronous.
 
-`retriever_specific_config["store_mb"]` defaults to `512` (512 MB in decimal units).
-Datasets whose stored document sizes sum to at most that threshold are loaded whole.
-Above it, the existing similarity-selected subset is used and the answer reports partial
-coverage. The selected text is budgeted in million characters. This setting does not cap
-process RAM: SQLite storage, parsed rows and document batches also consume memory, and
-concurrent retrievals each own a separate store. The 256 MB batching budget and token and
-result-row limits are independent of this threshold.
+`retriever_specific_config["store_mb"]` defaults to `512` and counts megabytes of text
+(million characters), the same on both sides of the threshold. A dataset holding at most
+that much text is loaded whole. Above it, the parts most similar to the question are
+loaded up to the same size, and the answer reports partial coverage as the text held and
+an estimate of the dataset's text. The stored file sizes do not decide this: a CSV holds
+more text than bytes, a PDF far less. The text is measured as it is read, so a dataset
+over the threshold is read up to it once before its most similar parts are loaded. This
+setting does not cap process RAM: SQLite storage, parsed rows and document batches also
+consume memory, and concurrent retrievals each own a separate store. The 256 MB batching
+budget and token and result-row limits are independent of this threshold.
 
 ## The contract
 

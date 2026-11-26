@@ -16,6 +16,7 @@ answer was reached, and the full result when it has more than one row.
 """
 
 import json
+import math
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -23,10 +24,11 @@ from itertools import groupby, pairwise
 from typing import Any, Literal
 from uuid import UUID
 
+from fastapi import status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import select
 
-from cognee.context_global_variables import current_dataset_id
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
@@ -51,8 +53,9 @@ BROAD_CONTEXT_TOKENS = 30_000
 BROAD_READING_TOKENS = 12_000
 # Megabytes of text held in memory at once while the store is built.
 BROAD_BATCH_MB = 256
-# A dataset up to this many megabytes is loaded into the store whole; a larger one is
-# represented by the parts most similar to the question, up to this size.
+# A dataset holding up to this many megabytes (million characters) of text is loaded into
+# the store whole; a larger one is represented by the parts most similar to the question,
+# up to this size.
 BROAD_STORE_MB = 512
 # The least text a chunk is assumed to hold, when deciding how many to ask the vector
 # store for; a chunk is rarely shorter.
@@ -70,8 +73,16 @@ _MAX_CHARS_PER_TOKEN = 6
 _MIN_CHUNK_TOKENS = 256
 
 
-class BroadLimitError(ValueError):
+class BroadLimitError(CogneeValidationError):
     """The dataset exceeds a BROAD limit; the message names the setting to raise."""
+
+    def __init__(
+        self,
+        message: str,
+        name: str = "BroadLimitError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
 
 
 class BroadNoTextError(NoDataError):
@@ -147,14 +158,30 @@ class Corpus:
     """A dataset's documents, fetched from the graph in batches of whole documents so the
     text held at once stays near ``batch_chars``. Batches are planned from each document's
     stored size, scaled by how much text a stored byte turned out to hold; a document
-    larger than a batch raises."""
+    larger than a batch raises. The batches end early once the text read passes
+    ``store_chars``: the dataset is then too large to load whole (``over_store``)."""
 
     graph: Any
     documents: list[str]
     names: dict[str, str]
     sizes: dict[str, int]
     batch_chars: int
+    store_chars: int
     worker: BroadWorker
+    # The text read so far, in characters, and the stored bytes of the documents it came from.
+    read_chars: int = 0
+    read_stored: int = 0
+
+    @property
+    def over_store(self) -> bool:
+        return self.read_chars > self.store_chars
+
+    def estimated_chars(self) -> int | None:
+        """The whole dataset's text in characters, estimated from the text the documents
+        read so far held per stored byte; None when their stored sizes are unknown."""
+        if not self.read_stored:
+            return None
+        return round(self.read_chars * sum(self.sizes.values()) / self.read_stored)
 
     async def fetch(self, documents: list[str]) -> list[Unit]:
         nodes, edges = await self.graph.get_neighborhood(documents, depth=1)
@@ -173,13 +200,17 @@ class Corpus:
                 planned += size * ratio
             units = await self.fetch(batch)
             text = sum(len(unit.text) for unit in units)
+            stored = sum(self.sizes.get(document, 0) for document in batch)
+            self.read_chars += text
+            self.read_stored += stored
+            if self.over_store:
+                return
             if len(batch) == 1 and text > self.batch_chars:
                 raise BroadLimitError(
                     f"BROAD: document {self.names.get(batch[0], batch[0])} holds {text:,} "
                     f"characters of text, more than one batch of {self.batch_chars:,} "
                     "(batch_mb). Raise batch_mb in retriever_specific_config."
                 )
-            stored = sum(self.sizes.get(document, 0) for document in batch)
             if stored:
                 ratio = max(ratio, text / stored)
             start += len(batch)
@@ -318,10 +349,12 @@ class BroadRetriever(CompletionRetriever):
     - ``reading_tokens``: the size of the prompt the reading route fills with the parts of
       the text most similar to the question.
     - ``batch_mb``: megabytes of text held in memory at once while the store is built.
-    - ``store_mb``: a dataset up to this stored size is loaded into the in-memory SQLite
-      store whole (default 512 MB, decimal). A larger one is represented by the parts most
-      similar to the question, up to this many million characters, and the answer says so.
-      This is a coverage threshold, not a bound on process RAM.
+    - ``store_mb``: megabytes (million characters) of text the in-memory SQLite store holds
+      (default 512). A dataset with up to this much text is loaded whole. A larger one is
+      represented by the parts most similar to the question, up to the same size, and the
+      answer says so. The text is measured as it is read, so a dataset over the limit is
+      read up to the limit once before its most similar parts are loaded. This is a
+      coverage threshold, not a bound on process RAM.
     """
 
     def __init__(
@@ -333,10 +366,18 @@ class BroadRetriever(CompletionRetriever):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        if min(context_tokens, reading_tokens, batch_mb, store_mb) <= 0:
-            raise ValueError(
-                "BROAD context_tokens, reading_tokens, batch_mb and store_mb must be positive"
-            )
+        settings = {
+            "context_tokens": context_tokens,
+            "reading_tokens": reading_tokens,
+            "batch_mb": batch_mb,
+            "store_mb": store_mb,
+        }
+        for name, value in settings.items():
+            # bool is an int subclass; True must not pass as 1.
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"BROAD {name} must be a number, not {value!r}.")
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"BROAD {name} must be a positive, finite number, not {value!r}.")
         self.context_tokens = context_tokens
         self.reading_tokens = reading_tokens
         self.batch_chars = int(batch_mb * 1_000_000)
@@ -345,56 +386,45 @@ class BroadRetriever(CompletionRetriever):
 
     async def get_retrieved_objects(self, query: str) -> BroadContext:
         engine = await get_unified_engine()
+        foreign_keys = await self.dlt_foreign_keys(engine.graph)
         async with BroadWorker(RecordStore) as store:
-            await store.run(store.store.add_dlt_tables, await self.dlt_foreign_keys(engine.graph))
-            total = await self.dataset_size()
-            corpus = None
-            if total is None:
-                corpus = await self.open_corpus(engine.graph, store)
-                total = sum(corpus.sizes.values())
-            if total > self.store_chars:
-                chars, parts = await self.build_most_similar(store, engine.vector, query)
+            await store.run(store.store.add_dlt_tables, foreign_keys)
+            corpus = await self.open_corpus(engine.graph, store)
+            whole, chars = await self.build(store, corpus)
+            if not corpus.over_store:
                 if not chars:
                     raise BroadNoTextError("BROAD found no document text in this dataset.")
-                coverage = (
-                    f"the {parts:,} parts of the dataset most similar to the question "
-                    f"({chars / 1e6:.1f} MB of {total / 1e6:,.0f} MB; the rest was not searched)"
+                fits = (
+                    bool(whole)
+                    and len(await store.run(self.tokenizer.extract_tokens, whole))
+                    <= self.context_tokens
                 )
-                logger.warning(
-                    "BROAD dataset holds %.0f MB, more than store_mb (%.0f MB): the store holds %s. "
-                    "Raise store_mb in retriever_specific_config to search more.",
-                    total / 1e6,
-                    self.store_chars / 1e6,
-                    coverage,
-                )
-                found = await self.decide(query, store, None)
-                found.coverage = coverage
-                if found.route == "sql":
-                    found.note = found.note.replace("over the whole dataset", f"over {coverage}")
-                return found
-            corpus = corpus or await self.open_corpus(engine.graph, store)
-            whole, chars = await self.build(store, corpus)
+                logger.info("BROAD dataset: %d characters, shown whole: %s", chars, fits)
+                return await self.decide(query, store, whole if fits else None)
+        # That store holds the first documents by name, not the ones the question needs,
+        # so the most similar parts are loaded into a new one.
+        async with BroadWorker(RecordStore) as store:
+            await store.run(store.store.add_dlt_tables, foreign_keys)
+            chars, parts = await self.build_most_similar(store, engine.vector, query)
             if not chars:
                 raise BroadNoTextError("BROAD found no document text in this dataset.")
-            fits = (
-                bool(whole)
-                and len(await store.run(self.tokenizer.extract_tokens, whole))
-                <= self.context_tokens
+            total = corpus.estimated_chars()
+            of_total = f" of about {total / 1e6:,.1f} MB" if total is not None else ""
+            coverage = (
+                f"the {parts:,} parts of the dataset most similar to the question "
+                f"({chars / 1e6:.1f} MB{of_total} of text; the rest was not searched)"
             )
-            logger.info("BROAD dataset: %d characters, shown whole: %s", chars, fits)
-            return await self.decide(query, store, whole if fits else None)
-
-    async def dataset_size(self) -> int | None:
-        """The stored size in bytes of the dataset being searched, from one query over its
-        data records; None when no dataset is in context."""
-        dataset = current_dataset_id.get()
-        if dataset is None:
-            return None
-        async with get_relational_engine().get_async_session() as session:
-            total = await session.scalar(
-                select(func.coalesce(func.sum(Data.data_size), 0)).where(Data.dataset_id == dataset)
+            logger.warning(
+                "BROAD dataset holds more text than store_mb (%.1f MB): the store holds %s. "
+                "Raise store_mb in retriever_specific_config to search more.",
+                self.store_chars / 1e6,
+                coverage,
             )
-        return int(total or 0)
+            found = await self.decide(query, store, None)
+            found.coverage = coverage
+            if found.route == "sql":
+                found.note = found.note.replace("over the whole dataset", f"over {coverage}")
+            return found
 
     # --- loading ----------------------------------------------------------------------
 
@@ -428,6 +458,7 @@ class BroadRetriever(CompletionRetriever):
             names=names,
             sizes=await self.document_sizes(documents),
             batch_chars=self.batch_chars,
+            store_chars=self.store_chars,
             worker=worker,
         )
 
@@ -445,7 +476,8 @@ class BroadRetriever(CompletionRetriever):
 
     async def build(self, store: BroadWorker, corpus: Corpus) -> tuple[str, int]:
         """Fill the store batch by batch; return the dataset's text when it may fit one
-        prompt (else "") and its size in characters."""
+        prompt (else "") and its size in characters. The batches stop once the text passes
+        store_mb (``corpus.over_store``); the store is then incomplete."""
         whole: list[str] = []
         chars = 0
         async for units in corpus.batches():
