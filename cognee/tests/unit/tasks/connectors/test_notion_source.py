@@ -554,6 +554,45 @@ def test_a_redirect_answer_is_an_error_not_an_empty_listing(monkeypatch):
     assert {"id": CHILD_PAGE_ID, "_deleted": True} in rows
 
 
+def test_a_200_without_results_is_an_error_not_an_empty_listing():
+    """A 200 answer without a ``results`` list is malformed, not empty: read as
+    empty it would walk nothing below the page and tombstone every previously
+    synced page under it."""
+    fake = _basic_tree()
+    client = _client(fake)
+    state: dict = {}
+    list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, state, {}))
+    previous_pages = dict(state["pages"])
+
+    def results_less_listing(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith(f"/blocks/{ROOT_PAGE_ID}/children"):
+            return httpx.Response(200, json={"has_more": False, "next_cursor": None})
+        return fake.handler(request)
+
+    client._http = httpx.Client(transport=httpx.MockTransport(results_less_listing))
+    with pytest.raises(NotionAPIError) as caught:
+        list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, previous_pages, {}, {}))
+    assert "results" in str(caught.value)
+
+
+def test_a_200_without_results_on_a_data_source_query_is_an_error():
+    fake = _tree_with_database()
+    original = fake.handler
+
+    def handler(request):
+        if request.url.path.endswith(f"data_sources/{DATA_SOURCE_ID}/query"):
+            return httpx.Response(200, json={"has_more": False, "next_cursor": None})
+        return original(request)
+
+    fake.handler = handler
+    previous = {ROOT_PAGE_ID: {}, CHILD_PAGE_ID: {}, ROW_PAGE_ID: {}}
+    rows = []
+    with pytest.raises(NotionAPIError) as caught:
+        rows.extend(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, {}, {}))
+    assert "results" in str(caught.value)
+    assert not any(row.get("_deleted") for row in rows)
+
+
 def test_explicit_root_gone_raises():
     fake = FakeNotion()
     client = _client(fake)

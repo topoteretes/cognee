@@ -242,6 +242,23 @@ def _is_gone(exc: Exception) -> bool:
     return isinstance(exc, NotionAPIError) and exc.status_code in (403, 404)
 
 
+def _listing_results(response: dict, what: str) -> list:
+    """The ``results`` list of a listing response, or an error when it is absent.
+
+    A 200 without ``results`` is not an empty listing — an empty listing is a
+    200 with ``results: []``. Reading a missing key as empty would walk nothing
+    below the page and tombstone every previously synced row under it, so the
+    malformed answer aborts the sync instead.
+    """
+    if "results" not in response:
+        raise NotionAPIError(
+            0,
+            f"Notion answered the listing of {what} without a results list; "
+            "aborting instead of reading it as empty.",
+        )
+    return response["results"]
+
+
 def _list_block_children(client: _NotionClient, block_id: str):
     """Yield a block's direct children, across Notion's cursor pagination."""
     cursor = None
@@ -250,7 +267,7 @@ def _list_block_children(client: _NotionClient, block_id: str):
         if cursor:
             params["start_cursor"] = cursor
         response = client.request("GET", f"blocks/{block_id}/children", params=params)
-        yield from response.get("results", [])
+        yield from _listing_results(response, f"children of block {block_id}")
         cursor = response.get("next_cursor")
         if not response.get("has_more"):
             return
@@ -270,7 +287,7 @@ def _query_data_source(client: _NotionClient, data_source_id: str):
         if cursor:
             body["start_cursor"] = cursor
         response = client.request("POST", f"data_sources/{data_source_id}/query", json_body=body)
-        yield from response.get("results", [])
+        yield from _listing_results(response, f"query of data source {data_source_id}")
         # Notion stops a query at 10,000 rows with has_more false and this
         # status; the rows past the cut would otherwise be tombstoned.
         if (response.get("request_status") or {}).get("type") == "incomplete":
