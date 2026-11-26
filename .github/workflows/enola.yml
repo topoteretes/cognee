@@ -63,12 +63,19 @@ jobs:
           code=$?
           enola check --base "origin/${BASE_REF}" --summary . >> "$GITHUB_STEP_SUMMARY"
           summary_code=$?
-          # 0 clean, 1 a finding (reported, not enforced), 3 the base could not
-          # be compared (not a statement about the change), 2 enola could not run.
-          if [ "$code" -eq 2 ] || [ "$summary_code" -eq 2 ]; then
-            echo "::error::enola check could not run"
-            exit 1
-          fi
+          # With no --fail-on, enola reports every finding and exits 0, or 3 when
+          # the base cannot be compared (not a statement about the change). Any
+          # other code (2, a crash, a kill, a missing binary) means no report was
+          # made, which must not pass for a clean one.
+          for c in "$code" "$summary_code"; do
+            case "$c" in
+              0|3) ;;
+              *)
+                echo "::error::enola check could not run (exit $c)"
+                exit 1
+                ;;
+            esac
+          done
           if [ "$code" -eq 3 ]; then
             echo "::notice::enola declined to compare this branch with ${BASE_REF}; see the job summary"
           fi
