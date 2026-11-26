@@ -64,7 +64,7 @@ class FakeLinear:
         }
 
     # -- transport ---------------------------------------------------------
-    def execute(self, query, variables=None):
+    def execute(self, query, variables=None, *, check_active=None):
         variables = variables or {}
         self.calls.append(query)
         if self.fail_after is not None and len(self.calls) > self.fail_after:

@@ -377,7 +377,7 @@ jobs:
             - Source files: `${{ matrix.source_files }}`
             - Docs files: `${{ steps.docs_files.outputs.existing }}`
 
-            Follow-up (out of scope): cognee repo Markdown, CLAUDE.md, and Python docstrings.
+            Follow-up in the SDK repository (out of scope): update the relevant topic guide or Python docstrings if needed.
         run: |
           python3 -I tools/manage_docs_pr.py \
             --target-repo topoteretes/cognee-docs \

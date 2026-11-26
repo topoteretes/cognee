@@ -2,6 +2,7 @@ import os
 from typing import Any
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.files.utils.decode_text_sample import bom_encoding
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 from cognee.infrastructure.loaders.exceptions import UnreadableFileContentError
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
@@ -52,14 +53,16 @@ class TextLoader(LoaderInterface):
         )
 
     async def load(
-        self, file_path: str, encoding: str = "utf-8", **kwargs: Any
+        self, file_path: str, encoding: str | None = None, **kwargs: Any
     ) -> "str | LoaderResult":
         """
         Load and process the text file.
 
         Args:
             file_path: Path to the file to load
-            encoding: Text encoding to use (default: utf-8)
+            encoding: Text encoding to use. When omitted, a file starting with a
+                UTF-16 or UTF-32 byte-order mark is read in the encoding the mark
+                names, without the mark; any other file is read as UTF-8.
             **kwargs: Additional configuration (unused)
 
         Returns:
@@ -75,12 +78,23 @@ class TextLoader(LoaderInterface):
 
         with open(file_path, "rb") as f:
             file_metadata = await get_file_metadata(f)
+            f.seek(0)
+            bom_codec = bom_encoding(f.read(4)) if encoding is None else None
+        # Backward compatibility: a UTF-8 BOM keeps the plain UTF-8 read, so the text still
+        # starts with U+FEFF as before BOM support. Stripping it would change the first
+        # chunk's content-hashed id for files that were already ingested.
+        if bom_codec == "utf-8":
+            bom_codec = None
         # Name ingested file of current loader based on original file content hash
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
+        if encoding is None:
+            encoding = bom_codec or "utf-8"
         try:
             with open(file_path, encoding=encoding) as f:
                 content = f.read()
+            if bom_codec:
+                content = content.removeprefix("\ufeff")
         except UnicodeDecodeError as error:
             # This loader is the content-detection fallback, so a binary file
             # whose bytes the sniffer reads as text/plain (a .dmg, an archive)

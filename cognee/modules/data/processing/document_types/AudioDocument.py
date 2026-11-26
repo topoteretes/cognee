@@ -1,3 +1,5 @@
+import builtins
+
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.chunking.Chunker import Chunker
 
@@ -11,7 +13,7 @@ class AudioDocument(Document):
         result = await LLMGateway.create_transcript(self.raw_data_location)
         return result.text
 
-    async def read(self, chunker_cls: Chunker, max_chunk_size: int):
+    async def read(self, chunker_cls: builtins.type[Chunker], max_chunk_size: int):
         async def get_text():
             # Transcribe the audio file
             yield await self.create_transcript()

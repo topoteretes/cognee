@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Any
 from uuid import UUID
 
@@ -12,7 +13,7 @@ logger = get_logger()
 
 
 async def run_custom_pipeline(
-    tasks: list[Task] | list[str] | None = None,
+    tasks: list[Task] | list[str] | Callable[[Any], list[Task]] | None = None,
     data: Any = None,
     dataset: str | UUID = DEFAULT_DATASET_NAME,
     user: User = None,
@@ -36,7 +37,9 @@ async def run_custom_pipeline(
     relationships, and creates semantic connections for enhanced search and reasoning.
 
     Args:
-        tasks: List of Cognee Tasks to execute.
+        tasks: List of Cognee Tasks to execute, or a task resolver that picks each item's
+               list. A run whose items may go to workers is given the resolver of registered
+               task lists (``cognee.modules.pipelines.execution.registered_tasks``).
         data: The data to ingest. Can be anything when custom extraction and enrichment tasks are used.
               Data provided here will be forwarded to the first extraction task in the pipeline as input.
               Data rows (cognee's Data model) are read again under the dataset lock, so tasks get
@@ -66,9 +69,7 @@ async def run_custom_pipeline(
         pipeline_name: Name recorded on the pipeline run.
     """
 
-    custom_tasks = [
-        *tasks,
-    ]
+    custom_tasks = tasks if callable(tasks) else [*tasks]
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
@@ -87,4 +88,6 @@ async def run_custom_pipeline(
         pipeline_name=pipeline_name,
         data_cache=data_cache,
         skip_connection_test=skip_connection_test,
+        # run_pipeline reads it off a task list itself; registered tasks carry it.
+        needs_llm=getattr(custom_tasks, "needs_llm", True),
     )

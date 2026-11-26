@@ -13,6 +13,7 @@ from cognee.infrastructure.databases.vector.exceptions import CollectionNotFound
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.modules.search.dataset_routing import (
     DATASET_ROUTE_COLLECTION,
+    copy_dataset_routes,
     dataset_route_ids,
     route_datasets,
     sync_dataset_routes,
@@ -104,8 +105,10 @@ class FakeEngine:
 
     async def upsert_raw_vectors(self, collection_name, points, payload_schema=None):
         assert collection_name == DATASET_ROUTE_COLLECTION
+        # No schema: the rows are index rows, copied from the dataset's store as stored.
+        assert payload_schema is None
         for point in points:
-            self.created.append(payload_schema.model_validate(point["payload"]))
+            self.created.append(point["payload"])
             self.vectors[str(point["id"])] = point["vector"]
 
     async def delete_collection(self, collection_name):
@@ -128,17 +131,24 @@ def _patch(monkeypatch, engine, documents, access_control=True):
 
 
 class FakeIndexStore:
-    """The dataset's own store, holding the vectors the index build embedded."""
+    """The dataset's own store, holding the index rows the build embedded."""
 
     def __init__(self, vectors):
         self.vectors = vectors
         self.retrieved = []
 
+    @staticmethod
+    def stored_row(row_id):
+        """The index row as ``index_data_points`` stored it, minus the vector."""
+        return {"id": row_id, "text": f"indexed {row_id}", "belongs_to_set": []}
+
     async def retrieve(self, collection_name, data_point_ids, *, include_vector=False):
         assert collection_name == "GlobalContextSummary_text" and include_vector is True
         self.retrieved.extend(data_point_ids)
         return [
-            ScoredResult(id=UUID(row_id), score=0, payload={"text": "x", "vector": vector})
+            ScoredResult(
+                id=UUID(row_id), score=0, payload={**self.stored_row(row_id), "vector": vector}
+            )
             for row_id, vector in self.vectors.items()
             if row_id in data_point_ids
         ]
@@ -186,7 +196,9 @@ async def test_routes_to_the_dataset_whose_best_row_matches(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_dataset_with_no_routing_rows_is_always_searched(monkeypatch):
+async def test_a_dataset_with_no_routing_rows_is_left_out_when_another_is_routed(monkeypatch):
+    """SDK-1516: an unindexed dataset waits for the search's widening pass; kept
+    next to every routed one, a backlog of them meant routing never narrowed."""
     a, b, c = uuid4(), uuid4(), uuid4()
     (root_a,), (root_b,) = dataset_route_ids(a, []), dataset_route_ids(b, [])
     engine = FakeEngine(scores={root_a: 0.2, root_b: 0.3})
@@ -196,8 +208,35 @@ async def test_a_dataset_with_no_routing_rows_is_always_searched(monkeypatch):
 
     assert decision.routed == (a,)
     assert decision.unindexed == (c,)
-    assert decision.dataset_ids == [a, c]
+    assert decision.dataset_ids == [a]
     assert decision.narrowed is True
+
+
+@pytest.mark.asyncio
+async def test_one_indexed_dataset_narrows_a_backlog_of_unindexed_ones(monkeypatch):
+    """The case that kept routing from narrowing: one dataset indexed, the rest not."""
+    indexed, *backlog = (uuid4() for _ in range(6))
+    (root,) = dataset_route_ids(indexed, [])
+    _patch(monkeypatch, FakeEngine(scores={root: 0.4}), {d: [] for d in [indexed, *backlog]})
+
+    decision = await _route("q", [indexed, *backlog], top_k=1)
+
+    assert decision.dataset_ids == [indexed]
+    assert decision.unindexed == tuple(backlog)
+    assert decision.narrowed is True
+
+
+@pytest.mark.asyncio
+async def test_with_no_dataset_indexed_every_dataset_is_searched(monkeypatch):
+    a, b = uuid4(), uuid4()
+    _patch(monkeypatch, FakeEngine(scores={}), {a: [], b: []})
+
+    decision = await _route("q", [a, b], top_k=1)
+
+    assert decision.routed == ()
+    assert decision.unindexed == (a, b)
+    assert decision.dataset_ids == [a, b]
+    assert decision.narrowed is False
 
 
 @pytest.mark.asyncio
@@ -406,18 +445,15 @@ async def test_sync_writes_new_and_changed_rows_and_deletes_the_rest(monkeypatch
 
     assert touched == 3
     assert engine.deleted == [UUID(gone_id)]
-    assert sorted((str(row.id), row.text) for row in engine.created) == sorted(
-        [(kept_id, "kept bucket"), (changed_id, "new bucket text")]
+    # The rows are the index store's rows as stored, payload and vector alike;
+    # nothing was embedded for them.
+    assert sorted(engine.created, key=lambda row: row["id"]) == sorted(
+        [index_store.stored_row(kept_id), index_store.stored_row(changed_id)],
+        key=lambda row: row["id"],
     )
-    # The rows carry the index store's vectors; nothing was embedded for them.
     assert engine.vectors == {kept_id: [1.0, 0.0], changed_id: [0.0, 1.0]}
     assert engine.embedded == []
     assert sorted(index_store.retrieved) == sorted([kept_id, changed_id])
-    assert all(row.dataset_id == str(dataset_id) for row in engine.created)
-    assert {str(row.id): row.is_root for row in engine.created} == {
-        kept_id: False,
-        changed_id: False,
-    }
 
 
 @pytest.mark.asyncio
@@ -437,7 +473,7 @@ async def test_sync_ignores_rows_whose_ids_recall_cannot_derive(monkeypatch):
         FakeIndexStore({root_id: [0.1, 0.2]}),
     )
 
-    assert [str(row.id) for row in engine.created] == [root_id]
+    assert [row["id"] for row in engine.created] == [root_id]
 
 
 @pytest.mark.asyncio
@@ -506,6 +542,96 @@ async def test_sync_on_an_adapter_without_raw_vector_writes_warns_and_moves_on(m
 
     assert "cannot write precomputed vectors" in caplog.text
     assert touched == 0 and engine.created == []
+
+
+def _reembedded_store(vectors, model="deployment-model", width=2):
+    """A dataset's store after a re-embed: its index rows, and the model that embedded them."""
+    store = FakeIndexStore(vectors)
+    store.embedding_engine = types.SimpleNamespace(model=model, get_vector_size=lambda: width)
+    return store
+
+
+def _routing_engine(**kwargs):
+    """The routing store, embedding with the deployment's model (two dimensions)."""
+    engine = FakeEngine(**kwargs)
+    engine.embedding_engine.model = "deployment-model"
+    return engine
+
+
+@pytest.mark.asyncio
+async def test_copy_writes_the_rows_the_dataset_store_holds_now(monkeypatch):
+    """After a re-embed no build follows, so the rows are copied by their derivable ids."""
+    dataset_id, doc, deleted_doc = uuid4(), uuid4(), uuid4()
+    root_id = str(create_root_summary_id(str(dataset_id)))
+    bucket_id = str(create_document_bucket_id(str(dataset_id), str(doc)))
+    # Still in the dataset's store, but its document is gone: recall cannot derive its id.
+    orphan_id = str(create_document_bucket_id(str(dataset_id), str(deleted_doc)))
+    engine = _routing_engine(stored_width=2)
+    _patch(monkeypatch, engine, {dataset_id: [doc]})
+    store = _reembedded_store({root_id: [1.0, 0.0], bucket_id: [0.0, 1.0], orphan_id: [0.5, 0.5]})
+
+    assert await copy_dataset_routes(dataset_id, store) == 2
+
+    assert engine.vectors == {root_id: [1.0, 0.0], bucket_id: [0.0, 1.0]}
+    assert engine.created == [store.stored_row(root_id), store.stored_row(bucket_id)]
+    assert engine.embedded == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "dataset_model",
+    [{"model": "another-model"}, {"width": 3}],
+    ids=["another model of the same width", "the same name with another width"],
+)
+async def test_copy_writes_nothing_from_a_store_of_another_model(monkeypatch, dataset_model):
+    """Routing rows are scored with the deployment's model, so only its vectors are copied."""
+    dataset_id = uuid4()
+    root_id = str(create_root_summary_id(str(dataset_id)))
+    engine = _routing_engine(stored_width=2)
+    _patch(monkeypatch, engine, {dataset_id: []})
+    store = _reembedded_store({root_id: [1.0, 0.0]}, **dataset_model)
+
+    assert await copy_dataset_routes(dataset_id, store) == 0
+    assert engine.created == [] and store.retrieved == []
+
+
+@pytest.mark.asyncio
+async def test_copy_writes_nothing_into_a_collection_of_another_width(monkeypatch):
+    dataset_id = uuid4()
+    root_id = str(create_root_summary_id(str(dataset_id)))
+    engine = _routing_engine(stored_width=3)
+    _patch(monkeypatch, engine, {dataset_id: []})
+
+    assert await copy_dataset_routes(dataset_id, _reembedded_store({root_id: [1.0, 0.0]})) == 0
+    assert engine.created == []
+
+
+@pytest.mark.asyncio
+async def test_copy_on_an_adapter_without_raw_vector_writes_warns_and_moves_on(monkeypatch, caplog):
+    dataset_id = uuid4()
+    root_id = str(create_root_summary_id(str(dataset_id)))
+    engine = _routing_engine(stored_width=2)
+
+    async def no_raw_writes(collection_name, points, payload_schema=None):
+        raise NotImplementedError
+
+    engine.upsert_raw_vectors = no_raw_writes
+    _patch(monkeypatch, engine, {dataset_id: []})
+
+    with caplog.at_level("WARNING"):
+        assert await copy_dataset_routes(dataset_id, _reembedded_store({root_id: [1.0, 0.0]})) == 0
+    assert "cannot write precomputed vectors" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_copy_is_a_no_op_without_backend_access_control(monkeypatch):
+    dataset_id = uuid4()
+    root_id = str(create_root_summary_id(str(dataset_id)))
+    engine = _routing_engine(stored_width=2)
+    _patch(monkeypatch, engine, {dataset_id: []}, access_control=False)
+
+    assert await copy_dataset_routes(dataset_id, _reembedded_store({root_id: [1.0, 0.0]})) == 0
+    assert engine.created == []
 
 
 @pytest.mark.asyncio
@@ -703,3 +829,28 @@ async def test_no_database_is_created_without_access_control_or_outside_pgvector
     )
     await store_module.ensure_default_store()
     assert created == []
+
+
+@pytest.mark.asyncio
+async def test_routing_width_check_awaits_the_engines_vector_size():
+    """A worker-backed engine's size is awaited, never asked with the blocking call."""
+    from cognee.modules.search.dataset_routing.store import routing_width_matches
+
+    class SelfSizingEmbedder:
+        async def resolve_vector_size(self):
+            return 4
+
+        def get_vector_size(self):  # would block the event loop on a remote worker
+            raise AssertionError("get_vector_size() must not be called from async code")
+
+    class Store:
+        embedding_engine = SelfSizingEmbedder()
+
+        def __init__(self, stored):
+            self.stored = stored
+
+        async def get_stored_vector_size(self):
+            return self.stored
+
+    assert await routing_width_matches(Store(4)) is True
+    assert await routing_width_matches(Store(8)) is False

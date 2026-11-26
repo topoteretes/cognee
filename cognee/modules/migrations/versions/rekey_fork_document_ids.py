@@ -50,11 +50,19 @@ is equivalent.
 Fork rows are rare (same user, identical content, several datasets, before
 the upgrade), so this is cheap: one indexed relational query in the common
 case, per-document work only where forks exist.
+
+Postgres graph: this migration runs before ``postgres_graph_source_ref_tables``, so
+the graph still keeps its source refs in the ``source_ref_keys`` columns, a layout
+the current Postgres adapter refuses. The graph half (chunk properties, the node
+re-key, provenance keys) is therefore done here in frozen SQL against that layout
+(``_apply_postgres_array_layout``), with the same steps and order as the adapter
+path; the vector payload sync and the ledger update are shared. Every other graph,
+and a Postgres graph already in the current layout, goes through the adapter.
 """
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
 from cognee.infrastructure.databases.provenance import (
@@ -474,8 +482,206 @@ def _claimant_pairs(fork_rows: list, blocked: set, properties_by_node: dict) -> 
     return claimants
 
 
+# Postgres graph in the source_ref_keys layout: frozen SQL.
+#
+# Frozen snapshot of graph_node / graph_edge before ``postgres_graph_source_ref_tables``
+# (cognee 1.6.10 and earlier): provenance in four varchar[] columns on both tables;
+# edges keyed by (source_id, target_id, relationship_name), with foreign keys to
+# graph_node(id) ON DELETE CASCADE and no ON UPDATE action. A node is therefore
+# re-keyed by copying its row, copying its edges onto the copy and deleting the old
+# row, which takes the old edges with it. Nothing here reads the adapter.
+
+_PG_PROVENANCE_COLUMNS = "source_ref_keys, source_dataset_ids, source_run_ids, source_run_refs"
+_PG_DOCUMENT_KEY = "source_ref:v1:{dataset_id}:{data_id}"
+_PG_CHUNK_KEY_PREFIX = "source_ref:v2:{dataset_id}:{data_id}:"
+
+_PG_PRESENT_NODES = "SELECT id FROM {schema}.graph_node WHERE id = ANY(:ids)"
+
+# The chunks of the given documents with their properties, for the vector payload sync.
+_PG_DOCUMENT_CHUNKS = """
+    SELECT edge.source_id, edge.target_id, node.properties
+      FROM {schema}.graph_edge AS edge
+      JOIN {schema}.graph_node AS node ON node.id = edge.source_id
+     WHERE edge.relationship_name = :is_part_of AND edge.target_id = ANY(:ids)
+"""
+
+_PG_POINT_CHUNKS_AT_NEW_DOCUMENT = """
+    UPDATE {schema}.graph_node
+       SET properties = jsonb_set(properties, '{{document_id}}', to_jsonb(CAST(:new_id AS varchar)))
+     WHERE properties ? 'document_id'
+       AND id IN (SELECT source_id FROM {schema}.graph_edge
+                   WHERE target_id = CAST(:old_id AS varchar) AND relationship_name = :is_part_of)
+"""
+
+_PG_COPY_NODE = """
+    INSERT INTO {schema}.graph_node
+           (id, name, type, properties, {provenance}, created_at, updated_at)
+    SELECT CAST(:new_id AS varchar), name, type,
+           CASE WHEN properties ->> 'document_id' = CAST(:old_id AS varchar)
+                THEN jsonb_set(properties, '{{document_id}}', to_jsonb(CAST(:new_id AS varchar)))
+                ELSE properties END
+           || CASE WHEN properties ? 'id'
+                   THEN jsonb_build_object('id', CAST(:new_id AS varchar)) ELSE '{{}}'::jsonb END,
+           {provenance}, created_at, now()
+      FROM {schema}.graph_node WHERE id = CAST(:old_id AS varchar)
+    ON CONFLICT (id) DO NOTHING
+"""
+
+# Edge properties embed their endpoint ids, which retrieval prefers over the topology,
+# so they move with the endpoints (as in ``_migrate_graph``).
+_PG_COPY_EDGES = """
+    INSERT INTO {schema}.graph_edge
+           (source_id, target_id, relationship_name, properties, {provenance},
+            created_at, updated_at)
+    SELECT new_source, new_target, relationship_name,
+           properties
+           || CASE WHEN properties ? 'source_node_id'
+                   THEN jsonb_build_object('source_node_id', new_source) ELSE '{{}}'::jsonb END
+           || CASE WHEN properties ? 'target_node_id'
+                   THEN jsonb_build_object('target_node_id', new_target) ELSE '{{}}'::jsonb END,
+           {provenance}, created_at, now()
+      FROM (SELECT *,
+                   CASE WHEN source_id = CAST(:old_id AS varchar) THEN CAST(:new_id AS varchar)
+                        ELSE source_id END AS new_source,
+                   CASE WHEN target_id = CAST(:old_id AS varchar) THEN CAST(:new_id AS varchar)
+                        ELSE target_id END AS new_target
+              FROM {schema}.graph_edge
+             WHERE source_id = CAST(:old_id AS varchar) OR target_id = CAST(:old_id AS varchar)) AS edge
+    ON CONFLICT (source_id, target_id, relationship_name) DO NOTHING
+"""
+
+_PG_DELETE_NODE = "DELETE FROM {schema}.graph_node WHERE id = CAST(:old_id AS varchar)"
+
+# A key list with the document's keys moved to the canonical data id, in their stored
+# order, without duplicates (an artifact may already carry the new key). Run refs
+# embed the key, so the same replacement moves them.
+_PG_MOVED_KEYS = """
+    COALESCE((SELECT CAST(array_agg(moved_key ORDER BY first_position) AS varchar[])
+                FROM (SELECT replace(replace(stored_key, :old_document_key, :new_document_key),
+                                     :old_chunk_prefix, :new_chunk_prefix) AS moved_key,
+                             min(position) AS first_position
+                        FROM unnest({column}) WITH ORDINALITY AS stored(stored_key, position)
+                       GROUP BY 1) AS moved),
+             '{{}}')
+"""
+
+_PG_MOVE_PROVENANCE = """
+    UPDATE {schema}.{table}
+       SET source_ref_keys = {moved_ref_keys},
+           source_run_refs = {moved_run_refs}
+     WHERE array_to_string(source_ref_keys, ' ') LIKE :needle
+        OR array_to_string(source_run_refs, ' ') LIKE :needle
+"""
+
+
+async def _postgres_array_layout(graph_engine) -> tuple | None:
+    """(engine, schema) of a Postgres graph still in the source_ref_keys layout, else None."""
+    from .postgres_graph_source_ref_tables import _postgres_engine, _schema_of
+
+    engine = _postgres_engine(graph_engine)
+    if engine is None:
+        return None
+    async with engine.connect() as connection:
+        schema = await _schema_of(connection, "graph_node", with_legacy_columns=True)
+    return (engine, schema) if schema is not None else None
+
+
+async def _pg_rekey_document(connection, schema: str, old_id: str, new_id: str) -> None:
+    """Re-key one document node and its edges, and point its chunks at the new id."""
+    ids = {"old_id": old_id, "new_id": new_id}
+    await connection.execute(
+        text(_PG_POINT_CHUNKS_AT_NEW_DOCUMENT.format(schema=schema)),
+        {**ids, "is_part_of": _IS_PART_OF},
+    )
+    copy = {"schema": schema, "provenance": _PG_PROVENANCE_COLUMNS}
+    await connection.execute(text(_PG_COPY_NODE.format(**copy)), ids)
+    await connection.execute(text(_PG_COPY_EDGES.format(**copy)), ids)
+    await connection.execute(text(_PG_DELETE_NODE.format(schema=schema)), ids)
+
+
+async def _pg_move_provenance(connection, schema: str, fork_rows: list) -> None:
+    """Move every node and edge key of each fork row's document to its canonical id."""
+    for old_id, new_id, dataset_id in fork_rows:
+        keys = {
+            "old_document_key": _PG_DOCUMENT_KEY.format(dataset_id=dataset_id, data_id=old_id),
+            "new_document_key": _PG_DOCUMENT_KEY.format(dataset_id=dataset_id, data_id=new_id),
+            "old_chunk_prefix": _PG_CHUNK_KEY_PREFIX.format(dataset_id=dataset_id, data_id=old_id),
+            "new_chunk_prefix": _PG_CHUNK_KEY_PREFIX.format(dataset_id=dataset_id, data_id=new_id),
+            "needle": f"%:{dataset_id}:{old_id}%",
+        }
+        for table in ("graph_node", "graph_edge"):
+            statement = _PG_MOVE_PROVENANCE.format(
+                schema=schema,
+                table=table,
+                moved_ref_keys=_PG_MOVED_KEYS.format(column="source_ref_keys"),
+                moved_run_refs=_PG_MOVED_KEYS.format(column="source_run_refs"),
+            )
+            await connection.execute(text(statement), keys)
+        await connection.commit()
+
+
+async def _apply_postgres_array_layout(
+    context: MigrationContext, fork_rows: list, engine, schema: str
+) -> None:
+    """``_apply`` for a Postgres graph in the source_ref_keys layout, in frozen SQL.
+
+    Same steps and order as the adapter path: chunk vector payloads, then the
+    ledger, then the graph re-key, provenance last. Reads only the fork documents
+    and their chunks, not the whole graph. Each document is re-keyed in one
+    transaction; a run stopped between documents, or before the provenance move,
+    finds the moved nodes already present and converges on the next run.
+    """
+    candidate_ids = sorted({node_id for old, new, _ in fork_rows for node_id in (old, new)})
+    async with engine.connect() as connection:
+        present = (
+            await connection.execute(
+                text(_PG_PRESENT_NODES.format(schema=schema)), {"ids": candidate_ids}
+            )
+        ).scalars()
+        properties_by_node = {str(node_id): {} for node_id in present}
+        chunk_rows = (
+            await connection.execute(
+                text(_PG_DOCUMENT_CHUNKS.format(schema=schema)),
+                {"ids": candidate_ids, "is_part_of": _IS_PART_OF},
+            )
+        ).all()
+    chunk_edges = []
+    for chunk_id, document_id, properties in chunk_rows:
+        properties_by_node[str(chunk_id)] = dict(properties or {})
+        chunk_edges.append((str(chunk_id), str(document_id), _IS_PART_OF, {}))
+
+    blocked = await _keeper_blocked_pairs(fork_rows, context.dataset_id)
+    claimant_pairs = _claimant_pairs(fork_rows, blocked, properties_by_node)
+    id_map = {
+        old_id: new_id
+        for old_id, new_id, _dataset_id in claimant_pairs
+        if old_id in properties_by_node and new_id not in properties_by_node
+    }
+
+    await _sync_chunk_vector_payloads(
+        context.vector_engine, properties_by_node, chunk_edges, claimant_pairs
+    )
+    if id_map:
+        await _update_ledger_references(id_map, context.dataset_id)
+
+    async with engine.connect() as connection:
+        for old_id, new_id in id_map.items():
+            await _pg_rekey_document(connection, schema, old_id, new_id)
+            await connection.commit()
+        if id_map:
+            logger.info(
+                "rekey_fork_document_ids: re-keyed %d fork document node(s) in Postgres",
+                len(id_map),
+            )
+        await _pg_move_provenance(connection, schema, fork_rows)
+
+
 async def _apply(context: MigrationContext, fork_rows: list) -> None:
     graph_engine = context.graph_engine
+    postgres = await _postgres_array_layout(graph_engine)
+    if postgres is not None:
+        await _apply_postgres_array_layout(context, fork_rows, *postgres)
+        return
     nodes, edges = await graph_engine.get_graph_data()
     properties_by_node = {str(node_id): dict(props or {}) for node_id, props in nodes}
     normalized_edges = [

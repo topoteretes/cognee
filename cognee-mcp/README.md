@@ -659,18 +659,20 @@ recall(query="What is the vault recovery phrase?", include_references=True)
 #
 #    Evidence:
 #    - chunk 1 of document text_<hash> (data_id: <uuid>, chunk_id: <uuid>): "The vault recovery phrase is ..."
-#      dataset: main_dataset (dataset_id=<uuid>)
+#      refs: data_id=<uuid>, dataset_id=<uuid>, document=text_<hash>
 forget(data_id="<uuid>", dataset_id="<uuid>")
 ```
 
 `include_references=True` shows the ids `forget` needs; without it the output is
-unchanged. The default answer cites its sources in an `Evidence:` block (best
-match first) and gets a `dataset:` line. CHUNKS, SUMMARIES, RAG and
-graph-completion hits get `refs: data_id=..., dataset_id=..., document=...`
-lines instead (at most five per hit, best match first). A chunk hit names the
-one item its text came from, while a graph-completion answer lists every item
-in its context, so use the default type or `search_type="CHUNKS"` to find one
-fact. Session hits are not stored data and carry no ids. With backend access
+unchanged. Every hit backed by stored data gets
+`refs: data_id=..., dataset_id=..., document=...` lines (at most five per hit,
+best match first), read from the hit's structured references. A chunk hit
+lists the one item its text came from, and the default answer the items its
+`Evidence:` block cites. A RAG or graph-completion answer lists every item in
+its context, and so does the default answer when it falls back to graph
+completion (for example when the dataset has no chunk index yet). To find one
+fact, use `search_type="CHUNKS"`. Session hits are not
+stored data and carry no ids. With backend access
 control off, ids are only shown when recall is scoped to a single dataset.
 
 `self_improvement` defaults to `True`; only an explicit `False` is forwarded, so
@@ -699,7 +701,8 @@ remember(
 In API mode, upload the ontologies first through `POST /api/v1/ontologies` using
 the same authenticated user as the MCP server. Keys are sent as repeated
 `ontology_key` form fields. In local mode, keys resolve through `OntologyService`
-in the default user's local ontology store; remote uploads are not copied locally.
+in the default user's ontology store under this instance's data root (a local
+folder or an `s3://` prefix); uploads to a remote instance are not copied into it.
 Unknown or inaccessible keys fail the write. Background failures are reported by
 `cognify_status`.
 

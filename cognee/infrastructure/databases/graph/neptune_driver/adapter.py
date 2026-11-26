@@ -260,6 +260,8 @@ class NeptuneGraphDB(GraphDBInterface):
         nodes: list[DataPoint],
         source_ref_key: str | None = None,
         pipeline_run_id: str | None = None,
+        *,
+        replace: bool = False,
     ) -> None:
         """
         Add multiple nodes to the graph in a single operation.
@@ -267,6 +269,7 @@ class NeptuneGraphDB(GraphDBInterface):
         Parameters:
         -----------
             - nodes (List[DataPoint]): A list of DataPoint objects to be added to the graph.
+            - replace (bool): Ignored: every write stores the incoming properties.
         """
         if not nodes:
             logger.debug("No nodes to add")
@@ -472,6 +475,39 @@ class NeptuneGraphDB(GraphDBInterface):
                     logger.exception(f"Failed to get individual node {node_id}")
                     continue
             return nodes
+
+    async def get_node_ids_by_property(
+        self, node_types: list[str], property_name: str, values: list[Any]
+    ) -> list[str]:
+        """Ids of typed nodes whose property is one of ``values``, filtered in openCypher."""
+        if not node_types or not values:
+            return []
+        if not property_name.isidentifier():
+            raise ValueError(f"Invalid property name: {property_name!r}")
+        query = f"""
+        MATCH (n:{self._GRAPH_NODE_LABEL})
+        WHERE n.type IN $types AND toString(n.`{property_name}`) IN $values
+        RETURN id(n) AS node_id
+        """
+        params = {"types": list(node_types), "values": [str(value) for value in values]}
+        result = await self.query(query, params)
+        return [str(record["node_id"]) for record in result]
+
+    async def get_outgoing_edge_keys(self, source_ids: list[str]) -> list[tuple[str, str, str]]:
+        """Keys of the edges leaving ``source_ids``, each source matched by its id."""
+        if not source_ids:
+            return []
+        query = f"""
+        UNWIND $source_ids AS source_id
+        MATCH (source:{self._GRAPH_NODE_LABEL})-[r]->(target:{self._GRAPH_NODE_LABEL})
+        WHERE id(source) = source_id
+        RETURN id(source) AS source_id, id(target) AS target_id, type(r) AS relationship_name
+        """
+        result = await self.query(query, {"source_ids": [str(i) for i in source_ids]})
+        return [
+            (str(row["source_id"]), str(row["target_id"]), row["relationship_name"])
+            for row in result
+        ]
 
     async def extract_node(self, node_id: str):
         """

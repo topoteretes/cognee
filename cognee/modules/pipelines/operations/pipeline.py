@@ -1,3 +1,20 @@
+"""Dataset-aware pipeline orchestrator: run a task list over one or more datasets.
+
+``run_pipeline`` is the runner behind ``add``, ``cognify``, ``improve`` and
+``run_custom_pipeline``. A custom pipeline built from ``Task`` objects gets the same run
+lifecycle as cognee's own pipelines, with no extra code:
+
+* environment setup and the first-use LLM / embedding connection probe;
+* user resolution (the default user when none is given) and dataset authorization, with
+  write permission required on every dataset;
+* per-dataset serialization through the dataset lock that delete operations also take,
+  so runs and deletes on one dataset wait for each other while different datasets are
+  not blocked (process-local, like the lock itself);
+* per dataset, one logical run (``run_tasks``): a ``PipelineRun`` record, the dataset's
+  own database context, up to ``data_per_batch`` items processed concurrently, an
+  optional rollback on failure, and ``PipelineRunInfo`` events yielded to the caller.
+"""
+
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from typing import Any
@@ -10,6 +27,7 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods.get_selected_dataset_data import get_selected_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.exceptions import AfterRunHookError
+from cognee.modules.pipelines.execution import DataItemExecutor
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
@@ -74,8 +92,24 @@ async def run_pipeline(
     extras: dict | None = None,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
     after_items_ran: Callable[[], Awaitable[Any]] | None = None,
+    data_item_executor: DataItemExecutor | None = None,
 ):
-    """``tasks`` is either the task list every data item runs, or a callable
+    """Run ``tasks`` over each authorized dataset and yield its ``PipelineRunInfo`` events.
+
+    An async generator: iterate it to drive the runs. Datasets run one after another,
+    each under its dataset lock (see ``run_pipeline_per_dataset``), and each yields
+    ``PipelineRunStarted`` followed by ``PipelineRunCompleted`` or ``PipelineRunErrored``.
+    With ``incremental_loading`` or ``data_cache`` set, a data item already completed for
+    ``pipeline_name`` in that dataset is skipped, recorded as
+    ``PipelineRunAlreadyCompleted`` in the run's ``data_ingestion_info``.
+
+    ``datasets`` takes names or ids. Omitted, the run covers every dataset the user may
+    write to. A name the user has no dataset for creates that dataset; an unknown
+    ``UUID``, or no dataset at all, raises ``DatasetNotFoundError``. ``data`` limits the
+    run to those items; without it each dataset's run covers all of its rows.
+    ``llm_config`` and ``embedding_config`` apply inside each dataset's database context.
+
+    ``tasks`` is either the task list every data item runs, or a callable
     mapping one item to its task list (a task resolver — see ``run_tasks``);
     items resolved to different lists still share one run per dataset.
     ``extras`` carries caller-resolved context into each item's PipelineContext.
@@ -85,13 +119,18 @@ async def run_pipeline(
     probed). For a task list it is derived from the tasks themselves — the
     union of ``Task.needs_llm`` — and the ``needs_llm`` parameter applies only
     when ``tasks`` is a resolver, whose caller must pass the union over every
-    list the resolver can return.
+    list the resolver can return (registered tasks know theirs:
+    ``RegisteredTasks.needs_llm``).
 
     ``after_run_completed`` is awaited after each dataset's run completes, and
     ``after_items_ran`` also when items in the run failed, both inside that dataset's
     database context (see ``run_tasks``). When either fails on a completed run, the
     remaining datasets still run and one ``AfterRunHookError`` naming every failed
-    dataset is raised after them."""
+    dataset is raised after them.
+
+    ``data_item_executor`` may run this call's data items in other processes
+    (see ``cognee.modules.pipelines.execution``). It applies to this call only
+    and comes before an executor registered for the process."""
     if tasks is None:
         raise ValueError(
             "run_pipeline requires tasks: a task list or a per-item task resolver callable"
@@ -127,6 +166,7 @@ async def run_pipeline(
             extras=extras,
             after_run_completed=after_run_completed,
             after_items_ran=after_items_ran,
+            data_item_executor=data_item_executor,
         )
         run_completed = False
         try:
@@ -163,7 +203,23 @@ async def run_pipeline_per_dataset(
     extras: dict | None = None,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
     after_items_ran: Callable[[], Awaitable[Any]] | None = None,
+    data_item_executor: DataItemExecutor | None = None,
 ):
+    """Run one dataset's pipeline under its dataset lock and yield its run events.
+
+    The lock is the one delete operations take too, so a second run, add or delete on
+    the same dataset waits until this run finishes, while other datasets proceed. It is
+    process-local and does not serialize separate worker processes. Nested runs are
+    supported: a task that starts another pipeline on the same dataset (e.g.
+    ``cognify_session`` calling ``add()`` / ``cognify()``) reuses the lock its ancestor
+    holds instead of deadlocking on it.
+
+    ``Data`` rows in ``data`` are read again once the lock is held, so tasks see each row
+    as it is now and rows deleted meanwhile are dropped; without ``data`` the run covers
+    every row of the dataset. The remaining arguments pass through to ``run_tasks``.
+    Callers normally use ``run_pipeline``, which authorizes the user and datasets first.
+    """
+
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
     async def _run_body():
@@ -192,6 +248,7 @@ async def run_pipeline_per_dataset(
             extras=extras,
             after_run_completed=after_run_completed,
             after_items_ran=after_items_ran,
+            data_item_executor=data_item_executor,
         )
 
         async with aclosing(pipeline_run):

@@ -7,6 +7,7 @@ as ``test_google_drive_source.py``.
 
 import json
 import sys
+import time
 
 import httpx
 import pytest
@@ -127,10 +128,10 @@ class FakeNotion:
         return httpx.Response(200, json=store[object_id])
 
 
-def _client(fake: FakeNotion) -> _NotionClient:
+def _client(fake: FakeNotion, check_active=None) -> _NotionClient:
     transport = httpx.MockTransport(fake.handler)
     http_client = httpx.Client(transport=transport)
-    return _NotionClient(http_client, "secret_token")
+    return _NotionClient(http_client, "secret_token", check_active)
 
 
 def _basic_tree():
@@ -520,7 +521,28 @@ def test_transient_error_aborts_without_tombstones(monkeypatch):
         list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, previous_pages, {}, {}))
 
 
-def test_gone_child_page_is_tombstoned_not_raised():
+def test_a_redirect_answer_is_an_error_not_an_empty_listing(monkeypatch):
+    """SDK-832: redirects are not followed, and a 3xx that carries a JSON body
+    must not be read as a page with nothing below it (which would tombstone its
+    children and index a prefix of the tree)."""
+    fake = _basic_tree()
+    client = _client(fake)
+    state: dict = {}
+    list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, state, {}))
+    previous_pages = dict(state["pages"])
+
+    def redirects_children(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith(f"/blocks/{ROOT_PAGE_ID}/children"):
+            return httpx.Response(
+                301, headers={"Location": "https://elsewhere.example/"}, json={"results": []}
+            )
+        return fake.handler(request)
+
+    client._http = httpx.Client(transport=httpx.MockTransport(redirects_children))
+    with pytest.raises(NotionAPIError) as caught:
+        list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, previous_pages, {}, {}))
+    assert caught.value.status_code == 301
+
     fake = _basic_tree()
     client = _client(fake)
     state: dict = {}
@@ -545,6 +567,118 @@ def test_429_is_retried_then_succeeds():
     client = _client(fake)
     rows = list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, {}, {}))
     assert any(r["id"] == ROOT_PAGE_ID for r in rows if not r.get("_deleted"))
+
+
+def _answering(*answers):
+    """A client whose requests get ``answers`` in turn (the last one repeats); and its sleeps."""
+    pending = list(answers)
+    sent = []
+
+    def handler(request):
+        sent.append(request)
+        answer = pending.pop(0) if len(pending) > 1 else pending[0]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    return _NotionClient(httpx.Client(transport=httpx.MockTransport(handler)), "secret_token"), sent
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_a_status_that_never_recovers_is_retried_and_raised_as_a_notion_api_error(
+    monkeypatch, status
+):
+    sleeps = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    client, sent = _answering(httpx.Response(status, json={"message": "busy"}))
+
+    with pytest.raises(NotionAPIError) as caught:
+        client.request("GET", "users/me")
+
+    assert type(caught.value) is NotionAPIError
+    assert caught.value.status_code == status
+    assert len(sent) == notion_module._MAX_RETRIES
+    assert sleeps == [1.0, 2.0, 4.0, 8.0]
+
+
+def test_a_retry_waits_what_retry_after_asks(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    client, _ = _answering(
+        httpx.Response(429, headers={"Retry-After": "7"}, json={}),
+        httpx.Response(200, json={"object": "user"}),
+    )
+
+    assert client.request("GET", "users/me") == {"object": "user"}
+    assert sleeps == [7.0]
+
+
+def test_a_dropped_connection_is_retried_with_backoff(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    client, sent = _answering(httpx.ConnectError("refused"))
+
+    with pytest.raises(httpx.ConnectError):
+        client.request("GET", "users/me")
+
+    assert len(sent) == notion_module._MAX_RETRIES
+    assert sleeps == [1.0, 2.0, 4.0, 8.0]
+
+
+class _Revoked(Exception):
+    """What a host's check raises once the connection is gone."""
+
+
+def _revoked_on_third_check():
+    # The first check is the row loop's, before it reads anything; the second is the walk's,
+    # before the root page; the third is the client's, before the wait after its request.
+    checks = iter([None, None, _Revoked()])
+
+    def check_active():
+        failure = next(checks)
+        if failure is not None:
+            raise failure
+
+    return check_active
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"status_code": 503},
+        {"status_code": 429, "headers": {"Retry-After": "5"}},
+        {"error": httpx.ConnectError("refused")},
+    ],
+    ids=["outage", "rate_limit", "transport"],
+)
+def test_a_revoked_connection_stops_a_retry_before_it_waits(monkeypatch, answer):
+    """The host's check runs before every wait, so a revoked run does not sleep a backoff."""
+    pytest.importorskip("dlt")
+    from dlt.extract.exceptions import ResourceExtractionError
+
+    requests, sleeps = [], []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if "error" in answer:
+            raise answer["error"]
+        return httpx.Response(json={"message": "try later"}, **answer)
+
+    resource = notion_source(
+        token="secret",
+        root_page_ids=[ROOT_PAGE_ID],
+        workspace_id=WORKSPACE_ID,
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        check_active=_revoked_on_third_check(),
+    )
+    # dlt wraps whatever a resource raises; the host's error is its cause, unchanged.
+    with pytest.raises(ResourceExtractionError) as captured:
+        list(resource)
+
+    assert isinstance(captured.value.__cause__, _Revoked)
+    assert len(requests) == 1
+    assert sleeps == []
 
 
 def test_refuses_core_without_document_row_contract(monkeypatch):
@@ -655,6 +789,7 @@ def test_has_more_without_a_cursor_aborts_instead_of_tombstoning():
 
 
 def test_check_active_runs_for_every_walked_page_even_when_nothing_changed():
+    # Once per walked page, not per request: in Cloud every check is a control-plane call.
     fake = _basic_tree()
     unchanged = {"last_edited_time": "2024-01-01T00:00:00.000Z", "root_id": ROOT_PAGE_ID}
     previous = {
@@ -664,7 +799,7 @@ def test_check_active_runs_for_every_walked_page_even_when_nothing_changed():
     calls = []
     rows = list(
         _iter_rows(
-            _client(fake),
+            _client(fake, lambda: calls.append(1)),
             [ROOT_PAGE_ID],
             [],
             WORKSPACE_ID,

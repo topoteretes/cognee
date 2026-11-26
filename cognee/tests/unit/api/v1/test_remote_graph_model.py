@@ -14,6 +14,7 @@ from cognee.api.v1.serve import state as state_mod
 from cognee.api.v1.serve.cloud_client import CloudClient, remote_graph_schema
 from cognee.infrastructure.engine import DataPoint, Edge, FromIdentity
 from cognee.shared.data_models import KnowledgeGraph
+from cognee.shared.exceptions import InvalidGraphSchemaError
 from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 from cognee.shared.llm_graph_model import _edge_field_types, _identity_field_types
 from cognee.tasks.graph.exceptions import InvalidReferenceTypeError
@@ -164,6 +165,25 @@ async def test_remember_refuses_a_model_the_extraction_cannot_fill_before_any_up
     assert remote.calls == []
 
 
+@pytest.mark.asyncio
+async def test_remember_sends_a_schema_dict_as_given(remote):
+    schema = remote_graph_schema(InfluenceGraph)
+    schema["description"] = "kept: a class rebuilt from the schema would drop it"
+
+    await remember_mod.remember("text", graph_model=schema)
+
+    (call,) = remote.calls
+    assert json.loads(_form_fields(call["form"])["graph_model"]) == schema
+
+
+@pytest.mark.asyncio
+async def test_remember_refuses_an_unbuildable_schema_before_any_upload(remote):
+    with pytest.raises(InvalidGraphSchemaError, match="title"):
+        await remember_mod.remember("text", graph_model={"type": "object"})
+
+    assert remote.calls == []
+
+
 # ----- cognify() -----
 
 
@@ -192,6 +212,25 @@ async def test_cognify_sends_typed_edges(remote):
     (call,) = remote.calls
     rebuilt = graph_schema_to_graph_model(call["json"]["graph_model"])
     assert list(_edge_field_types(rebuilt)) == ["influences"]
+
+
+@pytest.mark.asyncio
+async def test_cognify_sends_a_schema_dict_as_given(remote):
+    schema = remote_graph_schema(InfluenceGraph)
+    schema["description"] = "kept: a class rebuilt from the schema would drop it"
+
+    await cognify_mod.cognify(graph_model=schema)
+
+    (call,) = remote.calls
+    assert call["json"]["graph_model"] == schema
+
+
+@pytest.mark.asyncio
+async def test_cognify_refuses_an_unbuildable_schema_before_any_upload(remote):
+    with pytest.raises(InvalidGraphSchemaError, match="title"):
+        await cognify_mod.cognify(graph_model={"type": "object"})
+
+    assert remote.calls == []
 
 
 @pytest.mark.asyncio

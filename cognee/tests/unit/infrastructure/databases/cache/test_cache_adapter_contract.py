@@ -129,6 +129,7 @@ async def test_qa_entries_by_ids_returns_empty_or_chronological_matches(cache_ad
 async def test_agent_trace_collections_share_empty_and_last_n_contract(cache_adapter, last_n):
     assert await cache_adapter.get_agent_trace_session("user", "missing") == []
     assert await cache_adapter.get_agent_trace_session("user", "missing", last_n=1) == []
+    assert await cache_adapter.get_agent_trace_session("user", "missing", start=0, end=2) == []
     assert await cache_adapter.get_agent_trace_feedback("user", "missing") == []
 
     for index in range(1, 4):
@@ -155,6 +156,15 @@ async def test_agent_trace_collections_share_empty_and_last_n_contract(cache_ada
     assert [entry.trace_id for entry in latest_one] == ["trace-3"]
     assert [entry.trace_id for entry in latest_many] == ["trace-1", "trace-2", "trace-3"]
     assert feedback_one == ["feedback-3"]
+
+    first_two = await cache_adapter.get_agent_trace_session("user", "trace-session", start=0, end=2)
+    middle = await cache_adapter.get_agent_trace_session("user", "trace-session", start=1, end=2)
+    beyond_end = await cache_adapter.get_agent_trace_session(
+        "user", "trace-session", start=3, end=4
+    )
+    assert [entry.trace_id for entry in first_two] == ["trace-1", "trace-2"]
+    assert [entry.trace_id for entry in middle] == ["trace-2"]
+    assert beyond_end == []
 
 
 @pytest.mark.asyncio

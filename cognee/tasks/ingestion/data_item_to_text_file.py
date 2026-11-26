@@ -4,8 +4,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
 from cognee.infrastructure.files.encryption import is_encrypted_local_file
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
@@ -16,15 +14,6 @@ from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
-
-
-class SaveDataSettings(BaseSettings):
-    accept_local_file_path: bool = True
-
-    model_config = SettingsConfigDict(extra="allow")
-
-
-settings = SaveDataSettings()
 
 
 # Bytes copied per iteration when pulling a stored object down to a temp file.
@@ -102,6 +91,10 @@ async def data_item_to_text_file(
 ) -> tuple[str, LoaderInterface]:
     """Run the loader engine on a data item's file.
 
+    No access policy here: every path that reaches this function was either
+    written by cognee (an upload, text or fetched page under the data root)
+    or admitted by the one gate in ``save_data_item_to_storage``.
+
     ``loader_kwargs`` (ingestion context: dataset_name, dataset_id, user,
     original_file_name) is forwarded to the selected loader's ``load()``;
     loaders that don't need it ignore it via ``**kwargs``.
@@ -117,41 +110,35 @@ async def data_item_to_text_file(
 
         # data is local file path
         elif parsed_url.scheme == "file":
-            if settings.accept_local_file_path:
-                if is_encrypted_local_file(get_data_file_path(data_item_path)):
-                    return await _load_from_local_copy(
-                        data_item_path,
-                        Path(parsed_url.path).suffix,
-                        preferred_loaders,
-                        **loader_kwargs,
-                    )
-                loader = get_loader_engine()
-                return await loader.load_file(
-                    data_item_path, preferred_loaders, **loader_kwargs
-                ), loader.get_loader(data_item_path, preferred_loaders)
-            else:
-                raise IngestionError(message="Local files are not accepted.")
+            if is_encrypted_local_file(get_data_file_path(data_item_path)):
+                return await _load_from_local_copy(
+                    data_item_path,
+                    Path(parsed_url.path).suffix,
+                    preferred_loaders,
+                    **loader_kwargs,
+                )
+            loader = get_loader_engine()
+            return await loader.load_file(
+                data_item_path, preferred_loaders, **loader_kwargs
+            ), loader.get_loader(data_item_path, preferred_loaders)
 
         # data is an absolute file path
         elif data_item_path.startswith("/") or (
             os.name == "nt" and len(data_item_path) > 1 and data_item_path[1] == ":"
         ):
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
-            if settings.accept_local_file_path:
-                if is_encrypted_local_file(data_item_path):
-                    # A sealed object under the data root: loaders read by path,
-                    # so they get a temporary plaintext copy, as S3 objects do.
-                    return await _load_from_local_copy(
-                        data_item_path,
-                        Path(data_item_path).suffix,
-                        preferred_loaders,
-                        **loader_kwargs,
-                    )
-                loader = get_loader_engine()
-                return await loader.load_file(
-                    data_item_path, preferred_loaders, **loader_kwargs
-                ), loader.get_loader(data_item_path, preferred_loaders)
-            else:
-                raise IngestionError(message="Local files are not accepted.")
+            if is_encrypted_local_file(data_item_path):
+                # A sealed object under the data root: loaders read by path,
+                # so they get a temporary plaintext copy, as S3 objects do.
+                return await _load_from_local_copy(
+                    data_item_path,
+                    Path(data_item_path).suffix,
+                    preferred_loaders,
+                    **loader_kwargs,
+                )
+            loader = get_loader_engine()
+            return await loader.load_file(
+                data_item_path, preferred_loaders, **loader_kwargs
+            ), loader.get_loader(data_item_path, preferred_loaders)
     # data is not a supported type
     raise IngestionError(message=f"Data type not supported: {type(data_item_path)}")

@@ -256,7 +256,7 @@ def _dispatch_delete(client: CogneeApiClient, args: argparse.Namespace) -> None:
 
 def _dispatch_remember(client: CogneeApiClient, args: argparse.Namespace) -> None:
     fmt.echo(f"Remembering {len(args.data)} item(s) in dataset '{args.dataset_name}'...")
-    if getattr(args, "chunker", "TextChunker") != "TextChunker":
+    if getattr(args, "chunker", None) is not None:
         fmt.warning(
             f"--chunker={args.chunker} is ignored in --api-url mode; "
             f"the server selects the chunker."

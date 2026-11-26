@@ -642,3 +642,29 @@ async def test_default_prompt_renders_hints_and_custom_prompt_is_verbatim():
     assert "TEMPORAL_NORMALIZATION_HINTS:" in hinted
     assert '- "27 April" -> 1986-04-27 (inferred from context)' in hinted
     assert custom == "MINE"
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "integrate_chunk_graphs", new_callable=AsyncMock)
+async def test_each_chunk_extraction_call_sees_only_its_own_chunk_id(mock_integrate):
+    import asyncio
+    from uuid import uuid4
+
+    from cognee.modules.observability.llm_calls import current_chunk_id
+
+    mock_integrate.side_effect = lambda chunks, *args, **kwargs: chunks
+    chunks = [_make_chunk(text=f"chunk {i}") for i in range(3)]
+    for chunk in chunks:
+        chunk.id = uuid4()
+    seen = {}
+
+    async def fake_extract(text, *args, **kwargs):
+        await asyncio.sleep(0)
+        seen[text] = current_chunk_id.get()
+        return KnowledgeGraph(nodes=[], edges=[])
+
+    with patch.object(egd_module, "extract_content_graph", side_effect=fake_extract):
+        await extract_graph_from_data(chunks, KnowledgeGraph)
+
+    assert seen == {chunk.text: chunk.id for chunk in chunks}
+    assert current_chunk_id.get() is None

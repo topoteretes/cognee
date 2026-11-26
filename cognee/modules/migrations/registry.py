@@ -45,6 +45,18 @@ from cognee.modules.migrations.versions.postgres_graph_provenance_columns import
 from cognee.modules.migrations.versions.postgres_graph_provenance_columns import (
     migrate as postgres_graph_provenance_columns,
 )
+from cognee.modules.migrations.versions.postgres_graph_source_ref_tables import (
+    downgrade as postgres_graph_source_ref_tables_down,
+)
+from cognee.modules.migrations.versions.postgres_graph_source_ref_tables import (
+    migrate as postgres_graph_source_ref_tables,
+)
+from cognee.modules.migrations.versions.reembed_local_default_embedding_model import (
+    downgrade as reembed_local_default_embedding_model_down,
+)
+from cognee.modules.migrations.versions.reembed_local_default_embedding_model import (
+    migrate as reembed_local_default_embedding_model,
+)
 from cognee.modules.migrations.versions.rekey_fork_document_ids import (
     downgrade as rekey_fork_document_ids_down,
 )
@@ -123,6 +135,28 @@ MIGRATIONS: list[Migration] = [
         up=pgvector_hnsw_indexes,
         down_revision="rekey_fork_document_ids",
         down=pgvector_hnsw_indexes_down,
+    ),
+    # The Postgres graph kept the source refs of a node or edge in four array columns,
+    # so a node shared by many documents had its row rewritten on every attach. Moves
+    # them into graph_node_source_ref / graph_edge_source_ref, one row per ref, in
+    # batches. No-op on every graph that is not stored in these Postgres tables.
+    Migration(
+        slug="postgres_graph_source_ref_tables",
+        cognee_version="1.6.9",
+        up=postgres_graph_source_ref_tables,
+        down_revision="pgvector_hnsw_indexes",
+        down=postgres_graph_source_ref_tables_down,
+    ),
+    # The default local embedding model (no embedding setting, no LLM key) changed from
+    # BAAI/bge-small-en-v1.5 to perplexity-ai/pplx-embed-v1-0.6b, whose vectors have
+    # another width. Re-embeds the datasets the previous default built. No-op wherever
+    # an embedding model is configured, and for every dataset another model built.
+    Migration(
+        slug="reembed_local_default_embedding_model",
+        cognee_version="1.6.11",
+        up=reembed_local_default_embedding_model,
+        down_revision="postgres_graph_source_ref_tables",
+        down=reembed_local_default_embedding_model_down,
     ),
 ]
 

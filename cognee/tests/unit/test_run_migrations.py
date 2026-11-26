@@ -309,6 +309,25 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
             asyncio.run(startup.run_migrations())
             relational.assert_awaited_once()
 
+    def test_a_call_waiting_for_another_calls_migrations_says_so(self):
+        startup = importlib.import_module("cognee.modules.migrations.startup")
+
+        async def slow_migrations(target):
+            await asyncio.sleep(0.05)
+            return []
+
+        async def two_calls():
+            await asyncio.gather(startup.run_migrations(), startup.run_migrations())
+
+        with (
+            patch.object(startup, "apply_all_migrations", new=slow_migrations),
+            self.assertLogs(startup.logger, level="INFO") as logged,
+        ):
+            asyncio.run(two_calls())
+
+        waiting = [line for line in logged.output if "Waiting for the database migrations" in line]
+        self.assertEqual(len(waiting), 1)
+
     def test_returns_failed_databases_so_write_paths_can_block(self):
         """The failed-database ids are RETURNED (not just logged): write entry
         points (cognify/remember) treat a non-empty result as a hard stop so

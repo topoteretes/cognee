@@ -6,9 +6,8 @@ engine has no ``libsql_vector_idx`` / ``vector_top_k`` approximate index.
 
 Engine constraints that shape the SQL here: no scalar subquery inside
 ``ON CONFLICT DO UPDATE SET`` (so ``belongs_to_set`` merges happen in Python before
-a plain upsert), and ``json_each().value`` returns a string element's raw JSON text,
-escapes included (so node-set names are compared on ``payload ->> je.fullkey``, and
-tag removal filters names in Python inside one write transaction).
+a plain upsert; tag removal rewrites each payload in Python inside one write
+transaction).
 
 Concurrency: one synchronous driver connection per adapter, used only inside
 ``asyncio.to_thread`` under ``self._connection_lock``. That lock is load-bearing —
@@ -314,6 +313,21 @@ class TursoVectorAdapter(VectorDBInterface):
         )
         return [row[0] for row in rows or [] if not row[0].startswith(_ENGINE_TABLE_PREFIXES)]
 
+    async def get_collection_names(self) -> list[str]:
+        """The tables of this database that are collections (see ``_is_collection``).
+
+        Names come back as the engine stores them, lowercased; it resolves a
+        collection by either spelling.
+        """
+        return [name for name in await self.get_table_names() if await self._is_collection(name)]
+
+    async def get_data_point_ids(self, collection_name: str) -> list[str]:
+        """The id of every row in ``collection_name``; none for a missing table."""
+        if not await self.has_collection(collection_name):
+            return []
+        rows = await self._execute(f'SELECT id FROM "{collection_name}"', fetch=True)
+        return [row[0] for row in rows or []]
+
     # ------------------------------------------------------------------ #
     # Writes
     # ------------------------------------------------------------------ #
@@ -559,6 +573,38 @@ class TursoVectorAdapter(VectorDBInterface):
             )
         return scores
 
+    async def score_by_ids_batch(
+        self, collection_name: str, data_point_ids: list[str], query_vectors: list[list[float]]
+    ) -> list[list[ScoredResult]]:
+        """One statement per id batch, with a distance column per query vector, so the
+        rows are visited once and the distances are computed in the engine."""
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids or not query_vectors:
+            return [[] for _ in query_vectors]
+        if not await self.has_collection(collection_name):
+            raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
+        distances = ", ".join(
+            f"vector_distance_cos(vector, vector32(?)) AS distance_{index}"
+            for index in range(len(query_vectors))
+        )
+        literals = [_vector_literal(query_vector) for query_vector in query_vectors]
+        scores: list[list[ScoredResult]] = [[] for _ in query_vectors]
+        for start in range(0, len(ids), QUERY_BATCH_SIZE):
+            batch = ids[start : start + QUERY_BATCH_SIZE]
+            placeholders = ",".join("?" for _ in batch)
+            rows = await self._execute(
+                f'SELECT id, {distances} FROM "{collection_name}" WHERE id IN ({placeholders})',
+                [*literals, *batch],
+                fetch=True,
+            )
+            for row in rows or []:
+                row_id = parse_id(str(row[0]))
+                for index, query_scores in enumerate(scores):
+                    query_scores.append(
+                        ScoredResult(id=row_id, score=float(row[index + 1]), payload=None)
+                    )
+        return scores
+
     async def search(
         self,
         collection_name: str,
@@ -591,15 +637,11 @@ class TursoVectorAdapter(VectorDBInterface):
         where_clause = ""
         if node_name:
             placeholders = ",".join("?" for _ in node_name)
-            # The engine's json_each().value is the element's raw JSON text, with
-            # escapes for non-ASCII characters, quotes and backslashes, so names
-            # are compared on the decoded element that ``->>`` returns.
-            element = f'"{collection_name}".payload ->> je.fullkey'
             if node_name_filter_operator == "AND":
                 where_clause = (
-                    f" WHERE (SELECT count(DISTINCT {element}) FROM json_each("
+                    f" WHERE (SELECT count(DISTINCT je.value) FROM json_each("
                     f"\"{collection_name}\".payload, '$.belongs_to_set') je "
-                    f"WHERE {element} IN ({placeholders})) = ?"
+                    f"WHERE je.value IN ({placeholders})) = ?"
                 )
                 params.extend(node_name)
                 params.append(len(set(node_name)))
@@ -607,7 +649,7 @@ class TursoVectorAdapter(VectorDBInterface):
                 where_clause = (
                     f" WHERE EXISTS (SELECT 1 FROM json_each("
                     f"\"{collection_name}\".payload, '$.belongs_to_set') je "
-                    f"WHERE {element} IN ({placeholders}))"
+                    f"WHERE je.value IN ({placeholders}))"
                 )
                 params.extend(node_name)
 
@@ -720,15 +762,11 @@ class TursoVectorAdapter(VectorDBInterface):
             # or deleted-when-empty; a row already stored with an empty
             # belongs_to_set (e.g. an untagged index row) is never collateral.
             # Mirrors PGVector.
-            #
-            # The engine's json_each().value is the element's raw JSON text, with
-            # escapes for non-ASCII characters, quotes and backslashes, so tags are
-            # compared on the decoded value that ``->>`` returns.
             select_sql = (
                 f'SELECT t.id, t.payload FROM "{table_name}" AS t '
                 f"WHERE json_type(t.payload, '$.belongs_to_set') = 'array' "
                 f"AND EXISTS (SELECT 1 FROM json_each(t.payload, '$.belongs_to_set') je "
-                f"WHERE t.payload ->> je.fullkey IN ({tag_placeholders})){id_scope}"
+                f"WHERE je.value IN ({tag_placeholders})){id_scope}"
             )
             params = (*tags, *scope_params)
 

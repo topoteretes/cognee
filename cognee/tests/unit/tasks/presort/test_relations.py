@@ -192,3 +192,46 @@ async def test_llm_fallback_for_unknown_relation(tmp_path):
     assert instances[0].target == "ACME Corp"
     assert instances[0].origin == "llm"
     assert instances[0].confidence == 0.9
+
+
+@pytest.mark.asyncio
+async def test_llm_detect_decodes_utf16_sample(tmp_path):
+    """Regression for #6563: once is_text_content admits UTF-16 files, _llm_detect
+
+    reached them too (it filters on is_text). A raw UTF-8 decode of the sample
+    handed the LLM interleaved null bytes (``I\x00n\x00v\x00o...``); decoding by
+    the BOM must give the extractor the real characters.
+    """
+    invoice = tmp_path / "invoice_march.txt"
+    invoice.write_text("Invoice issued by ACME Corp for March services.", encoding="utf-16")
+    files = [
+        FileRecord(path=str(invoice), name="invoice_march.txt", extension="txt", is_text=True),
+    ]
+
+    extraction = RelationExtraction(
+        instances=[
+            ExtractedRelationTarget(
+                target_name="ACME Corp", confidence=0.9, rationale="issuer named in header"
+            ),
+        ]
+    )
+    with patch(
+        f"{MODULE}.LLMGateway.acreate_structured_output",
+        new=AsyncMock(return_value=extraction),
+    ) as llm_mock:
+        relationships, warnings = await compute_relationships(
+            Path(tmp_path),
+            _spec_with_custom_relation(),
+            files,
+            [],
+            [],
+            [],
+            [],
+            use_llm=True,
+        )
+
+    prompt = llm_mock.await_args.args[0]
+    assert "ACME Corp" in prompt  # decoded text, not null-laden bytes
+    assert "\x00" not in prompt
+    assert warnings == []
+    assert relationships["invoice_for"][0].target == "ACME Corp"

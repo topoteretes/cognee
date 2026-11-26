@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from cognee.api.v1.update import incremental
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import GLINER_DEMO_EXTRACTOR
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.shared.data_models import KnowledgeGraph
@@ -41,7 +42,7 @@ async def _run_extraction_step():
         step = await incremental._extraction_step(
             GLINER_DEMO_EXTRACTOR,
             document,
-            incremental.TextChunker,
+            TextChunker,
             KnowledgeGraph,
             None,
             SimpleNamespace(summary_method=None),

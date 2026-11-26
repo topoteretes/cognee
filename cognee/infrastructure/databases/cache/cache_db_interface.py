@@ -85,9 +85,13 @@ class CacheDBInterface(ABC):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        time: str | None = None,
+        prompt_time: str | None = None,
     ) -> None:
         """
-        Add a Q/A/context triplet to a cache session.
+        Add a Q/A/context triplet to a cache session. ``time`` is the entry's event
+        time (ISO-8601, aware); None means the store time. ``prompt_time`` is the
+        turn's start when the client sent it.
         Uses the same QA fields as update_qa_entry for consistent structure.
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
         memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
@@ -195,6 +199,28 @@ class CacheDBInterface(ABC):
         Returns True if deleted, False if session did not exist.
         """
 
+    @abstractmethod
+    async def list_session_ids(self, user_id: str) -> list[str]:
+        """
+        Return every session id the user has stored content for (QA entries,
+        agent traces or session context), in no particular order.
+        """
+
+    async def delete_sessions(self, sessions: list[tuple[str, str]]) -> list[bool]:
+        """
+        Delete each (user id, session id) pair whole: QA entries, agent traces
+        and session context. One flag per pair, True if any of its data existed.
+
+        Non-abstract so external adapters keep working: the default deletes one
+        session at a time; the in-tree adapters delete in a few round trips.
+        """
+        existed = []
+        for user_id, session_id in sessions:
+            context_existed = await self.delete_session_context(user_id, session_id)
+            session_existed = await self.delete_session(user_id, session_id)
+            existed.append(context_existed or session_existed)
+        return existed
+
     async def get_value(self, key: str) -> str | None:
         """
         Retrieve a raw string value stored under the given key, or None if absent/expired.
@@ -225,6 +251,15 @@ class CacheDBInterface(ABC):
         """
         raise NotImplementedError("This cache adapter does not support key/value storage.")
 
+    async def delete_values(self, keys: list[str]) -> None:
+        """
+        Delete the values stored under the given keys, those present.
+
+        The default deletes one key at a time with ``delete_value``.
+        """
+        for key in keys:
+            await self.delete_value(key)
+
     @abstractmethod
     async def append_agent_trace_step(
         self,
@@ -239,20 +274,34 @@ class CacheDBInterface(ABC):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        time: str | None = None,
     ) -> None:
         """
-        Append one agent trace step to the session-scoped trace list.
+        Append one agent trace step to the session-scoped trace list. ``time`` is the
+        step's event time (ISO-8601, aware); None means the store time.
         """
 
     @abstractmethod
     async def get_agent_trace_session(
-        self, user_id: str, session_id: str, last_n: int | None = None
+        self,
+        user_id: str,
+        session_id: str,
+        last_n: int | None = None,
+        start: int | None = None,
+        end: int | None = None,
     ) -> list[SessionAgentTraceEntry]:
         """
-        Retrieve agent trace steps for the given session in chronological order.
+        Retrieve agent trace steps for the given session: the last ``last_n``, or the
+        steps at positions ``start`` to ``end`` (exclusive, oldest first), or all.
 
-        Implementations must return an empty list when no entries exist and when
-        last_n <= 0. They must never return None.
+        Positions count live steps only, as ``get_agent_trace_count`` does. A range is
+        read by position because a tail read shifts when steps are appended after the
+        count; ``last_n`` is for showing the newest steps. ``SessionManager`` checks
+        the arguments (``start`` and ``end`` together, ``0 <= start < end``, not with
+        ``last_n``); adapters assume they hold.
+
+        Results are in chronological order. Implementations must return an empty
+        list when no entries exist or when last_n <= 0, never None.
         """
 
     @abstractmethod

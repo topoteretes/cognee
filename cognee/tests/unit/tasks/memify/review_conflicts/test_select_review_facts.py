@@ -94,7 +94,9 @@ def test_sections_hold_group_facts_and_paired_statements_only(scope):
     alice_group_and_lone_statement(scope)
     prompt = build_prompt(scope, ["acme", "alice"])
     assert prompt.shown_facts == {"acme": ["e2", "e1"], "alice": ["e6", "e5"]}
-    assert "[n3] Bob (types: Person)" in prompt.text
+    # Bob is only a value here: his line says so, and no subject heading names him.
+    assert "\nValue [n3] Bob (types: Person)" in prompt.text
+    assert "Subject [n3]" not in prompt.text
 
 
 def test_reused_comparisons_read_support_changed_by_previous_batch(scope):

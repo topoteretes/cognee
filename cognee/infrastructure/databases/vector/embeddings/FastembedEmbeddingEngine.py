@@ -32,6 +32,9 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
     EmbeddingResult,
 )
+from cognee.infrastructure.databases.vector.embeddings.fastembed_models import (
+    fastembed_text_models,
+)
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
     sane_limit,
@@ -42,6 +45,7 @@ from cognee.infrastructure.databases.vector.embeddings.utils import (
     sanitize_embedding_text_inputs,
 )
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.infrastructure.utils.run_cpu_bound import run_cpu_bound
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.model_download_notice import log_model_load
@@ -111,7 +115,7 @@ def fastembed_model_cached(
     """
     cache_dir = Path(cache_dir or resolve_fastembed_cache_dir())
     description = next(
-        (entry for entry in TextEmbedding.list_supported_models() if entry.get("model") == model),
+        (entry for entry in fastembed_text_models() if entry.get("model") == model),
         None,
     )
     size_gb = (description or {}).get("size_in_GB")
@@ -250,13 +254,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 embeddings = [[0.0] * self.dimensions for _ in sanitized_text]
             else:
                 async with embedding_rate_limiter_context_manager():
-                    embeddings = self.embedding_model.embed(
-                        sanitized_text,
-                        batch_size=len(sanitized_text),
-                        parallel=None,
-                    )
-
-                embeddings = [e.tolist() for e in embeddings]
+                    embeddings = await run_cpu_bound(self._run_model, sanitized_text)
 
         except Exception as error:
             error_str = str(error).lower()
@@ -282,6 +280,18 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             # A mock embeds nothing; fastembed itself reports no usage.
             tokens=0 if self.mock else count_input_tokens(None, sanitized_text, self.tokenizer),
         )
+
+    def _run_model(self, texts: list[str]) -> list[list[float]]:
+        """Embed ``texts`` with the loaded model, as one batch.
+
+        Blocks for as long as the model runs (a second for a batch of chunks on a
+        small model, more than ten on a large one), so it is called through
+        ``run_cpu_bound`` and never on the event loop. Batches take turns there: the
+        model already uses every core, so two at once would be no faster and would
+        hold twice the memory.
+        """
+        vectors = self.embedding_model.embed(texts, batch_size=len(texts), parallel=None)
+        return [vector.tolist() for vector in vectors]
 
     input_limit_source = "fastembed model tokenizer"
 

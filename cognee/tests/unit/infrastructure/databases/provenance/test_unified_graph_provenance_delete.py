@@ -25,11 +25,14 @@ from uuid import uuid4
 import pytest
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
     NodeDeleteData,
+    data_source_ref_key_selector,
     get_dataset_id_from_source_ref_key,
+    make_chunk_source_ref_key,
     make_source_ref_key,
     make_source_run_ref,
 )
@@ -300,6 +303,13 @@ class FakeProvenanceGraphEngine:
             for e, row in self.edges.items()
         ]
         return nodes, edges
+
+    # The lookups an adapter may answer in its store. Here they are the interface's
+    # defaults, which run on the by-dataset finders and get_graph_data above.
+    find_node_source_refs_by_data = GraphDBInterface.find_node_source_refs_by_data
+    find_edge_source_refs_by_data = GraphDBInterface.find_edge_source_refs_by_data
+    find_edge_texts_in_use = GraphDBInterface.find_edge_texts_in_use
+    _warn_data_source_ref_fallback = GraphDBInterface._warn_data_source_ref_fallback
 
     async def remove_belongs_to_set_tags(self, tags):
         self._guard()
@@ -689,3 +699,156 @@ async def test_fake_dataset_helper_matches_contract():
 
 # Reference the imports used only inside helpers so linters keep them.
 _ = (EdgeType, generate_node_id, get_edge_retrieval_text)
+
+
+# ---------------------------------------------------------------------------
+# delete_by_document: one document's refs, asked for by document.
+# ---------------------------------------------------------------------------
+
+
+class StoreSideLookupGraphEngine(FakeProvenanceGraphEngine):
+    """A graph that answers all three lookups itself, as the Postgres adapter does
+    (Ladybug and Neo4j answer the two source-ref lookups and inherit the default
+    ``find_edge_texts_in_use``).
+
+    Reading the whole dataset or the whole graph fails the test: with such an
+    adapter a delete of one document must not need either.
+    """
+
+    async def find_node_source_refs_by_dataset(self, dataset_id):
+        raise AssertionError("one document's delete read every node ref of the dataset")
+
+    async def find_edge_source_refs_by_dataset(self, dataset_id):
+        raise AssertionError("one document's delete read every edge ref of the dataset")
+
+    async def get_graph_data(self):
+        raise AssertionError("one document's delete read the whole graph")
+
+    async def find_node_source_refs_by_data(self, dataset_id, data_id):
+        self._guard()
+        select = data_source_ref_key_selector(_as_uuid(dataset_id), _as_uuid(data_id))
+        return {
+            node_id: owned
+            for node_id, node in self.nodes.items()
+            if (owned := select(node.source_ref_keys))
+        }
+
+    async def find_edge_source_refs_by_data(self, dataset_id, data_id):
+        self._guard()
+        select = data_source_ref_key_selector(_as_uuid(dataset_id), _as_uuid(data_id))
+        return {
+            edge: owned
+            for edge, row in self.edges.items()
+            if (owned := select(row.source_ref_keys))
+        }
+
+    async def find_edge_texts_in_use(self, edge_texts):
+        self._guard()
+        stored = {
+            get_edge_retrieval_text(row.edge_text, edge.relationship_name)
+            for edge, row in self.edges.items()
+        }
+        return set(edge_texts) & stored
+
+
+async def _seed_two_documents(graph):
+    """Document A (v1 key and two chunk keys) and document B in one dataset, plus the
+    same data id as A in another dataset. Returns the ids and keys the tests use."""
+    dataset, other_dataset, data_a, data_b = uuid4(), uuid4(), uuid4(), uuid4()
+    keys = {
+        "a_document": make_source_ref_key(dataset, data_a),
+        "a_chunk_1": make_chunk_source_ref_key(dataset, data_a, uuid4()),
+        "a_chunk_2": make_chunk_source_ref_key(dataset, data_a, uuid4()),
+        "b_document": make_source_ref_key(dataset, data_b),
+        "b_chunk": make_chunk_source_ref_key(dataset, data_b, uuid4()),
+        "a_elsewhere": make_chunk_source_ref_key(other_dataset, data_a, uuid4()),
+    }
+    graph.add_node("a_document_node", "Entity", ["name"], {"name": "A"})
+    graph.add_node("a_chunk_node", "Entity", ["name"], {"name": "A chunk"})
+    graph.add_node("shared_node", "Entity", ["name"], {"name": "Shared"})
+    graph.add_node("b_node", "Entity", ["name"], {"name": "B"})
+    graph.add_node("elsewhere_node", "Entity", ["name"], {"name": "Elsewhere"})
+    a_edge = graph.add_edge("a_document_node", "a_chunk_node", "has_chunk", "A has chunk")
+    shared_edge = graph.add_edge("a_chunk_node", "shared_node", "mentions", "mentions")
+    b_edge = graph.add_edge("b_node", "shared_node", "mentions", "mentions")
+
+    await graph.attach_node_source_refs(["a_document_node"], [keys["a_document"]])
+    await graph.attach_node_source_refs(["a_chunk_node"], [keys["a_chunk_1"]])
+    await graph.attach_node_source_refs(["shared_node"], [keys["a_chunk_2"], keys["b_chunk"]])
+    await graph.attach_node_source_refs(["b_node"], [keys["b_document"]])
+    await graph.attach_node_source_refs(["elsewhere_node"], [keys["a_elsewhere"]])
+    await graph.attach_edge_source_refs([a_edge], [keys["a_chunk_1"]])
+    await graph.attach_edge_source_refs([shared_edge], [keys["a_chunk_2"]])
+    await graph.attach_edge_source_refs([b_edge], [keys["b_chunk"]])
+    return dataset, data_a, keys, (a_edge, shared_edge, b_edge)
+
+
+@pytest.mark.parametrize("graph_class", [FakeProvenanceGraphEngine, StoreSideLookupGraphEngine])
+async def test_delete_by_document_removes_every_ref_version_of_that_document_only(graph_class):
+    """The v1 key and every v2 chunk key of the document go; another document of the
+    dataset and the same data id in another dataset keep theirs. Same outcome whether
+    the graph filters the dataset's refs (the interface default) or selects the
+    document's itself."""
+    graph = graph_class()
+    dataset, data_a, keys, (a_edge, shared_edge, b_edge) = await _seed_two_documents(graph)
+    vector = FakeVectorEngine()
+
+    result = await _build_engine(graph, vector).delete_by_document(str(dataset), str(data_a))
+
+    assert result.matched
+    assert sorted(result.deleted_node_ids) == ["a_chunk_node", "a_document_node"]
+    assert set(result.deleted_edges) == {a_edge, shared_edge}
+    assert set(graph.nodes) == {"shared_node", "b_node", "elsewhere_node"}
+    assert graph.nodes["shared_node"].source_ref_keys == [keys["b_chunk"]]
+    assert graph.nodes["b_node"].source_ref_keys == [keys["b_document"]]
+    assert graph.nodes["elsewhere_node"].source_ref_keys == [keys["a_elsewhere"]]
+    assert set(graph.edges) == {b_edge}
+
+    # "A has chunk" is used by no edge any more; "mentions" still is, by B's edge.
+    edge_type_deletes = [
+        ids for name, ids in vector.deleted if name == "EdgeType_relationship_name"
+    ]
+    assert edge_type_deletes == [[str(EdgeType.id_for("A has chunk"))]]
+
+
+async def test_delete_by_document_of_an_unknown_document_is_a_noop():
+    graph = StoreSideLookupGraphEngine()
+    dataset, _data_a, _keys, _edges = await _seed_two_documents(graph)
+    nodes_before, edges_before = set(graph.nodes), set(graph.edges)
+    vector = FakeVectorEngine()
+
+    result = await _build_engine(graph, vector).delete_by_document(str(dataset), str(uuid4()))
+
+    assert not result.matched
+    assert (set(graph.nodes), set(graph.edges)) == (nodes_before, edges_before)
+    assert vector.deleted == []
+
+
+async def test_default_data_lookups_keep_only_that_documents_keys():
+    """The interface defaults an adapter inherits: the dataset's refs, narrowed to the
+    document's v1 key and v2 chunk keys."""
+    graph = FakeProvenanceGraphEngine()
+    dataset, data_a, keys, (a_edge, shared_edge, _b_edge) = await _seed_two_documents(graph)
+
+    assert await graph.find_node_source_refs_by_data(str(dataset), str(data_a)) == {
+        "a_document_node": [keys["a_document"]],
+        "a_chunk_node": [keys["a_chunk_1"]],
+        "shared_node": [keys["a_chunk_2"]],
+    }
+    assert await graph.find_edge_source_refs_by_data(str(dataset), str(data_a)) == {
+        a_edge: [keys["a_chunk_1"]],
+        shared_edge: [keys["a_chunk_2"]],
+    }
+    assert await graph.find_node_source_refs_by_data(str(dataset), str(uuid4())) == {}
+
+
+async def test_default_edge_texts_in_use_follows_get_edge_retrieval_text():
+    """An edge's text is its stripped ``edge_text``, else its stripped relationship name."""
+    graph = FakeProvenanceGraphEngine()
+    graph.add_edge("a", "b", "knows", "  Alice knows Bob\n")
+    graph.add_edge("b", "c", " works_at ", "   ")
+    graph.add_edge("c", "d", "likes", None)
+
+    asked = ["Alice knows Bob", "works_at", "likes", "knows", "nobody has this"]
+    assert await graph.find_edge_texts_in_use(asked) == {"Alice knows Bob", "works_at", "likes"}
+    assert await graph.find_edge_texts_in_use([]) == set()
