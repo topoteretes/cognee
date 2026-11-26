@@ -15,11 +15,15 @@ dependencies = [
     # PyPI, and release cognee-mcp only after it: older releases return no
     # structured evidence for the default recall answer, so it gets no refs.
     "cognee[postgres-binary,docs,neo4j]>=1.5.4,<2.0.0",
-    # FastMCP 3 ships tag-based visibility and the tool-search transform this
+    # FastMCP 4 ships tag-based visibility and the tool-search transform this
     # server relies on; the FastMCP vendored in the `mcp` SDK is an older fork
     # that has neither. `mcp` is still a direct dependency for its wire types.
-    "fastmcp>=3.4.0,<4.0.0",
-    "mcp>=1.24.0,<2.0.0",
+    # FastMCP 4 (via fastmcp-slim[server]) requires mcp>=2.3.0,<3, whose
+    # Streamable HTTP transport speaks the MCP 2026-07-28 revision, so
+    # `server/discover` is answered and 2026-era clients negotiate the current
+    # protocol instead of silently falling back to the legacy era (#6831).
+    "fastmcp>=4.0.0,<5.0.0",
+    "mcp>=2.3.0,<3.0.0",
     "uv>=0.6.3,<1.0.0",
     "httpx>=0.27.0,<1.0.0",
     # Same floor as cognee core, declared here until a cognee release that
