@@ -357,7 +357,7 @@ async def test_browser_route_waiting_for_slot_obeys_navigation_deadline():
     from cognee.tasks.web_scraper.default_url_crawler import DefaultUrlCrawler
 
     route = SimpleNamespace(request=SimpleNamespace(resource_type="fetch"), abort=AsyncMock())
-    with pytest.raises(TimeoutError):
+    with pytest.raises(asyncio.TimeoutError):
         await DefaultUrlCrawler()._fetch_browser_route(
             route, semaphore=asyncio.Semaphore(0), deadline=time.monotonic() + 0.01
         )

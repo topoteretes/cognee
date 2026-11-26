@@ -10,6 +10,7 @@ import httpx
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.web_scraper.ssrf_protection import (
+    SSRFProtectionError,
     require_http_requests_allowed,
     validate_outbound_url,
 )
@@ -482,7 +483,13 @@ class DefaultUrlCrawler:
                                 await self._fetch_browser_route(
                                     route, semaphore=semaphore, deadline=deadline
                                 )
-                            except Exception as error:  # noqa: BLE001 -- abort is already reported
+                            except (
+                                httpx.HTTPError,
+                                SSRFProtectionError,
+                                ValueError,
+                                OSError,
+                                asyncio.TimeoutError,
+                            ) as error:
                                 # The route has already been aborted. Let Chromium
                                 # surface a failed navigation/resource, not an
                                 # uncaught event-listener error during teardown.
