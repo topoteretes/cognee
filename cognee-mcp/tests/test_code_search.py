@@ -41,6 +41,7 @@ async def test_code_search_forwards_a_code_scoped_structured_query(monkeypatch):
             "limit": 100,
         },
         "include_references": False,
+        "only_context": False,
     }
 
 

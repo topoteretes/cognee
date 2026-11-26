@@ -571,6 +571,7 @@ async def recall(
     scope: str | None = None,
     code_query: dict | None = None,
     include_references: bool = False,
+    only_context: bool = False,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -634,6 +635,10 @@ async def recall(
         are not stored data and get no refs. With backend
         access control off, ids are only shown when recall is scoped to a
         single dataset.
+    only_context : bool
+        Return the context a completion search type retrieved instead of the
+        answer written from it. Set search_type with it, since auto-routing
+        may pick a type with a different context.
 
     Returns a one-line memory-hit or empty-state summary followed by the original
     result text. Status markers do not count as hits. Empty-state checks are
@@ -656,6 +661,7 @@ async def recall(
                 scope=scope_list or None,
                 code_query=code_query,
                 include_references=include_references,
+                only_context=only_context,
             )
             empty_state = recall_marker_state(results)
             items = recall_items(results)
