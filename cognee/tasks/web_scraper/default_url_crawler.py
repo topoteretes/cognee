@@ -363,33 +363,35 @@ class DefaultUrlCrawler:
             return
 
         async def fetch():
-            async with semaphore or asyncio.Semaphore(self.concurrency):
-                async with self._client.stream(
+            async with (
+                semaphore or asyncio.Semaphore(self.concurrency),
+                self._client.stream(
                     request.method,
                     request.url,
                     headers=await request.all_headers(),
                     content=request.post_data_buffer,
-                ) as response:
-                    # Chromium does not reroute every native redirect. Refuse it
-                    # explicitly instead of relying only on the dead proxy.
-                    if response.is_redirect:
-                        raise ValueError("Browser redirects are disabled by the outbound policy")
-                    body = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        if (
-                            self.max_browser_response_bytes is not None
-                            and len(body) + len(chunk) > self.max_browser_response_bytes
-                        ):
-                            raise ValueError("Browser response exceeds max_browser_response_bytes")
-                        body.extend(chunk)
-                    # HTTPX decompresses content; do not decode it a second time.
-                    headers = {
-                        key: value
-                        for key, value in response.headers.items()
-                        if key.lower()
-                        not in {"content-encoding", "content-length", "transfer-encoding"}
-                    }
-                    await route.fulfill(status=response.status_code, headers=headers, body=body)
+                ) as response,
+            ):
+                # Chromium does not reroute every native redirect. Refuse it
+                # explicitly instead of relying only on the dead proxy.
+                if response.is_redirect:
+                    raise ValueError("Browser redirects are disabled by the outbound policy")
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if (
+                        self.max_browser_response_bytes is not None
+                        and len(body) + len(chunk) > self.max_browser_response_bytes
+                    ):
+                        raise ValueError("Browser response exceeds max_browser_response_bytes")
+                    body.extend(chunk)
+                # HTTPX decompresses content; do not decode it a second time.
+                headers = {
+                    key: value
+                    for key, value in response.headers.items()
+                    if key.lower()
+                    not in {"content-encoding", "content-length", "transfer-encoding"}
+                }
+                await route.fulfill(status=response.status_code, headers=headers, body=body)
 
         remaining = self.timeout if deadline is None else max(0.0, deadline - time.monotonic())
         try:
@@ -475,7 +477,7 @@ class DefaultUrlCrawler:
                         semaphore = asyncio.Semaphore(self.concurrency)
                         deadline = time.monotonic() + timeout_val
 
-                        async def fetch_route(route, semaphore=semaphore, deadline=deadline):
+                        async def fetch_route(route, *, semaphore=semaphore, deadline=deadline):
                             try:
                                 await self._fetch_browser_route(
                                     route, semaphore=semaphore, deadline=deadline
