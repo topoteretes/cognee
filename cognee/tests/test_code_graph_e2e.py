@@ -63,12 +63,12 @@ COGNIFY_DATASET = "code_graph_e2e_cognify"
 
 # --- Known answers, pinned to the fixture + ENOLA_PINNED_VERSION ------------
 # If enola is bumped and these change, update them deliberately. Last
-# re-verified against enola 0.5.1: it emits the README as document/section
-# symbols, an `extraction` coverage fact, the pyproject's declared package as
-# `pkg:pypi/requests`, and (since 0.4.14) a module-level `module-edge:` dependency
-# fact per resolved package import. File-level import facts such as
-# `main -> inventory.store` now carry the imported file path as their target and
-# no resolved module id; the resolved `imports` edge lives on the module-edge fact.
+# re-verified against enola 0.5.4: it emits the README as document/section
+# symbols, an `extraction` coverage fact and the pyproject's declared package as
+# `pkg:pypi/requests`. File-level import facts such as `main -> inventory.store`
+# carry the imported file path as their target and no resolved module id. Since
+# 0.5.4 the fixture gets no module-level `module-edge:` dependency fact either,
+# so the module-to-module `imports` edge is the one cognee derives itself.
 
 EXPECTED_MODULES = {".", "inventory"}
 
@@ -234,10 +234,10 @@ def _assert_typed_code_graph(nodes: dict, edges: list, repo_name: str) -> None:
     )
 
     imports = {(name_of[s], name_of[t]) for s, t, rel, _ in edges if rel == "imports"}
-    # enola resolves the package import from main.py to the top-level module
-    # `inventory` on a module-level dependency fact (see the known-answers note).
-    assert ("module-edge: . -> inventory", "inventory") in imports, (
-        f"Missing 'imports' edge from 'module-edge: . -> inventory' to module 'inventory'; "
+    # main.py imports the package: the root module imports module `inventory`
+    # (see the known-answers note).
+    assert (".", "inventory") in imports, (
+        f"Missing 'imports' edge from module '.' to module 'inventory'; "
         f"imports present: {sorted(imports)}"
     )
 
