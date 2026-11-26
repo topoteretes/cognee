@@ -532,6 +532,27 @@ jobs:
       - name: Install cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} dependencies
         run: uv sync --extra api --extra docs --extra dev --extra dlt --extra postgres
 
+      # The legacy version runs ladybug 0.17.1, which downloads its JSON
+      # extension from extension.ladybugdb.com/v0.17.0. Ladybug deleted that
+      # line from the server on 21 Nov 2026 (LadybugDB/ladybug#1706), so the
+      # download is a 404. Ladybug's extension-repo image built before the
+      # purge still holds the file; copying it into ladybug's extension
+      # directory makes the legacy INSTALL JSON / LOAD EXTENSION JSON find it
+      # installed. The container is created to copy from, never started.
+      # Keep this digest (tag 0.22.0, built 25 Oct 2026): an image built after
+      # the purge is not expected to hold v0.17.0.
+      - name: Provide the Ladybug v0.17.0 JSON extension
+        if: ${{ matrix.graph_provider == 'ladybug' }}
+        env:
+          EXTENSION_REPO_IMAGE: ghcr.io/ladybugdb/extension-repo@sha256:9a491e040608fa49bae944f655f3412df46f54a0c1fc898fd82ecce3ea1d2ce0
+          EXTENSION_FILE: v0.17.0/linux_amd64/json/libjson.lbug_extension
+        run: |
+          extension_dir="$HOME/.lbdb/extension/0.17.0/linux_amd64/json"
+          mkdir -p "$extension_dir"
+          container=$(docker create "$EXTENSION_REPO_IMAGE")
+          docker cp "$container:/usr/share/nginx/html/$EXTENSION_FILE" "$extension_dir/"
+          docker rm "$container"
+
       - name: "Phase 1 — mock-replay ingest 2 datasets (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }})"
         env:
           # Phase 1 seeding is fully mocked (LLM replay + zero-vector
