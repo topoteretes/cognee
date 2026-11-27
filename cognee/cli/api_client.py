@@ -12,6 +12,7 @@ writes, which is the correct model for file-based backends.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import mimetypes
 import os
@@ -146,11 +147,15 @@ class CogneeApiClient:
                     )
                 else:
                     files.append(
+                    (
+                        "data",
                         (
-                            "data",
-                            (f"text_{len(files)}.txt", io.BytesIO(item.encode()), "text/plain"),
-                        )
+                            f"text_{hashlib.sha256(item.encode()).hexdigest()[:16]}.txt",
+                            io.BytesIO(item.encode()),
+                            "text/plain",
+                        ),
                     )
+                )
             form_data = {"datasetName": dataset_name}
             r = self._get_client().post(self._url("/api/v1/add"), files=files, data=form_data)
             self._raise_for_status(r)
