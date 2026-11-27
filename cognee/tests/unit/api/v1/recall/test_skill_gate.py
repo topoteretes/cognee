@@ -68,6 +68,27 @@ def test_gate_negation_suppresses_contractions(query):
     assert not should_search_skills(query).fired
 
 
+@pytest.mark.parametrize(
+    "broken,procedural",
+    [
+        ("Docker won't start, ", "how do I fix it?"),
+        ("Build is not passing. ", "How do I fix it?"),
+        ("Redis isn't reachable; ", "how do we recover?"),
+        ("Login is not working - ", "how to reset it?"),
+        ("Pods are not ready. ", "Step-by-step fix?"),
+    ],
+)
+def test_negation_in_earlier_clause_does_not_suppress(broken, procedural):
+    """A negation should only suppress a match within its own clause.
+
+    "Docker won't start, how do I fix it?" must fire just like "how do I fix
+    it?" on its own: the negation belongs to the first clause, not the
+    procedural question that follows it (issue #5647).
+    """
+    assert should_search_skills(procedural).fired
+    assert should_search_skills(broken + procedural).fired
+
+
 def test_gate_result_carries_score_and_matches():
     result = should_search_skills("how do I deploy to staging")
     assert result.score >= 3.0
@@ -346,6 +367,22 @@ def test_gate_chinese_negation_suppresses_match():
 )
 def test_gate_chinese_negation_suppresses_matches(query):
     assert not should_search_skills(query).fired
+
+
+@pytest.mark.parametrize(
+    "broken,procedural",
+    [
+        ("服务启动不了，", "怎么排查？"),
+        ("部署失败了，不能访问，", "怎么配置回滚？"),
+    ],
+)
+def test_chinese_negation_in_earlier_clause_does_not_suppress(broken, procedural):
+    """Same clause-leak as the English case: a negation in an earlier clause
+    (``不``) must not cancel a procedural match (``怎么排查``) in the next one
+    (issue #5647).
+    """
+    assert should_search_skills(procedural).fired
+    assert should_search_skills(broken + procedural).fired
 
 
 def test_gate_mixed_language_stacks_scores():
