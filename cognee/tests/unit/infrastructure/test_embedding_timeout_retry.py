@@ -21,7 +21,7 @@ async def test_hung_attempt_is_cancelled_before_retry_succeeds(name, monkeypatch
     module = importlib.import_module(f"cognee.infrastructure.databases.vector.embeddings.{name}")
     cls = getattr(module, name)
     monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
-    monkeypatch.setattr(module, "EMBEDDING_ATTEMPT_TIMEOUT", 0.01)
+    monkeypatch.setenv("EMBEDDING_ATTEMPT_TIMEOUT", "0.01")
     with patch.object(cls, "get_tokenizer", return_value=SimpleNamespace(count_tokens=lambda t: 1)):
         engine = cls(
             model="test-model", dimensions=2, endpoint="http://localhost:1/v1", api_key="test"
@@ -72,7 +72,7 @@ async def test_retry_after_hung_http_response_opens_another_connection(name, mon
     module = importlib.import_module(f"cognee.infrastructure.databases.vector.embeddings.{name}")
     cls = getattr(module, name)
     monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
-    monkeypatch.setattr(module, "EMBEDDING_ATTEMPT_TIMEOUT", 0.2)
+    monkeypatch.setenv("EMBEDDING_ATTEMPT_TIMEOUT", "0.2")
     peers = []
     writers = []
     first_closed = asyncio.Event()
@@ -130,5 +130,61 @@ async def test_retry_after_hung_http_response_opens_another_connection(name, mon
         await server.wait_closed()
         for writer in writers:
             writer.close()
+        if not name.startswith("Lite"):
+            await engine._client.close()
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "invalid", ""])
+def test_invalid_attempt_timeout_is_rejected(value, monkeypatch):
+    from cognee.infrastructure.databases.vector.embeddings.retry_config import (
+        get_embedding_attempt_timeout,
+    )
+
+    monkeypatch.setenv("EMBEDDING_ATTEMPT_TIMEOUT", value)
+    with pytest.raises(ValueError, match="EMBEDDING_ATTEMPT_TIMEOUT"):
+        get_embedding_attempt_timeout()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["LiteLLMEmbeddingEngine", "OpenAICompatibleEmbeddingEngine"])
+async def test_slow_endpoint_can_override_attempt_timeout(name, monkeypatch):
+    module = importlib.import_module(f"cognee.infrastructure.databases.vector.embeddings.{name}")
+    cls = getattr(module, name)
+    monkeypatch.setenv("EMBEDDING_ATTEMPT_TIMEOUT", "180")
+    monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
+    with patch.object(cls, "get_tokenizer", return_value=SimpleNamespace(count_tokens=lambda t: 1)):
+        engine = cls(
+            model="test-model", dimensions=2, endpoint="http://localhost:1/v1", api_key="test"
+        )
+    assert engine.attempt_timeout == 180
+    observed = []
+    original_wait_for = asyncio.wait_for
+
+    async def wait_for(awaitable, timeout):
+        observed.append(timeout)
+        return await original_wait_for(awaitable, timeout=timeout)
+
+    async def request(**kwargs):
+        if name.startswith("Lite"):
+            assert kwargs["timeout"] == 180
+        return SimpleNamespace(
+            data=[
+                {"embedding": [1.0, 0.0]}
+                if name.startswith("Lite")
+                else SimpleNamespace(embedding=[1.0, 0.0])
+            ],
+            usage=SimpleNamespace(prompt_tokens=1),
+        )
+
+    monkeypatch.setattr(module.asyncio, "wait_for", wait_for)
+    if name.startswith("Lite"):
+        monkeypatch.setattr(module.litellm, "aembedding", request)
+    else:
+        assert engine._client.timeout == 180
+        monkeypatch.setattr(engine._client.embeddings, "create", request)
+    try:
+        assert await engine.embed_text(["hello"]) == [[1.0, 0.0]]
+        assert 180 in observed
+    finally:
         if not name.startswith("Lite"):
             await engine._client.close()

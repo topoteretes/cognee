@@ -288,3 +288,7 @@ For production deployments, review and tighten these settings.
 **Local LLM server times out during ingestion**
 - Issue: cognify sends one extraction call per chunk at once, so a serial server (Ollama, llama.cpp, a small vLLM deployment) queues them until callers time out and retry. The RPM limiter does not help: it limits how many calls start per interval, not how many are running
 - Solution: set `LLM_MAX_CONCURRENT_REQUESTS` to what the server runs in parallel (Ollama's `OLLAMA_NUM_PARALLEL`), usually 1 to 4. It applies per model and per process, so N workers can send N times that
+
+### Embedding request deadlines
+
+`EMBEDDING_ATTEMPT_TIMEOUT` sets the per-request timeout in seconds for LiteLLM and OpenAI-compatible embedding engines (default `60`, finite and positive). Set it before creating the engine; increase it for slow self-hosted endpoints. The retry-start window remains 128 seconds: an in-flight attempt may extend it by the configured timeout, and a timeout longer than that window may leave no further attempt. Rate-limiter queueing is outside the HTTP deadline.

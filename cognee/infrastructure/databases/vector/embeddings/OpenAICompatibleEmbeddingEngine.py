@@ -50,9 +50,9 @@ from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
-    EMBEDDING_ATTEMPT_TIMEOUT,
     EMBEDDING_RETRY_WINDOW,
     embedding_retry_condition,
+    get_embedding_attempt_timeout,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     count_input_tokens,
@@ -110,6 +110,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         input_type: str | None = None,
         encoding_format: EncodingFormat | None = None,
     ):
+        self.attempt_timeout = get_embedding_attempt_timeout()
         self.model = model or "default"
         self.dimensions = dimensions
         self.endpoint = endpoint or "http://localhost:8080"
@@ -138,7 +139,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         self._client = AsyncOpenAI(
             api_key=self.api_key,
             base_url=base,
-            timeout=EMBEDDING_ATTEMPT_TIMEOUT,
+            timeout=self.attempt_timeout,
             max_retries=0,
         )
 
@@ -199,7 +200,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             async with embedding_rate_limiter_context_manager():
                 response = await asyncio.wait_for(
                     self._client.embeddings.create(**create_kwargs),
-                    timeout=EMBEDDING_ATTEMPT_TIMEOUT,
+                    timeout=self.attempt_timeout,
                 )
             embeddings = [
                 decode_embedding(item.embedding, self.encoding_format) for item in response.data

@@ -38,9 +38,9 @@ from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
-    EMBEDDING_ATTEMPT_TIMEOUT,
     EMBEDDING_RETRY_WINDOW,
     embedding_retry_condition,
+    get_embedding_attempt_timeout,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     count_input_tokens,
@@ -183,6 +183,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.endpoint = endpoint
         self.api_version = api_version
         self.provider = provider
+        self.attempt_timeout = get_embedding_attempt_timeout()
         self.model = model
         self.dimensions = dimensions
         self.tokenizer = self.get_tokenizer()
@@ -326,11 +327,11 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
                     # Tenacity owns retries. wait_for completes cancellation
                     # of the timed-out request before another attempt starts.
-                    embedding_kwargs["timeout"] = EMBEDDING_ATTEMPT_TIMEOUT
+                    embedding_kwargs["timeout"] = self.attempt_timeout
                     embedding_kwargs["num_retries"] = 0
                     response = await asyncio.wait_for(
                         litellm.aembedding(**embedding_kwargs),
-                        timeout=EMBEDDING_ATTEMPT_TIMEOUT,
+                        timeout=self.attempt_timeout,
                     )
 
                 embedding_response = [

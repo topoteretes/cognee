@@ -29,6 +29,9 @@ in ``EmbeddingException``. ``is_missing_package_error`` walks ``__cause__`` and
 looks one ``__context__`` step down at each link, which covers exactly that shape.
 """
 
+import math
+import os
+
 from tenacity import retry_if_exception
 
 from cognee.infrastructure.llm.exceptions import (
@@ -38,10 +41,24 @@ from cognee.infrastructure.llm.exceptions import (
 
 # Fit two full requests plus backoff inside the existing 128-second retry
 # window. stop_before_delay never starts a sleep that crosses that window;
-# a final in-flight attempt may extend it by at most 60s (188s, not 300s).
+# a final in-flight attempt may extend it by the configured attempt timeout
+# (188s with the default). A slow endpoint can opt into a longer attempt.
 # Local rate-limiter queueing is outside the HTTP attempt timeout.
 EMBEDDING_ATTEMPT_TIMEOUT = 60.0
 EMBEDDING_RETRY_WINDOW = 128.0
+
+
+def get_embedding_attempt_timeout() -> float:
+    """Read the per-request deadline when an engine is created; reject unbounded values."""
+    try:
+        timeout = float(os.getenv("EMBEDDING_ATTEMPT_TIMEOUT", str(EMBEDDING_ATTEMPT_TIMEOUT)))
+    except ValueError as error:
+        raise ValueError(
+            "EMBEDDING_ATTEMPT_TIMEOUT must be a finite positive number of seconds"
+        ) from error
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("EMBEDDING_ATTEMPT_TIMEOUT must be a finite positive number of seconds")
+    return timeout
 
 
 def is_missing_package_error(error: BaseException) -> bool:

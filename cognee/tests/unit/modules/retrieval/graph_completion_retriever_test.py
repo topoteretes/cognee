@@ -608,3 +608,20 @@ async def test_memory_retrieval_excludes_skill_collections_and_projection():
     kwargs = search.call_args.kwargs
     assert "Skill_search_text" not in kwargs["collections"]
     assert kwargs["excluded_node_types"] == ("Skill",)
+
+
+def test_custom_skill_class_is_not_suppressed_by_vector_collection_discovery():
+    from pydantic import Field
+
+    from cognee.infrastructure.engine import DataPoint
+    from cognee.modules.engine.models import Skill as ProceduralSkill
+
+    class Skill(DataPoint):
+        metadata: dict = Field(default={"index_fields": ["user_knowledge"]})
+
+    with patch(
+        "cognee.modules.retrieval.graph_completion_retriever.get_all_subclasses",
+        return_value=[ProceduralSkill, Skill],
+    ):
+        collections = GraphCompletionRetriever._get_vector_index_collections()
+    assert collections == ["Skill_user_knowledge"]

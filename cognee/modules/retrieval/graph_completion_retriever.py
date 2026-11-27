@@ -7,6 +7,7 @@ from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.engine.models import Skill
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
@@ -134,7 +135,7 @@ class GraphCompletionRetriever(BaseRetriever):
         for subclass in get_all_subclasses(DataPoint):
             # Procedures are loaded explicitly by the skill/agentic path. They
             # are not evidence about a user's data (including legacy mixed datasets).
-            if subclass.__name__ == "Skill":
+            if subclass is Skill:
                 continue
             metadata = subclass.model_fields.get("metadata")
             if metadata is None:
@@ -286,6 +287,8 @@ class GraphCompletionRetriever(BaseRetriever):
             query_batch,
             top_k=self.top_k,
             collections=collections or None,
+            # Persisted graph nodes carry only the unqualified class name.
+            # A custom DataPoint named Skill cannot be distinguished here.
             excluded_node_types=("Skill",),
             node_type=self.node_type,
             node_name=self.node_name,
