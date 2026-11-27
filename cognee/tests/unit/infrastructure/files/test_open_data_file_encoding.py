@@ -16,7 +16,7 @@ import cognee.infrastructure.files.storage.S3FileStorage as s3_module
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 
 
-class _FakeS3FileStorage:
+class _FakeRemoteFileStorage:
     """Same ``open`` signature as the real S3 backend: ``mode`` only, no kwargs."""
 
     calls: list[tuple[str, str]] = []
@@ -32,13 +32,33 @@ class _FakeS3FileStorage:
 
 @pytest.mark.asyncio
 async def test_s3_branch_never_forwards_encoding(monkeypatch):
-    monkeypatch.setattr(s3_module, "S3FileStorage", _FakeS3FileStorage)
-    _FakeS3FileStorage.calls = []
+    monkeypatch.setattr(s3_module, "S3FileStorage", _FakeRemoteFileStorage)
+    _FakeRemoteFileStorage.calls = []
 
     async with open_data_file("s3://bucket/dir/file.txt", mode="r", encoding="utf-8") as file:
         assert file.read() == "from s3"
 
-    assert _FakeS3FileStorage.calls == [("file.txt", "r")]
+    assert _FakeRemoteFileStorage.calls == [("file.txt", "r")]
+
+
+@pytest.mark.asyncio
+async def test_az_branch_reads_through_the_azure_backend(monkeypatch):
+    import cognee.infrastructure.files.storage.AzureBlobFileStorage as azure_module
+
+    monkeypatch.setattr(azure_module, "AzureBlobFileStorage", _FakeRemoteFileStorage)
+    _FakeRemoteFileStorage.calls = []
+
+    async with open_data_file("az://box/dir/../docs/file.txt", mode="r", encoding="utf-8") as file:
+        assert file.read() == "from s3"
+
+    assert _FakeRemoteFileStorage.calls == [("file.txt", "r")]
+
+
+@pytest.mark.parametrize("scheme", ["s3", "az"])
+def test_object_store_urls_keep_their_scheme(scheme):
+    from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
+
+    assert get_data_file_path(f"{scheme}://box/dir/../docs/f.txt") == f"{scheme}://box/docs/f.txt"
 
 
 @pytest.mark.asyncio

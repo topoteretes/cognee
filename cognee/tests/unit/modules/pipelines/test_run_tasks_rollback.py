@@ -87,7 +87,9 @@ async def test_telemetry_follows_the_whole_run_lifecycle(monkeypatch, outcome):
     monkeypatch.setattr(
         run_tasks_module,
         "get_graph_engine",
-        AsyncMock(return_value=SimpleNamespace(push_to_s3=flush, needs_push_to_s3=lambda: False)),
+        AsyncMock(
+            return_value=SimpleNamespace(push_to_remote=flush, needs_push_to_remote=lambda: False)
+        ),
     )
     monkeypatch.setattr(run_tasks_module, "set_database_global_context_variables", _no_op_context)
     monkeypatch.setattr(
@@ -320,7 +322,7 @@ async def test_run_tasks_tells_the_rollback_whether_the_writes_are_durable(
     monkeypatch.setattr(
         run_tasks_module,
         "get_graph_engine",
-        AsyncMock(return_value=SimpleNamespace(push_to_s3=_push)),
+        AsyncMock(return_value=SimpleNamespace(push_to_remote=_push)),
     )
     monkeypatch.setattr(run_tasks_module, "set_database_global_context_variables", _no_op_context)
     monkeypatch.setattr(
@@ -409,10 +411,10 @@ async def test_run_tasks_marks_cancelled_run_as_errored_instead_of_stuck(monkeyp
 
 
 def _engine(needs_push=None):
-    """A fake engine: no ``push_to_s3`` when ``needs_push`` is None."""
+    """A fake engine: no ``push_to_remote`` when ``needs_push`` is None."""
     if needs_push is None:
         return SimpleNamespace()
-    return SimpleNamespace(push_to_s3=AsyncMock(), needs_push_to_s3=lambda: needs_push)
+    return SimpleNamespace(push_to_remote=AsyncMock(), needs_push_to_remote=lambda: needs_push)
 
 
 @pytest.mark.parametrize(
@@ -438,23 +440,29 @@ def test_writes_are_durable_unless_an_engine_waits_for_its_push(
 
 
 def test_an_engine_that_pushes_without_saying_when_fails_loudly():
-    """An engine with ``push_to_s3`` but no ``needs_push_to_s3`` must not pass its
+    """An engine with ``push_to_remote`` but no ``needs_push_to_remote`` must not pass its
     writes off as durable."""
     with pytest.raises(AttributeError):
-        run_tasks_module.writes_durable_before_push(SimpleNamespace(push_to_s3=AsyncMock()))
+        run_tasks_module.writes_durable_before_push(SimpleNamespace(push_to_remote=AsyncMock()))
 
 
 @pytest.mark.parametrize("adapter", ["ladybug", "sqlalchemy"])
 @pytest.mark.parametrize(
-    "storage_backend, has_temp_copy, needs_push",
-    [("s3", True, True), ("s3", False, False), ("local", True, False)],
+    "storage_backend, db_path, has_temp_copy, needs_push",
+    [
+        ("s3", "s3://bucket/db", True, True),
+        ("s3", "s3://bucket/db", False, False),
+        ("local", "s3://bucket/db", True, False),
+        ("azure", "az://box/db", True, True),
+        ("s3", "az://box/db", True, False),
+    ],
 )
 @pytest.mark.asyncio
-async def test_adapters_push_to_s3_only_when_they_say_they_need_to(
-    monkeypatch, adapter, storage_backend, has_temp_copy, needs_push
+async def test_adapters_push_to_remote_only_when_they_say_they_need_to(
+    monkeypatch, adapter, storage_backend, db_path, has_temp_copy, needs_push
 ):
-    """``needs_push_to_s3`` is the adapter's one statement of the rule, and its
-    ``push_to_s3`` does nothing when it is false."""
+    """``needs_push_to_remote`` is the adapter's one statement of the rule, and its
+    ``push_to_remote`` does nothing when it is false."""
     from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
     from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
         SQLAlchemyAdapter,
@@ -465,11 +473,12 @@ async def test_adapters_push_to_s3_only_when_they_say_they_need_to(
         "sqlalchemy": (SQLAlchemyAdapter, "temp_db_file"),
     }[adapter]
     engine = object.__new__(adapter_cls)
+    engine.db_path = db_path
     if has_temp_copy:
         setattr(engine, temp_attr, "/tmp/local-copy")
     monkeypatch.setenv("STORAGE_BACKEND", storage_backend)
 
-    assert engine.needs_push_to_s3() is needs_push
+    assert engine.needs_push_to_remote() is needs_push
     if not needs_push:
-        # Returns before touching S3 or any attribute an uninitialized adapter lacks.
-        await engine.push_to_s3()
+        # Returns before touching the object store or any attribute an uninitialized adapter lacks.
+        await engine.push_to_remote()

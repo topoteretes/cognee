@@ -45,6 +45,12 @@ from cognee.infrastructure.databases.provenance.source_refs import (
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.files.storage.remote_storage import (
+    get_remote_file_storage,
+    get_remote_scheme,
+    is_configured_backend,
+    is_remote_path,
+)
 from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticEvent, LoopAgnosticLock
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.modules.observability import OtelStatusCode as StatusCode
@@ -350,6 +356,24 @@ def _decoded_json_text(value: Any) -> str | None:
     return decoded if isinstance(decoded, str) else str(value)
 
 
+def _local_copy_of_remote_graph(db_path: str) -> str:
+    """A local temporary file holding the graph stored at the remote ``db_path``.
+
+    The engine opens local files only. The file is empty when nothing is stored yet.
+    """
+    with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
+        local_path = temp_file.name
+    run_sync(_pull_remote_graph(db_path, local_path))
+    return local_path
+
+
+async def _pull_remote_graph(db_path: str, local_path: str) -> None:
+    try:
+        await get_remote_file_storage(db_path).download_to(local_path)
+    except FileNotFoundError:
+        logger.warning(f"Ladybug remote storage file not found: {db_path}")
+
+
 class LadybugAdapter(GraphDBInterface):
     """
     Adapter for Ladybug graph database operations with improved consistency and async support.
@@ -376,7 +400,11 @@ class LadybugAdapter(GraphDBInterface):
         kuzu_max_db_size: int = DEFAULT_KUZU_MAX_DB_SIZE,
     ) -> "LadybugAdapter":
         """Create a LadybugAdapter running in subprocess-proxy mode."""
-        db_parent = os.path.dirname(os.path.abspath(db_path))
+        # The engine opens local files only: a remote graph (s3://, az://) is worked on
+        # in a local copy, which push_to_remote uploads after a run.
+        temp_graph_file = _local_copy_of_remote_graph(db_path) if is_remote_path(db_path) else None
+        engine_path = temp_graph_file or db_path
+        db_parent = os.path.dirname(os.path.abspath(engine_path))
         if db_parent:
             os.makedirs(db_parent, exist_ok=True)
 
@@ -402,11 +430,12 @@ class LadybugAdapter(GraphDBInterface):
                     kuzu_max_db_size=kuzu_max_db_size,
                     subprocess_mode=True,
                     session=session,
+                    temp_graph_file=temp_graph_file,
                 )
 
             db = RemoteKuzuDatabase(
                 session,
-                db_path=db_path,
+                db_path=engine_path,
                 buffer_pool_size=kuzu_buffer_pool_size,
                 max_num_threads=kuzu_num_threads,
                 max_db_size=kuzu_max_db_size,
@@ -424,6 +453,7 @@ class LadybugAdapter(GraphDBInterface):
                 database=db,
                 connection=conn,
                 session=session,
+                temp_graph_file=temp_graph_file,
             )
         except Exception:
             session.shutdown(timeout=2.0)
@@ -440,6 +470,7 @@ class LadybugAdapter(GraphDBInterface):
         database: Any | None = None,
         connection: Any | None = None,
         session: Any | None = None,
+        temp_graph_file: str | None = None,
     ):
         """Initialize Ladybug database connection and schema.
 
@@ -472,6 +503,9 @@ class LadybugAdapter(GraphDBInterface):
             proxies lazily against the surviving session; after ``close()``
             the session is zeroed and the adapter is in a permanent error
             state.
+        temp_graph_file:
+            Subprocess mode with a remote ``db_path`` (s3://, az://): the local
+            copy the worker opens, which ``push_to_remote`` uploads.
         """
         if subprocess_mode:
             if session is None:
@@ -482,6 +516,9 @@ class LadybugAdapter(GraphDBInterface):
                 )
         self.open_connections = 0
         self.db_path = db_path
+        if temp_graph_file:
+            # A local copy exists only for a remote db_path; needs_push_to_remote reads it.
+            self.temp_graph_file = temp_graph_file
         self.kuzu_num_threads = kuzu_num_threads
         self.kuzu_buffer_pool_size = kuzu_buffer_pool_size
         self.kuzu_max_db_size = kuzu_max_db_size
@@ -620,11 +657,8 @@ class LadybugAdapter(GraphDBInterface):
         )
 
         try:
-            if "s3://" in self.db_path:
-                with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
-                    self.temp_graph_file = temp_file.name
-
-                run_sync(self.pull_from_s3())
+            if is_remote_path(self.db_path):
+                self.temp_graph_file = _local_copy_of_remote_graph(self.db_path)
 
                 self.db = Database(
                     self.temp_graph_file,
@@ -727,31 +761,21 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to initialize Ladybug database: {e}")
             raise
 
-    def needs_push_to_s3(self) -> bool:
-        """Whether writes live in a local copy of an S3 database until ``push_to_s3``."""
-        return os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file")
+    def needs_push_to_remote(self) -> bool:
+        """Whether writes live in a local copy of an object-store database until ``push_to_remote``."""
+        return hasattr(self, "temp_graph_file") and is_configured_backend(
+            get_remote_scheme(self.db_path)
+        )
 
-    async def push_to_s3(self) -> None:
-        if not self.needs_push_to_s3():
+    async def push_to_remote(self) -> None:
+        if not self.needs_push_to_remote():
             return
-        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-
-        s3_file_storage = S3FileStorage("")
 
         if self.connection:
             async with self.LADYBUG_ASYNC_LOCK:
                 self.connection.execute("CHECKPOINT;")
 
-        s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
-
-    async def pull_from_s3(self) -> None:
-        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-
-        s3_file_storage = S3FileStorage("")
-        try:
-            s3_file_storage.s3.get(self.db_path, self.temp_graph_file, recursive=True)
-        except FileNotFoundError:
-            logger.warning(f"Ladybug S3 storage file not found: {self.db_path}")
+        await get_remote_file_storage(self.db_path).upload_from(self.temp_graph_file)
 
     async def is_empty(self) -> bool:
         # Scoped to :Node so the GraphMetadata marker table (and any future
@@ -1028,7 +1052,8 @@ class LadybugAdapter(GraphDBInterface):
 
         self.db = RemoteKuzuDatabase(
             self._session,
-            db_path=self.db_path,
+            # The local copy of a remote graph, as create_subprocess opened it.
+            db_path=getattr(self, "temp_graph_file", self.db_path),
             buffer_pool_size=self.kuzu_buffer_pool_size,
             max_num_threads=self.kuzu_num_threads,
             max_db_size=self.kuzu_max_db_size,

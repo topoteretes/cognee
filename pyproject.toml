@@ -190,7 +190,9 @@ huggingface = ["transformers>=4.46.3,<6"]
 ollama = ["transformers>=4.46.3,<6"]
 mistral = ["mistral-common>=1.5.2,<2", "mistralai>=1.9.10,<2"]
 anthropic = ["anthropic>=0.27"]
-azure = ["azure-identity>=1.15.0,<2"]
+# azure-identity: managed identity for Azure OpenAI. adlfs: Azure Blob Storage
+# (STORAGE_BACKEND=azure).
+azure = ["azure-identity>=1.15.0,<2", "adlfs>=2026.8.0,<2027"]
 deepeval = ["deepeval>=3.0.1,<4"]
 posthog = ["posthog>=3.5.0,<4"]
 groq = ["groq>=0.8.0,<1.0.0"]
@@ -256,6 +258,8 @@ instructor = ["instructor>=1.9.1,<1.15.3"]
 dev = [
     # The legacy LLM adapters' unit tests build the instructor client.
     "instructor>=1.9.1,<1.15.3",
+    # The Azure Blob Storage unit tests and type checks import adlfs and azure-core.
+    "cognee[azure]",
     "pytest>=7.4.0,<8",
     "pytest-cov>=6.1.1,<7.0.0",
     "pytest-asyncio>=0.21.1,<0.22",

@@ -152,12 +152,17 @@ class HealthChecker:
 
             from cognee.base_config import get_base_config
             from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
+            from cognee.infrastructure.files.storage.remote_storage import (
+                REMOTE_STORAGE_BACKENDS,
+                get_remote_scheme,
+            )
 
             base_config = get_base_config()
             storage = get_file_storage(base_config.data_root_directory)
 
-            # Determine provider
-            provider = "s3" if base_config.data_root_directory.startswith("s3://") else "local"
+            # Determine provider: the object store's STORAGE_BACKEND name, or local
+            remote_scheme = get_remote_scheme(base_config.data_root_directory)
+            provider = REMOTE_STORAGE_BACKENDS[remote_scheme] if remote_scheme else "local"
 
             import uuid
 
@@ -173,7 +178,7 @@ class HealthChecker:
                     f.write("test")
                 os.remove(test_file)
             else:
-                # For S3, test basic operations
+                # For object storage (S3, Azure), store and remove through the backend
                 test_path = f"health_check_test_{test_id}"
                 await storage.store(test_path, BytesIO(b"test"))
                 await storage.remove(test_path)

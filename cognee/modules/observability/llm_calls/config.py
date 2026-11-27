@@ -32,7 +32,7 @@ def get_llm_call_capture_config() -> LLMCallCaptureConfig:
     The directory is resolved only when capture is on, so a deployment that
     never enables it is never affected by its data root. Records are appended
     to local files, so the directory must be an absolute local path; an
-    ``s3://`` data root needs an explicit ``LLM_CALL_CAPTURE_DIRECTORY``.
+    ``s3://`` or ``az://`` data root needs an explicit ``LLM_CALL_CAPTURE_DIRECTORY``.
     """
     config = LLMCallCaptureConfig()
     if not config.enabled:

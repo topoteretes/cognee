@@ -433,10 +433,17 @@ class RemoteLanceDBConnection:
     API used by cognee's LanceDBAdapter is exposed.
     """
 
-    def __init__(self, session: LanceDBSubprocessSession, url: str, api_key: str | None):
+    def __init__(
+        self,
+        session: LanceDBSubprocessSession,
+        url: str,
+        api_key: str | None,
+        storage_options: dict[str, str] | None = None,
+    ):
         self._session = session
         self._url = url
         self._api_key = api_key
+        self._storage_options = storage_options
         self._connected = False
         # Serializes first-time connects so concurrent callers (e.g. via
         # ``asyncio.gather`` over multiple adapter operations) don't both
@@ -457,9 +464,7 @@ class RemoteLanceDBConnection:
         async with self._connect_lock:
             if self._connected:
                 return
-            await self._session.call_async(
-                Request(op=OP_CONNECT, kwargs={"url": self._url, "api_key": self._api_key})
-            )
+            await self._session.call_async(self._connect_request())
             self._connected = True
             # Replay step: on worker respawn, re-establish the underlying
             # lancedb connection before any other op fires. Registered
@@ -467,13 +472,19 @@ class RemoteLanceDBConnection:
             # idempotent against future flows that flip ``_connected``
             # back to False (none today, but defensive).
             if self._connect_replay_step is None:
-                self._connect_replay_step = ReplayStep(
-                    make_request=lambda: Request(
-                        op=OP_CONNECT,
-                        kwargs={"url": self._url, "api_key": self._api_key},
-                    ),
-                )
+                self._connect_replay_step = ReplayStep(make_request=self._connect_request)
                 self._session.add_replay_step(self._connect_replay_step)
+
+    def _connect_request(self) -> Request:
+        """The worker's connect request, sent on first use and replayed after a respawn."""
+        return Request(
+            op=OP_CONNECT,
+            kwargs={
+                "url": self._url,
+                "api_key": self._api_key,
+                "storage_options": self._storage_options,
+            },
+        )
 
     async def _ensure_connected(self) -> None:
         if not self._connected:

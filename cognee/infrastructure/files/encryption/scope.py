@@ -12,6 +12,7 @@ import os
 from cognee.base_config import get_base_config
 from cognee.infrastructure.files.storage.get_storage_config import get_storage_config
 from cognee.infrastructure.files.storage.LocalFileStorage import get_parsed_path
+from cognee.infrastructure.files.storage.remote_storage import get_remote_scheme
 from cognee.infrastructure.files.storage.storage import Storage
 
 from .config import get_file_encryption_config
@@ -19,11 +20,14 @@ from .envelope import MAGIC, is_envelope
 
 
 def _same_or_within(path: str, root: str) -> bool:
-    if path.startswith("s3://") or root.startswith("s3://"):
-        if not (path.startswith("s3://") and root.startswith("s3://")):
+    path_scheme, root_scheme = get_remote_scheme(path), get_remote_scheme(root)
+    if path_scheme or root_scheme:
+        # Object stores (s3://, az://): same scheme, then a key-prefix boundary.
+        if path_scheme != root_scheme:
             return False
-        path_key = path[len("s3://") :].rstrip("/")
-        root_key = root[len("s3://") :].rstrip("/")
+        prefix = f"{path_scheme}://"
+        path_key = path[len(prefix) :].rstrip("/")
+        root_key = root[len(prefix) :].rstrip("/")
         return path_key == root_key or path_key.startswith(root_key + "/")
 
     resolved_path = os.path.realpath(os.path.expanduser(get_parsed_path(path)))

@@ -353,7 +353,7 @@ async def test_cognify_rollback_keeps_the_documents_the_failed_run_completed(
 
 
 @pytest.mark.asyncio
-async def test_cognify_rollback_keeps_nothing_when_the_push_to_s3_fails(
+async def test_cognify_rollback_keeps_nothing_when_the_push_to_remote_fails(
     clean_test_environment, monkeypatch
 ):
     """S3 storage: every item completes and is stamped, then the graph push
@@ -382,7 +382,7 @@ async def test_cognify_rollback_keeps_nothing_when_the_push_to_s3_fails(
         raise OSError("S3 push failed")
 
     monkeypatch.setattr(run_tasks_module, "writes_durable_before_push", lambda *_: False)
-    monkeypatch.setattr(LadybugAdapter, "push_to_s3", _push_fails, raising=False)
+    monkeypatch.setattr(LadybugAdapter, "push_to_remote", _push_fails, raising=False)
 
     with pytest.raises(CognifyFailedError, match="S3 push failed"):
         await cognee.cognify(datasets=[dataset_name], user=user, early_chunk_indexing=False)
@@ -396,7 +396,7 @@ async def test_cognify_rollback_keeps_nothing_when_the_push_to_s3_fails(
     async def _push_ok(_self):
         return None
 
-    monkeypatch.setattr(LadybugAdapter, "push_to_s3", _push_ok, raising=False)
+    monkeypatch.setattr(LadybugAdapter, "push_to_remote", _push_ok, raising=False)
     run_info = (await cognee.cognify(datasets=[dataset_name], user=user))[dataset.id]
     assert run_info.status == "PipelineRunCompleted"
     outcomes = {

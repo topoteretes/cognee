@@ -82,14 +82,17 @@ class BaseConfig(BaseSettings):
         # Adding this here temporarily to ensure that the cache root directory is set correctly for S3 storage automatically
         # I'll remove this after we update documentation for S3 storage
         # Auto-configure cache root directory for S3 storage if not explicitly set
-        storage_backend = os.getenv("STORAGE_BACKEND", "").lower()
+        # Imported here: the storage package imports this module.
+        from cognee.infrastructure.files.storage.remote_storage import get_backend_scheme
+
+        remote_scheme = get_backend_scheme(os.getenv("STORAGE_BACKEND", ""))
         cache_root_env = os.getenv("CACHE_ROOT_DIRECTORY")
 
-        if storage_backend == "s3" and not cache_root_env:
-            # Auto-generate S3 cache path when using S3 storage
+        if remote_scheme and not cache_root_env:
+            # Auto-generate the cache path on the bucket (S3) or container (Azure)
             bucket_name = os.getenv("STORAGE_BUCKET_NAME")
             if bucket_name:
-                self.cache_root_directory = f"s3://{bucket_name}/cognee/cache"
+                self.cache_root_directory = f"{remote_scheme}://{bucket_name}/cognee/cache"
 
         # Require absolute paths for root directories
         self.data_root_directory = ensure_absolute_path(self.data_root_directory)

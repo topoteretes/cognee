@@ -23,7 +23,7 @@ def get_azure_ad_token_provider() -> Callable[[], str]:
     more often than needed.
     """
     try:
-        from azure.identity import (  # ty:ignore[unresolved-import]
+        from azure.identity import (
             DefaultAzureCredential,
             get_bearer_token_provider,
         )

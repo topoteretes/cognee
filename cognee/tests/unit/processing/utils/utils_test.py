@@ -72,3 +72,7 @@ async def test_root_dir_absolute_paths():
     # Test with None path
     with pytest.raises(ValueError, match="cannot be None"):
         ensure_absolute_path(None)
+
+    # Object-store roots pass unchanged
+    for remote_root in ("s3://bucket/cognee/data", "az://box/cognee/data"):
+        assert ensure_absolute_path(remote_root) == remote_root

@@ -158,7 +158,7 @@ def test_default_sqlite_backend_on_s3_raises():
 
     with (
         patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational),
-        pytest.raises(CacheConnectionError, match="cannot store cache.db on S3"),
+        pytest.raises(CacheConnectionError, match="cannot store cache.db on s3://"),
     ):
         _create_engine("sqlite")
 
@@ -171,9 +171,22 @@ def test_explicitly_chosen_sqlite_backend_on_s3_still_raises():
 
     with (
         patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational),
-        pytest.raises(CacheConnectionError, match="cannot store cache.db on S3"),
+        pytest.raises(CacheConnectionError, match="cannot store cache.db on s3://"),
     ):
         _create_engine("sqlite", explicit=True)
+
+
+def test_sqlite_backend_on_azure_raises():
+    """An Azure system root is refused the same way: the message names its scheme."""
+    fake_relational = types.SimpleNamespace(
+        db_path="az://box/cognee/system/databases", db_provider="sqlite"
+    )
+
+    with (
+        patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational),
+        pytest.raises(CacheConnectionError, match="cannot store cache.db on az://"),
+    ):
+        _create_engine("sqlite")
 
 
 def test_postgres_backend_without_url_or_postgres_relational_raises():

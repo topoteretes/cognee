@@ -15,6 +15,12 @@ from sqlalchemy.orm import joinedload
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.files.storage.remote_storage import (
+    get_remote_file_storage,
+    get_remote_scheme,
+    is_configured_backend,
+    is_remote_path,
+)
 from cognee.infrastructure.files.stored_file_claims import removing_stored_files
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.modules.data.models.Data import Data
@@ -90,7 +96,7 @@ class SQLAlchemyAdapter:
             [prefix, db_path] = connection_string.split("///")
             self.db_path = db_path
 
-            if "s3://" in self.db_path:
+            if is_remote_path(self.db_path):
                 db_dir_path = path.dirname(self.db_path)
                 file_storage = get_file_storage(db_dir_path)
 
@@ -100,7 +106,7 @@ class SQLAlchemyAdapter:
                     self.temp_db_file = temp_file.name
                     connection_string = prefix + "///" + self.temp_db_file
 
-                run_sync(self.pull_from_s3())
+                run_sync(self.pull_from_remote())
 
         if "sqlite" in connection_string:
             # Pool-sizing keys opt into a bounded pool; without them the engine
@@ -172,26 +178,22 @@ class SQLAlchemyAdapter:
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
-    def needs_push_to_s3(self) -> bool:
-        """Whether writes live in a local copy of an S3 database until ``push_to_s3``."""
-        return os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_db_file")
+    def needs_push_to_remote(self) -> bool:
+        """Whether writes live in a local copy of an object-store database until ``push_to_remote``."""
+        return hasattr(self, "temp_db_file") and is_configured_backend(
+            get_remote_scheme(self.db_path)
+        )
 
-    async def push_to_s3(self) -> None:
-        if not self.needs_push_to_s3():
+    async def push_to_remote(self) -> None:
+        if not self.needs_push_to_remote():
             return
-        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+        await get_remote_file_storage(self.db_path).upload_from(self.temp_db_file)
 
-        s3_file_storage = S3FileStorage("")
-        s3_file_storage.s3.put(self.temp_db_file, self.db_path, recursive=True)
-
-    async def pull_from_s3(self) -> None:
-        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-
-        s3_file_storage = S3FileStorage("")
+    async def pull_from_remote(self) -> None:
         try:
-            s3_file_storage.s3.get(self.db_path, self.temp_db_file, recursive=True)
+            await get_remote_file_storage(self.db_path).download_to(self.temp_db_file)
         except FileNotFoundError:
-            pass
+            pass  # nothing stored yet: start with an empty database
 
     def _configure_sqlite_engine(self) -> None:
         """Install the per-connection setup of a file-based engine (see ``__init__``).

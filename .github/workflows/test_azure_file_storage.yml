@@ -1,0 +1,66 @@
+name: test | azure file storage
+
+on:
+  workflow_call:
+    inputs:
+      ci-image:
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
+jobs:
+  test-azure-storage:
+    name: Run Azure File Storage Test
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    services:
+      # Azure Blob emulator; reached as "azurite" from a job container, else on localhost.
+      azurite:
+        image: mcr.microsoft.com/azure-storage/azurite:3.38.0
+        ports:
+          - 10000:10000
+    env:
+      STORAGE_BACKEND: azure
+      STORAGE_BUCKET_NAME: cognee-test
+      ENABLE_BACKEND_ACCESS_CONTROL: True
+      # Azurite's documented development account and key, public by design; not a secret.
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://${{ inputs.ci-image != '' && 'azurite' || '127.0.0.1' }}:10000/devstoreaccount1;"
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_ARGS: ${{ secrets.LLM_ARGS }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+      EMBEDDING_DIMENSIONS: 300
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "azure"
+
+      # The system root is on Azure, where the default sqlite cache.db cannot live.
+      - name: Run Azure File Storage Test
+        run: >
+          CACHE_DB_URL="sqlite+aiosqlite:///${RUNNER_TEMP}/cognee_cache.db"
+          uv run python ./cognee/tests/test_azure_file_storage.py
+
+      - name: Run Azure File Storage Test with file encryption
+        run: |
+          export FILE_ENCRYPTION_ENABLED=true
+          export FILE_ENCRYPTION_KEY="$(uv run python -c 'import os,base64;print(base64.b64encode(os.urandom(32)).decode())')"
+          CACHE_DB_URL="sqlite+aiosqlite:///${RUNNER_TEMP}/cognee_cache_encrypted.db" \
+            uv run python ./cognee/tests/test_azure_file_storage.py

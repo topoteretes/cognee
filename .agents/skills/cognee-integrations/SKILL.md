@@ -51,6 +51,10 @@ host services with `DB_HOST=host.docker.internal`.
 
 - **S3 storage** (`cognee[aws]`): `STORAGE_BACKEND=s3` + bucket/credentials,
   and point `DATA_ROOT_DIRECTORY`/`SYSTEM_ROOT_DIRECTORY` at `s3://` paths.
+- **Azure Blob Storage** (`cognee[azure]`): `STORAGE_BACKEND=azure` +
+  `STORAGE_BUCKET_NAME` (the container) + `AZURE_STORAGE_CONNECTION_STRING`, or
+  `AZURE_STORAGE_ACCOUNT_NAME` with a key, SAS token or Azure's credential chain;
+  point the roots at `az://<container>/...` paths.
 - **Session cache**: `CACHE_BACKEND` = sqlite (default) | postgres | redis | tapes.
 - **Ontologies**: `ONTOLOGY_FILE_PATH` to an OWL file, resolver/matching via
   `ONTOLOGY_RESOLVER` / `MATCHING_STRATEGY`.

@@ -109,8 +109,11 @@ def test_get_raw_data_local_file_downloads_bytes(client, monkeypatch, tmp_path):
     assert response.content == content
 
 
-def test_get_raw_data_s3_streams_bytes_without_s3_dependency(client, monkeypatch):
-    """Streams bytes from an s3:// raw_data_location (mocked)."""
+@pytest.mark.parametrize("scheme", ["s3", "az"])
+def test_get_raw_data_object_store_streams_bytes_without_its_dependency(
+    client, monkeypatch, scheme
+):
+    """Streams bytes from an s3:// or az:// raw_data_location (mocked) instead of a 501."""
     dataset_id = uuid.uuid4()
     data_id = uuid.uuid4()
 
@@ -118,7 +121,7 @@ def test_get_raw_data_s3_streams_bytes_without_s3_dependency(client, monkeypatch
         monkeypatch,
         dataset_id=dataset_id,
         data_id=data_id,
-        raw_data_location="s3://bucket/path/to/file.txt",
+        raw_data_location=f"{scheme}://bucket/path/to/file.txt",
         name="file.txt",
         mime_type="text/plain",
     )

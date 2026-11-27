@@ -197,6 +197,21 @@ def test_s3_roots_compare_by_prefix(encryption_env, monkeypatch):
         get_base_config.cache_clear()
 
 
+def test_azure_roots_compare_by_scheme_and_prefix(encryption_env, monkeypatch):
+    from cognee.base_config import get_base_config
+
+    monkeypatch.setenv("DATA_ROOT_DIRECTORY", "az://box/data")
+    get_base_config.cache_clear()
+    try:
+        assert is_under_data_root("az://box/data/ds1")
+        assert not is_under_data_root("az://box/data-other")
+        assert not is_under_data_root("az://box/database")
+        assert not is_under_data_root("s3://box/data/ds1")
+        assert not is_under_data_root("/local/path")
+    finally:
+        get_base_config.cache_clear()
+
+
 def test_dataset_scoped_root_counts(encryption_env, data_root, tmp_path):
     from cognee.infrastructure.files.storage.config import file_storage_config
 
