@@ -55,3 +55,6 @@ __all__ = [
     "telegram_source",
     "vercel_source",
 ]
+from .klaviyo import klaviyo_source
+
+__all__.append("klaviyo_source")
