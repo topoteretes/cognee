@@ -93,7 +93,7 @@ def _local_database_path(value: str | None) -> str | None:
     try:
         url = make_url(value)
     except ArgumentError:
-        # Not a SQLAlchemy URL (Neptune's `neptune-graph://<id>`, for one): a
+        # Not a SQLAlchemy URL (a community adapter's own endpoint scheme, say): a
         # network endpoint with no local file behind it.
         return None
     return url.database if url.get_backend_name().startswith("sqlite") else None

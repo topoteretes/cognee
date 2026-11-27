@@ -296,10 +296,6 @@ _NO_NATIVE_YET = "no native iter_bounded_neighborhood yet; follow-up to SDK-786"
             "cognee.infrastructure.databases.graph.turso.adapter",
             marks=pytest.mark.xfail(strict=True, reason=_NO_NATIVE_YET),
         ),
-        pytest.param(
-            "cognee.infrastructure.databases.graph.neptune_driver.adapter",
-            marks=pytest.mark.xfail(strict=True, reason=_NO_NATIVE_YET),
-        ),
     ],
 )
 def test_in_tree_adapters_bound_the_neighbourhood_read(adapter_module):

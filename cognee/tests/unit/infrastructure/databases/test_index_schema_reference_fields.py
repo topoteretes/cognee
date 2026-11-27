@@ -29,25 +29,16 @@ def _index_schema_classes():
 
     classes = [("lancedb", LanceDBIndexSchema)]
 
-    # PGVector and Neptune require optional extras (postgres / aws). Importing
-    # their adapters fails when those deps are absent (e.g. the basic CI job),
-    # so include them only when importable — they are covered in the dedicated
-    # DB test jobs where the extras are installed.
+    # PGVector requires an optional extra (postgres). Importing its adapter
+    # fails when that dep is absent (e.g. the basic CI job), so include it only
+    # when importable — it is covered in the dedicated DB test jobs where the
+    # extra is installed.
     try:
         from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
             IndexSchema as PGVectorIndexSchema,
         )
 
         classes.append(("pgvector", PGVectorIndexSchema))
-    except Exception:  # pragma: no cover - depends on optional extras
-        logger.debug("Ignoring exception in _index_schema_classes", exc_info=True)
-
-    try:
-        from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
-            IndexSchema as NeptuneIndexSchema,
-        )
-
-        classes.append(("neptune", NeptuneIndexSchema))
     except Exception:  # pragma: no cover - depends on optional extras
         logger.debug("Ignoring exception in _index_schema_classes", exc_info=True)
 

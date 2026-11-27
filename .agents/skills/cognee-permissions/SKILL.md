@@ -159,8 +159,8 @@ isolation; `REQUIRE_AUTHENTICATION=false` with access control on is ignored
   so two users' `"notes"` datasets are unrelated.
 - **Unsupported backends are a hard error.** With access control on, both
   the graph and vector backends need a dataset-database handler. If either
-  lacks one (e.g. Neptune, Neptune Analytics, most community vector
-  adapters), cognee raises `OSError` naming it
+  lacks one (e.g. ladybug-remote, most community adapters), cognee raises
+  `OSError` naming it
   (`multi_user_support_possible()` in `cognee/context_global_variables.py`),
   never a silent fall back to shared databases. Switch backends or set
   `ENABLE_BACKEND_ACCESS_CONTROL=false`. See the

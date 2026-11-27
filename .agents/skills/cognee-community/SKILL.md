@@ -18,7 +18,7 @@ name with underscores.
 |---|---|
 | Vector adapters | azureaisearch, milvus, moss, opengauss, opensearch, pinecone, qdrant, redis, singlestore, turbopuffer, valkey, weaviate |
 | Graph adapters | arcadedb, memgraph, networkx, pggraph, spanner, turbopuffer, turingdb |
-| Hybrid (graph+vector in one DB) | arcadedb, duckdb, falkordb, helixdb |
+| Hybrid (graph+vector in one DB) | arcadedb, duckdb, falkordb, helixdb, neptune |
 | Connectors (data sources) | confluence, gmail, google-drive, notion, slack |
 | Tasks / pipelines / retrievers | codify_tasks, codify_pipeline, code_retriever, exa_tasks, scrapegraph_tasks |
 | Observability | keywordsai (`MONITORING_TOOL=keywordsai` + `KEYWORDSAI_API_KEY`) |

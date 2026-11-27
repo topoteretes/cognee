@@ -22,18 +22,11 @@ import pytest
             "Neo4jAdapter",
             {"id": "conflict", "properties": {"type": "FactConflict", "selected_fact": "Accepted"}},
         ),
-        (
-            "neptune_driver",
-            "NeptuneGraphDB",
-            {"id": "conflict", "properties": {"type": "FactConflict", "selected_fact": "Accepted"}},
-        ),
     ],
 )
 async def test_cypher_adapters_skip_edge_queries(module_name, class_name, row):
     if module_name == "neo4j_driver":
         pytest.importorskip("neo4j")
-    elif module_name == "neptune_driver":
-        pytest.importorskip("botocore")
     module = importlib.import_module(f"cognee.infrastructure.databases.graph.{module_name}.adapter")
     adapter = object.__new__(getattr(module, class_name))
     adapter.query = AsyncMock(return_value=[row])

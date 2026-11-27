@@ -21,7 +21,7 @@ def _is_hybrid_provider(graph_config: dict, vector_config: dict) -> bool:
     if unified and unified in UNIFIED_PROVIDERS:
         return True
 
-    # Original logic for neptune and future paired providers
+    # Paired providers: graph and vector name the same hybrid backend
     graph_provider = graph_config.get("graph_database_provider", "")
     vector_provider = vector_config.get("vector_db_provider", "")
     return graph_provider in HYBRID_PROVIDERS and graph_provider == vector_provider
@@ -33,34 +33,6 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
 
     unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
     provider = unified_provider or graph_config["graph_database_provider"]
-
-    if provider == "neptune_analytics":
-        from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
-            NEPTUNE_ANALYTICS_ENDPOINT_URL,
-            NeptuneAnalyticsAdapter,
-        )
-        from cognee.infrastructure.databases.vector.embeddings import (
-            EmbeddingGateway,
-            get_embedding_engine,
-        )
-
-        graph_url = graph_config.get("graph_database_url", "")
-        if not graph_url:
-            raise OSError("Missing Neptune endpoint.")
-
-        if not graph_url.startswith(NEPTUNE_ANALYTICS_ENDPOINT_URL):
-            raise ValueError(
-                f"Neptune endpoint must have the format "
-                f"'{NEPTUNE_ANALYTICS_ENDPOINT_URL}<GRAPH_ID>'"
-            )
-
-        graph_identifier = graph_url.replace(NEPTUNE_ANALYTICS_ENDPOINT_URL, "")
-        embedding_engine = EmbeddingGateway(get_embedding_engine())
-
-        return NeptuneAnalyticsAdapter(
-            graph_id=graph_identifier,
-            embedding_engine=embedding_engine,
-        )
 
     raise OSError(f"Unsupported hybrid provider: {provider}")
 

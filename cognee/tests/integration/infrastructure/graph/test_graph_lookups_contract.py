@@ -3,7 +3,7 @@
 
 Runs against every in-tree adapter it can reach: Ladybug in-process and in
 subprocess mode and Turso always (local files); Postgres and Neo4j when
-``.env`` configures them (see conftest). Neptune has no live instance in CI.
+``.env`` configures them (see conftest).
 """
 
 from __future__ import annotations

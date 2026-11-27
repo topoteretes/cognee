@@ -1541,9 +1541,6 @@ mistral = [
 neo4j = [
     { name = "neo4j" },
 ]
-neptune = [
-    { name = "langchain-aws" },
-]
 notebook = [
     { name = "notebook" },
 ]
@@ -1663,7 +1660,6 @@ requires-dist = [
     { name = "ladybug", marker = "('Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or sys_platform != 'darwin'", specifier = "==0.22.3" },
     { name = "ladybug", marker = "('Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin') or ('Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin')", specifier = ">=0.17.0,<0.18" },
     { name = "lancedb", specifier = ">=0.39.0,<0.40.0" },
-    { name = "langchain-aws", marker = "extra == 'neptune'", specifier = ">=0.2.22" },
     { name = "langchain-core", marker = "extra == 'langchain'", specifier = ">=1.2.5" },
     { name = "langchain-text-splitters", marker = "extra == 'langchain'", specifier = ">=1.1.2,<2" },
     { name = "langdetect", specifier = ">=1.0.9" },
@@ -1751,7 +1747,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "evernote", "gmail", "google-drive", "google-calendar", "baml", "instructor", "dev", "debug", "redis", "tracing", "ontology", "docling", "docling-full", "gliner", "gliner-remote-grpc", "gliner-remote-amqp", "remote-worker-amqp", "rapidocr"]
+provides-extras = ["api", "scraping", "fastembed", "neo4j", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "evernote", "gmail", "google-drive", "google-calendar", "baml", "instructor", "dev", "debug", "redis", "tracing", "ontology", "docling", "docling-full", "gliner", "gliner-remote-grpc", "gliner-remote-amqp", "remote-worker-amqp", "rapidocr"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -5111,23 +5107,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/64/b2/02c1d60588094190b545802aa0f3bd756e2d679282442c42371e57888c1a/lancedb-0.39.0-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:0b38bfc50c79dd55bb993388b55af7d757e1cd1a0d0bbdc9a49926aae8f1533c", size = 67889066, upload-time = "2026-09-17T22:07:55.576Z" },
     { url = "https://files.pythonhosted.org/packages/55/de/a4cd70478b7d8a6b07acf591e4abf4eda39d6d250a627cd68430e77449d2/lancedb-0.39.0-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:640dcde055e684f44c7aa2f79a345301862d7a6868076ee76d8a732296be00bb", size = 71408505, upload-time = "2026-09-17T22:08:01.938Z" },
     { url = "https://files.pythonhosted.org/packages/65/c4/d425cb82a956bfe47c7d903dd15fb59c0d0011b805cb5af5e26b581b8537/lancedb-0.39.0-cp310-abi3-win_amd64.whl", hash = "sha256:b93f1eddbb7c0fa55770fc4ad4794d676ca9209e1683cd9535091dd450f12810", size = 103116777, upload-time = "2026-09-21T14:13:42.695Z" },
-]
-
-[[package]]
-name = "langchain-aws"
-version = "1.1.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "boto3" },
-    { name = "langchain-core" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' and python_full_version < '3.13'" },
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
-    { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/52/1d/bb306951b1c394b7a27effb8eb6c9ee65dd77fcc4be7c20f76e3299a9e1e/langchain_aws-1.1.0.tar.gz", hash = "sha256:1e2f8570328eae4907c3cf7e900dc68d8034ddc865d9dc96823c9f9d8cccb901", size = 393899, upload-time = "2025-11-24T14:35:24.216Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/33/91b8d2a7570657b371382b45054142c54165a51706990a5c1b4cc40c0e9a/langchain_aws-1.1.0-py3-none-any.whl", hash = "sha256:8ec074615b42839e035354063717374c32c63f5028ef5221ba073fd5f3ef5e37", size = 152432, upload-time = "2025-11-24T14:35:23.004Z" },
 ]
 
 [[package]]

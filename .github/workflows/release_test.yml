@@ -94,7 +94,7 @@ jobs:
     with:
       python-versions: '["3.11.x", "3.12.x", "3.13.x"]'
       os: '["ubuntu-22.04"]'
-      extra-dependencies: 'postgres aws neptune langchain dlt'
+      extra-dependencies: 'postgres aws langchain dlt'
     secrets: inherit
 
   # The PR gate runs the search suite on one Python per backend combo. The

@@ -19,7 +19,7 @@ def _make_adapter() -> Neo4jAdapter:
 async def test_has_edges_returns_existing_edge_tuples():
     """has_edges must return the subset of input edges that exist, as
     (from_node, to_node, relationship_name) tuples — the graph_db_interface
-    contract shared with the ladybug/postgres/neptune adapters — not a list
+    contract shared with the ladybug/postgres adapters — not a list
     of booleans."""
     adapter = _make_adapter()
     adapter.query = AsyncMock(
@@ -65,7 +65,7 @@ async def test_has_edges_matches_on_id_property_not_internal_id():
 @pytest.mark.asyncio
 async def test_get_connections_preserves_edge_properties():
     """get_connections must merge the relationship's properties into the edge
-    dict (as the postgres/ladybug/neptune adapters do), not reduce it to just
+    dict (as the postgres/ladybug adapters do), not reduce it to just
     the relationship name — consumers such as legacy_delete read keys like
     ``edge_text`` from it."""
     adapter = _make_adapter()

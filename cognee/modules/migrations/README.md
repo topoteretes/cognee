@@ -96,7 +96,7 @@ converge it on the next upgrade.
   so dispatch on `engine.__class__.__name__`, never `type(engine)`.
 - lance 0.32's `merge_insert` can panic on tables carrying deletion vectors —
   prefer plain `add` + delete in migrations, compact when the handle allows.
-- Hybrid graph+vector backends (Neptune Analytics) store vectors as graph
+- Hybrid graph+vector backends (one store for both roles) store vectors as graph
   nodes sharing the entity id — id migrations must detect
   (`_is_hybrid_provider`) and refuse rather than corrupt.
 - `get_graph_data()` loads the ENTIRE graph into memory; fine at current

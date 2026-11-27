@@ -238,12 +238,12 @@ jobs:
       os: '["ubuntu-22.04"]'
       # postgres so the SQL cache adapter tests run instead of skipping; omitted
       # on macos/windows (extended) where psycopg2 has no prebuilt wheels.
-      # aws/neptune/langchain/dlt: the CI-image copy of the unit suite (deleted
+      # aws/langchain/dlt: the CI-image copy of the unit suite (deleted
       # -- it was the slowest of eight identical copies, behind a 3-minute image
       # pull) was the only leg with these, and four test files importorskip on
       # them. Resolved from the existing lock on 3.10. evernote: the Evernote client test
       # that maps the real Thrift error classes importorskips on it.
-      extra-dependencies: 'postgres aws neptune langchain dlt evernote'
+      extra-dependencies: 'postgres aws langchain dlt evernote'
     secrets: inherit
 
   different-os-tests-extended:

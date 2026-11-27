@@ -928,7 +928,7 @@ async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edg
 
 
 def _is_hybrid_backend() -> bool:
-    """True when graph and vector live in ONE store (e.g. Neptune Analytics).
+    """True when graph and vector live in ONE store (a hybrid adapter).
 
     On hybrid backends the vector "points" are graph nodes sharing the entity's
     id; this migration's separate vector/graph steps would corrupt them (the

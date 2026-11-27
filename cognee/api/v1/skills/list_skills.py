@@ -117,7 +117,7 @@ async def _delete_skill_in_context(skill_id: str, dataset: UUID) -> bool:
 
     graph_engine = await get_graph_engine()
     # delete_nodes cascades connected edges on every graph backend (DETACH
-    # DELETE on ladybug/neo4j/neptune; ON DELETE CASCADE FKs on postgres/turso).
+    # DELETE on ladybug/neo4j; ON DELETE CASCADE FKs on postgres/turso).
     await graph_engine.delete_nodes([str(skill.id)])
 
     # Remove the Skill's embeddings. index_fields=["search_text"] maps to the

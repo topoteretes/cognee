@@ -158,7 +158,6 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `aws` - S3 storage support
       - `postgres` / `postgres-binary` - PostgreSQL database support
       - `neo4j` - Neo4j graph database support
-      - `neptune` - AWS Neptune support
       - `turso` - Turso vector/graph store support
       - `scraping` - Web scraping capabilities
       - `langchain` - LangChain integration

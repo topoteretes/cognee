@@ -10,34 +10,24 @@ from cognee.infrastructure.databases.unified.get_unified_engine import (
 
 
 class TestIsHybridProvider:
-    # NOTE: This test is disabled temporarily, until we implement Neptune hybrid capabilities
-    # def test_both_neptune_analytics_is_hybrid(self):
-    #     g = {"graph_database_provider": "neptune_analytics"}
-    #     v = {"vector_db_provider": "neptune_analytics"}
-    #     assert _is_hybrid_provider(g, v) is True
-
     def test_ladybug_lancedb_is_not_hybrid(self, monkeypatch):
         monkeypatch.delenv("USE_UNIFIED_PROVIDER", raising=False)
         g = {"graph_database_provider": "ladybug"}
         v = {"vector_db_provider": "lancedb"}
         assert _is_hybrid_provider(g, v) is False
 
-    def test_neptune_graph_only_is_not_hybrid(self):
-        g = {"graph_database_provider": "neptune_analytics"}
+    def test_hybrid_graph_only_is_not_hybrid(self):
+        g = {"graph_database_provider": "some_hybrid"}
         v = {"vector_db_provider": "lancedb"}
         assert _is_hybrid_provider(g, v) is False
 
     def test_mismatched_hybrid_is_not_hybrid(self):
         g = {"graph_database_provider": "neo4j"}
-        v = {"vector_db_provider": "neptune_analytics"}
+        v = {"vector_db_provider": "some_hybrid"}
         assert _is_hybrid_provider(g, v) is False
 
     def test_empty_configs(self):
         assert _is_hybrid_provider({}, {}) is False
-
-    # NOTE: This test is disabled temporarily, until we implement Neptune hybrid capabilities
-    # def test_hybrid_providers_registry(self):
-    #     assert "neptune_analytics" in HYBRID_PROVIDERS
 
 
 @pytest.mark.asyncio
