@@ -276,8 +276,11 @@ class TestSpawnEnvironment(unittest.TestCase):
         # The fallback interpreter IS the host's own (server_python returns
         # sys.executable when cognee lives in Hermes's environment). It needs the
         # host's PYTHONPATH to find its dependencies, so it must keep them.
-        env = self._spawn_env(python=sys.executable, PYTHONPATH="/host/site-packages")
+        env = self._spawn_env(
+            python=sys.executable, PYTHONPATH="/host/site-packages", PYTHONHOME="/host"
+        )
         self.assertEqual(env["PYTHONPATH"], "/host/site-packages")
+        self.assertEqual(env["PYTHONHOME"], "/host")
 
     def test_default_interpreter_keeps_import_paths(self):
         # python=None resolves to sys.executable (the host), so nothing is stripped.

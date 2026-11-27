@@ -18,6 +18,17 @@ project adheres to [Semantic Versioning](https://semver.org/).
   `integrations/hermes-agent` of topoteretes/cognee-integrations. The PyPI package name,
   the entry points and `cognee-hermes-install` are unchanged.
 
+### Fixed
+- **The local runtime ignores the host's `PYTHONPATH` and `PYTHONHOME` (#6808).** A packaged
+  Hermes (the Windows desktop app) exports `PYTHONPATH` into its own package tree. The local
+  server then imported `pydantic` and `uvicorn` from there and died at start with
+  `DLL load failed while importing _pydantic_core: Access is denied`. The server, the
+  `install-runtime` install step and its version check now run on the runtime venv without
+  those two variables. A cognee in Hermes's own environment still gets them.
+  A runtime that pip built (no `uv` on PATH) while `PYTHONPATH` was set can be missing
+  packages the host already had: rebuild it with `hermes cognee remove-runtime`, then
+  `hermes cognee install-runtime`.
+
 ## [1.4.3]
 
 ### Added

@@ -41,6 +41,7 @@ from .runtime_env import (
     pinned_version,
     server_python,
     spawn_lock,
+    venv_env,
     write_server_pidfile,
 )
 
@@ -230,21 +231,11 @@ def _isolated_env_file():
 
 
 def _spawn(port, data_root, system_root, log_path, python=None):
-    env = dict(os.environ)
     python = python or sys.executable
-    # A packaged host (a desktop/MSIX Hermes) exports PYTHONPATH pointing at its
-    # own venv and source tree for its own use. The server's interpreter would
-    # then import pydantic/uvicorn from there instead of from its own runtime
-    # venv, and Windows denies a process without package identity the right to
-    # load a native .pyd out of an MSIX package path:
-    #   ImportError: DLL load failed while importing _pydantic_core: Access is denied.
-    # The runtime venv is complete on its own (uv pip check passes), so the
-    # inherited import paths are dropped for it. The fallback interpreter IS the
-    # host's own (server_python returns sys.executable) and needs those paths to
-    # find its dependencies, so it keeps them.
-    if str(python) != str(sys.executable):
-        for name in ("PYTHONPATH", "PYTHONHOME"):
-            env.pop(name, None)
+    # The fallback interpreter IS the host's own (server_python returns
+    # sys.executable) and needs the host's import paths to find its
+    # dependencies, so only the runtime venv gets the environment without them.
+    env = dict(os.environ) if python == sys.executable else venv_env()
     # An explicit COGNEE_ENV_FILE from the user wins; otherwise pin an empty one.
     if not env.get("COGNEE_ENV_FILE"):
         isolated = _isolated_env_file()

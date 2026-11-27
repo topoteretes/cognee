@@ -122,6 +122,23 @@ def venv_python(venv_dir: Optional[Path] = None) -> Path:
     return venv_dir / "bin" / "python"
 
 
+def venv_env() -> dict[str, str]:
+    """The environment for a process on the runtime venv's interpreter.
+
+    A packaged host (a desktop/MSIX Hermes) exports PYTHONPATH, pointing at its
+    own venv and source tree, for its own use. Inherited by the venv's
+    interpreter, those paths come before the venv's own site-packages: the
+    server imports the host's pydantic/uvicorn (which Windows refuses to load
+    out of an MSIX package path, #6808), pip counts the host's packages as
+    installed and leaves them out of the venv, and the version probe reads the
+    host's cognee. The venv is complete on its own, so both are dropped.
+    """
+    env = dict(os.environ)
+    for name in ("PYTHONPATH", "PYTHONHOME"):
+        env.pop(name, None)
+    return env
+
+
 def _marker_requirement() -> Optional[str]:
     try:
         marker = json.loads(READY_MARKER.read_text(encoding="utf-8"))
@@ -531,6 +548,7 @@ def _installed_version(python: Path, timeout: float = 60) -> str:
     try:
         result = subprocess.run(
             [str(python), "-c", probe],
+            env=venv_env(),
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -588,7 +606,7 @@ def install_runtime(
             _run(
                 [uv, "pip", "install", "--python", str(python), LOCAL_COGNEE_REQUIREMENT],
                 step="Installing cognee with uv",
-                env=env,
+                env={**venv_env(), "UV_PYTHON_DOWNLOADS": "never"},
                 timeout=timeout,
             )
         else:
@@ -601,6 +619,7 @@ def install_runtime(
             _run(
                 [str(python), "-m", "pip", "install", LOCAL_COGNEE_REQUIREMENT],
                 step="Installing cognee with pip",
+                env=venv_env(),
                 timeout=timeout,
             )
         version = _installed_version(python)
