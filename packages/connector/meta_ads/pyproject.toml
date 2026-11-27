@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cognee-community-connector-meta-ads"
+version = "0.1.0"
+description = "A text-first dlt connector for Meta Ads campaigns and performance"
+requires-python = ">=3.10"
+dependencies = [
+    "dlt>=1.9.0,<1.31",
+    "facebook-business>=17.0.2,<18",
+    "cognee>=0.5.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["cognee_community_connector_meta_ads"]
