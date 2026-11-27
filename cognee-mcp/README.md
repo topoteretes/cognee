@@ -534,7 +534,7 @@ The MCP server exposes five tools (three memory tools pinned in `tools/list`, pl
 - **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
 - **forget**: Delete memory by dataset name or id, a single data item by `data_id` (paired with its `dataset_id`, both shown by `recall` with `include_references=True`), or delete all owned memory with `everything=True`
 - **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Unadvertised by default; discoverable via `search_tools` and callable by name
-- **improve**: Run the improve loop over a dataset and report each stage. With `session_ids` it writes those sessions into the graph. Pass `dataset_id` for a dataset shared with you, since a name resolves only among the datasets you own. With `wait=False` it returns at once and the run goes on; its outcome is then only in the log. Unadvertised by default; discoverable via `search_tools` and callable by name
+- **improve**: Run the improve loop over a dataset and report each stage. With `session_ids` it writes those sessions into the graph. Pass `dataset_id` for a dataset shared with you, since a name resolves only among the datasets you own. With `run_in_background=True` it returns at once and the run goes on; its outcome is then only in the log. Unadvertised by default; discoverable via `search_tools` and callable by name
 
 ### Recall result summaries
 

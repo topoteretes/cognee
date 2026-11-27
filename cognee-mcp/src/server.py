@@ -882,9 +882,7 @@ async def improve(
     build_global_context_index: bool = False,
     build_truth_subspace: bool = False,
     dataset_id: str | None = None,
-    # Not `background` as on remember: tool search indexes parameter names, and that
-    # one ranks improve above cognify_status for a question about background ingestion.
-    wait: bool = True,
+    run_in_background: bool = False,
 ) -> list:
     """Run the self-improvement loop over a dataset and report what each stage did.
 
@@ -921,11 +919,11 @@ async def improve(
         UUID of the dataset to process; takes precedence over dataset_name.
         A name resolves only among the datasets you own, so use the id for
         a dataset shared with you.
-    wait : bool
-        False returns at once while the stages go on, for a dataset whose
-        improve outlasts a tool call. The reply then lists no stages, and
-        their outcome is only logged. No tool reports it. In direct mode
-        the run ends with the MCP server.
+    run_in_background : bool
+        Return at once while the stages go on, for a dataset whose improve
+        outlasts a tool call. The reply then lists no stages, and their
+        outcome is only logged. No tool reports it. In direct mode the run
+        ends with the MCP server.
     """
     from uuid import UUID
 
@@ -944,7 +942,7 @@ async def improve(
                 build_global_context_index=build_global_context_index,
                 build_truth_subspace=build_truth_subspace,
                 dataset_id=parsed_dataset_id,
-                background=not wait,
+                run_in_background=run_in_background,
             )
             return [
                 types.TextContent(
@@ -1002,8 +1000,8 @@ def format_improve_result(result, dataset_name: str) -> str:
     tags={"status"},
     description=(
         "Check the progress of background ingestion started by remember(background=True). "
-        "Reports active and completed pipeline jobs for a dataset, including failures that "
-        "a backgrounded call could not return inline."
+        "Reports active and completed pipeline jobs for a dataset, including jobs that fail, "
+        "which a backgrounded call could not return inline."
     ),
 )
 async def cognify_status(
