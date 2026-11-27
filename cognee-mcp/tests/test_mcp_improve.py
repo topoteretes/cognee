@@ -1,8 +1,7 @@
 """MCP improve / remember: the same improve options as the SDK, summarized per stage.
 
-``improve`` is not an advertised MCP tool (the LLM-facing surface is pinned to
-remember / recall / forget), but it is the coroutine an operator or a future
-registration reaches, and ``remember`` runs the same loop through
+``improve`` is registered but not advertised (the LLM-facing surface is pinned to
+remember / recall / forget), and ``remember`` runs the same loop through
 ``self_improvement``. These tests pin what both forward to ``CogneeClient``
 and what the client forwards to the SDK or the HTTP API.
 """

@@ -9,6 +9,7 @@ something it just found).
 import json
 import sys
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from fastmcp import Client
@@ -32,6 +33,15 @@ MEMORY_TOOLS = {"remember", "recall", "forget"}
 def hidden_tools() -> set[str]:
     """Registered but not advertised in default mode."""
     return set(server.registry.tags) - set(server.registry.names_with_tag(DEFAULT_TAG))
+
+
+class FakeImproveClient:
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def improve(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"status": "completed", "stages": []}
 
 
 class FakeStatusClient:
@@ -143,6 +153,8 @@ async def test_result_window_is_not_the_binding_constraint():
         ("is my background ingestion finished?", "cognify_status"),
         ("check the progress of a pipeline job", "cognify_status"),
         ("did remember fail in the background", "cognify_status"),
+        ("improve", "improve"),
+        ("write my session into the graph", "improve"),
     ],
 )
 async def test_natural_language_queries_rank_their_tool_first(query, expected):
@@ -262,3 +274,22 @@ async def test_usage_logging_name_survives_the_registry_wrapper():
 
     assert [c["function_name"] for c in calls] == ["MCP forget"]
     assert calls[0]["log_type"] == "mcp_tool"
+
+
+async def test_improve_is_hidden_and_reaches_a_dataset_by_id(monkeypatch):
+    dataset_id = "00000000-0000-0000-0000-000000000001"
+    fake_client = FakeImproveClient()
+    monkeypatch.setattr(server, "cognee_client", fake_client)
+    server.apply_tool_mode("default")
+
+    async with Client(server.mcp) as client:
+        assert "improve" not in {tool.name for tool in await client.list_tools()}
+
+        result = await client.call_tool(
+            "call_tool",
+            {"name": "improve", "arguments": {"dataset_id": dataset_id, "session_ids": "s1"}},
+        )
+
+    assert result.content[0].text.startswith(f"Improve completed for dataset '{dataset_id}'.")
+    assert fake_client.calls[0]["dataset_id"] == UUID(dataset_id)
+    assert fake_client.calls[0]["session_ids"] == ["s1"]

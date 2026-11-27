@@ -34,7 +34,6 @@ except ImportError:  # cognee-mcp pins a released cognee; older cores have no hi
 
 
 from cognee.shared.logging_utils import get_log_file_location, get_logger, setup_logging
-from cognee.shared.usage_logger import log_usage
 
 try:
     from .cognee_client import CogneeClient
@@ -876,7 +875,7 @@ async def forget(
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
-@log_usage(function_name="MCP improve", log_type="mcp_tool")
+@registry.tool(tags={"improve"})
 async def improve(
     dataset_name: str | None = None,
     session_ids: str | None = None,
