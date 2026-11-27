@@ -36,6 +36,13 @@ from cognee.infrastructure.llm.exceptions import (
     is_budget_exhausted_error,
 )
 
+# Fit two full requests plus backoff inside the existing 128-second retry
+# window. stop_before_delay never starts a sleep that crosses that window;
+# a final in-flight attempt may extend it by at most 60s (188s, not 300s).
+# Local rate-limiter queueing is outside the HTTP attempt timeout.
+EMBEDDING_ATTEMPT_TIMEOUT = 60.0
+EMBEDDING_RETRY_WINDOW = 128.0
+
 
 def is_missing_package_error(error: BaseException) -> bool:
     """Whether *error* failed on a package that is not installed.

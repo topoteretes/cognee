@@ -5,6 +5,10 @@ from typing import TYPE_CHECKING
 from cognee.base_config import get_base_config
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.postgres.transient import (
+    is_transient_postgres_error,
+    retry_postgres,
+)
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.chunking.models.DltRow import DltRow
 from cognee.modules.engine.models.node_set import NodeSet
@@ -60,6 +64,7 @@ async def get_memory_fragment(
     graph_engine=None,
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = 10,
+    excluded_node_types: tuple[str, ...] = (),
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     if properties_to_project is None:
@@ -81,7 +86,7 @@ async def get_memory_fragment(
         if "feedback_weight" not in edge_properties_to_project:
             edge_properties_to_project.append("feedback_weight")
 
-    memory_fragment = CogneeGraph()
+    memory_fragment = CogneeGraph(excluded_node_types=excluded_node_types)
 
     try:
         if graph_engine is None:
@@ -90,14 +95,16 @@ async def get_memory_fragment(
         if neighborhood_depth is not None and relevant_ids_to_filter:
             # Use neighborhood-based projection with seed nodes
             seed_ids = relevant_ids_to_filter[:neighborhood_seed_top_k]
-            await memory_fragment.project_neighborhood_from_db(
-                graph_engine,
-                node_properties_to_project=node_properties_to_project,
-                edge_properties_to_project=edge_properties_to_project,
-                seed_node_ids=seed_ids,
-                depth=neighborhood_depth,
-                triplet_distance_penalty=triplet_distance_penalty,
-                feedback_influence=feedback_influence,
+            await retry_postgres(
+                lambda: memory_fragment.project_neighborhood_from_db(
+                    graph_engine,
+                    node_properties_to_project=node_properties_to_project,
+                    edge_properties_to_project=edge_properties_to_project,
+                    seed_node_ids=seed_ids,
+                    depth=neighborhood_depth,
+                    triplet_distance_penalty=triplet_distance_penalty,
+                    feedback_influence=feedback_influence,
+                )
             )
         elif neighborhood_depth is not None and not relevant_ids_to_filter:
             raise ValueError(
@@ -105,21 +112,27 @@ async def get_memory_fragment(
                 "(set wide_search_top_k to a positive integer)"
             )
         else:
-            await memory_fragment.project_graph_from_db(
-                graph_engine,
-                node_properties_to_project=node_properties_to_project,
-                edge_properties_to_project=edge_properties_to_project,
-                node_type=node_type,
-                node_name=node_name,
-                node_name_filter_operator=node_name_filter_operator,
-                relevant_ids_to_filter=relevant_ids_to_filter,
-                memory_fragment_filter=memory_fragment_filter or [],
-                triplet_distance_penalty=triplet_distance_penalty,
-                feedback_influence=feedback_influence,
+            await retry_postgres(
+                lambda: memory_fragment.project_graph_from_db(
+                    graph_engine,
+                    node_properties_to_project=node_properties_to_project,
+                    edge_properties_to_project=edge_properties_to_project,
+                    node_type=node_type,
+                    node_name=node_name,
+                    node_name_filter_operator=node_name_filter_operator,
+                    relevant_ids_to_filter=relevant_ids_to_filter,
+                    memory_fragment_filter=memory_fragment_filter or [],
+                    triplet_distance_penalty=triplet_distance_penalty,
+                    feedback_influence=feedback_influence,
+                )
             )
     except EntityNotFoundError:
         pass
-    except Exception:
+    except Exception as error:
+        if is_transient_postgres_error(error):
+            # An unavailable store is not an empty memory. Preserve the cause
+            # after the read's retry budget is exhausted.
+            raise
         logger.exception("Error during memory fragment creation")
 
     return memory_fragment
@@ -141,6 +154,7 @@ async def _get_top_triplet_importances(
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = 10,
     personal_weights: dict[str, float] | None = None,
+    excluded_node_types: tuple[str, ...] = (),
 ) -> list[Edge] | list[list[Edge]]:
     """Creates memory fragment (if needed), maps distances, and calculates top triplet importances.
 
@@ -177,6 +191,7 @@ async def _get_top_triplet_importances(
             graph_engine=graph_engine,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            excluded_node_types=excluded_node_types,
         )
 
         # Score only newly discovered IDs; node_name filters NodeSet membership,
@@ -247,6 +262,7 @@ async def brute_force_triplet_search(
     neighborhood_seed_top_k: int | None = 10,
     personal_weights: dict[str, float] | None = None,
     pinned_node_ids: dict[str, list[str]] | None = None,
+    excluded_node_types: tuple[str, ...] = (),
 ) -> list[Edge] | list[list[Edge]]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
@@ -354,6 +370,7 @@ async def brute_force_triplet_search(
                         triplet_distance_penalty=triplet_distance_penalty,
                         feedback_influence=feedback_influence,
                         graph_engine=graph_engine,
+                        excluded_node_types=excluded_node_types,
                     )
                     if not memory_fragment.nodes:
                         return [[] for _ in range(query_list_length)] if query_list_length else []
@@ -414,6 +431,7 @@ async def brute_force_triplet_search(
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
                 personal_weights=personal_weights,
+                excluded_node_types=excluded_node_types,
             )
 
             result_count = sum(len(r) for r in results) if query_list_length else len(results)

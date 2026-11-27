@@ -116,3 +116,33 @@ async def test_index_graph_edges_initialization_error():
         pytest.raises(RuntimeError, match="Graph edge indexing error"),
     ):
         await index_graph_edges()
+
+
+@pytest.mark.asyncio
+async def test_transient_index_failure_retries_the_same_points_without_extraction():
+    class ClosedConnection(Exception):
+        sqlstate = "08003"
+
+    index = AsyncMock(side_effect=[ClosedConnection("closed"), None])
+    with (
+        patch.dict(index_graph_edges.__globals__, {"index_data_points": index}),
+        patch("cognee.infrastructure.databases.postgres.transient.asyncio.sleep", new=AsyncMock()),
+    ):
+        await index_graph_edges(edges_data=[("a", "b", "uses", {})], vector_engine=object())
+    assert index.await_count == 2
+    first, second = [call.args[0] for call in index.call_args_list]
+    assert first is second
+    assert first[0].id == second[0].id
+
+
+@pytest.mark.asyncio
+async def test_terminal_index_failure_is_not_retried_and_preserves_cause():
+    error = ValueError("invalid vector")
+    index = AsyncMock(side_effect=error)
+    with (
+        patch.dict(index_graph_edges.__globals__, {"index_data_points": index}),
+        pytest.raises(RuntimeError) as caught,
+    ):
+        await index_graph_edges(edges_data=[], vector_engine=object())
+    assert index.await_count == 1
+    assert caught.value.__cause__ is error

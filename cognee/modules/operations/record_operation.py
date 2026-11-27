@@ -114,6 +114,8 @@ class OperationContext:
         # not "the body did not raise" (improve marks a run with an errored
         # stage as failed). A raised exception still wins over it.
         self.outcome = None
+        self.error_class: str | None = None
+        self.error_message: str | None = None
         self.close_deferred = False
         # Optional JSON payload for the row's run_info column (improve stamps
         # its stage watermarks here — see improve/watermarks.py).
@@ -147,6 +149,11 @@ class OperationContext:
     def set_outcome(self, outcome) -> None:
         """Override the outcome recorded for a body that exits cleanly."""
         self.outcome = outcome
+
+    def set_error(self, error: BaseException) -> None:
+        """Keep the cause when an operation handles a failed stage without raising."""
+        self.error_class = type(error).__name__
+        self.error_message = scrub_error_message(error)
 
     def merge_run_info(self, run_info: dict, *, allow_overwrite: bool = False) -> None:
         """Merge a payload into the row's ``run_info`` column, append-style.
@@ -263,6 +270,8 @@ async def record_operation(
             if not context.close_deferred:
                 if outcome is OperationOutcome.SUCCEEDED and context.outcome is not None:
                     outcome = context.outcome
+                    error_class = context.error_class
+                    error_message = context.error_message
                 try:
                     await _write_operation_row(
                         context, context.started_at, outcome.value, error_class, error_message
@@ -303,8 +312,8 @@ async def finish_operation(context: OperationContext, error: BaseException | Non
         error_message: str | None = scrub_error_message(error)
     else:
         outcome = context.outcome or OperationOutcome.SUCCEEDED
-        error_class = None
-        error_message = None
+        error_class = context.error_class
+        error_message = context.error_message
 
     try:
         await _write_operation_row(

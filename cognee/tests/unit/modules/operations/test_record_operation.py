@@ -409,3 +409,25 @@ async def test_raised_exception_wins_over_the_override(ops_engine):
     rows = await _fetch_rows(ops_engine)
     assert rows[0].outcome == "failed"
     assert rows[0].error_class == "ValueError"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("background", [False, True])
+async def test_handled_failure_preserves_cause(ops_engine, background):
+    from cognee.modules.pipelines.models import OperationOutcome
+
+    cause = TimeoutError()
+    error = RuntimeError("Graph edge indexing error")
+    error.__cause__ = cause
+    async with record_operation("improve") as operation:
+        operation.set_outcome(OperationOutcome.FAILED)
+        operation.set_error(error)
+        if background:
+            operation.defer_close()
+    if background:
+        await record_operation_mod.finish_operation(operation)
+    rows = await _fetch_rows(ops_engine)
+    assert len(rows) == 1
+    assert rows[0].outcome == "failed"
+    assert rows[0].error_class == "RuntimeError"
+    assert rows[0].error_message == "Graph edge indexing error; caused by TimeoutError"

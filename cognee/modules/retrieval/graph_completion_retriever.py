@@ -132,6 +132,10 @@ class GraphCompletionRetriever(BaseRetriever):
         """Collect vector index collection names from all DataPoint subclasses."""
         collections = []
         for subclass in get_all_subclasses(DataPoint):
+            # Procedures are loaded explicitly by the skill/agentic path. They
+            # are not evidence about a user's data (including legacy mixed datasets).
+            if subclass.__name__ == "Skill":
+                continue
             metadata = subclass.model_fields.get("metadata")
             if metadata is None:
                 continue
@@ -282,6 +286,7 @@ class GraphCompletionRetriever(BaseRetriever):
             query_batch,
             top_k=self.top_k,
             collections=collections or None,
+            excluded_node_types=("Skill",),
             node_type=self.node_type,
             node_name=self.node_name,
             node_name_filter_operator=self.node_name_filter_operator,

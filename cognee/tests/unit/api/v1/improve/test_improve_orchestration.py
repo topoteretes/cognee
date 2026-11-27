@@ -453,6 +453,8 @@ async def test_errored_non_fatal_run_marks_the_operation_failed(harness):
     # The stage-8 watermark trusts the operation row, so a run with an errored
     # stage must not be recorded as a succeeded improve.
     assert harness.operations[-1].outcome == OperationOutcome.FAILED
+    assert harness.operations[-1].error_class == "ValueError"
+    assert harness.operations[-1].error_message == "nope"
 
 
 @pytest.mark.asyncio

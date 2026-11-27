@@ -592,3 +592,19 @@ async def test_empty_graph_raises_no_data_error():
         pytest.raises(NoDataError, match="knowledge graph is empty"),
     ):
         await retriever.get_retrieved_objects(query="test query")
+
+
+@pytest.mark.asyncio
+async def test_memory_retrieval_excludes_skill_collections_and_projection():
+    from cognee.modules.engine.models import Skill
+
+    assert Skill.__name__ == "Skill"
+    retriever = GraphCompletionRetriever()
+    with patch(
+        "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
+        return_value=[],
+    ) as search:
+        await retriever.get_triplets("What do we know about the company?")
+    kwargs = search.call_args.kwargs
+    assert "Skill_search_text" not in kwargs["collections"]
+    assert kwargs["excluded_node_types"] == ("Skill",)

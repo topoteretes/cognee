@@ -24,7 +24,7 @@ from openai import AsyncOpenAI
 from tenacity import (
     before_sleep_log,
     retry,
-    stop_after_delay,
+    stop_before_delay,
     wait_exponential_jitter,
 )
 
@@ -50,6 +50,8 @@ from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
+    EMBEDDING_ATTEMPT_TIMEOUT,
+    EMBEDDING_RETRY_WINDOW,
     embedding_retry_condition,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
@@ -133,11 +135,16 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             base = base[: -len("/embeddings")]
         if not base.endswith("/v1"):
             base = base + "/v1"
-        self._client = AsyncOpenAI(api_key=self.api_key, base_url=base, timeout=120)
+        self._client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=base,
+            timeout=EMBEDDING_ATTEMPT_TIMEOUT,
+            max_retries=0,
+        )
 
     @observe(as_type="embeddings")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_before_delay(EMBEDDING_RETRY_WINDOW),
         wait=wait_exponential_jitter(2, 128),
         # Budget exhaustion is terminal too: this engine talks to any
         # OpenAI-compatible base URL, a LiteLLM proxy included. It is classified
@@ -192,7 +199,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             async with embedding_rate_limiter_context_manager():
                 response = await asyncio.wait_for(
                     self._client.embeddings.create(**create_kwargs),
-                    timeout=300.0,
+                    timeout=EMBEDDING_ATTEMPT_TIMEOUT,
                 )
             embeddings = [
                 decode_embedding(item.embedding, self.encoding_format) for item in response.data
