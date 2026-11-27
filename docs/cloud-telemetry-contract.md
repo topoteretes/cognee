@@ -54,7 +54,7 @@ property can replace them. They are validated too; if one fails, the event is no
 | `tenant_id` | tenant UUID, or `Single User Tenant` | which tenant |
 | `is_agent` | bool | the user is an agent (a child user with its own API key) |
 | `agent_owner_id` | UUID or null | the human who owns the agent |
-| `agent_plugin` | a known plugin key, `custom`, or null | which plugin the agent is |
+| `agent_plugin` | a built-in plugin key (`BUILTIN_PLUGINS`), `custom`, or null | which plugin the agent is; a self-named plugin outside the built-ins is `custom` here, since its key is client-chosen |
 | `schema_version` | int | this contract's version |
 | `telemetry_origin` | `cloud` | profile marker |
 

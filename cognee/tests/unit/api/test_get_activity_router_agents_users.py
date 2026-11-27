@@ -61,7 +61,8 @@ def _user(email, parent_user_id=None) -> User:
 
 @pytest_asyncio.fixture
 async def two_users(monkeypatch):
-    """Alice and Bob, each with one agent, an API key, data and a search."""
+    """Alice and Bob, each with one agent, an API key, data and a search.
+    Alice also owns a plugin-provisioned agent (tagged email)."""
     sql_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with sql_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -76,12 +77,15 @@ async def two_users(monkeypatch):
     bob = _user("bob@example.com")
     alice_agent = _user(f"helper+{alice.id}@cognee.agent", parent_user_id=alice.id)
     bob_agent = _user(f"helper+{bob.id}@cognee.agent", parent_user_id=bob.id)
+    alice_plugin_agent = _user(
+        f"hermes-agent+plugin.{alice.id}@cognee.agent", parent_user_id=alice.id
+    )
     now = datetime.now(timezone.utc)
 
     async with engine.get_async_session() as session:
         session.add_all([alice, bob])
         await session.flush()
-        session.add_all([alice_agent, bob_agent])
+        session.add_all([alice_agent, bob_agent, alice_plugin_agent])
         await session.flush()
         for owner in (alice, alice_agent, bob, bob_agent):
             session.add(UserApiKey(user_id=owner.id, api_key=f"key-{owner.id}"))
@@ -89,7 +93,13 @@ async def two_users(monkeypatch):
             session.add(Query(text="q", query_type="CHUNKS", user_id=owner.id, created_at=now))
         await session.commit()
 
-    yield SimpleNamespace(alice=alice, bob=bob, alice_agent=alice_agent, bob_agent=bob_agent)
+    yield SimpleNamespace(
+        alice=alice,
+        bob=bob,
+        alice_agent=alice_agent,
+        bob_agent=bob_agent,
+        alice_plugin_agent=alice_plugin_agent,
+    )
 
     await sql_engine.dispose()
 
@@ -117,10 +127,27 @@ def test_agents_lists_only_the_caller_and_their_own_agents(two_users):
 
     assert response.status_code == 200
     by_id = {row["id"]: row for row in response.json()}
-    assert set(by_id) == {str(two_users.alice.id), str(two_users.alice_agent.id)}
+    assert set(by_id) == {
+        str(two_users.alice.id),
+        str(two_users.alice_agent.id),
+        str(two_users.alice_plugin_agent.id),
+    }
     assert by_id[str(two_users.alice_agent.id)]["is_agent"] is True
     assert by_id[str(two_users.alice_agent.id)]["api_key_count"] == 1
     assert by_id[str(two_users.alice.id)]["status"] == "LIVE"
+
+
+def test_agents_strips_the_plugin_tag_from_a_provisioned_agents_short_id(two_users):
+    """An agent the plugin provision route minted carries ``+plugin.<parent_id>``
+    in its email; the tag is attribution, not part of the displayed id."""
+    alice = two_users.alice
+
+    by_id = {row["id"]: row for row in _client(alice).get("/activity/agents").json()}
+    row = by_id[str(two_users.alice_plugin_agent.id)]
+    assert row["is_agent"] is True
+    assert row["agent_type"] == "hermes agent"
+    assert row["agent_short_id"] == str(alice.id)
+    assert by_id[str(two_users.alice_agent.id)]["agent_short_id"] == str(alice.id)
 
 
 def test_agents_never_includes_another_users_account_or_agents(two_users):

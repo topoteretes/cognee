@@ -1,9 +1,12 @@
 """The cloud telemetry contract, checked on the payload send_telemetry queues (SDK-1167)."""
 
+from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
+from cognee.modules.integrations.agent_identity import agent_email, plugin_agent_email
 from cognee.modules.pipelines.operations.run_tasks_with_telemetry import (
     pipeline_run_telemetry_properties,
 )
@@ -157,3 +160,36 @@ def test_other_origins_keep_the_full_payload(cloud_payloads, monkeypatch):
     assert {"persistent_id", "api_key_hash"} <= set(payload["properties"])
     assert payload["properties"]["datasets"][0].startswith("fp:")
     assert CLOUD_REJECTIONS == {}
+
+
+def _agent(email_for) -> SimpleNamespace:
+    parent_id = uuid4()
+    return SimpleNamespace(
+        id=uuid4(), tenant_id=None, parent_user_id=parent_id, email=email_for(parent_id)
+    )
+
+
+@pytest.mark.parametrize(
+    "email_for, expected",
+    [
+        (lambda parent_id: plugin_agent_email("codex", parent_id), "codex"),
+        (lambda parent_id: agent_email("codex", parent_id), "codex"),
+        # A self-named plugin's key is client-chosen: the cloud sends "custom".
+        (lambda parent_id: plugin_agent_email("hermes-agent", parent_id), "custom"),
+    ],
+)
+def test_cloud_reports_only_builtin_plugin_keys(cloud_payloads, email_for, expected):
+    send_telemetry("cognee.search EXECUTION COMPLETED", _agent(email_for))
+
+    [payload] = cloud_payloads
+    assert payload["properties"]["agent_plugin"] == expected
+    assert "hermes-agent" not in str(payload)
+    assert CLOUD_REJECTIONS == {}
+
+
+def test_other_origins_report_a_self_named_plugin_key(cloud_payloads, monkeypatch):
+    monkeypatch.setenv("TELEMETRY_ORIGIN", "sdk")
+    send_telemetry("cognee.recall", _agent(lambda p: plugin_agent_email("hermes-agent", p)))
+
+    [payload] = cloud_payloads
+    assert payload["properties"]["agent_plugin"] == "hermes-agent"

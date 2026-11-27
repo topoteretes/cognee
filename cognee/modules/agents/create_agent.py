@@ -1,6 +1,10 @@
 from sqlalchemy import update
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.integrations.agent_identity import (
+    agent_email,
+    plugin_agent_email,
+)
 from cognee.modules.users.api_key.create_api_key import create_api_key
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import create_user
@@ -8,20 +12,30 @@ from cognee.modules.users.models.User import User
 
 
 async def create_agent(
-    name: str, parent_user: User, *, issue_api_key: bool = True
+    name: str, parent_user: User, *, issue_api_key: bool = True, plugin_identity: bool = False
 ) -> tuple[User, str | None]:
     """Create an agent sub-user of ``parent_user``, with an API key unless told not to.
 
     ``issue_api_key=False`` returns ``(agent, None)`` for callers that mint the
     agent's keys themselves (plugin provisioning adds each key through
     ``add_plugin_agent_key``, under the agent's key cap).
+
+    ``plugin_identity=True`` tags the agent's email as a plugin identity
+    (``<name>+plugin.<parent_id>@cognee.agent``, see
+    :func:`cognee.modules.integrations.agent_identity.plugin_agent_email`), so
+    attribution can tell a plugin's agent from one a user named — only the
+    provision route passes it.
     """
     # Agents are one level deep: an agent cannot create agents of its own.
     if parent_user.parent_user_id is not None:
         raise PermissionDeniedError("An agent cannot create agents.")
 
     sanitized_name = name.lower().replace(" ", "-")
-    internal_email = f"{sanitized_name}+{parent_user.id}@cognee.agent"
+    internal_email = (
+        plugin_agent_email(sanitized_name, parent_user.id)
+        if plugin_identity
+        else agent_email(sanitized_name, parent_user.id)
+    )
 
     agent_user = await create_user(
         email=internal_email,

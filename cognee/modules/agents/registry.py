@@ -196,35 +196,54 @@ def list_registered_agent_connections() -> list[AgentConnection]:
         return list(_registered_agent_connections.values())
 
 
+def persisted_agent_connections_from_configs(
+    user_id: UUID, configs: Iterable[dict], active_only: bool = True
+) -> list[AgentConnection]:
+    """The agent connections stored in ``user_id``'s configuration records.
+
+    ``configs`` are the records :func:`get_principals_all_configuration`
+    returns for that one owner; only the ``AGENT_CONFIG_NAME`` ones hold
+    connections. The blob is writable by its owner through the public
+    configuration endpoint, so an entry is only trusted for the user whose
+    configuration holds it. Otherwise anyone could name another user here
+    and read their sessions.
+    """
+    agents: list[AgentConnection] = []
+    for config in configs:
+        if config.get("name") != AGENT_CONFIG_NAME:
+            continue
+        agents_dict = config.get("configuration", {}).get("agents", {})
+        for data in agents_dict.values():
+            try:
+                connection = AgentConnection(**data)
+            except ValidationError:
+                logger.debug(
+                    "Skipping malformed agent connection of user %s", user_id, exc_info=True
+                )
+                continue
+            if connection.user_id != user_id:
+                continue
+            if not active_only or connection.status == "active":
+                agents.append(connection)
+    return agents
+
+
 async def list_persisted_agent_connections(
     user_ids: list[UUID], active_only: bool = True
 ) -> list[AgentConnection]:
+    """Active (or all) persisted connections of ``user_ids``, in that order, in one read."""
     from cognee.modules.users.methods.get_principal_configuration import (
-        get_principal_all_configuration,
+        get_principals_all_configuration,
     )
 
+    configs_by_owner = await get_principals_all_configuration(user_ids)
     agents: list[AgentConnection] = []
     for user_id in user_ids:
-        all_configs = await get_principal_all_configuration(user_id)
-        for config in all_configs:
-            if config.get("name") == AGENT_CONFIG_NAME:
-                agents_dict = config.get("configuration", {}).get("agents", {})
-                for data in agents_dict.values():
-                    # The blob is writable by its owner through the public
-                    # configuration endpoint, so an entry is only trusted for
-                    # the user whose configuration holds it. Otherwise anyone
-                    # could name another user here and read their sessions.
-                    try:
-                        connection = AgentConnection(**data)
-                    except ValidationError:
-                        logger.debug(
-                            "Skipping malformed agent connection of user %s", user_id, exc_info=True
-                        )
-                        continue
-                    if connection.user_id != user_id:
-                        continue
-                    if not active_only or connection.status == "active":
-                        agents.append(connection)
+        agents.extend(
+            persisted_agent_connections_from_configs(
+                user_id, configs_by_owner.get(user_id, []), active_only
+            )
+        )
     return agents
 
 

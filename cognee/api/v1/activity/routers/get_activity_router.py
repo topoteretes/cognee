@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 from cognee.exceptions import CogneeApiError
+from cognee.modules.integrations.agent_identity import PLUGIN_EMAIL_TAG
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.methods.get_visible_user_ids import get_visible_user_ids
 from cognee.modules.users.models import User
@@ -402,7 +403,10 @@ def get_activity_router() -> APIRouter:
             # Parse agent type from email
             # Internal email format: "sanitized-name+{parent_user_id}@cognee.agent"
             # The +{parent_user_id} suffix ensures uniqueness across users but
-            # must be stripped for display purposes.
+            # must be stripped for display purposes. An agent the plugin
+            # provision route minted carries "+plugin.{parent_user_id}" instead
+            # (see cognee.modules.integrations.agent_identity); the tag is
+            # not part of the id.
             # Legacy agents used "-" throughout, so we fall back to rsplit("-", 1)
             # when no "+" is present and the suffix looks like a hex UUID fragment.
             if is_agent:
@@ -410,6 +414,7 @@ def get_activity_router() -> APIRouter:
                 if "+" in local_part:
                     # Current format: name+user_id
                     display_name, agent_short_id = local_part.rsplit("+", 1)
+                    agent_short_id = agent_short_id.removeprefix(PLUGIN_EMAIL_TAG)
                 elif "-" in local_part:
                     # Legacy format: name-part-of-uuid — strip UUID suffix
                     prefix, suffix = local_part.rsplit("-", 1)

@@ -667,14 +667,24 @@ def _cloud_payload(event_name: str, user, tenant_id, additional_properties: dict
 
 def _cloud_trusted_fields(user, tenant_id) -> dict:
     """Identity and environment of a cloud event, built only here."""
-    from cognee.modules.integrations.agent_identity import agent_telemetry_properties
+    from cognee.modules.integrations.agent_identity import (
+        CUSTOM_AGENT_PLUGIN,
+        agent_telemetry_properties,
+    )
+    from cognee.modules.integrations.plugins import BUILTIN_PLUGINS
     from cognee.shared.telemetry_schema import CLOUD_SCHEMA_VERSION
 
     user_id, resolved_tenant_id = _telemetry_identity(user, tenant_id)
+    agent_properties = agent_telemetry_properties(user)
+    # A plugin names itself (SDK-646), so its key is a client-chosen string. The
+    # cloud contract carries only the frozen built-in keys; any other plugin's
+    # agent is reported as a custom one.
+    if agent_properties["is_agent"] and agent_properties["agent_plugin"] not in BUILTIN_PLUGINS:
+        agent_properties["agent_plugin"] = CUSTOM_AGENT_PLUGIN
     return {
         "user_id": user_id,
         "tenant_id": resolved_tenant_id,
-        **agent_telemetry_properties(user),
+        **agent_properties,
         "schema_version": CLOUD_SCHEMA_VERSION,
         "telemetry_origin": "cloud",
     }

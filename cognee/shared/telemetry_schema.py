@@ -19,7 +19,7 @@ from cognee.api.v1.forget.forget import ForgetTarget
 from cognee.memory.entries import RecallScope
 from cognee.modules.cognify.config import EXTRACTORS
 from cognee.modules.integrations.agent_identity import CUSTOM_AGENT_PLUGIN
-from cognee.modules.integrations.plugins import KNOWN_PLUGINS
+from cognee.modules.integrations.plugins import BUILTIN_PLUGINS
 from cognee.modules.migration.export import EXPORT_FORMATS
 from cognee.modules.migration.sources import (
     IMPORT_MODES,
@@ -131,7 +131,7 @@ _RecallScopes = Annotated[
 _SOURCES = (COGXArchiveSource, GraphitiSource, LangMemSource, LettaSource, Mem0Source, ZepSource)
 
 _AgentPlugin = Annotated[
-    str, StringConstraints(pattern=_one_of((*KNOWN_PLUGINS, CUSTOM_AGENT_PLUGIN)))
+    str, StringConstraints(pattern=_one_of((*BUILTIN_PLUGINS, CUSTOM_AGENT_PLUGIN)))
 ]
 # The producers' own rules; both also match their fallback label "other".
 _ItemLoader = Annotated[str, StringConstraints(pattern=_ITEM_LOADER.pattern)]
