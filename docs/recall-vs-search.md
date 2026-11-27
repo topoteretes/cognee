@@ -304,7 +304,9 @@ The Harbor Lights Festival opens …
 ```
 
 - Section headers, the conflict block and the prompt's frame (template, history,
-  grounding, global context, guidance) carry no tag; removing every tag line (a line that
+  grounding, global context, guidance) carry no tag. Neither does an entity expand could
+  not read back the same: an ontology concept the query names (pinned by grounding), and
+  an entity whose edges could not be read. Removing every tag line (a line that
   is one whole tag) gives exactly the regular prompt. A tag is real only when
   `metadata["records"]` lists it: a stored body may quote an earlier tag.
 - `metadata["records"]` lists one record per tag, in prompt order: `tag`,
@@ -313,8 +315,10 @@ The Harbor Lights Festival opens …
   returns), `rank`, `score` (comparable within one kind), `distance` (passages,
   comparable across datasets), `conflicts` and `sources`. A caller fitting a budget drops
   whole records (each starts at its tag) and picks them by these fields.
+- `sources` are a passage's document. Entity records carry none here (`null`, like
+  facts): expanding the entity returns the documents behind all its edges.
 - An entity's prompt body is its heading and the edges the query ranked first; its
-  `version`, `full_chars` and `sources` describe every one-hop edge, the body expand
+  `version` and `full_chars` describe every one-hop edge, the body expand
   returns, so they do not depend on the query.
 - With access control off, a search over several datasets reads one shared store, so its
   records belong to no single dataset and their tags leave it out:
@@ -327,16 +331,20 @@ cited memory the user wants to re-read. An item is a tag as the prompt shows it,
 `ExpandItem` or a `{dataset_id, record_kind, record_id}` dict. Each result's
 `metadata["status"]` is `available`, `missing` or `forbidden` (the caller cannot read the
 dataset); a body that changed since it was cited comes back with a new `version`.
-Records are read by id alone: the query, `top_k`, `node_name` and `datasets` are ignored,
-so a tag expands to the same body in any later turn. A passage or fact comes back as the
-prompt showed it, an entity with every one-hop edge (a superset of its prompt bullets),
-sorted by text. One result per item, in request order. A tag without a dataset is read
+Records are read by id alone: the query, `top_k`, `node_name` and `datasets` are ignored
+(pass an empty query), so a tag expands to the same body in any later turn. A passage or
+fact comes back as the prompt showed it, an entity with every one-hop edge (a superset of
+its prompt bullets), sorted by text, and the documents behind those edges in `sources`; a
+failed sources lookup fails the call. Expand renders passages with the call's own
+`retriever_specific_config`, so a passage's version matches the cited one only when that
+config (projected external metadata) is the cited call's. One result per item, in request order. A tag without a dataset is read
 from the shared store when access control is off, and is `forbidden` otherwise.
 
 Cited mode runs `HYBRID_COMPLETION` only: an explicit other `query_type` is refused, and
 a routed one falls back to it. A request hybrid would hand to `GRAPH_COMPLETION` (a typed
 `node_type`, `neighborhood_depth`, `feedback_influence > 0`, including a deployment's
-`DEFAULT_FEEDBACK_INFLUENCE`) raises `CitedRequiresHybridError`. A searched dataset
+`DEFAULT_FEEDBACK_INFLUENCE`) raises `CitedRequiresHybridError`; on a server started with
+that setting, HTTP callers use `result_mode="full"`. A searched dataset
 without passages (a code-only dataset), which hybrid hands to `GRAPH_COMPLETION`, is left
 out of the result; the error is raised only when no searched dataset can be cited. Cited
 mode needs graph-only sources. Over

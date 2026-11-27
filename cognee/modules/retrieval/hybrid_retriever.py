@@ -38,6 +38,7 @@ from cognee.modules.retrieval.hybrid.entities import (
     read_entities_in_full,
     render_full_entity,
     search_entities,
+    stamp_full_version,
 )
 from cognee.modules.retrieval.hybrid.external_metadata import project_external_metadata
 from cognee.modules.retrieval.hybrid.facts import (
@@ -335,6 +336,7 @@ class HybridRetriever(BaseRetriever):
         # realize a class, and the relations of an individual, are what "customer"
         # or "Acme" means in the business model.
         entity_hits = pin_grounded_entities(entity_hits, concepts)
+        pinned_ids = {concept.node_id for concept in concepts}
         entities, reachable_ids = await build_entities(
             self._unified_engine.graph,
             entity_hits,
@@ -342,7 +344,7 @@ class HybridRetriever(BaseRetriever):
             edge_rank_by_id(edge_hits),
             self.node_name,
             self.node_name_filter_operator,
-            pinned_ids={concept.node_id for concept in concepts},
+            pinned_ids=pinned_ids,
             pinned_class_ids={
                 concept.node_id
                 for concept in concepts
@@ -358,6 +360,9 @@ class HybridRetriever(BaseRetriever):
         resolutions = await read_user_resolutions(self._unified_engine.graph)
         edge_hits = apply_fact_hit_resolutions(edge_hits, resolutions)
         apply_entity_resolutions(entities, resolutions)
+        for entity in entities:
+            # After resolutions, which drop rejected edges from the full body too.
+            stamp_full_version(entity, citable=entity["id"] not in pinned_ids)
         return entities, FactCandidates(
             edge_hits=edge_hits,
             reachable_edge_type_ids=reachable_ids,

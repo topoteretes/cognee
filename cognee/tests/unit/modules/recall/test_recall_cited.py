@@ -29,9 +29,10 @@ from cognee.modules.recall.methods.recall_cited import (
 )
 from cognee.modules.recall.types.RecallCited import ExpandItem
 from cognee.modules.retrieval.hybrid.context import format_hybrid_context, render_passage
-from cognee.modules.retrieval.hybrid.entities import render_entity, render_full_entity
+from cognee.modules.retrieval.hybrid.entities import render_entity, stamp_full_version
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
+from cognee.modules.users.exceptions import PermissionDeniedError
 
 DATASET_ID = uuid4()
 DATA_ID = str(uuid4())
@@ -81,6 +82,27 @@ LONG_TEXT = " ".join(["Switching datasets moves saves to the new dataset."] * 10
 FACT_TEXT = "Pinning keeps recall on the active dataset."
 
 
+def _entity(**overrides) -> dict:
+    """An entity as the retriever returns it: the full edge list replaced by its hash."""
+    entity = {
+        "id": ENTITY_ID,
+        "name": "tenant server",
+        "type": "software",
+        "edges": [SHOWN_EDGE],
+        "all_edges": [UNSHOWN_EDGE, SHOWN_EDGE],
+        "score": 0.3,
+        "conflicts": ["The tenant runs 1.6.9 and 1.6.8."],
+        **overrides,
+    }
+    stamp_full_version(entity, citable=True)
+    return entity
+
+
+FULL_ENTITY = render_entity(
+    {"name": "tenant server", "type": "software", "edges": [UNSHOWN_EDGE, SHOWN_EDGE]}
+)
+
+
 def _retrieved() -> dict:
     return {
         "chunks": [
@@ -94,17 +116,7 @@ def _retrieved() -> dict:
         ],
         "chunk_summaries": {},
         "chunk_scores": {CHUNK_ID: {"score": 0.06, "distance": 0.21}},
-        "entities": [
-            {
-                "id": ENTITY_ID,
-                "name": "tenant server",
-                "type": "software",
-                "edges": [SHOWN_EDGE],
-                "all_edges": [UNSHOWN_EDGE, SHOWN_EDGE],
-                "score": 0.3,
-                "conflicts": ["The tenant runs 1.6.9 and 1.6.8."],
-            }
-        ],
+        "entities": [_entity()],
         "facts": [
             {"id": FACT_ID, "text": FACT_TEXT, "score": 0.4},
             # Shown in the conflicts block already, so not a fact (format_facts' rule).
@@ -131,16 +143,11 @@ def _no_relational_reads(monkeypatch):
     async def created_at(data_ids):
         return {data_id: "2026-11-20T10:00:00" for data_id in data_ids if data_id}
 
-    async def evidence(edge_ids, dataset_id, **kwargs):
-        return [
-            SimpleNamespace(
-                edge_id=edge_id, data_id=DATA_ID, chunk_id=CHUNK_ID, document_name="notes.md"
-            )
-            for edge_id in edge_ids
-        ]
+    async def no_evidence_read(dataset_id, edge_ids):
+        raise AssertionError("a cited recall reads no edge evidence")
 
     monkeypatch.setattr(recall_cited, "_created_at_by_data_id", created_at)
-    monkeypatch.setattr(recall_cited, "get_edge_evidence_records", evidence)
+    monkeypatch.setattr(recall_cited, "get_edge_sources", no_evidence_read)
 
 
 @pytest.mark.asyncio
@@ -148,7 +155,7 @@ async def test_cited_prompt_is_the_regular_prompt_with_a_tag_before_every_record
     retrieved = _retrieved()
     frame = _frame(grounding="## Ontology grounding\n- x", global_context="## Global context\n- y")
 
-    (item,) = await build_cited_item(_payload(retrieved, context_frame=frame), [DATASET_ID])
+    (item,) = await build_cited_item(_payload(retrieved, context_frame=frame))
 
     assert _without_tags(item.text) == _regular_prompt(retrieved, frame)
     assert item.system_prompt == "system"
@@ -169,7 +176,7 @@ async def test_cited_prompt_is_the_regular_prompt_with_a_tag_before_every_record
 @pytest.mark.asyncio
 async def test_records_carry_ids_versions_scores_and_sources_in_prompt_order():
     retrieved = _retrieved()
-    (item,) = await build_cited_item(_payload(retrieved), [DATASET_ID])
+    (item,) = await build_cited_item(_payload(retrieved))
     passage, entity, fact = item.metadata["records"]
 
     passage_body = render_passage(retrieved["chunks"][0])
@@ -189,17 +196,18 @@ async def test_records_carry_ids_versions_scores_and_sources_in_prompt_order():
         }
     ]
 
-    # An entity's prompt shows the ranked bullets; its version, full_chars and sources
-    # describe every edge, the body expand returns, whatever the query ranked.
+    # An entity's prompt shows the ranked bullets; its version and full_chars describe
+    # every edge, the body expand returns, whatever the query ranked. The retriever
+    # hashed that body and dropped the edge list; its sources come from expand.
     shown_entity = render_entity(retrieved["entities"][0])
-    full_entity = render_full_entity(retrieved["entities"][0])
-    assert UNSHOWN_EDGE["text"] in full_entity and UNSHOWN_EDGE["text"] not in shown_entity
+    assert "all_edges" not in retrieved["entities"][0]
+    assert UNSHOWN_EDGE["text"] in FULL_ENTITY and UNSHOWN_EDGE["text"] not in shown_entity
     assert entity["record_id"] == ENTITY_ID
     assert entity["chars"] == len(shown_entity)
-    assert entity["full_chars"] == len(full_entity)
-    assert entity["version"] == compute_content_hash(full_entity)
+    assert entity["full_chars"] == len(FULL_ENTITY)
+    assert entity["version"] == compute_content_hash(FULL_ENTITY)
     assert f"{entity['tag']}\n{shown_entity}" in item.text
-    assert len(entity["sources"]) == 1 and entity["sources"][0]["data_id"] == DATA_ID
+    assert entity["sources"] is None
     assert passage["full_chars"] == passage["chars"]
 
     # A fact's body is its line in Related facts; its sources are not tracked.
@@ -211,13 +219,10 @@ async def test_records_carry_ids_versions_scores_and_sources_in_prompt_order():
 
 @pytest.mark.asyncio
 async def test_no_prompt_means_no_item_and_unsplittable_template_is_refused():
-    assert await build_cited_item(_payload(_retrieved(), user_prompt=None), [DATASET_ID]) == []
+    assert await build_cited_item(_payload(_retrieved(), user_prompt=None)) == []
     with pytest.raises(CogneeValidationError) as raised:
         await build_cited_item(
-            _payload(
-                _retrieved(), context_frame=_frame(template_prefix=None, template_suffix=None)
-            ),
-            [DATASET_ID],
+            _payload(_retrieved(), context_frame=_frame(template_prefix=None, template_suffix=None))
         )
     assert raised.value.name == "CitedTemplateNotSplittableError"
 
@@ -236,7 +241,7 @@ def _handed_off(name: str) -> SearchResultPayload:
 
 @pytest.mark.asyncio
 async def test_a_dataset_hybrid_handed_to_graph_completion_is_left_out():
-    items = await build_cited_items([_handed_off("code_repo"), _payload(_retrieved())], object())
+    items = await build_cited_items([_handed_off("code_repo"), _payload(_retrieved())])
     assert [item.dataset_name for item in items] == ["agent_sessions"]
 
 
@@ -244,39 +249,21 @@ async def test_a_dataset_hybrid_handed_to_graph_completion_is_left_out():
 async def test_cited_recall_is_refused_when_no_dataset_can_be_cited():
     with pytest.raises(CogneeValidationError) as raised:
         await build_cited_items(
-            [_handed_off("code_repo"), _payload(_retrieved(), user_prompt=None)], object()
+            [_handed_off("code_repo"), _payload(_retrieved(), user_prompt=None)]
         )
     assert raised.value.name == "CitedRequiresHybridError"
     assert "'code_repo'" in raised.value.message
     # Nothing found at all is not a refusal.
-    assert await build_cited_items([_payload(_retrieved(), user_prompt=None)], object()) == []
+    assert await build_cited_items([_payload(_retrieved(), user_prompt=None)]) == []
 
 
 @pytest.mark.asyncio
-async def test_a_shared_store_result_is_tagged_without_a_dataset(monkeypatch):
+async def test_a_shared_store_result_is_tagged_without_a_dataset():
     # Access control off and several datasets: one search over the shared store, so the
-    # payload names no dataset and its entities' evidence may sit in any readable one.
-    readable = [SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())]
-    evidence_reads = []
-
-    async def authorized(datasets, permission_type, user):
-        assert datasets is None and permission_type == "read"
-        return readable
-
-    async def evidence(edge_ids, dataset_id, **kwargs):
-        evidence_reads.append(dataset_id)
-        return [
-            SimpleNamespace(
-                edge_id=edge_id, data_id=DATA_ID, chunk_id=CHUNK_ID, document_name="notes.md"
-            )
-            for edge_id in edge_ids
-        ]
-
-    monkeypatch.setattr(recall_cited, "get_authorized_existing_datasets", authorized)
-    monkeypatch.setattr(recall_cited, "get_edge_evidence_records", evidence)
+    # payload names no dataset.
     retrieved = _retrieved()
 
-    (item,) = await build_cited_items([_payload(retrieved, dataset_id=None)], object())
+    (item,) = await build_cited_items([_payload(retrieved, dataset_id=None)])
 
     assert _without_tags(item.text) == _regular_prompt(retrieved, _frame())
     for record in item.metadata["records"]:
@@ -285,34 +272,92 @@ async def test_a_shared_store_result_is_tagged_without_a_dataset(monkeypatch):
             record["record_kind"], None, record["record_id"], record["version"]
         )
         assert parse_record_tag(record["tag"]).dataset_id is None
-    assert evidence_reads == [dataset.id for dataset in readable]
-    entity = next(r for r in item.metadata["records"] if r["record_kind"] == "entity")
-    assert entity["sources"][0]["data_id"] == DATA_ID
+
+
+@pytest.mark.parametrize("citable, readable", [(False, True), (True, False)])
+@pytest.mark.asyncio
+async def test_an_entity_expand_cannot_rebuild_is_shown_without_a_tag(citable, readable):
+    # An ontology-pinned concept (not citable), and an entity whose neighborhood read
+    # failed (no all_edges): expand would answer with another version, or with missing.
+    unstamped = {
+        "id": str(uuid4()),
+        "name": "Customer",
+        "type": "ontology class",
+        "edges": [SHOWN_EDGE],
+        **({"all_edges": [SHOWN_EDGE]} if readable else {}),
+    }
+    stamp_full_version(unstamped, citable=citable)
+    assert not {"all_edges", "full_version", "full_chars"} & set(unstamped)
+    retrieved = _retrieved()
+    retrieved["entities"].insert(0, unstamped)
+
+    (item,) = await build_cited_item(_payload(retrieved))
+
+    assert _without_tags(item.text) == _regular_prompt(retrieved, _frame())
+    lines = item.text.split("\n")
+    assert not TAG_LINE.match(lines[lines.index("### Customer (ontology class)") - 1])
+    entities = [r for r in item.metadata["records"] if r["record_kind"] == "entity"]
+    assert [record["record_id"] for record in entities] == [ENTITY_ID]
 
 
 @pytest.mark.asyncio
 async def test_a_hybrid_payload_without_its_frame_is_an_internal_error():
     with pytest.raises(CogneeSystemError) as raised:
-        await build_cited_item(_payload(_retrieved(), context_frame=None), [DATASET_ID])
+        await build_cited_item(_payload(_retrieved(), context_frame=None))
     assert raised.value.name == "CitedFrameMissingError"
 
 
-@pytest.mark.asyncio
-async def test_an_edge_two_shown_entities_share_is_a_source_of_both():
-    retrieved = _retrieved()
-    retrieved["entities"].append(
-        {
-            "id": str(uuid4()),
-            "name": "cognee",
-            "type": "software",
-            "edges": [SHOWN_EDGE],
-            "all_edges": [SHOWN_EDGE],
-        }
+def _evidence(edge_id, chunk_id=CHUNK_ID):
+    return SimpleNamespace(
+        edge_id=edge_id, data_id=DATA_ID, chunk_id=chunk_id, document_name="notes.md"
     )
-    (item,) = await build_cited_item(_payload(retrieved), [DATASET_ID])
-    entities = [r for r in item.metadata["records"] if r["record_kind"] == "entity"]
-    assert len(entities) == 2
-    assert all(record["sources"][0]["data_id"] == DATA_ID for record in entities)
+
+
+@pytest.mark.asyncio
+async def test_expanded_entity_sources_are_complete_and_shared_edges_count_for_both(monkeypatch):
+    from uuid import UUID
+
+    # More evidence rows than the citation lookup's 50-row cut, which expand must not use.
+    edges = [{"text": f"edge {n}", "edge_object_id": str(uuid4())} for n in range(60)]
+    first = {"id": ENTITY_ID, "all_edges": edges}
+    second = {"id": str(uuid4()), "all_edges": edges[:1]}
+
+    async def sources(dataset_id, edge_ids):
+        assert dataset_id == DATASET_ID
+        return [_evidence(edge_id, chunk_id=str(uuid4())) for edge_id in edge_ids]
+
+    monkeypatch.setattr(recall_cited, "get_edge_sources", sources)
+
+    by_entity = await recall_cited._entity_sources([first, second], [DATASET_ID])
+
+    assert len(by_entity[ENTITY_ID]) == 60
+    assert len(by_entity[second["id"]]) == 1
+    assert UUID(by_entity[second["id"]][0].data_id) == UUID(DATA_ID)
+
+
+@pytest.mark.asyncio
+async def test_a_failing_sources_lookup_fails_the_expand(monkeypatch):
+    async def broken(dataset_id, edge_ids):
+        raise RuntimeError("evidence table unavailable")
+
+    monkeypatch.setattr(recall_cited, "get_edge_sources", broken)
+    with pytest.raises(RuntimeError, match="evidence table unavailable"):
+        await recall_cited._entity_sources(
+            [{"id": ENTITY_ID, "all_edges": [SHOWN_EDGE]}], [DATASET_ID]
+        )
+
+
+@pytest.mark.parametrize("error", [PermissionDeniedError, None])
+@pytest.mark.asyncio
+async def test_an_unknown_or_unreadable_dataset_is_not_readable(monkeypatch, error):
+    async def authorized(datasets, permission_type, user):
+        assert permission_type == "read"
+        if error is not None:
+            raise error("no read access")
+        return []
+
+    monkeypatch.setattr(recall_cited, "get_authorized_existing_datasets", authorized)
+    assert await recall_cited._readable_dataset(uuid4(), object()) is None
 
 
 def test_a_tag_names_the_record_it_was_made_for():
@@ -546,6 +591,14 @@ def test_expand_items_are_accepted_as_tags_models_and_dicts_in_either_spelling()
         {"dataset_id": str(DATASET_ID), "record_kind": "passage"},
         {"dataset_id": str(DATASET_ID), "record_kind": "passage", "record_id": "chunk-1"},
         f"[mem:passage/{DATASET_ID}/{CHUNK_ID}]",
+        # A version is a content hash; anything else would be echoed into a tag no
+        # parser accepts.
+        {
+            "dataset_id": str(DATASET_ID),
+            "record_kind": "passage",
+            "record_id": CHUNK_ID,
+            "version": "<script>x</script>",
+        },
     ],
 )
 def test_an_invalid_expand_item_is_refused_with_its_position(bad_item):
@@ -640,7 +693,7 @@ async def test_the_real_prompt_chain_strips_back_to_the_regular_prompt(monkeypat
         context_frame=_context_frame(retriever, prompts),
     )
 
-    (item,) = await build_cited_item(payload_, [DATASET_ID])
+    (item,) = await build_cited_item(payload_)
 
     assert _without_tags(item.text) == prompts[0]
     assert "## Ontology grounding" in item.text and "## Global context" in item.text

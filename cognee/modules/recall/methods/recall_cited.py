@@ -8,7 +8,8 @@ caller can select records by score. ``expand_items`` reads records by id later, 
 or its fields, with no query. Both render bodies with the retriever's own renderers, so a
 record's ``version`` describes exactly the body expand returns: for a passage or fact the
 body the prompt shows, for an entity every one-hop edge (the prompt shows the ones the
-query ranked first).
+query ranked first). An entity expand cannot rebuild carries no tag: an ontology-pinned
+concept, and one whose edges could not be read. Entity sources come from expand only.
 """
 
 import re
@@ -28,7 +29,7 @@ from cognee.modules.data.content_hash import compute_content_hash
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.models import Data
-from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
+from cognee.modules.provenance.edge_evidence.lookup import get_edge_sources
 from cognee.modules.recall.methods.normalize_search_payload import (
     normalize_search_payload,
     search_result_kind,
@@ -36,7 +37,7 @@ from cognee.modules.recall.methods.normalize_search_payload import (
 from cognee.modules.recall.types.RecallCited import CitedRecord, ExpandItem, RecordSource
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.retrieval.hybrid.context import attached_conflict_texts, render_passage
-from cognee.modules.retrieval.hybrid.entities import render_entity, render_full_entity
+from cognee.modules.retrieval.hybrid.entities import render_entity
 from cognee.modules.retrieval.utils.conflict_context import format_conflicts
 from cognee.modules.retrieval.utils.results import display_value, payload, result_id
 from cognee.modules.search.methods.get_search_type_retriever_instance import (
@@ -91,9 +92,7 @@ def parse_record_tag(tag: str) -> ExpandItem:
     )
 
 
-async def build_cited_items(
-    payloads: list[SearchResultPayload], user: Any
-) -> list[SearchResultItem]:
+async def build_cited_items(payloads: list[SearchResultPayload]) -> list[SearchResultItem]:
     """The cited prompt of every searched dataset hybrid answered, in payload order.
 
     A dataset hybrid handed to another search type (``hybrid_deferral_reason``: it has no
@@ -122,37 +121,25 @@ async def build_cited_items(
             payload_.search_type,
         )
 
-    shared_store_datasets = None
     items: list[SearchResultItem] = []
     handed_off_ids = {id(payload_) for payload_ in handed_off}
     for payload_ in prompted:
-        if id(payload_) in handed_off_ids:
-            continue
-        evidence_dataset_ids = [payload_.dataset_id]
-        if payload_.dataset_id is None:
-            # Access control off: one search over the shared store, whose entities may
-            # have evidence in any dataset the caller reads.
-            if shared_store_datasets is None:
-                shared_store_datasets = [
-                    dataset.id
-                    for dataset in await get_authorized_existing_datasets(None, "read", user)
-                ]
-            evidence_dataset_ids = shared_store_datasets
-        items.extend(await build_cited_item(payload_, evidence_dataset_ids))
+        if id(payload_) not in handed_off_ids:
+            items.extend(await build_cited_item(payload_))
     return items
 
 
-async def build_cited_item(
-    payload_: SearchResultPayload, evidence_dataset_ids: list[UUID | None]
-) -> list[SearchResultItem]:
+async def build_cited_item(payload_: SearchResultPayload) -> list[SearchResultItem]:
     """One dataset's ``only_context`` hybrid result as its cited prompt, or [] when
     retrieval found nothing.
 
     The prompt is assembled as ``format_hybrid_context`` and ``build_completion_prompts``
     assemble regular mode's (the frame comes from ``payload_.context_frame``), with each
-    record's tag line before its body. Entity sources are read from the edge evidence of
-    ``evidence_dataset_ids``. Raises ``CitedTemplateNotSplittableError`` when the
-    retriever's user template cannot be split around the context.
+    record's tag line before its body. An entity without ``full_version`` (see
+    ``stamp_full_version``) is shown as regular mode shows it, without a tag or a record.
+    Entity records carry no sources; expand reads them. Raises
+    ``CitedTemplateNotSplittableError`` when the retriever's user template cannot be split
+    around the context.
     """
     retrieved = payload_.result_object
     if not payload_.user_prompt:
@@ -186,14 +173,14 @@ async def build_cited_item(
     created_at = await _created_at_by_data_id(
         [display_value(payload(chunk).get("document_id")) for chunk in chunks]
     )
-    entity_sources = await _entity_sources(entities, evidence_dataset_ids)
 
     records: list[CitedRecord] = []
 
-    def cite(record_kind: str, record_id: str, body: str, full_body: str, **fields) -> str:
-        """``body`` behind its tag line, recorded in ``records``. ``full_body`` is the body
-        expand returns, which the version describes."""
-        version = record_version(full_body)
+    def cite(
+        record_kind: str, record_id: str, body: str, version: str, full_chars: int, **fields
+    ) -> str:
+        """``body`` behind its tag line, recorded in ``records``. ``version`` and
+        ``full_chars`` describe the body expand returns."""
         tag = record_tag(record_kind, dataset_id, record_id, version)
         records.append(
             CitedRecord(
@@ -203,7 +190,7 @@ async def build_cited_item(
                 record_id=record_id,
                 version=version,
                 chars=len(body),
-                full_chars=len(full_body),
+                full_chars=full_chars,
                 **fields,
             )
         )
@@ -221,7 +208,8 @@ async def build_cited_item(
                 "passage",
                 chunk_id,
                 body,
-                body,
+                record_version(body),
+                len(body),
                 rank=rank,
                 score=scores.get("score"),
                 distance=scores.get("distance"),
@@ -235,23 +223,36 @@ async def build_cited_item(
         body = render_entity(entity)
         if not body:
             continue
+        if not entity.get("full_version"):
+            entity_blocks.append(body)
+            continue
         entity_blocks.append(
             cite(
                 "entity",
                 entity["id"],
                 body,
-                render_full_entity(entity),
+                entity["full_version"],
+                entity["full_chars"],
                 rank=rank,
                 score=entity.get("score"),
                 conflicts=list(entity.get("conflicts", [])),
-                sources=entity_sources.get(entity["id"], []),
             )
         )
 
     fact_lines = []
     for rank, fact in enumerate(facts, start=1):
         line = f"- {fact['text']}"
-        fact_lines.append(cite("fact", fact["id"], line, line, rank=rank, score=fact.get("score")))
+        fact_lines.append(
+            cite(
+                "fact",
+                fact["id"],
+                line,
+                record_version(line),
+                len(line),
+                rank=rank,
+                score=fact.get("score"),
+            )
+        )
 
     # The sections and joiners of ``format_hybrid_context``.
     context = "\n\n".join(
@@ -497,11 +498,13 @@ def _passage_source(chunk: Any, created_at: dict[str, str]) -> RecordSource:
 async def _entity_sources(
     entities: list[dict], dataset_ids: list[UUID | None]
 ) -> dict[str, list[RecordSource]]:
-    """The documents behind each entity's edges (all of them, the body its version
-    describes), from the edge-evidence table of ``dataset_ids``.
+    """The documents behind each expanded entity's edges (all of them, the body its
+    version describes), from the edge-evidence table of ``dataset_ids``.
 
-    Only edges cognify extracted from document chunks have evidence; an entity known
-    only through improve(), session bridging or the code graph has none.
+    Every source is read (``get_edge_sources``: no row limit, edge ids in batches), and a
+    storage error raises: sources that silently came back empty would read as an entity
+    without evidence. Only edges cognify extracted from document chunks have evidence; an
+    entity known only through improve(), session bridging or the code graph has none.
     """
     dataset_ids = [UUID(str(dataset_id)) for dataset_id in dataset_ids if dataset_id]
     if not entities or not dataset_ids:
@@ -519,7 +522,7 @@ async def _entity_sources(
     records = [
         record
         for dataset_id in dataset_ids
-        for record in await get_edge_evidence_records(list(edge_entities), dataset_id)
+        for record in await get_edge_sources(dataset_id, list(edge_entities))
     ]
     created_at = await _created_at_by_data_id([str(record.data_id) for record in records])
     sources: dict[str, dict[tuple[str, str], RecordSource]] = defaultdict(dict)

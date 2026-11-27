@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+from cognee.modules.data.content_hash import compute_content_hash
 from cognee.modules.retrieval import hybrid_retriever as hybrid_retriever_module
 from cognee.modules.retrieval import only_context_prompt
 from cognee.modules.retrieval.hybrid.chunks import chunk_scores_by_id
@@ -16,6 +17,7 @@ from cognee.modules.retrieval.hybrid.entities import (
     format_entities,
     render_entity,
     render_full_entity,
+    stamp_full_version,
 )
 from cognee.modules.retrieval.hybrid.pairs import chunk_summary_pairs
 from cognee.modules.retrieval.hybrid.ranking import rank_chunk_summary_pairs
@@ -155,6 +157,52 @@ async def test_an_entity_keeps_every_edge_beside_its_ranked_bullets():
     assert render_full_entity(entity) == (
         "### tenant server\n- tenant server -- runs -- alpha\n- tenant server -- runs -- zeta"
     )
+
+
+@pytest.mark.asyncio
+async def test_the_full_body_leaves_the_retriever_as_its_hash():
+    entity_hit = _hit("tenant server", 0.2, name="tenant server")
+    entity_id = entity_hit.payload["id"]
+    nodes, edges = _neighborhood(entity_id, ["zeta", "alpha"])
+    rejected = str(uuid4())
+    # The edge to "zeta" carries the id a user resolution rejects.
+    edges[0] = (*edges[0][:3], {"edge_object_id": rejected})
+    graph = SimpleNamespace(get_neighborhood=AsyncMock(return_value=(nodes, edges)))
+    (entity,), _ = await build_entities(graph, [entity_hit], max_edges_per_entity=1)
+    # A user resolution rejected one edge: it is in neither body.
+    resolved_context.apply_entity_resolutions(
+        [entity],
+        [{"about_id": entity_id, "selected_fact": "kept", "rejected_fact_ids": [rejected]}],
+    )
+    full_body = render_full_entity(entity)
+    assert full_body == "### tenant server\n- tenant server -- runs -- alpha"
+
+    stamp_full_version(entity, citable=True)
+
+    # What expand returns for this entity hashes to the cited version; the edge list
+    # itself is gone, so a search result does not grow with the neighborhood.
+    assert "all_edges" not in entity
+    assert entity["full_version"] == compute_content_hash(full_body)
+    assert entity["full_chars"] == len(full_body)
+
+
+@pytest.mark.asyncio
+async def test_an_entity_expand_cannot_rebuild_gets_no_version():
+    entity_hit = _hit("tenant server", 0.2, name="tenant server")
+    entity_id = entity_hit.payload["id"]
+    graph = SimpleNamespace(
+        get_neighborhood=AsyncMock(return_value=_neighborhood(entity_id, ["alpha"]))
+    )
+    # An ontology-pinned concept: its heading and edge read are the grounding's own.
+    (pinned,), _ = await build_entities(graph, [entity_hit], max_edges_per_entity=1)
+    stamp_full_version(pinned, citable=False)
+    # A failed neighborhood read: no edges to hash.
+    graph.get_neighborhood = AsyncMock(side_effect=RuntimeError("graph down"))
+    (unread,), _ = await build_entities(graph, [entity_hit], max_edges_per_entity=1)
+    stamp_full_version(unread, citable=True)
+
+    for entity in (pinned, unread):
+        assert not {"all_edges", "full_version", "full_chars"} & set(entity)
 
 
 def _entity_store(monkeypatch, entity_hit, graph):

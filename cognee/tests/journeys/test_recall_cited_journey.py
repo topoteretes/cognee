@@ -16,6 +16,7 @@ from uuid import uuid4
 import pytest
 
 import cognee
+from cognee.api.v1.recall.query_router import route_query
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.content_hash import compute_content_hash
 from cognee.modules.recall.config import RecallConfig
@@ -29,6 +30,9 @@ DOCUMENT = (
     "Fishermen from Porto Vela carry the lanterns along the old quay."
 )
 QUERY = "Who directs the Harbor Lights Festival in Porto Vela?"
+# A quoted phrase routes to a lexical search type in regular mode.
+ROUTED_QUERY = '"Harbor Lights Festival"'
+NODE_SET = "festivals"
 TAG_LINE = re.compile(
     r"^\[mem:(passage|entity|fact)/([0-9a-f-]{36}/)?[0-9a-f-]{36}@[0-9a-f]{32}\]$"
 )
@@ -49,7 +53,7 @@ async def test_every_cited_tag_expands_to_the_body_the_prompt_showed(
     clean_env, default_user, _no_warmup_shortcut
 ):
     dataset = "journey_recall_cited"
-    await cognee.add(DOCUMENT, dataset_name=dataset)
+    await cognee.add(DOCUMENT, dataset_name=dataset, node_set=[NODE_SET])
     await cognee.cognify(datasets=[dataset])
 
     recall_args = {
@@ -74,6 +78,23 @@ async def test_every_cited_tag_expands_to_the_body_the_prompt_showed(
     expanded = await cognee.recall("unrelated question", expand_items=tags, user=default_user)
     _assert_expanded_as_cited(cited.text, records, expanded)
 
+    # Without a pinned type, a question that routes elsewhere still gets the cited
+    # hybrid prompt, and a node-set scope is applied as regular mode applies it.
+    assert route_query(ROUTED_QUERY).search_type is not SearchType.HYBRID_COMPLETION
+    routed_args = {**recall_args, "query_text": ROUTED_QUERY}
+    del routed_args["query_type"]
+    (routed,) = await cognee.recall(**routed_args, result_mode="cited")
+    assert routed.search_type == SearchType.HYBRID_COMPLETION.value
+    assert routed.metadata["records"]
+    scoped_args = {**recall_args, "node_name": [NODE_SET]}
+    (scoped,) = await cognee.recall(**scoped_args, result_mode="cited")
+    (scoped_regular,) = await cognee.recall(**scoped_args)
+    assert scoped.metadata["records"]
+    assert (
+        "\n".join(line for line in scoped.text.split("\n") if not TAG_LINE.match(line))
+        == scoped_regular.text
+    )
+
     outsider = await create_user(f"cited-{uuid4().hex[:8]}@example.com", "pw-Test-123")
     refused = await cognee.recall(QUERY, expand_items=tags, user=outsider)
     assert [row.metadata["status"] for row in refused] == ["forbidden"] * len(tags)
@@ -86,12 +107,15 @@ def _assert_expanded_as_cited(cited_text: str, records: list[dict], expanded: li
         assert body_row.metadata["tag"] == record["tag"]
         assert body_row.metadata["full_chars"] == record["full_chars"] == len(body_row.text)
         assert compute_content_hash(body_row.text) == record["version"]
-        assert body_row.metadata["sources"] == record["sources"]
         if record["record_kind"] == "entity":
+            # A cited entity carries no sources; expand reads those of all its edges.
+            assert record["sources"] is None
+            assert isinstance(body_row.metadata["sources"], list)
             # The prompt showed the bullets the query ranked first; expand returns them all.
             shown_lines = cited_text.split(f"{record['tag']}\n", 1)[1].split("\n\n", 1)[0]
             assert set(shown_lines.split("\n")) <= set(body_row.text.split("\n"))
         else:
+            assert body_row.metadata["sources"] == record["sources"]
             assert f"{record['tag']}\n{body_row.text}" in cited_text
 
 

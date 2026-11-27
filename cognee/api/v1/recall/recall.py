@@ -544,8 +544,9 @@ def _validate_cited_request(
     if deferral_reason:
         raise CogneeValidationError(
             message=f"result_mode='cited' needs hybrid retrieval, but {deferral_reason}. "
-            "Drop that option (pass feedback_influence=0 when the deployment sets "
-            "DEFAULT_FEEDBACK_INFLUENCE), or use result_mode='full'.",
+            "If you did not pass that option, this deployment sets "
+            "DEFAULT_FEEDBACK_INFLUENCE: SDK callers can pass feedback_influence=0; over "
+            "HTTP use result_mode='full'.",
             name="CitedRequiresHybridError",
         )
 
@@ -682,8 +683,9 @@ async def recall(
             ``"cited"`` returns the ``only_context`` HYBRID_COMPLETION prompt with a tag
             line, ``[mem:<kind>/<dataset_id>/<record_id>@<version>]``, before every
             passage, entity and fact, and the tagged records (rank, score, version,
-            length, conflicts, sources) in ``metadata["records"]``, so the model can name
-            the memory it used. Requires ``only_context=True`` and graph-only sources; an
+            length, conflicts, passage sources) in ``metadata["records"]``, so the model
+            can name the memory it used. An ontology concept the query names is shown
+            without a tag. Requires ``only_context=True`` and graph-only sources; an
             explicit ``query_type`` other than HYBRID_COMPLETION is refused, a routed one
             falls back to it. A request hybrid would hand to GRAPH_COMPLETION (a typed
             ``node_type``, ``neighborhood_depth``, ``feedback_influence > 0``) raises
@@ -701,9 +703,12 @@ async def recall(
             ``retriever_specific_config`` (passage rendering) and the LLM/embedding
             configs, and ignores ``query_text``, ``top_k``, ``node_name``,
             ``node_type``, ``datasets``, ``scope``, ``only_context``,
-            ``neighborhood_depth`` and ``feedback_influence``. A passage or fact comes
-            back as the prompt showed it; an entity with every one-hop edge, a superset
-            of the bullets the prompt showed. One result per item, in request order. Each
+            ``neighborhood_depth`` and ``feedback_influence``; pass an empty
+            ``query_text``. A passage or fact comes back as the prompt showed it (a
+            passage's version matches when ``retriever_specific_config`` is the cited
+            call's); an entity with every one-hop edge, a superset of the bullets the
+            prompt showed, and the documents those edges came from in ``sources``. One
+            result per item, in request order. Each
             result's ``metadata["status"]`` is ``available``, ``missing`` (no longer
             stored) or ``forbidden`` (dataset not readable); a changed body has a new
             ``version``.
@@ -1221,7 +1226,7 @@ async def recall(
                 if result_mode == "cited":
                     from cognee.modules.recall.methods.recall_cited import build_cited_items
 
-                    items: list[SearchResultItem] = await build_cited_items(graph_results, user)
+                    items: list[SearchResultItem] = await build_cited_items(graph_results)
                 else:
                     items = [item for r in graph_results for item in normalize_search_payload(r)]
                 tagged = [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]

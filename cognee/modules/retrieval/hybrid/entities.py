@@ -3,6 +3,7 @@ from typing import Any, NamedTuple
 from uuid import UUID
 
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+from cognee.modules.data.content_hash import compute_content_hash
 from cognee.modules.engine.models.DltColumn import DltColumn
 from cognee.modules.engine.models.Entity import Entity
 from cognee.modules.graph.utils.fact_conflicts import (
@@ -179,7 +180,8 @@ async def build_entities(
             entity["id"] if entity["id"] in pinned_class_ids else None,
         )
         # Every edge the read returned, in or out of scope: the body cited recall
-        # versions and expand returns (``render_full_entity``).
+        # versions and expand returns (``render_full_entity``). The caller replaces
+        # the list with its hash (``stamp_full_version``) once resolutions are applied.
         entity["all_edges"] = all_edge_bullets(all_connections.get(entity["id"], []))
     return entities, _reachable_edge_type_ids(connections_by_entity_id)
 
@@ -233,6 +235,24 @@ def render_full_entity(entity: dict) -> str:
     """An entity with every one-hop edge (``all_edges``): the body expand returns and
     cited recall versions, the same whatever the query ranked."""
     return render_entity({**entity, "edges": entity.get("all_edges", [])})
+
+
+def stamp_full_version(entity: dict, *, citable: bool) -> None:
+    """Replace ``all_edges`` with what cited recall needs of it: ``full_version``, the
+    content hash of the full body expand returns, and ``full_chars``, its length.
+
+    The edge list itself never leaves the retriever, so a search result does not grow
+    with an entity's neighborhood. An entity expand cannot rebuild gets neither field
+    and is shown without a tag: one that is not ``citable`` (an ontology-pinned concept,
+    whose heading and edge read are the grounding's own) and one whose neighborhood read
+    failed (no ``all_edges``).
+    """
+    all_edges = entity.pop("all_edges", None)
+    if not citable or all_edges is None:
+        return
+    full_body = render_entity({**entity, "edges": all_edges})
+    entity["full_version"] = compute_content_hash(full_body)
+    entity["full_chars"] = len(full_body)
 
 
 def _type_from_connections(
