@@ -218,8 +218,9 @@ def get_permissions_router() -> APIRouter:
         Returns a success message indicating the role was created.
 
         ## Error Codes
-        - **400 Bad Request**: Invalid role name or role already exists
+        - **400 Bad Request**: Invalid role name
         - **403 Forbidden**: User cannot manage users in their current tenant
+        - **409 Conflict**: A role with this name already exists in the tenant
         - **500 Internal Server Error**: Error creating the role
         """
         send_telemetry(
