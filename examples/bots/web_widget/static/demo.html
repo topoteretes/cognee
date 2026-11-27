@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>cognee web widget — ask our docs</title>
+    <style>
+      body {
+        font: 16px/1.6 system-ui, sans-serif;
+        margin: 0;
+        color: #111827;
+        background: #f3f4f6;
+      }
+      .wrap {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 64px 24px;
+      }
+      code {
+        background: #111827;
+        color: #f9fafb;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      pre {
+        background: #111827;
+        color: #f9fafb;
+        padding: 16px;
+        border-radius: 10px;
+        overflow-x: auto;
+      }
+      h1 {
+        margin-bottom: 4px;
+      }
+      .muted {
+        color: #6b7280;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Ask our docs</h1>
+      <p class="muted">
+        This page embeds the cognee chat widget. Click the bubble in the
+        bottom-right and ask about cognee — answers come back with citations to
+        the source docs, and everything is scoped to your conversation.
+      </p>
+
+      <h3>Embed it on your own site</h3>
+      <p>One tag, no build step:</p>
+      <pre>&lt;script src="http://localhost:8000/widget.js"
+        data-site-id="acme"
+        data-api="http://localhost:8000"&gt;&lt;/script&gt;</pre>
+
+      <p class="muted">
+        Try: <em>“What is cognee?”</em>, <em>“How is memory kept private?”</em>,
+        or type <code>/forget</code> to wipe this conversation.
+      </p>
+    </div>
+
+    <!-- The widget under test embeds itself: -->
+    <script src="/widget.js" data-site-id="demo" data-api=""></script>
+  </body>
+</html>
