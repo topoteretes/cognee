@@ -51,9 +51,10 @@ async def _read_nodes_or_raise(graph_engine, node_ids) -> list[dict]:
     """A failed read must not look like deleted entities or a completed empty review."""
     if not node_ids:
         return []
-    # get_nodes() is the by-id read, but Ladybug returns [] and Neptune a partial list when it
-    # fails, and a node missing here deletes every FactConflict about it. The filtered read
-    # raises; its discarded edge query is the price, and batching re-runs both per batch.
+    # get_nodes() is the by-id read, but an adapter may return [] or a partial list when it
+    # fails (Ladybug returns []), and a node missing here deletes every FactConflict about
+    # it. The filtered read raises; its discarded edge query is the price, and batching
+    # re-runs both per batch.
     nodes, _ = await graph_engine.get_filtered_graph_data([{"id": list(node_ids)}])
     return _to_property_dicts(nodes)
 

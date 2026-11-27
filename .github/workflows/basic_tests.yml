@@ -50,7 +50,7 @@ jobs:
   # image, so it paid a ~3-minute image pull before the same 14 minutes of
   # tests the seven bare OS-matrix legs ran in parallel. It was the critical
   # path of the whole gate. The only thing it uniquely exercised was four
-  # test files that importorskip on aws/neptune/langchain/dlt; those extras
+  # test files that importorskip on aws/langchain/dlt; those extras
   # now go to the ubuntu unit legs in test_suites.yml.
   simple-examples:
     name: Run Simple Examples

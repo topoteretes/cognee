@@ -97,7 +97,7 @@ def temporal_anchors_from_rows(
 
 class GraphDBInterface(ABC):
     """
-    Interface every graph backend implements (Ladybug/Kuzu, Neo4j, Neptune, Turso, Postgres demo).
+    Interface every graph backend implements (Ladybug/Kuzu, Neo4j, Turso, Postgres demo).
 
     Cognify's ``add_data_points``, the retrievers, ``improve()`` stages, ``forget()`` and
     the graph view all talk to the engine through these methods, so a backend's graph code
@@ -1334,8 +1334,8 @@ class GraphDBInterface(ABC):
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """Retrieve a batch of triplets (source, edge, target).
 
-        Optional extension — implemented by PostgresDemoAdapter, Neo4jAdapter,
-        and LadybugAdapter but not NeptuneGraphDB.
+        Optional extension — implemented by PostgresDemoAdapter, Neo4jAdapter
+        and LadybugAdapter.
 
         Parameters
         ----------

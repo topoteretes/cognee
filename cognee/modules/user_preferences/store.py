@@ -94,7 +94,7 @@ async def upsert_preference_node(
     extension implemented only by Ladybug, so on ``NotImplementedError`` the
     write falls through to the full-node path below — safe as an update there
     because every other in-tree adapter's ``add_nodes`` is a true upsert
-    (Neo4j ``ON MATCH SET n +=``, Neptune ``ON MATCH SET n +=``,
+    (Neo4j ``ON MATCH SET n +=``,
     Postgres/Turso ``ON CONFLICT DO UPDATE``), and the full model is written
     each time so a blob replacement loses nothing. On create, the node is also
     merged into the ``user_preferences`` NodeSet so all preference nodes can be

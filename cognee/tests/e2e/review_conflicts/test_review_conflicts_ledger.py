@@ -1,7 +1,7 @@
 """review_conflicts on a graph that records its writes in the relational ledger, on SQLite.
 
 A graph that held data before its first provenance-aware write (one created before
-cognee 1.5), or a backend without ``set_graph_metadata`` (Turso, Neptune), keeps its
+cognee 1.5), or a backend without ``set_graph_metadata`` (Turso), keeps its
 rollback provenance in the relational ``nodes`` / ``edges`` tables. The conflict review's
 writes go through ``add_data_points`` into those tables too. Offline: the LLM and the
 embeddings are the journeys' deterministic mocks.

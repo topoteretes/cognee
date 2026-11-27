@@ -257,8 +257,8 @@ def _is_row_ref_of(source_ref_key: str, dataset_id: UUID) -> bool:
 
 async def _delete_edges(graph_engine, stale_edges: list[tuple[str, str]]) -> tuple[int, int]:
     """Delete stale ``child_of`` edges, returning how many were removed and how many could
-    not be. Neptune cannot delete an edge by identity, so there a moved row keeps its old
-    parent too, and the same edges are tried again on every cognify."""
+    not be. A backend without ``delete_edge_triples`` cannot delete them, so there a moved
+    row keeps its old parent too, and the same edges are tried again on every cognify."""
     if not stale_edges:
         return 0, 0
     identities = [EdgeIdentity(child, parent, CHILD_OF) for child, parent in stale_edges]

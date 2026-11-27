@@ -103,7 +103,7 @@ async def clean_test_environment(request, tmp_path, monkeypatch):
     monkeypatch.setattr(add_data_points_module, "index_graph_edges", _noop_index)
 
     # This suite validates the relational-ledger rollback path (still the path
-    # for every graph backend that lacks provenance support — Neo4j, Neptune,
+    # for every graph backend that lacks provenance support — Neo4j,
     # Postgres). On the default Ladybug stack an empty graph would otherwise be
     # marked graph-provenance and skip the ledger entirely. Force the ledger
     # path so add_data_points writes the Node/Edge rows these tests assert on;

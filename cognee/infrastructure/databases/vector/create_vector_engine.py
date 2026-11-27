@@ -143,7 +143,7 @@ def _create_vector_engine(
     for each provider, raising an EnvironmentError if any are missing, or ImportError if the
     provider's package is not installed.
 
-    Built-in providers include: pgvector, LanceDB, and neptune_analytics. Additional
+    Built-in providers include: pgvector, LanceDB, and Turso. Additional
     providers (e.g. ChromaDB, Qdrant, Weaviate, Milvus) are available as community
     adapters that register themselves via ``use_vector_adapter`` — see
     https://github.com/topoteretes/cognee-community.
@@ -260,34 +260,6 @@ def _create_vector_engine(
             schema=vector_db_schema,
         )
 
-    elif vector_db_provider.lower() == "neptune_analytics":
-        try:
-            from langchain_aws import NeptuneAnalyticsGraph
-        except ImportError:
-            raise ImportError(
-                "langchain_aws is not installed. Please install it with 'pip install langchain_aws'"
-            )
-
-        if not vector_db_url:
-            raise OSError("Missing Neptune endpoint.")
-
-        from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
-            NEPTUNE_ANALYTICS_ENDPOINT_URL,
-            NeptuneAnalyticsAdapter,
-        )
-
-        if not vector_db_url.startswith(NEPTUNE_ANALYTICS_ENDPOINT_URL):
-            raise ValueError(
-                f"Neptune endpoint must have the format '{NEPTUNE_ANALYTICS_ENDPOINT_URL}<GRAPH_ID>'"
-            )
-
-        graph_identifier = vector_db_url.replace(NEPTUNE_ANALYTICS_ENDPOINT_URL, "")
-
-        return NeptuneAnalyticsAdapter(
-            graph_id=graph_identifier,
-            embedding_engine=embedding_engine,
-        )
-
     elif vector_db_provider.lower() == "lancedb":
         from .lancedb.LanceDBAdapter import LanceDBAdapter
 
@@ -323,7 +295,8 @@ def _create_vector_engine(
     else:
         raise OSError(
             f"Unsupported vector database provider: {vector_db_provider}. "
-            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics', 'Turso'])}"
+            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'Turso'])}. "
+            "Other providers are community adapters that must be installed and registered first: https://github.com/topoteretes/cognee-community"
         )
 
 

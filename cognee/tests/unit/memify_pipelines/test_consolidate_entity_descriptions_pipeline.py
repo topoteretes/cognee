@@ -148,7 +148,7 @@ def test_format_edges_with_endpoints_ignores_incoming_is_a_edge():
 
 
 def test_format_edges_with_endpoints_keeps_outgoing_is_a_reported_target_first():
-    # The direction-preserving backends (neo4j, neptune, turso, postgres) put
+    # The direction-preserving backends (neo4j, turso, postgres) put
     # this node in the source slot for an outgoing edge; source_node_id agrees.
     node_id = "entity-1"
 

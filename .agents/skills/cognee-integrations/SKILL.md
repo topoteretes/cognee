@@ -33,15 +33,16 @@ either keep a valid OpenAI key or configure both.
 - **Relational** (`DB_PROVIDER`): sqlite (default) or postgres
   (`cognee[postgres]`; host/port/user/password/name via `DB_*` vars).
 - **Vector** (`VECTOR_DB_PROVIDER`): lancedb (default), pgvector
-  (`cognee[postgres]`, needs `VECTOR_DB_URL`), neptune_analytics
-  (`cognee[neptune]`), turso (`cognee[turso]`). Anything else (ChromaDB,
-  Qdrant, Weaviate, Milvus, …) lives in community adapters — install from
+  (`cognee[postgres]`, needs `VECTOR_DB_URL`), turso (`cognee[turso]`).
+  Anything else (ChromaDB, Qdrant, Weaviate, Milvus, Neptune Analytics, …)
+  lives in community adapters — install from
   https://github.com/topoteretes/cognee-community and register with
   `use_vector_adapter` before use; setting `VECTOR_DB_PROVIDER` alone raises
   "Unsupported vector database provider".
 - **Graph** (`GRAPH_DATABASE_PROVIDER`): ladybug (default), neo4j
-  (`cognee[neo4j]`, bolt URL + credentials), neptune (`cognee[neptune]`),
-  ladybug-remote, postgres (no raw Cypher / natural-language search).
+  (`cognee[neo4j]`, bolt URL + credentials), ladybug-remote, postgres (no raw
+  Cypher / natural-language search). Amazon Neptune is a community adapter
+  (`cognee-community-hybrid-adapter-neptune`).
 
 The repo `docker-compose.yml` ships ready-to-use `postgres` (pgvector) and
 `neo4j` profiles with matching default credentials. From a container, reach

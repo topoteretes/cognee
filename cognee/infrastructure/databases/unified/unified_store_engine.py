@@ -29,7 +29,7 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
     """Facade that wraps graph and vector engines with capability flags.
 
     For separate backends (e.g. Ladybug + LanceDB), holds two independent engine
-    instances.  For hybrid backends (e.g. Neptune Analytics), both properties
+    instances.  For hybrid backends (one store for both roles), both properties
     point to the same adapter object.
 
     The pipeline can check ``has_capability()`` to decide whether to optimise

@@ -52,7 +52,7 @@ def _is_outgoing(edge_info: dict[str, Any], node_id: str, node_in_source_slot: b
     order, because the two disagree by backend. Ladybug's get_connections
     matches undirected (``MATCH (n)-[r:EDGE]-(m)`` with ``n`` pinned to the
     queried node), so it returns the queried node in the source slot for
-    incoming edges too; Neo4j, Neptune, Turso and the Postgres adapters
+    incoming edges too; Neo4j, Turso and the Postgres adapters
     preserve the real direction. get_graph_from_model stamps source_node_id
     on every edge cognee writes, so it is the one answer that holds
     everywhere - same fallback delete_chunks_incremental uses.

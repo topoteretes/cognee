@@ -193,7 +193,7 @@ class StoreRecorder:
 
 class FallbackStoreRecorder(StoreRecorder):
     """StoreRecorder that persists writes across runs and, like backends
-    without ``delete_edge_triples`` (Neptune), neutralizes pruned
+    without ``delete_edge_triples``, neutralizes pruned
     edges in place instead of deleting them."""
 
     async def upsert_preference_node(

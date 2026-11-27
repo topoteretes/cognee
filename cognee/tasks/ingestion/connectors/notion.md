@@ -117,7 +117,7 @@ parent edge, deleting one removes its node and edges and leaves its children whe
 database disappears with its last row. The last holds the moment the row is forgotten on a graph
 that stores its provenance (one that was empty when cognee first wrote to it); on any other graph
 the database goes at the next cognify that still has structured pages. On a graph backend that cannot
-delete an edge by identity (Neptune) a moved page keeps its old parent edge as well.
+delete an edge by identity (one without `delete_edge_triples`) a moved page keeps its old parent edge as well.
 
 Where a page sits is not part of its identity. Moving it inside its root keeps its document id
 and does not run extraction again; renaming a database re-reads its rows once, because the title

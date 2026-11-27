@@ -50,7 +50,7 @@ def validate_raw_vector_points(points: list[dict], vector_size: int) -> dict[str
 
 class VectorDBInterface(Protocol):
     """
-    Interface every vector backend implements (LanceDB, PGVector, Neptune Analytics, Turso).
+    Interface every vector backend implements (LanceDB, PGVector, Turso).
 
     Get an instance with ``get_vector_engine_async()``; never construct adapters directly.
 
@@ -235,8 +235,7 @@ class VectorDBInterface(Protocol):
         cost is reaching the rows rather than the distances override it to visit the rows
         once: LanceDB fetches the scoped vectors with one filtered scan and scores every
         query locally, PGVector and Turso run one statement with a distance column per
-        query. Neptune Analytics keeps the default: its distances are computed server-side
-        by a one-embedding procedure, and no live deployment was available to measure.
+        query.
         """
         return list(
             await asyncio.gather(

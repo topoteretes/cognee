@@ -11,7 +11,7 @@ Two complementary checks keep the whole bug class from returning:
 * ``test_no_cognee_error_subclass_bypasses_base_init`` — a **static** AST sweep
   of every ``.py`` file in the package. It needs no imports, so it also covers
   subclasses that live outside ``*/exceptions/`` packages or inside modules that
-  require optional extras (e.g. ``code_graph``, ``web_scraper``, ``neptune``).
+  require optional extras (e.g. ``code_graph``, ``web_scraper``).
 * ``test_cognee_error_subclasses_preserve_args_and_chaining`` — a **runtime**
   check that instantiates every importable subclass and verifies the observable
   contract (``args`` populated, ``str`` non-empty, ``__cause__`` preserved).
@@ -238,7 +238,7 @@ def _import_family_modules():
         try:
             importlib.import_module(_module_name(path))
         except Exception:
-            # Modules behind optional extras (scraping, neptune, ...)
+            # Modules behind optional extras (scraping, ...)
             # may not import in a minimal environment. The static test above
             # already covers them; here we simply skip what we cannot load.
             logger.debug("Skipping item after error in _import_family_modules", exc_info=True)

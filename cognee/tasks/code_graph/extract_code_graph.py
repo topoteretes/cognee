@@ -931,8 +931,8 @@ def _read_repo_node_property(node: Any, key: str) -> Any:
     """One property off a ``get_node()`` result.
 
     ``get_node`` returns either the properties flattened at the top level,
-    nested inside a ``properties`` key that may itself be JSON text, or (on
-    Neptune) an openCypher node map with ``~id`` and ``~properties`` -- every
+    nested inside a ``properties`` key that may itself be JSON text, or
+    an openCypher node map with ``~id`` and ``~properties`` -- every
     shape is covered so a caller reads a property without caring which
     adapter answered. Also used for ``get_nodes`` results, which have the
     same shapes.

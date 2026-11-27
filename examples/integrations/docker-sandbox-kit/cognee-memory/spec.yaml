@@ -27,7 +27,7 @@ environment:
     # User permissioning: multi-tenant ACLs + per-user+dataset DB isolation.
     # This is cognee's default; pinned here so the kit is explicit about it.
     # Supported by the default backends (kuzu/ladybug graph + lancedb vector);
-    # also neo4j, postgres (demo), turso — NOT neptune/ladybug-remote.
+    # also neo4j, postgres (demo), turso — NOT ladybug-remote.
     ENABLE_BACKEND_ACCESS_CONTROL: "true"
 
 # Named cognee-openai (not "openai") on purpose: built-in agent kits (shell,

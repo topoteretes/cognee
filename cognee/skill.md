@@ -492,7 +492,7 @@ cognee.config.set_llm_api_key("sk-...")
 ```
 
 Environment variables (`.env`): `LLM_API_KEY`, `LLM_MODEL`, `LLM_PROVIDER`, `EMBEDDING_*`,
-`GRAPH_DATABASE_PROVIDER` (ladybug default, neo4j, neptune, postgres_demo), `VECTOR_DB_PROVIDER`
+`GRAPH_DATABASE_PROVIDER` (ladybug default, neo4j, postgres_demo), `VECTOR_DB_PROVIDER`
 (lancedb default, pgvector, turso), `DB_PROVIDER` (sqlite default, postgres), `CACHE_BACKEND`.
 If only the LLM or only embeddings are configured, the other defaults to OpenAI.
 

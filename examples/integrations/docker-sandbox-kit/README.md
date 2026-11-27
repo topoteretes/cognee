@@ -108,8 +108,8 @@ user/permission commands.
 `supported_dataset_database_handlers.py`): graph — kuzu/ladybug (default),
 Neo4j (multi-db editions, plus a `neo4j_community` container-per-dataset
 handler), Postgres (demo), Turso; vector — LanceDB (default), PGVector,
-Turso. **Not** supported: Neptune, ladybug-remote, Neptune Analytics, and
-community vector adapters unless they register a dataset-database handler.
+Turso. **Not** supported: ladybug-remote, and community
+adapters unless they register a dataset-database handler.
 
 ## Inspecting memory and security
 

@@ -53,7 +53,6 @@ async def test_default_reads_missing_counts_as_zero(metrics):
     [
         ("ladybug.adapter", "LadybugAdapter"),
         ("neo4j_driver.adapter", "Neo4jAdapter"),
-        ("neptune_driver.adapter", "NeptuneGraphDB"),
         ("postgres_demo.adapter", "PostgresDemoAdapter"),
         ("turso.adapter", "TursoAdapter"),
     ],

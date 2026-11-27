@@ -20,8 +20,8 @@ Abandoned-run recovery checks at API startup and every 5 minutes. The `COGNEE_ST
 
 #### 2. Interface-Based Database Adapters
 Multiple backends are supported through adapter interfaces:
-- **Graph**: Ladybug (default), Neo4j, Neptune, Postgres (demo) via `GraphDBInterface`
-- **Vector**: LanceDB (default), PGVector, Neptune Analytics, Turso via `VectorDBInterface` (ChromaDB/Qdrant/Weaviate/Milvus via community adapters)
+- **Graph**: Ladybug (default), Neo4j, Postgres (demo) via `GraphDBInterface` (Neptune and others via community adapters)
+- **Vector**: LanceDB (default), PGVector, Turso via `VectorDBInterface` (ChromaDB/Qdrant/Weaviate/Milvus/Neptune Analytics via community adapters)
 - **Relational**: SQLite (default), PostgreSQL
 
 Key files:
@@ -39,11 +39,10 @@ User → Dataset → Data hierarchy with permission-based filtering. Enable with
 | Graph | Neo4j | ✅ | default handler `neo4j`: one Neo4j database per dataset inside the DBMS — requires an edition with multi-database support (Enterprise/Aura). Two alternates: `neo4j_community` runs one Docker container per dataset, because Community edition serves exactly one database per server (needs Docker); `neo4j_aura_dev` provisions a whole Aura instance per dataset — dev/PoC only, not production-ready |
 | Graph | Postgres | ✅ | default handler `postgres_graph`: one Postgres database per dataset. `postgres_graph_shared` instead gives each dataset a schema (`ds_<dataset_id>`) in cognee's main database, so no `CREATE DATABASE` privilege is needed. graph-on-Postgres is itself a demo feature (see [Postgres graph configuration](runtime-configuration.md#graph-databases)) |
 | Graph | Turso | ✅ | one Turso database file per dataset; local only (no remote sync in this version) |
-| Graph | Neptune, ladybug-remote | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
+| Graph | ladybug-remote | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
 | Vector | LanceDB (default) | ✅ | |
 | Vector | PGVector | ✅ | default handler `pgvector`: one Postgres database per dataset. `pgvector_shared` uses a schema (`ds_<dataset_id>`) in cognee's main database instead — no `CREATE DATABASE` privilege needed |
 | Vector | Turso | ✅ | one Turso database file per dataset; exact cosine scan, no approximate index |
-| Vector | Neptune Analytics | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
 | Vector | Community adapters (ChromaDB, Qdrant, …) | ❌ | unless the adapter registers a handler via `use_dataset_database_handler()` |
 | Relational | SQLite / Postgres / Turso | n/a — always shared | one relational DB holds users, ACLs, and the dataset-database registry; it is never isolated per dataset |
 

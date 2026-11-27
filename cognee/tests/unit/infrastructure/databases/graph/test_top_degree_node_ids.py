@@ -125,7 +125,6 @@ def test_the_default_is_inherited_not_abstract():
         "cognee.infrastructure.databases.graph.neo4j_driver.adapter",
         "cognee.infrastructure.databases.graph.ladybug.adapter",
         "cognee.infrastructure.databases.graph.turso.adapter",
-        "cognee.infrastructure.databases.graph.neptune_driver.adapter",
     ],
 )
 def test_in_tree_adapters_override_the_expensive_default(adapter_module):

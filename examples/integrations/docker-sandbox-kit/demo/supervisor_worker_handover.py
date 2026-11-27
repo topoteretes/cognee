@@ -26,8 +26,8 @@ isolation, from supported_dataset_database_handlers.py):
   graph:  ladybug/kuzu (default), neo4j (incl. neo4j_community handler),
           postgres (demo), turso
   vector: lancedb (default), pgvector, turso
-  NOT supported: neptune, ladybug-remote, neptune_analytics, community
-  vector adapters that don't register a dataset-database handler.
+  NOT supported: ladybug-remote, community
+  adapters that don't register a dataset-database handler.
 """
 
 import argparse
