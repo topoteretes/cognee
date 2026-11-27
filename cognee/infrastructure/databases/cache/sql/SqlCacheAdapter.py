@@ -1143,6 +1143,72 @@ class SqlCacheAdapter(CacheDBInterface):
                 logger.error(error_msg)
                 raise CacheConnectionError(error_msg) from error
 
+    async def increment_session_context_counter(
+        self, user_id: str, session_id: str, entry_id: str, field: str, delta: int
+    ) -> bool:
+        """Atomically increment a counter field in the session-context entry.
+
+        Uses a single atomic UPDATE with json_set() to avoid race conditions on SQLite
+        where with_for_update() is a no-op. The UPDATE extracts the current value,
+        coalesces it to 0 if missing, adds delta, and writes back in one statement.
+
+        Args:
+            user_id: The user ID
+            session_id: The session ID
+            entry_id: The entry ID to increment
+            field: The counter field name (e.g., "helpful_count")
+            delta: The amount to increment (can be negative)
+
+        Returns:
+            True if a matching entry was incremented, False otherwise.
+        """
+        await self._ensure_initialized()
+        attempt = 0
+        while True:
+            try:
+                async with self.sessionmaker() as session, session.begin():
+                    await self._lock_session_writes(
+                        session, cache_session_context, user_id, session_id
+                    )
+                    # Atomic UPDATE using json_set() - works on both SQLite and Postgres
+                    stmt = (
+                        update(cache_session_context)
+                        .where(
+                            self._session_filter(cache_session_context, user_id, session_id),
+                            cache_session_context.c.entry_id == entry_id,
+                            self._not_expired(cache_session_context),
+                        )
+                        .values(
+                            payload=func.json_set(
+                                cache_session_context.c.payload,
+                                f'$.{field}',
+                                func.coalesce(
+                                    func.json_extract(cache_session_context.c.payload, f'$.{field}'),
+                                    0
+                                ) + delta
+                            )
+                        )
+                    )
+                    result = await session.execute(stmt)
+                    if result.rowcount == 0:
+                        return False
+                    await self._refresh_session_ttl(
+                        session, cache_session_context, user_id, session_id
+                    )
+                    return True
+            except DBAPIError as error:
+                attempt += 1
+                if is_deadlock(error) and attempt < _DEADLOCK_ATTEMPTS:
+                    await asyncio.sleep(0.05 * (2**attempt))
+                    continue
+                error_msg = f"Unexpected error while incrementing session context counter in SQL cache: {error}"
+                logger.error(error_msg)
+                raise CacheConnectionError(error_msg) from error
+            except Exception as error:
+                error_msg = f"Unexpected error while incrementing session context counter in SQL cache: {error}"
+                logger.error(error_msg)
+                raise CacheConnectionError(error_msg) from error
+
     async def delete_session_context_entry(
         self, user_id: str, session_id: str, entry_id: str
     ) -> bool:

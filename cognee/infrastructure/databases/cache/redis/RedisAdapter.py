@@ -737,6 +737,68 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
+    async def increment_session_context_counter(
+        self, user_id: str, session_id: str, entry_id: str, field: str, delta: int
+    ) -> bool:
+        """Atomically increment a counter field in the session-context entry.
+
+        Uses a Lua script to atomically read-modify-write the entry on the Redis server,
+        preventing lost updates when two concurrent increments race. The script loads the
+        list, finds the matching entry by id, increments the counter field, and writes
+        it back in a single atomic operation.
+
+        Args:
+            user_id: The user ID
+            session_id: The session ID
+            entry_id: The entry ID to increment
+            field: The counter field name (e.g., "helpful_count")
+            delta: The amount to increment (can be negative)
+
+        Returns:
+            True if a matching entry was incremented, False otherwise.
+        """
+        # Lua script that atomically increments a field in a JSON entry within a Redis list
+        # KEYS[1]: the list key
+        # ARGV[1]: entry_id to match
+        # ARGV[2]: field name to increment
+        # ARGV[3]: delta to add
+        lua_script = """
+        local entries = redis.call('LRANGE', KEYS[1], 0, -1)
+        for i, entry_json in ipairs(entries) do
+            local entry = cjson.decode(entry_json)
+            if entry.id == ARGV[1] then
+                local current = tonumber(entry[ARGV[2]]) or 0
+                entry[ARGV[2]] = current + tonumber(ARGV[3])
+                redis.call('LSET', KEYS[1], i - 1, cjson.encode(entry))
+                return 1
+            end
+        end
+        return 0
+        """
+        try:
+            context_key = self._session_context_key(user_id, session_id)
+            # Execute the Lua script atomically
+            result = await self.async_redis.eval(
+                lua_script,
+                1,  # number of keys
+                context_key,  # KEYS[1]
+                entry_id,     # ARGV[1]
+                field,        # ARGV[2]
+                str(delta),   # ARGV[3]
+            )
+            if result == 1:
+                await self._apply_session_ttl(context_key)
+                return True
+            return False
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while incrementing session context counter: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while incrementing session context counter in Redis: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
     async def delete_session_context_entry(
         self, user_id: str, session_id: str, entry_id: str
     ) -> bool:
