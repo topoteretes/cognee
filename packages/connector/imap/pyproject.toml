@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cognee-community-connector-imap"
+version = "0.1.0"
+description = "Generic IMAP mailbox data-source connector for cognee"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+keywords = ["cognee", "imap", "email", "connector", "dlt", "memory", "ai"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+
+# imaplib and email are in the Python standard library — no extra deps needed
+# for basic operation.  html2text and chardet are optional quality upgrades.
+dependencies = [
+    "cognee>=1.4.0",
+    "dlt[filesystem]>=0.4.0",
+]
+
+[project.optional-dependencies]
+# Recommended: better HTML stripping and charset detection.
+full = [
+    "html2text>=2024.2.26",
+    "chardet>=5.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "html2text>=2024.2.26",
+    "chardet>=5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/topoteretes/cognee-community"
+"Bug Tracker" = "https://github.com/topoteretes/cognee-community/issues"
+Source = "https://github.com/topoteretes/cognee-community/tree/main/packages/connector/imap"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cognee_community_connector_imap"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
