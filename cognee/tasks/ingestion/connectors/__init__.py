@@ -55,3 +55,6 @@ __all__ = [
     "telegram_source",
     "vercel_source",
 ]
+from .airtable import airtable_source
+
+__all__.append("airtable_source")
