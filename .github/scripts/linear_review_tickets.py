@@ -10,6 +10,8 @@ An approval counts whether or not it still stood at the merge. The protected
 branches dismiss an approval when the pull request changes after it (a push, a
 changed merge base), so a reviewer who approved before the last change would
 otherwise get no ticket for a review they did.
+An approval dismissed by hand counts as well: the ``review_dismissed`` events
+don't separate it reliably from an automatic one.
 
 Reviewers are matched to Linear users by GitHub account: a Linear user who has
 connected GitHub carries the numeric GitHub user id (``gitHubUserId``), which is
