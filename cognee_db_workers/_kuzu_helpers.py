@@ -18,8 +18,10 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import sys
 import tempfile
+import time
 from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
@@ -62,6 +64,11 @@ _BUNDLED_EXTENSIONS_DIR = os.path.join(os.path.dirname(__file__), "ladybug_exten
 _PROBE_REPO = "/cognee-nonexistent-extension-repo/"
 
 _EXTENSION_RELPATH_PATTERN = re.compile(r"(v[\d.]+)[/\\]([A-Za-z0-9_]+)[/\\]json[/\\]libjson")
+
+# The engine's per-user extension store: extensions registered in a database's
+# catalog are auto-loaded from <this root>/extension/<version>/<platform>/json/
+# when the database is opened (see materialize_bundled_json_extension).
+_LBUG_EXTENSION_ROOT = os.path.join(os.path.expanduser("~"), ".lbdb")
 
 
 def _requested_extension_relpath(
@@ -114,6 +121,78 @@ def bundled_json_extension_path(
     return path if os.path.isfile(path) else None
 
 
+def is_missing_json_extension_error(message: str) -> bool:
+    """True for the one engine failure cognee can self-heal at open time.
+
+    ``Database(...)`` auto-loads every extension the database's catalog
+    registers, from the engine's per-user store. A database created under an
+    older cognee image carries ``json`` in its catalog; the upgraded image
+    ships the binary only inside ``ladybug_extensions/`` — so the open dies
+    with ``IO exception: Failed to load library ... libjson.lbug_extension``
+    before any LOAD-by-path fallback can run. Deliberately narrow (both
+    markers must be present) so unrelated IO errors — permissions, disk
+    full, WAL replay, lock contention — are never misclassified into an
+    extension reinstall.
+    """
+    lowered = message.lower()
+    return "failed to load library" in lowered and "libjson" in lowered
+
+
+def materialize_bundled_json_extension(execute: Callable[[str], object]) -> str | None:
+    """Copy the bundled JSON binary to where the engine auto-loads it from.
+
+    Returns the target path, or None when the probe yields nothing or the
+    bundle does not cover the announced version/platform (callers fall back
+    to the remote INSTALL). See ``is_missing_json_extension_error`` for why
+    placing the file beats LOAD-by-path: a catalog-registered extension is
+    auto-loaded at ``Database(...)`` open time, before any connection exists
+    to run LOAD on.
+
+    The engine announces ``<version>/<platform>`` itself (same offline probe
+    as ``load_json_extension``), so a binary is only ever placed where the
+    engine looks for that exact binary; nothing is guessed. The on-disk
+    layout drops the probe's leading ``v`` and adds the trailing ``json/``
+    directory (verified against the engine's own auto-load error path on
+    0.19.0/linux_amd64).
+    """
+    requested = _requested_extension_relpath(execute)
+    if requested is None:
+        return None
+    version_dir, platform_token = requested
+    bundled = os.path.join(
+        _BUNDLED_EXTENSIONS_DIR, version_dir, platform_token, "libjson.lbug_extension"
+    )
+    if not os.path.isfile(bundled):
+        return None
+    target = os.path.join(
+        _LBUG_EXTENSION_ROOT,
+        "extension",
+        version_dir.removeprefix("v"),
+        platform_token,
+        "json",
+        "libjson.lbug_extension",
+    )
+    if os.path.isfile(target):
+        # Already materialized — and never rewritten in place: a concurrently
+        # running worker may have the file open/mapped.
+        return target
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    # Copy via a sibling temp file + atomic replace so a concurrent engine
+    # open can never observe a half-written binary.
+    tmp_target = f"{target}.tmp-{time.time_ns()}"
+    try:
+        shutil.copyfile(bundled, tmp_target)
+        os.replace(tmp_target, target)
+    except Exception:
+        try:
+            os.remove(tmp_target)
+        except OSError:
+            pass
+        raise
+    logger.info("Materialized bundled JSON extension at %s", target)
+    return target
+
+
 def load_json_extension(execute: Callable[[str], object]) -> None:
     """Load the JSON extension on a live connection without requiring network.
 
@@ -160,9 +239,13 @@ def install_json_extension_local(
 
     The extension must be installed against an empty Ladybug database before
     the real database is opened — otherwise queries that touch JSON fail
-    with a confusing "extension not loaded" error. Best-effort: any failure
-    is swallowed (already-installed and offline-machine cases both look
-    like raises here).
+    with a confusing "extension not loaded" error. When a bundled binary is
+    available it is instead materialized into the engine's per-user store
+    (``~/.lbdb``), which additionally keeps databases whose catalog already
+    registers json — i.e. everything created under an older cognee image —
+    openable after an upgrade. Best-effort: any failure is swallowed
+    (already-installed and offline-machine cases both look like raises
+    here).
 
     Uses ``TemporaryDirectory`` rather than ``NamedTemporaryFile`` so the
     path can be reopened by Ladybug on Windows, where an open
@@ -171,12 +254,6 @@ def install_json_extension_local(
     ``cognee/infrastructure/databases/graph/ladybug/ladybug_migrate.py``.
     """
     import ladybug
-
-    # Bundled binaries make the warm-up pointless: LOAD by absolute path
-    # needs no pre-install and no network, so skip the throwaway database
-    # (and its startup cost) entirely.
-    if bundled_extensions_present():
-        return
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         temp_db_path = os.path.join(tmp_dir, "ladybug-json-install")
@@ -194,6 +271,14 @@ def install_json_extension_local(
             tmp_db.init_database()
             conn = ladybug.Connection(tmp_db)
             try:
+                if bundled_extensions_present() and materialize_bundled_json_extension(
+                    conn.execute
+                ):
+                    # Bundled binary placed where the engine auto-loads
+                    # catalog-registered extensions from — fresh databases
+                    # need no further setup, and upgraded ones (catalog
+                    # already registers json) open again. No network used.
+                    return
                 conn.execute("INSTALL JSON;")
             except Exception as error:
                 # Still best-effort (LOAD EXTENSION retries the install on

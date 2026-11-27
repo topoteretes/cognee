@@ -182,6 +182,130 @@ def test_bundled_extensions_present(tmp_path):
     assert bundled_extensions_present(str(tmp_path))
 
 
+# --- Materializing the bundled binary into the engine's store ----------------
+#
+# ``Database(...)`` auto-loads every extension a database's catalog registers,
+# from ``~/.lbdb/extension/<version>/<platform>/json/``. Databases created
+# under older cognee images carry ``json`` in their catalog; an upgraded image
+# ships the binary only inside ``ladybug_extensions/``, so the open dies with
+# "IO exception: Failed to load library ..." before any LOAD-by-path fallback
+# can run (no connection exists yet). Materializing the bundled binary at the
+# engine-announced location makes those databases openable again — the fix
+# for the docker 1.4.x → 1.6.x upgrade break (issue #5736).
+
+MISSING_JSON_LIBRARY_ERROR = (
+    "IO exception: Failed to load library: /app/.lbdb/extension/0.19.0/linux_amd64/json/"
+    "libjson.lbug_extension which is needed by extension: json."
+)
+
+
+def test_missing_json_extension_error_is_matched_narrowly():
+    from cognee_db_workers._kuzu_helpers import is_missing_json_extension_error
+
+    assert is_missing_json_extension_error(MISSING_JSON_LIBRARY_ERROR)
+    # Unrelated open failures must never be classified as a missing extension:
+    assert not is_missing_json_extension_error("IO exception: database is locked")
+    assert not is_missing_json_extension_error("IO exception: Permission denied")
+    # A bare "Failed to load library" (e.g. a corrupted bundled binary at
+    # LOAD time) is the loader ladder's business, not an open-time recovery:
+    assert not is_missing_json_extension_error("Failed to load library")
+    assert not is_missing_json_extension_error("wal replay failed: checksum mismatch")
+
+
+def test_materialize_targets_engine_layout(monkeypatch, tmp_path):
+    from cognee_db_workers._kuzu_helpers import materialize_bundled_json_extension
+
+    target_root = tmp_path / "home" / ".lbdb"
+    bundle = _bundle(tmp_path / "bundle")
+    monkeypatch.setattr(_kuzu_helpers, "_BUNDLED_EXTENSIONS_DIR", str(tmp_path / "bundle"))
+    monkeypatch.setattr(_kuzu_helpers, "_LBUG_EXTENSION_ROOT", str(target_root))
+
+    execute = RecordingExecute()
+    result = materialize_bundled_json_extension(execute)
+
+    # The probe's "v" prefix is dropped and the trailing json/ dir added —
+    # exactly the layout the engine auto-loads catalog-registered extensions
+    # from (verified against the engine's own error path on 0.19.0/linux_amd64).
+    expected = target_root / "extension" / "9.9.9" / "test_arch" / "json" / "libjson.lbug_extension"
+    assert result == str(expected)
+    assert expected.read_bytes() == bundle.read_bytes()
+    assert execute.statements == [PROBE_STMT]
+
+
+def test_materialize_skips_when_bundle_does_not_cover_announcement(monkeypatch, tmp_path):
+    from cognee_db_workers._kuzu_helpers import materialize_bundled_json_extension
+
+    target_root = tmp_path / "home" / ".lbdb"
+    monkeypatch.setattr(_kuzu_helpers, "_BUNDLED_EXTENSIONS_DIR", str(tmp_path / "bundle"))
+    monkeypatch.setattr(_kuzu_helpers, "_LBUG_EXTENSION_ROOT", str(target_root))
+
+    # Probe announces a version/platform the bundle does not carry.
+    execute = RecordingExecute(probe=probe_error("v9.9.9", "unbundled_platform"))
+    assert materialize_bundled_json_extension(execute) is None
+    assert not target_root.exists()
+
+
+def test_materialize_skips_when_probe_is_unparseable(monkeypatch, tmp_path):
+    from cognee_db_workers._kuzu_helpers import materialize_bundled_json_extension
+
+    target_root = tmp_path / "home" / ".lbdb"
+    _bundle(tmp_path / "bundle")
+    monkeypatch.setattr(_kuzu_helpers, "_BUNDLED_EXTENSIONS_DIR", str(tmp_path / "bundle"))
+    monkeypatch.setattr(_kuzu_helpers, "_LBUG_EXTENSION_ROOT", str(target_root))
+
+    execute = RecordingExecute(probe=RuntimeError("some future error format"))
+    assert materialize_bundled_json_extension(execute) is None
+    assert not target_root.exists()
+
+
+def test_materialize_never_rewrites_existing_binary(monkeypatch, tmp_path):
+    from cognee_db_workers._kuzu_helpers import materialize_bundled_json_extension
+
+    target_root = tmp_path / "home" / ".lbdb"
+    _bundle(tmp_path / "bundle")
+    monkeypatch.setattr(_kuzu_helpers, "_BUNDLED_EXTENSIONS_DIR", str(tmp_path / "bundle"))
+    monkeypatch.setattr(_kuzu_helpers, "_LBUG_EXTENSION_ROOT", str(target_root))
+
+    expected = target_root / "extension" / "9.9.9" / "test_arch" / "json" / "libjson.lbug_extension"
+    expected.parent.mkdir(parents=True)
+    expected.write_bytes(b"already-there")
+    # A concurrently running worker may have the file open/mapped — the file
+    # must never be rewritten in place.
+    assert materialize_bundled_json_extension(RecordingExecute()) == str(expected)
+    assert expected.read_bytes() == b"already-there"
+
+
+def test_warmup_materializes_instead_of_noop(monkeypatch, tmp_path):
+    """The warm-up used to return immediately when a bundled binary existed,
+    leaving ~/.lbdb empty — the root cause of the 1.4.x → 1.6.x upgrade break.
+    It must now materialize the bundled binary into the engine's store (and
+    still fall back to the remote INSTALL when it can't). The announcement is
+    canned so the test is deterministic whether or not the local engine has
+    json installed already (a real engine's probe only errors while the
+    extension is missing)."""
+    import ladybug
+
+    requested = ("v9.9.9", "test_arch")
+    bundle = _bundle(tmp_path / "bundle", *requested)
+    monkeypatch.setattr(_kuzu_helpers, "_BUNDLED_EXTENSIONS_DIR", str(tmp_path / "bundle"))
+    monkeypatch.setattr(_kuzu_helpers, "_LBUG_EXTENSION_ROOT", str(tmp_path / "home" / ".lbdb"))
+    monkeypatch.setattr(_kuzu_helpers, "_requested_extension_relpath", lambda execute: requested)
+
+    _kuzu_helpers.install_json_extension_local(buffer_pool_size=64 * 1024 * 1024)
+
+    expected = (
+        tmp_path
+        / "home"
+        / ".lbdb"
+        / "extension"
+        / requested[0].removeprefix("v")
+        / requested[1]
+        / "json"
+        / "libjson.lbug_extension"
+    )
+    assert expected.read_bytes() == bundle.read_bytes()
+
+
 # --- Source-of-truth guards -------------------------------------------------
 #
 # The ladybug constraint in pyproject.toml decides which extension versions
