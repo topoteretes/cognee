@@ -978,10 +978,12 @@ class CogneeClient:
         build_global_context_index: bool = False,
         build_truth_subspace: bool = False,
         dataset_id: UUID | None = None,
+        background: bool = False,
     ) -> dict[str, Any]:
         """Run the improve loop and return the ImproveResult as a JSON-shaped dict.
 
-        ``dataset_id`` takes precedence over ``dataset_name``.
+        ``dataset_id`` takes precedence over ``dataset_name``. ``background``
+        returns the result as ``running`` while the stages go on.
 
         Both modes return the same shape: ``status`` plus one ``stages`` entry
         per stage (name, status, reason, counts). An older server that still
@@ -998,6 +1000,8 @@ class CogneeClient:
                 payload["build_global_context_index"] = True
             if build_truth_subspace:
                 payload["build_truth_subspace"] = True
+            if background:
+                payload["run_in_background"] = True
             response = await self.client.post(endpoint, json=payload, headers=self._get_headers())
             response.raise_for_status()
             return response.json()
@@ -1010,6 +1014,8 @@ class CogneeClient:
                     kwargs["build_global_context_index"] = True
                 if build_truth_subspace:
                     kwargs["build_truth_subspace"] = True
+                if background:
+                    kwargs["run_in_background"] = True
                 result = await self.cognee.improve(**kwargs)
                 if hasattr(result, "model_dump"):
                     return result.model_dump(mode="json")

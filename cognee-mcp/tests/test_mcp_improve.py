@@ -69,6 +69,7 @@ async def test_mcp_improve_forwards_every_option(monkeypatch):
         session_ids="s1, s2",
         build_global_context_index=True,
         build_truth_subspace=True,
+        wait=False,
     )
 
     assert fake_client.calls == [
@@ -78,6 +79,7 @@ async def test_mcp_improve_forwards_every_option(monkeypatch):
             "build_global_context_index": True,
             "build_truth_subspace": True,
             "dataset_id": None,
+            "background": True,
         }
     ]
 
@@ -185,6 +187,7 @@ async def test_cognee_client_api_improve_sends_every_option():
             session_ids=["s1"],
             build_global_context_index=True,
             build_truth_subspace=True,
+            background=True,
         )
     finally:
         await client.close()
@@ -196,6 +199,7 @@ async def test_cognee_client_api_improve_sends_every_option():
         "session_ids": ["s1"],
         "build_global_context_index": True,
         "build_truth_subspace": True,
+        "run_in_background": True,
     }
     assert result["status"] == "completed"
     assert [stage["stage"] for stage in result["stages"]] == [
@@ -278,6 +282,7 @@ async def test_cognee_client_local_improve_returns_the_result_as_json_dict():
         session_ids=["s1"],
         build_global_context_index=True,
         build_truth_subspace=True,
+        background=True,
     )
 
     assert fake.calls == [
@@ -286,6 +291,7 @@ async def test_cognee_client_local_improve_returns_the_result_as_json_dict():
             "session_ids": ["s1"],
             "build_global_context_index": True,
             "build_truth_subspace": True,
+            "run_in_background": True,
         }
     ]
     assert result["status"] == "skipped"

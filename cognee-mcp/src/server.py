@@ -882,6 +882,7 @@ async def improve(
     build_global_context_index: bool = False,
     build_truth_subspace: bool = False,
     dataset_id: str | None = None,
+    wait: bool = True,
 ) -> list:
     """Run the self-improvement loop over a dataset and report what each stage did.
 
@@ -918,6 +919,9 @@ async def improve(
         UUID of the dataset to process; takes precedence over dataset_name.
         A name resolves only among the datasets you own, so use the id for
         a dataset shared with you.
+    wait : bool
+        False returns at once while the stages go on, for a dataset whose
+        improve outlasts a tool call. The reply then lists no stages.
     """
     from uuid import UUID
 
@@ -936,6 +940,7 @@ async def improve(
                 build_global_context_index=build_global_context_index,
                 build_truth_subspace=build_truth_subspace,
                 dataset_id=parsed_dataset_id,
+                background=not wait,
             )
             return [
                 types.TextContent(
