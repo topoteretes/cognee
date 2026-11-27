@@ -1,5 +1,6 @@
-"""Connection-string sources: the ALLOW_DATABASE_INGESTION switch, and network
-databases that resolve to a server cognee itself uses."""
+"""Connection-string sources: the ALLOW_DATABASE_INGESTION switch, network
+databases that resolve to a server cognee itself uses, and the public-servers-only
+rule for network callers."""
 
 from contextlib import nullcontext
 from ipaddress import ip_address
@@ -20,8 +21,10 @@ from cognee.modules.operations import (
     operation_origin_scope,
     remote_caller_scope,
 )
+from cognee.tasks.ingestion import create_dlt_source
 from cognee.tasks.ingestion.create_dlt_source import (
     ALLOW_DATABASE_INGESTION_ENV,
+    _pin_to_addresses,
     _require_database_ingestion_allowed,
     _require_foreign_database_server,
     _same_machine,
@@ -30,6 +33,8 @@ from cognee.tasks.ingestion.create_dlt_source import (
 
 # TEST-NET-3 (RFC 5737): numeric, so resolving it needs no DNS.
 FOREIGN = "203.0.113.5"
+# A globally routable address, also numeric. Nothing here connects to it.
+PUBLIC = "8.8.8.8"
 
 
 @pytest.fixture
@@ -255,3 +260,155 @@ def test_switch_off_refuses_every_connection_string(servers, monkeypatch, value,
 
     assert f"ALLOW_DATABASE_INGESTION={value.strip()};" in error.value.message
     assert "Set ALLOW_DATABASE_INGESTION=true" in error.value.message
+
+
+def _resolve_example_host_to(monkeypatch, addresses):
+    """Make ``db.example.com`` resolve to ``addresses``; other hosts resolve as usual."""
+    resolve = create_dlt_source._resolved_addresses
+    monkeypatch.setattr(
+        create_dlt_source,
+        "_resolved_addresses",
+        lambda host: addresses if host == "db.example.com" else resolve(host),
+    )
+
+
+@pytest.fixture
+def network_caller(servers, monkeypatch):
+    """A network caller on a server that lets its callers ingest databases."""
+    monkeypatch.setenv(ALLOW_DATABASE_INGESTION_ENV, "true")
+    with remote_caller_scope():
+        yield
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "127.0.0.9",
+        "10.0.4.17",
+        "172.16.0.5",
+        "192.168.1.20",
+        "169.254.169.254",
+        "100.64.0.1",
+        FOREIGN,
+        "[::1]",
+        "[fd00::5]",
+        "[fe80::1]",
+        "[::ffff:10.0.4.17]",
+        "2130706433",
+        "0x7f.0.0.9",
+    ],
+    ids=[
+        "loopback",
+        "private-10",
+        "private-172",
+        "private-192",
+        "cloud-metadata",
+        "carrier-grade-nat",
+        "reserved",
+        "ipv6-loopback",
+        "ipv6-unique-local",
+        "ipv6-link-local",
+        "ipv4-mapped-private",
+        "decimal-loopback",
+        "hex-loopback",
+    ],
+)
+def test_network_callers_are_refused_non_public_hosts(network_caller, host):
+    """Port 6543 is not one of cognee's, so only the public-servers rule refuses these.
+    The numeric spellings are not IP literals but resolve to loopback."""
+    with pytest.raises(CogneeValidationError, match="only databases on public servers"):
+        create_dlt_source_from_connection_string(f"postgresql://u:p@{host}:6543/shop")
+
+
+def test_network_callers_are_refused_a_host_with_any_non_public_address(
+    network_caller, monkeypatch
+):
+    _resolve_example_host_to(monkeypatch, [PUBLIC, "10.0.4.17"])
+
+    with pytest.raises(CogneeValidationError, match="only databases on public servers"):
+        _require_foreign_database_server("postgresql://u:p@db.example.com/shop")
+
+
+def test_network_callers_learn_nothing_from_an_unresolvable_host(network_caller):
+    """The same refusal as a private address: no probe of internal DNS names."""
+    with pytest.raises(CogneeValidationError, match="only databases on public servers") as error:
+        create_dlt_source_from_connection_string("postgresql://u:p@no-such-host.invalid/db")
+
+    assert "no-such-host" not in error.value.message
+
+
+def test_network_callers_are_admitted_public_hosts(network_caller, monkeypatch):
+    assert _require_foreign_database_server(f"postgresql://u:p@{PUBLIC}/shop") == [PUBLIC]
+
+    _resolve_example_host_to(monkeypatch, ["8.8.4.4", PUBLIC])
+    assert _require_foreign_database_server("postgresql://u:p@db.example.com/shop") == [
+        "8.8.4.4",
+        PUBLIC,
+    ]
+
+
+@pytest.mark.parametrize("host", ["127.0.0.9", "10.0.4.17", "192.168.1.20", FOREIGN])
+def test_local_callers_keep_non_public_hosts(servers, host):
+    """The SDK, CLI and MCP over stdio: the caller already owns the machine."""
+    assert _require_foreign_database_server(f"postgresql://u:p@{host}:6543/shop") == [host]
+
+
+@pytest.mark.parametrize("scheme", ["postgresql", "postgres"])
+def test_postgres_is_pinned_by_hostaddr_and_keeps_its_host_name(scheme):
+    """Every checked address, in order, so the driver still falls back from one to
+    the next; libpq wants the host name once per address."""
+    dsn = f"{scheme}://u:p@db.example.com:5432/shop?sslmode=verify-full"
+
+    assert _pin_to_addresses(dsn, [PUBLIC]) == (
+        dsn,
+        {"connect_args": {"host": "db.example.com", "hostaddr": PUBLIC}},
+    )
+    assert _pin_to_addresses(dsn, ["2001:4860:4860::8888", PUBLIC]) == (
+        dsn,
+        {
+            "connect_args": {
+                "host": "db.example.com,db.example.com",
+                "hostaddr": f"2001:4860:4860::8888,{PUBLIC}",
+            }
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "address, pinned",
+    [
+        (PUBLIC, f"mysql://u:p%40ss@{PUBLIC}:3306/shop?charset=utf8mb4"),
+        (
+            "2001:4860:4860::8888",
+            "mysql://u:p%40ss@[2001:4860:4860::8888]:3306/shop?charset=utf8mb4",
+        ),
+    ],
+    ids=["ipv4", "ipv6"],
+)
+def test_other_drivers_are_pinned_by_the_url_host(address, pinned):
+    dsn = "mysql://u:p%40ss@db.example.com:3306/shop?charset=utf8mb4"
+
+    assert _pin_to_addresses(dsn, [address, "8.8.4.4"]) == (pinned, {})
+
+
+def test_the_source_connects_to_the_checked_address(servers, monkeypatch):
+    """The name is resolved once: what was checked is what the driver is handed.
+    Real dlt and a real engine, stopped at the driver's connect."""
+    import psycopg2
+
+    connects = []
+
+    def refuse(*args, **kwargs):
+        connects.append(kwargs)
+        raise psycopg2.OperationalError("stopped at the driver")
+
+    _resolve_example_host_to(monkeypatch, ["2001:4860:4860::8888", PUBLIC])
+    monkeypatch.setattr(psycopg2, "connect", refuse)
+
+    with pytest.raises(CogneeValidationError, match="OperationalError"):
+        create_dlt_source_from_connection_string("postgresql://u:p@db.example.com/shop")
+
+    assert connects
+    for connect in connects:
+        assert connect["host"] == "db.example.com,db.example.com"
+        assert connect["hostaddr"] == f"2001:4860:4860::8888,{PUBLIC}"

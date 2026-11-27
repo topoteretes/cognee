@@ -130,7 +130,8 @@ def get_remember_router() -> APIRouter:
                 "ALLOW_HTTP_REQUESTS=true on the server), or a database connection "
                 "string (postgresql://, mysql://, sqlite:///, ...), refused over the "
                 "API with 422 DatabaseIngestionDisabled unless the server sets "
-                "ALLOW_DATABASE_INGESTION=true. Combined with 'data': "
+                "ALLOW_DATABASE_INGESTION=true, and then only for a database on a "
+                "public server (422 DatabaseSourceRefused otherwise). Combined with 'data': "
                 "uploads come first, then these entries; labels and external_metadata "
                 "pair with that combined order. Empty entries are ignored. With "
                 "content_type='code' every entry is a repository spec (git URL or "
@@ -324,8 +325,11 @@ def get_remember_router() -> APIRouter:
           ingestion is disabled over the API by default: the request fails with
           422 DatabaseIngestionDisabled unless the server sets
           ALLOW_DATABASE_INGESTION=true (the SDK, CLI and MCP server ingest databases
-          without the setting); cognee's own databases are refused either way, and a
-          sqlite:/// path must be an existing file. Uploads come first,
+          without the setting). With the setting on, the API admits only a database
+          on a public server: a host that is, or resolves to, a loopback, private or
+          otherwise non-public address fails with 422 DatabaseSourceRefused. Cognee's
+          own databases are refused either way, and a sqlite:/// path must be an
+          existing file. Uploads come first,
           then raw_data entries; labels and external_metadata pair with that combined
           order. Normal ingestion only — rejected with content_type. At least one of data
           or raw_data is required for normal ingestion.
@@ -381,7 +385,8 @@ def get_remember_router() -> APIRouter:
           ACCEPT_LOCAL_FILE_PATH=false)
         - **422 Unprocessable Entity**: A database connection string in raw_data while
           ALLOW_DATABASE_INGESTION is unset or false (DatabaseIngestionDisabled), or one
-          that names cognee's own storage (DatabaseSourceRefused, SqliteSourceRefused)
+          that names cognee's own storage or a server that is not public
+          (DatabaseSourceRefused, SqliteSourceRefused)
         - **403 Forbidden**: A server-side path in raw_data while ACCEPT_LOCAL_FILE_PATH is
           unset or false (IngestionError naming the setting)
         - **409 Conflict**: Error during processing
