@@ -21,7 +21,11 @@ class UserRefreshToken(Base):
         Uuid, ForeignKey("principals.id", ondelete="CASCADE"), nullable=False, index=True
     )
     token_hash: Mapped[str] = mapped_column(nullable=False, unique=True, index=True)
-    # Fingerprint of the password the token was issued under: a password change ends the login.
+    # Fingerprint of the password the token was issued under, keyed with the
+    # token secret: a change of either ends the login.
     password_fingerprint: Mapped[str] = mapped_column(nullable=False)
     # Moved forward on every use, so it is the end of the allowed idle time.
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Indexed for the removal of expired rows on login.
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )

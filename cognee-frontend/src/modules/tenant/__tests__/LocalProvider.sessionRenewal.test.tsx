@@ -37,6 +37,16 @@ describe("LocalProvider login renewal", () => {
     expect(requested()).toEqual(["/users/me", "/auth/refresh", "/users/me"]);
   });
 
+  it("shows a backend error during the renewal instead of sending the user to sign in", async () => {
+    fetchMock.mockResponses(["", { status: 401 }], [JSON.stringify({ detail: "Database is busy" }), { status: 503 }]);
+
+    render(<LocalProvider><Probe /></LocalProvider>);
+
+    expect(await screen.findByText("Connection Error")).toBeInTheDocument();
+    expect(screen.getByText("Database is busy")).toBeInTheDocument();
+    expect(requested()).toEqual(["/users/me", "/auth/refresh"]);
+  });
+
   it("does not set up the workspace when the login cannot be renewed", async () => {
     fetchMock.mockResponses(["", { status: 401 }], ["", { status: 401 }]);
 

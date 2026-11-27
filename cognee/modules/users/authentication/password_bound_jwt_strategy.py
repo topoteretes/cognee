@@ -33,14 +33,22 @@ logger = get_logger()
 PASSWORD_FINGERPRINT_CLAIM = "pwd"
 
 
+def password_fingerprint(secret: str, hashed_password: str | None) -> str:
+    """HMAC of the stored password hash, keyed with the token secret.
+
+    Shared by the access tokens here and the refresh tokens (``refresh_token.py``),
+    so both stop working when the password changes and when the secret does.
+    """
+    message = (hashed_password or "").encode()
+    return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
+
+
 class PasswordBoundJWTStrategy(JWTStrategy[models.UP, models.ID]):
     def _password_fingerprint(self, hashed_password: str | None) -> str:
-        """HMAC of the stored password hash, keyed with the token secret."""
         key = self.encode_key
         if isinstance(key, SecretStr):
             key = key.get_secret_value()
-        message = (hashed_password or "").encode()
-        return hmac.new(key.encode(), message, hashlib.sha256).hexdigest()
+        return password_fingerprint(key, hashed_password)
 
     async def write_token(self, user: models.UP) -> str:
         data = {

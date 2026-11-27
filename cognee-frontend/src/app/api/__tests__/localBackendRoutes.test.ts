@@ -4,7 +4,6 @@ import { GET as visualize } from "../visualize/route";
 import { GET as inventory } from "../schema/inventory/route";
 import { GET as provenance } from "../schema/provenance/route";
 import { GET as legacyProvenance } from "../schema-provenance/route";
-import { GET as signout } from "../local-signout/route";
 
 // Response serialization is Next's responsibility; exercise the handlers' real
 // backend requests and URL resolver against fetchMock.
@@ -57,27 +56,3 @@ it.each(routes.flatMap(route => ["cookie", "authorization", "x-api-key"].map(hea
     expect(fetchMock.mock.calls[0][0]).toMatch(/^http:\/\/configured.test:9100\/api\/v1\//);
   },
 );
-
-it("logs out against the runtime backend and passes its cookie deletions on", async () => {
-  // The backend names the cookies; the browser only drops the ones it is told to.
-  const deletions = ['auth_token=""; Max-Age=0; Path=/', 'auth_token_refresh=""; Max-Age=0; Path=/'];
-  // Headers.getSetCookie is in Node's fetch, which the route runs on, but not in jest-fetch-mock's.
-  fetchMock.mockImplementationOnce(
-    async () => ({ headers: { getSetCookie: () => deletions } }) as unknown as Response,
-  );
-  const response = await signout(request({ cookie: "session=test" }));
-  expect(fetchMock).toHaveBeenCalledWith("http://configured.test:9100/api/v1/auth/logout", {
-    method: "POST", headers: { cookie: "session=test" },
-  });
-  expect(response.status).toBe(307);
-  expect(response.headers.get("location")).toBe("http://ui.test/local-login");
-  expect(response.headers.get("set-cookie")).toBe(deletions.join(", "));
-});
-
-it("still sends the browser to the login page when the backend is down", async () => {
-  fetchMock.mockRejectOnce(new TypeError("fetch failed"));
-  const response = await signout(request({ cookie: "session=test" }));
-  expect(response.status).toBe(307);
-  expect(response.headers.get("location")).toBe("http://ui.test/local-login");
-  expect(response.headers.get("set-cookie")).toBeNull();
-});

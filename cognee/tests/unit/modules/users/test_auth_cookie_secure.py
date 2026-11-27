@@ -5,7 +5,8 @@ http, where the token is readable on the path. It was hardcoded off, which
 behind a TLS-terminating proxy could not be changed without editing code.
 The contract: the setting decides Secure on login, a value other than true or
 false raises, and logout deletes the cookie with the attributes login set. The
-refresh cookie login writes beside it carries the same attributes.
+refresh cookie login writes beside it carries the same attributes, except for
+its path: the auth routes only.
 The transport reads the variable at import, so the cases load a private copy of
 the module instead of reloading the one the app's auth backend holds.
 """
@@ -102,7 +103,9 @@ def test_login_sets_secure_from_the_environment(monkeypatch, value, secure):
         assert ("secure" in _attributes(header)) is secure
         assert "httponly" in _attributes(header), header
         assert "SameSite=Lax" in header, header
-        assert "Path=/api" in header and "Domain=x.test" in header, header
+        assert "Domain=x.test" in header, header
+    assert "Path=/api;" in access, access
+    assert "Path=/api/v1/auth;" in refresh, "the refresh cookie goes to the auth routes only"
     assert "max-age" not in _attributes(access), "login writes a session cookie"
     assert "Max-Age=604800" in refresh, "the refresh cookie outlives the browser session"
 
@@ -129,7 +132,9 @@ def test_logout_deletes_with_the_attributes_login_set(monkeypatch):
         assert "Max-Age=0" in header, header
         assert {"secure", "httponly"} <= _attributes(header), header
         assert "SameSite=Lax" in header, header
-        assert "Path=/api" in header and "Domain=x.test" in header, header
+        assert "Domain=x.test" in header, header
+    assert "Path=/api;" in access, access
+    assert "Path=/api/v1/auth;" in refresh, refresh
 
 
 @pytest.mark.parametrize("value, expected", [("x.test", "x.test"), ("", None)])

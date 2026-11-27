@@ -173,6 +173,39 @@ async def test_a_password_change_ends_the_login():
 
 
 @pytest.mark.asyncio
+async def test_a_new_token_secret_ends_the_login(monkeypatch):
+    """Changing FASTAPI_USERS_JWT_SECRET is how an operator signs everyone out.
+
+    It already ends every access token. A refresh token that survived it would
+    hand the browser a new one signed with the new secret.
+    """
+    monkeypatch.setenv("FASTAPI_USERS_JWT_SECRET", "the-secret-the-login-was-opened-under")
+    user = await _user()
+    token = await create_refresh_token(user)
+    assert (await redeem_refresh_token(token)).id == user.id
+
+    monkeypatch.setenv("FASTAPI_USERS_JWT_SECRET", "the-secret-after-a-rotation")
+
+    assert await redeem_refresh_token(token) is None
+    assert await _stored(token) is None
+
+
+@pytest.mark.asyncio
+async def test_the_password_fingerprint_is_the_one_access_tokens_carry():
+    """One fingerprint for both kinds of token, so they cannot drift apart."""
+    from cognee.modules.users.authentication.get_client_auth_backend import (
+        get_client_auth_backend,
+    )
+
+    user = await _user()
+    token = await create_refresh_token(user)
+
+    strategy = get_client_auth_backend().get_strategy()
+    stored = (await _stored(token)).password_fingerprint
+    assert stored == strategy._password_fingerprint(user.hashed_password)
+
+
+@pytest.mark.asyncio
 async def test_an_inactive_user_cannot_renew_a_login():
     """Login refuses an inactive user; a login opened before must not get around that."""
     user = await _user()
@@ -254,8 +287,9 @@ def test_refresh_exchanges_the_cookie_for_a_new_access_token():
     assert response.json() == {"access_token": "token-789", "token_type": "bearer"}
     redeem.assert_awaited_once_with("refresh-456")
     access, refresh = response.headers.get_list("set-cookie")
-    assert access.startswith("auth_token=token-789;")
+    assert access.startswith("auth_token=token-789;") and "Path=/;" in access
     assert refresh.startswith("auth_token_refresh=refresh-456;") and "Max-Age=604800" in refresh
+    assert "Path=/api/v1/auth;" in refresh, "the browser sends it to the auth routes only"
 
 
 @pytest.mark.parametrize("cookie", [None, "refresh-456"])
@@ -289,6 +323,7 @@ def test_logout_ends_the_login_without_a_valid_access_token():
     access, refresh = response.headers.get_list("set-cookie")
     assert access.startswith('auth_token=""') and "Max-Age=0" in access
     assert refresh.startswith('auth_token_refresh=""') and "Max-Age=0" in refresh
+    assert "Path=/;" in access and "Path=/api/v1/auth;" in refresh
 
 
 def test_logout_without_a_refresh_cookie_only_clears_the_cookies():

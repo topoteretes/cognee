@@ -6,14 +6,21 @@ kept in an httpOnly cookie, that ``POST /api/v1/auth/refresh`` exchanges for a
 new access token.
 
 Only the token's hash is stored, in ``user_refresh_token``, so signing out ends
-the login (``delete_refresh_token``). The token is not replaced on use: a
-browser sends several requests at once, and with a single-use token every
-refresh but the first would present one that no longer exists. Each use moves
-``expires_at`` forward instead, so the login lasts until the UI has not been
-used for ``REFRESH_TOKEN_LIFETIME_SECONDS`` (7 days by default).
+the login (``delete_refresh_token``). Each row also holds the fingerprint of
+the password it was issued under, keyed with ``FASTAPI_USERS_JWT_SECRET`` like
+an access token's: a password change ends the login, and so does a new secret,
+which is how an operator signs everyone out. With the secret unset it is
+generated per process, so a restart ends every login.
+
+The token is not replaced on use: a browser sends several requests at once,
+and with a single-use token every refresh but the first would present one that
+no longer exists. Each use moves ``expires_at`` forward instead, so the login
+lasts until the UI has not been used for ``REFRESH_TOKEN_LIFETIME_SECONDS``
+(7 days by default).
 """
 
 import hashlib
+import hmac
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -23,6 +30,9 @@ from sqlalchemy import delete, select
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models import User
 from cognee.modules.users.models.UserRefreshToken import UserRefreshToken
+
+from .get_auth_secret import get_auth_secret
+from .password_bound_jwt_strategy import password_fingerprint
 
 
 def get_refresh_token_lifetime() -> timedelta:
@@ -37,7 +47,7 @@ def _hash_token(token: str) -> str:
 
 
 def _fingerprint_password(hashed_password: str | None) -> str:
-    return hashlib.sha256((hashed_password or "").encode()).hexdigest()
+    return password_fingerprint(get_auth_secret("FASTAPI_USERS_JWT_SECRET"), hashed_password)
 
 
 async def create_refresh_token(user: User) -> str:
@@ -68,8 +78,9 @@ async def redeem_refresh_token(token: str) -> User | None:
     """Return the user a live refresh token belongs to and extend the token's life.
 
     None for an unknown or expired token. A token whose user is inactive, or
-    whose password changed since it was issued, is deleted: like an access
-    token (``PasswordBoundJWTStrategy``) it must not outlive the password.
+    whose password or token secret changed since it was issued, is deleted:
+    like an access token (``PasswordBoundJWTStrategy``) it must not outlive
+    either.
     """
     now = datetime.now(timezone.utc)
 
@@ -89,7 +100,9 @@ async def redeem_refresh_token(token: str) -> User | None:
         if (
             user is None
             or not user.is_active
-            or refresh_token.password_fingerprint != _fingerprint_password(user.hashed_password)
+            or not hmac.compare_digest(
+                refresh_token.password_fingerprint, _fingerprint_password(user.hashed_password)
+            )
         ):
             await session.delete(refresh_token)
             await session.commit()

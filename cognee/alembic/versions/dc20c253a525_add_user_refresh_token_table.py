@@ -42,7 +42,7 @@ def upgrade() -> None:
         ),
         sa.Column("token_hash", sa.String, nullable=False, unique=True, index=True),
         sa.Column("password_fingerprint", sa.String, nullable=False),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False, index=True),
     )
 
 

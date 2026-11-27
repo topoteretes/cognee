@@ -68,6 +68,15 @@ describe("localFetch login renewal", () => {
     expect(requested()).toEqual(["/datasets", "/auth/refresh"]);
   });
 
+  it("reports a backend error during the renewal instead of asking for a new sign-in", async () => {
+    fetchMock.mockResponses(["", { status: 401 }], [JSON.stringify({ detail: "Database is busy" }), { status: 503 }]);
+    const error = await localFetch("/v1/datasets").catch((error) => error);
+    expect(error).toBeInstanceOf(HttpError);
+    expect(error.status).toBe(503);
+    expect(error.message).toBe("Database is busy");
+    expect(requested()).toEqual(["/datasets", "/auth/refresh"]);
+  });
+
   it("renews once per request, also when the request is refused again", async () => {
     fetchMock.mockResponses(["", { status: 401 }], ["", { status: 200 }], ["", { status: 401 }]);
     await expect(localFetch("/v1/datasets")).rejects.toThrow("Session expired");
