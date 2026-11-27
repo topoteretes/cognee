@@ -39,6 +39,71 @@ describe("localFetch errors", () => {
   });
 });
 
+describe("localFetch login renewal", () => {
+  const requested = () => fetchMock.mock.calls.map(([url]) => String(url).replace(/^.*\/api\/v1/, ""));
+
+  beforeEach(() => {
+    fetchMock.resetMocks();
+    jest.spyOn(console, "log").mockImplementation(() => {});
+    jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it("renews an expired login and sends the request again", async () => {
+    fetchMock.mockResponses(
+      ["", { status: 401 }],
+      ["", { status: 200 }],
+      [JSON.stringify({ saved: true }), { status: 200 }],
+    );
+    const response = await localFetch("/v1/datasets", { method: "POST", body: "payload" });
+    expect(await response.json()).toEqual({ saved: true });
+    expect(requested()).toEqual(["/datasets", "/auth/refresh", "/datasets"]);
+    expect(fetchMock.mock.calls[1][1]).toEqual({ method: "POST", credentials: "include" });
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: "POST", body: "payload" });
+  });
+
+  it("asks for a new sign-in when the login cannot be renewed", async () => {
+    fetchMock.mockResponses(["", { status: 401 }], ["", { status: 401 }]);
+    await expect(localFetch("/v1/datasets")).rejects.toThrow("Session expired");
+    expect(requested()).toEqual(["/datasets", "/auth/refresh"]);
+  });
+
+  it("renews once per request, also when the request is refused again", async () => {
+    fetchMock.mockResponses(["", { status: 401 }], ["", { status: 200 }], ["", { status: 401 }]);
+    await expect(localFetch("/v1/datasets")).rejects.toThrow("Session expired");
+    expect(requested()).toEqual(["/datasets", "/auth/refresh", "/datasets"]);
+  });
+
+  it("leaves a forbidden request alone: the login is fine, the permission is missing", async () => {
+    fetchMock.mockResponseOnce("", { status: 403 });
+    await expect(localFetch("/v1/datasets")).rejects.toThrow("Session expired");
+    expect(requested()).toEqual(["/datasets"]);
+  });
+
+  it("renews once for requests that fail together", async () => {
+    let renewed = false;
+    let finishRenewal!: () => void;
+    const renewal = new Promise<void>((resolve) => { finishRenewal = resolve; });
+    fetchMock.mockResponse(async (request) => {
+      if (request.url.endsWith("/auth/refresh")) {
+        await renewal;
+        renewed = true;
+        return "";
+      }
+      return renewed ? "{}" : { status: 401, body: "" };
+    });
+
+    const requests = Promise.all(["/v1/datasets", "/v1/search", "/v1/settings"].map((url) => localFetch(url)));
+    // Every request has its 401 before the renewal answers.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    finishRenewal();
+    await requests;
+
+    expect(requested().filter((url) => url === "/auth/refresh")).toHaveLength(1);
+    expect(requested()).toHaveLength(7);
+  });
+});
+
 describe("localFetch backend selection", () => {
   const originalUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL;
   beforeEach(() => {

@@ -4,7 +4,8 @@ The cookie is the session; Secure keeps a browser from sending it over plain
 http, where the token is readable on the path. It was hardcoded off, which
 behind a TLS-terminating proxy could not be changed without editing code.
 The contract: the setting decides Secure on login, a value other than true or
-false raises, and logout deletes the cookie with the attributes login set.
+false raises, and logout deletes the cookie with the attributes login set. The
+refresh cookie login writes beside it carries the same attributes.
 The transport reads the variable at import, so the cases load a private copy of
 the module instead of reloading the one the app's auth backend holds.
 """
@@ -87,19 +88,23 @@ def test_login_sets_secure_from_the_environment(monkeypatch, value, secure):
         patch.object(ROUTER, "default_transport", transport),
         patch.object(ROUTER, "authenticate_user", AsyncMock(return_value=user)),
         patch.object(ROUTER, "get_client_auth_backend", return_value=backend),
+        patch.object(ROUTER, "create_refresh_token", AsyncMock(return_value="refresh-456")),
     ):
         response = _client(user).post(
             "/api/v1/auth/login", data={"username": "a@b.test", "password": "pw"}
         )
 
     assert response.status_code == 200, response.text
-    header = response.headers["set-cookie"]
-    assert header.startswith("auth_token=token-123;")
-    assert ("secure" in _attributes(header)) is secure
-    assert "httponly" in _attributes(header), header
-    assert "SameSite=Lax" in header, header
-    assert "Path=/api" in header and "Domain=x.test" in header, header
-    assert "max-age" not in _attributes(header), "login writes a session cookie"
+    access, refresh = response.headers.get_list("set-cookie")
+    assert access.startswith("auth_token=token-123;")
+    assert refresh.startswith("auth_token_refresh=refresh-456;")
+    for header in (access, refresh):
+        assert ("secure" in _attributes(header)) is secure
+        assert "httponly" in _attributes(header), header
+        assert "SameSite=Lax" in header, header
+        assert "Path=/api" in header and "Domain=x.test" in header, header
+    assert "max-age" not in _attributes(access), "login writes a session cookie"
+    assert "Max-Age=604800" in refresh, "the refresh cookie outlives the browser session"
 
 
 def test_logout_deletes_with_the_attributes_login_set(monkeypatch):
@@ -117,11 +122,14 @@ def test_logout_deletes_with_the_attributes_login_set(monkeypatch):
         response = _client(user).post("/api/v1/auth/logout")
 
     assert response.status_code == 200
-    header = response.headers["set-cookie"]
-    assert header.startswith('auth_token=""') and "Max-Age=0" in header
-    assert {"secure", "httponly"} <= _attributes(header), header
-    assert "SameSite=Lax" in header, header
-    assert "Path=/api" in header and "Domain=x.test" in header, header
+    access, refresh = response.headers.get_list("set-cookie")
+    assert access.startswith('auth_token=""')
+    assert refresh.startswith('auth_token_refresh=""')
+    for header in (access, refresh):
+        assert "Max-Age=0" in header, header
+        assert {"secure", "httponly"} <= _attributes(header), header
+        assert "SameSite=Lax" in header, header
+        assert "Path=/api" in header and "Domain=x.test" in header, header
 
 
 @pytest.mark.parametrize("value, expected", [("x.test", "x.test"), ("", None)])

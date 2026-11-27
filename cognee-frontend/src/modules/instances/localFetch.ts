@@ -2,6 +2,7 @@ import handleServerErrors from "@/utils/handleServerErrors";
 import { HttpError, toHttpError } from "@/services/http/errors";
 
 import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
+import refreshLocalSession from "@/modules/users/refreshLocalSession";
 
 let apiKey: string | null = process.env.NEXT_PUBLIC_COGWIT_API_KEY || null;
 
@@ -26,7 +27,7 @@ export default async function localFetch(url: URL | RequestInfo, options: Reques
 
   console.log(`[LOCAL-API] → ${method} ${fullUrl}`);
 
-  return global.fetch(
+  const send = () => global.fetch(
     fullUrl,
     {
       ...options,
@@ -36,7 +37,14 @@ export default async function localFetch(url: URL | RequestInfo, options: Reques
       } as HeadersInit,
       credentials: "include",
     },
-  )
+  );
+
+  return send()
+    // The backend's access token lasts an hour. When it has expired, renew the
+    // login with the refresh cookie and send the request once more.
+    .then(async (response) => (
+      response.status === 401 && await refreshLocalSession() ? send() : response
+    ))
     .then((response) => {
       console.log(`[LOCAL-API] ← ${method} ${fullUrl} — ${response.status} ${response.statusText}`);
       // Keep the HTTP status so callers can handle conflicts, rate limits, etc.

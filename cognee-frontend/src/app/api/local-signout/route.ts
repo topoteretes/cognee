@@ -4,23 +4,26 @@ import { getServerBackendUrl } from "@/modules/config/serverRuntimeConfig";
 
 export async function GET(request: Request) {
   const localApiUrl = getServerBackendUrl();
-  // Call the local backend's logout endpoint to invalidate the session
+  const response = NextResponse.redirect(new URL("/local-login", request.url));
+
+  // The backend ends the login and answers with the deletion of its cookies
+  // (the access and the refresh cookie). Pass those on to the browser: only
+  // the backend knows the cookies' names and attributes.
+  let logoutResponse: Response;
   try {
-    await fetch(`${localApiUrl}/api/v1/auth/logout`, {
+    logoutResponse = await fetch(`${localApiUrl}/api/v1/auth/logout`, {
       method: "POST",
       headers: {
         cookie: request.headers.get("cookie") || "",
       },
     });
   } catch {
-    // Backend might be down — still clear cookies and redirect
+    // Backend might be down — still redirect
+    return response;
   }
 
-  // Clear the fastapiusersauth cookie and redirect to local login
-  const response = NextResponse.redirect(new URL("/local-login", request.url));
-  response.cookies.set("fastapiusersauth", "", {
-    maxAge: 0,
-    path: "/",
-  });
+  for (const cookie of logoutResponse.headers.getSetCookie()) {
+    response.headers.append("set-cookie", cookie);
+  }
   return response;
 }
