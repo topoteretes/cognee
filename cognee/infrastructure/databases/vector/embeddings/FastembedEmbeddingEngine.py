@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import math
 import os
 import tempfile
 from pathlib import Path
@@ -243,33 +242,21 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         original_texts = text if isinstance(text, list) else [text]
         sanitized_text = sanitize_embedding_text_inputs(original_texts)
 
-        # fastembed cuts input past the model's limit without an error, so an
-        # over-length text is caught here and embedded in overlapping parts, the
-        # same recovery the other engines run when their provider rejects it.
-        if not self.mock and self._exceeds_model_limit(sanitized_text):
-            return await self._embed_in_parts(original_texts)
-
         try:
             if self.mock:
                 embeddings = [[0.0] * self.dimensions for _ in sanitized_text]
+                window_texts = sanitized_text
             else:
+                # fastembed cuts input past the model's limit without an error, so
+                # an over-length text is embedded as consecutive token windows whose
+                # vectors are pooled; every window of the batch goes to the model at once.
+                windows = self._windows(sanitized_text, await self.input_limit())
+                window_texts = [window for text_windows in windows for window, _ in text_windows]
                 async with embedding_rate_limiter_context_manager():
-                    embeddings = await run_cpu_bound(self._run_model, sanitized_text)
+                    vectors = await run_cpu_bound(self._run_model, window_texts)
+                embeddings = self._pool(windows, vectors)
 
         except Exception as error:
-            error_str = str(error).lower()
-            context_error_patterns = (
-                "context length",
-                "context window",
-                "input length",
-                "too long",
-                "maximum context",
-                "maximum tokens",
-                "max tokens",
-            )
-            if any(pattern in error_str for pattern in context_error_patterns):
-                return await self._embed_in_parts(original_texts)
-
             logger.error(f"Embedding error in FastembedEmbeddingEngine: {error!s}")
             raise EmbeddingException(
                 f"Failed to index data points using model {self.model}"
@@ -277,8 +264,9 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
 
         return EmbeddingResult(
             vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
-            # A mock embeds nothing; fastembed itself reports no usage.
-            tokens=0 if self.mock else count_input_tokens(None, sanitized_text, self.tokenizer),
+            # A mock embeds nothing; fastembed itself reports no usage. Windows are
+            # consecutive, so an over-length text is counted once.
+            tokens=0 if self.mock else count_input_tokens(None, window_texts, self.tokenizer),
         )
 
     def _run_model(self, texts: list[str]) -> list[list[float]]:
@@ -308,66 +296,89 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             return None
         return sane_limit(limit - tokenizer.num_special_tokens_to_add(False))
 
-    def _exceeds_model_limit(self, texts: list[str]) -> bool:
-        """Whether the model's tokenizer would truncate any of ``texts``.
+    def _windows(self, texts: list[str], limit: int | None) -> list[list[tuple[str, int]]]:
+        """Per text, the ``(window text, token count)`` pairs the model embeds for it.
 
-        The tokenizer keeps the cut-off part as ``overflowing`` pieces, so this
-        is the model's own verdict, not an estimate. A tokenizer that cannot
-        answer (an unexpected fastembed internals layout) means "no", which keeps
-        the pre-fix behaviour rather than raising.
+        A text within the model's limit is its own single window. An over-length
+        one is cut, from the model's own tokenizer output, into consecutive windows
+        of at most ``limit`` tokens (see :meth:`_pack`). The tokenizer keeps the
+        cut-off part as ``overflowing`` pieces, so the verdict is the model's own,
+        not an estimate. A tokenizer that cannot answer (an unexpected fastembed
+        internals layout, no readable limit, an encode failure) means the texts
+        are embedded as they are, which keeps the pre-fix behaviour rather than
+        raising.
         """
         tokenizer = getattr(getattr(self.embedding_model, "model", None), "tokenizer", None)
-        if tokenizer is None:
-            return False
+        if tokenizer is None or limit is None:
+            return [[(text, 1)] for text in texts]
         try:
-            return any(encoding.overflowing for encoding in tokenizer.encode_batch(texts))
+            encodings = tokenizer.encode_batch(texts)
         except Exception:
             logger.debug("Could not check input length with the fastembed tokenizer", exc_info=True)
-            return False
+            return [[(text, 1)] for text in texts]
+        windows = [self._pack(text, encoding, limit) for text, encoding in zip(texts, encodings)]
+        for text, text_windows in zip(texts, windows):
+            if len(text_windows) > 1:
+                logger.debug(
+                    "Text of %s characters exceeds what %s embeds at once (%s tokens); "
+                    "embedding it as %s consecutive windows.",
+                    len(text),
+                    self.model,
+                    limit,
+                    len(text_windows),
+                )
+        return windows
 
-    async def _embed_in_parts(self, original_texts: list[str]) -> EmbeddingResult:
-        """Embed over-length input in parts: a batch is split in two, a single text
-        into two overlapping halves whose embeddings are pooled. Each part goes back
-        through :meth:`embed_text`, which splits further while it is still too long.
+    @staticmethod
+    def _pack(text: str, encoding, limit: int) -> list[tuple[str, int]]:
+        """Cut ``text`` into consecutive windows of at most ``limit`` tokens.
+
+        ``encoding`` and its ``overflowing`` pieces together hold every token of
+        the text with its character offsets and word index. A cut lands at a word
+        start, so each window re-tokenizes to exactly the tokens it was cut from;
+        a single word longer than the limit is cut inside, at a token boundary.
+        Windows cover the text once, with no overlap, so pooling their vectors by
+        token count weighs every token the same.
         """
-        if len(original_texts) > 1:
-            mid = math.ceil(len(original_texts) / 2)
-            left_result, right_result = await asyncio.gather(
-                self.embed_text(original_texts[:mid]),
-                self.embed_text(original_texts[mid:]),
-            )
-            return EmbeddingResult(
-                vectors=handle_embedding_response(
-                    original_texts, left_result + right_result, self.dimensions
-                ),
-                tokens=left_result.tokens + right_result.tokens,
-            )
+        if not encoding.overflowing:
+            return [(text, sum(word is not None for word in encoding.word_ids))]
+        tokens = [
+            (offsets, word)
+            for piece in (encoding, *encoding.overflowing)
+            for offsets, word in zip(piece.offsets, piece.word_ids)
+            if word is not None  # special and padding tokens: offsets (0, 0)
+        ]
+        windows: list[tuple[str, int]] = []
+        start = 0
+        while start < len(tokens):
+            end = min(start + limit, len(tokens))
+            if end < len(tokens) and tokens[end][1] == tokens[end - 1][1]:
+                word_start = end
+                while word_start > start and tokens[word_start - 1][1] == tokens[end][1]:
+                    word_start -= 1
+                if word_start > start:
+                    end = word_start
+            windows.append((text[tokens[start][0][0] : tokens[end - 1][0][1]], end - start))
+            start = end
+        return windows
 
-        s = original_texts[0]
-        third = len(s) // 3
-        if third == 0:
-            raise EmbeddingContextWindowTooSmallError
-        logger.debug(
-            "Text of %s characters exceeds what %s embeds at once (%s tokens); embedding "
-            "it as two overlapping parts.",
-            len(s),
-            self.model,
-            self.max_completion_tokens,
-        )
-        left_part, right_part = s[: third * 2], s[third:]
-        left_result, right_result = await asyncio.gather(
-            self.embed_text([left_part]),
-            self.embed_text([right_part]),
-        )
-        (left_vec,), (right_vec,) = left_result, right_result
-        pooled = (np.array(left_vec) + np.array(right_vec)) / 2
-        # Tokens are what the model processed, overlaps included - as the hosted
-        # engines that count what they were billed for; with recursive splitting
-        # this can be several times the text's own count.
-        return EmbeddingResult(
-            vectors=handle_embedding_response(original_texts, [pooled.tolist()], self.dimensions),
-            tokens=left_result.tokens + right_result.tokens,
-        )
+    @staticmethod
+    def _pool(
+        windows: list[list[tuple[str, int]]], vectors: list[list[float]]
+    ) -> list[list[float]]:
+        """One vector per text: the mean of its windows' vectors, weighted by the
+        tokens each window holds. ``vectors`` are in window order."""
+        embeddings = []
+        position = 0
+        for text_windows in windows:
+            text_vectors = vectors[position : position + len(text_windows)]
+            position += len(text_windows)
+            if len(text_windows) == 1:
+                embeddings.append(text_vectors[0])
+                continue
+            weights = [count for _, count in text_windows]
+            embeddings.append(np.average(np.array(text_vectors), axis=0, weights=weights).tolist())
+        return embeddings
 
     def get_vector_size(self) -> int:
         """

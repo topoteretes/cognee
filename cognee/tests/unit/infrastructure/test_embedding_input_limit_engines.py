@@ -5,7 +5,8 @@ Per engine: where ``input_limit()`` gets the model's limit, that the default cap
 it is lowered with a warning, and that an unknown model keeps the cap. The limit
 is resolved once, asynchronously, by ``resolve_input_limit`` (the constructor only
 records the cap). Then the two silent-truncation providers: fastembed embeds an
-over-length text in parts instead of letting the model cut it, and Ollama is asked
+over-length text as token windows of the model's limit, in one batch, instead of
+letting the model cut it, and Ollama is asked
 to reject over-length input (``truncate: false``) so the existing split path runs.
 Finally the chunk size a pipeline runs with: an explicit ``chunk_size`` above the
 limit is lowered with a warning. Providers are mocked; nothing here loads a model
@@ -19,6 +20,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import numpy as np
 import pytest
+from tokenizers import Tokenizer
+from tokenizers.models import WordPiece
+from tokenizers.pre_tokenizers import BertPreTokenizer
+from tokenizers.processors import TemplateProcessing
 from typing_extensions import Self
 
 import cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine as fastembed_module
@@ -95,44 +100,97 @@ async def test_fastembed_unknown_model_limit_keeps_the_cap(monkeypatch):
     assert engine.model_input_limit is None
 
 
-@pytest.mark.asyncio
-async def test_fastembed_embeds_over_length_text_in_parts_instead_of_cutting_it(monkeypatch):
-    engine = _fastembed_engine(monkeypatch, None, {"max_length": 512})
-    long_text = "x" * 3000
-    embedded = []
+def _wordpiece_tokenizer(max_length: int) -> Tokenizer:
+    """A real wordpiece tokenizer, as fastembed loads one: [CLS]/[SEP] around the
+    text and truncation at ``max_length``, so ``overflowing``, ``offsets`` and
+    ``word_ids`` are the library's own. ``betas`` is two tokens (``beta``, ``##s``)."""
+    vocab = {
+        token: index
+        for index, token in enumerate(
+            ["[UNK]", "[CLS]", "[SEP]", "alpha", "beta", "##s", "gamma", "short", "ab", "##ab"]
+        )
+    }
+    tokenizer = Tokenizer(WordPiece(vocab, unk_token="[UNK]"))
+    tokenizer.pre_tokenizer = BertPreTokenizer()
+    tokenizer.post_processor = TemplateProcessing(
+        single="[CLS] $A [SEP]", special_tokens=[("[CLS]", 1), ("[SEP]", 2)]
+    )
+    tokenizer.enable_truncation(max_length=max_length)
+    return tokenizer
 
-    def encode_batch(texts):
-        # The model's tokenizer reports what it would cut off as ``overflowing``;
-        # here anything longer than 2500 characters, so one split (2000 + 2000,
-        # overlapping) is enough.
-        return [SimpleNamespace(overflowing=[1] if len(text) > 2500 else []) for text in texts]
+
+def _windowed_engine(monkeypatch, max_length: int = 8) -> tuple[FastembedEmbeddingEngine, list]:
+    """A fastembed engine over the wordpiece tokenizer above (limit: ``max_length``
+    less [CLS] and [SEP]) whose model records every batch it is asked to embed
+    and answers ``[len(text), 1, 1, 1]`` per text."""
+    engine = _fastembed_engine(monkeypatch, None, {"max_length": max_length})
+    tokenizer = _wordpiece_tokenizer(max_length)
+    engine.embedding_model.model.tokenizer = tokenizer
+    engine.tokenizer = SimpleNamespace(
+        count_tokens=lambda text: len(tokenizer.encode(text, add_special_tokens=False).ids)
+    )
+    calls = []
 
     def embed(texts, **kwargs):
-        embedded.extend(texts)
+        calls.append(list(texts))
         return [np.array([len(text), 1.0, 1.0, 1.0]) for text in texts]
 
-    engine.embedding_model.model.tokenizer.encode_batch = encode_batch
     engine.embedding_model.embed = embed
+    return engine, calls
 
-    (vector,) = await engine.embed_text([long_text])
 
-    assert long_text not in embedded, "the over-length text must never reach the model whole"
-    assert len(embedded) == 2 and all(len(part) <= 2000 for part in embedded)
-    assert len(vector) == 4
-    assert vector[0] == pytest.approx(np.mean([len(part) for part in embedded]))  # pooled
+def _token_count(engine: FastembedEmbeddingEngine, text: str) -> int:
+    return engine.tokenizer.count_tokens(text)
+
+
+@pytest.mark.asyncio
+async def test_fastembed_embeds_over_length_text_as_token_windows_in_one_batch(monkeypatch):
+    engine, calls = _windowed_engine(monkeypatch)  # limit: 6 tokens
+    long_text = " ".join(["alpha", "betas", "gamma"] * 5)  # 20 tokens
+
+    result = await engine.embed_text([long_text])
+    (vector,) = result
+
+    assert len(calls) == 1, "every window goes to the model in one batch"
+    (windows,) = calls
+    assert long_text not in windows, "the over-length text must never reach the model whole"
+    assert " ".join(windows) == long_text, "windows are consecutive, no overlap, nothing lost"
+    assert all(_token_count(engine, window) <= 6 for window in windows)
+    # The 7th token is ``##s`` of ``betas``, so the cut moves back to that word's start.
+    assert windows[0] == "alpha betas gamma alpha"
+    counts = [_token_count(engine, window) for window in windows]
+    assert vector[0] == pytest.approx(np.average([len(w) for w in windows], weights=counts))
+    assert vector[0] != pytest.approx(np.mean([len(w) for w in windows]))
+    assert result.tokens == 20
+
+
+@pytest.mark.asyncio
+async def test_fastembed_cuts_a_word_longer_than_the_limit_at_a_token_boundary(monkeypatch):
+    engine, calls = _windowed_engine(monkeypatch)  # limit: 6 tokens
+    word = "ab" * 10  # one word of 10 tokens: ``ab`` then nine ``##ab``
+
+    await engine.embed_text([word])
+
+    assert calls == [["ab" * 6, "ab" * 4]]
 
 
 @pytest.mark.asyncio
 async def test_fastembed_batch_with_one_over_length_item_returns_one_vector_per_input(monkeypatch):
-    engine = _fastembed_engine(monkeypatch, None, {"max_length": 512})
-    engine.embedding_model.model.tokenizer.encode_batch = lambda texts: [
-        SimpleNamespace(overflowing=[1] if len(text) > 2500 else []) for text in texts
+    engine, calls = _windowed_engine(monkeypatch)  # limit: 6 tokens
+
+    vectors = await engine.embed_text(["short", " ".join(["alpha"] * 15), "short"])
+
+    assert calls == [
+        [
+            "short",
+            " ".join(["alpha"] * 6),
+            " ".join(["alpha"] * 6),
+            " ".join(["alpha"] * 3),
+            "short",
+        ]
     ]
-    engine.embedding_model.embed = lambda texts, **kwargs: [np.ones(4) for _ in texts]
-
-    vectors = await engine.embed_text(["short", "y" * 3000, "short too"])
-
     assert len(vectors) == 3 and all(len(vector) == 4 for vector in vectors)
+    assert vectors[0] == [5.0, 1.0, 1.0, 1.0] and vectors[2] == [5.0, 1.0, 1.0, 1.0]
 
 
 @pytest.mark.asyncio
