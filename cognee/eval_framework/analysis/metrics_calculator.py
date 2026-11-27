@@ -3,6 +3,12 @@ from collections import defaultdict
 
 import numpy as np
 
+from cognee.eval_framework.integrity.coverage import MetricCoverage, compute_metric_coverage
+from cognee.eval_framework.integrity.status import count_statuses
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 
 def bootstrap_ci(scores, num_samples=10000, confidence_level=0.95):
     """Calculate bootstrap confidence intervals for a list of scores."""
@@ -38,7 +44,8 @@ def extract_metrics_and_details(
     for entry in data:
         for metric, values in entry["metrics"].items():
             score = values["score"]
-            # Skip None scores from failed evaluations
+            # None scores (failed evaluations) are left out of the scores; the coverage
+            # written by calculate_metrics_statistics says how many were left out.
             if score is not None:
                 metrics_data[metric].append(score)
                 if "reason" in values:
@@ -59,14 +66,22 @@ def save_aggregate_metrics(
     metrics_data: dict[str, list[float]],
     ci_results: dict[str, tuple[float, float, float]],
     output_path: str,
+    coverage: dict[str, MetricCoverage] | None = None,
+    answers: dict[str, int] | None = None,
 ) -> None:
-    """Save aggregated metrics and confidence intervals to file."""
+    """Save aggregated metrics and confidence intervals to file.
+
+    When ``coverage`` is given, each metric also carries ``coverage``: how many questions the
+    metric scored out of how many it was asked about.
+    """
     aggregate_data = {
         metric: {
             "scores": scores,
             "mean": ci_results[metric][0],
             "ci_lower": ci_results[metric][1],
             "ci_upper": ci_results[metric][2],
+            **({"coverage": coverage[metric].model_dump()} if coverage else {}),
+            **({"answers": answers} if answers else {}),
         }
         for metric, scores in metrics_data.items()
     }
@@ -88,7 +103,17 @@ def calculate_metrics_statistics(
         mean_score, lower, upper = bootstrap_ci(scores)
         ci_results[metric] = (mean_score, lower, upper)
 
+    coverage = compute_metric_coverage(data)
+    for metric, metric_coverage in coverage.items():
+        if metric_coverage.unscored:
+            logger.warning(
+                f"Metric '{metric}' scored {metric_coverage.scored}/{metric_coverage.total} "
+                "questions; its mean covers only the scored ones"
+            )
+
     # Save aggregate metrics
-    save_aggregate_metrics(metrics_data, ci_results, aggregate_output_path)
+    save_aggregate_metrics(
+        metrics_data, ci_results, aggregate_output_path, coverage, count_statuses(data)
+    )
 
     return metrics_data, metric_details, ci_results

@@ -14,6 +14,8 @@ from cognee.eval_framework.answer_generation.question_type_prompts import (
     get_question_type_prompt,
 )
 from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
+from cognee.eval_framework.integrity.answering import answer_question
+from cognee.eval_framework.integrity.status import answer_status
 from cognee.eval_framework.reporting.io import read_json, write_json
 from cognee.shared.logging_utils import get_logger
 
@@ -100,8 +102,7 @@ def normalize_answer_text(search_results: Any) -> str:
 
 def build_answer_record(
     question: dict[str, Any],
-    answer_text: str,
-    retrieval_context: str,
+    outcome: dict[str, Any],
     retriever_name: str,
     run_idx: int,
 ) -> dict[str, Any]:
@@ -109,13 +110,17 @@ def build_answer_record(
         "conversation_id": question.get("conversation_id", "unknown"),
         "question_idx": question["question_idx"],
         "question": question["question"],
-        "answer": answer_text,
+        "answer": normalize_answer_text(outcome["answer"]),
         "golden_answer": question["answer"],
-        "retrieval_context": retrieval_context,
+        "retrieval_context": outcome["retrieval_context"],
+        "status": outcome["status"],
         "question_type": question.get("question_type", "unknown"),
         "retriever_name": retriever_name,
         "run_idx": run_idx,
     }
+
+    if "error" in outcome:
+        answer["error"] = outcome["error"]
 
     # adversarial_answer: the distractor LoCoMo's judge must reject on unanswerable questions.
     for optional_key in ("rubric", "difficulty", "golden_context", "adversarial_answer"):
@@ -149,8 +154,7 @@ def _write_cached_answer(answer_cache_dir: Path | None, answer: dict[str, Any]) 
     if answer_cache_dir is None:
         return
 
-    answer_text = answer.get("answer")
-    if isinstance(answer_text, str) and answer_text.startswith("ERROR:"):
+    if answer_status(answer).failed:
         return
 
     answer_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -202,32 +206,19 @@ async def _answer_single_fixed_retriever(
 
         retriever = config["retriever_cls"](**retriever_kwargs)
 
-        try:
-            retrieved_objects = await retriever.get_retrieved_objects(query=question["question"])
-            retrieval_context = await retriever.get_context_from_objects(
-                query=question["question"],
-                retrieved_objects=retrieved_objects,
-            )
-            search_results = await retriever.get_completion_from_context(
-                query=question["question"],
-                retrieved_objects=retrieved_objects,
-                context=retrieval_context,
-            )
-            answer_text = normalize_answer_text(search_results)
-        except Exception as exc:
-            logger.exception(
-                "[%s][run %s] Failed to answer question_idx=%s",
+        outcome = await answer_question(retriever, question["question"])
+        if answer_status(outcome).failed:
+            logger.error(
+                "[%s][run %s] Failed to answer question_idx=%s: %s",
                 retriever_name,
                 run_idx,
                 question["question_idx"],
+                outcome["error"],
             )
-            answer_text = f"ERROR: {exc}"
-            retrieval_context = ""
 
         answer = build_answer_record(
             question=question,
-            answer_text=answer_text,
-            retrieval_context=retrieval_context,
+            outcome=outcome,
             retriever_name=retriever_name,
             run_idx=run_idx,
         )
