@@ -17,6 +17,10 @@ and with a single-use token every refresh but the first would present one that
 no longer exists. Each use moves ``expires_at`` forward instead, so the login
 lasts until the UI has not been used for ``REFRESH_TOKEN_LIFETIME_SECONDS``
 (7 days by default).
+
+It also ends ``REFRESH_TOKEN_MAX_LIFETIME_SECONDS`` after it started (30 days
+by default), however often it was used. Without that end a copied token could
+be kept alive for good by using it once a week.
 """
 
 import hashlib
@@ -40,6 +44,11 @@ def get_refresh_token_lifetime() -> timedelta:
     return timedelta(seconds=int(os.getenv("REFRESH_TOKEN_LIFETIME_SECONDS", "604800")))
 
 
+def get_refresh_token_max_lifetime() -> timedelta:
+    """How long a refresh token stays valid after the login, however often it is used."""
+    return timedelta(seconds=int(os.getenv("REFRESH_TOKEN_MAX_LIFETIME_SECONDS", "2592000")))
+
+
 def _hash_token(token: str) -> str:
     # A fast hash is enough: the token is 256 random bits, so unlike a
     # password it cannot be guessed from its hash.
@@ -54,7 +63,9 @@ async def create_refresh_token(user: User) -> str:
     """Store a new refresh token for ``user`` and return it.
 
     Rows that have expired, of any user, are removed in the same transaction:
-    nothing else deletes the token of a browser that never comes back.
+    nothing else deletes the token of a browser that never comes back. A token
+    past its maximum lifetime is no longer extended, so it expires and is
+    removed here within one ``REFRESH_TOKEN_LIFETIME_SECONDS``.
     """
     token = secrets.token_urlsafe(32)
     now = datetime.now(timezone.utc)
@@ -66,6 +77,7 @@ async def create_refresh_token(user: User) -> str:
                 user_id=user.id,
                 token_hash=_hash_token(token),
                 password_fingerprint=_fingerprint_password(user.hashed_password),
+                created_at=now,
                 expires_at=now + get_refresh_token_lifetime(),
             )
         )
@@ -77,10 +89,12 @@ async def create_refresh_token(user: User) -> str:
 async def redeem_refresh_token(token: str) -> User | None:
     """Return the user a live refresh token belongs to and extend the token's life.
 
-    None for an unknown or expired token. A token whose user is inactive, or
-    whose password or token secret changed since it was issued, is deleted:
-    like an access token (``PasswordBoundJWTStrategy``) it must not outlive
-    either.
+    None for an unknown token, for one not used for
+    ``REFRESH_TOKEN_LIFETIME_SECONDS``, and for one issued
+    ``REFRESH_TOKEN_MAX_LIFETIME_SECONDS`` ago, however recently it was used.
+    A token whose user is inactive, or whose password or token secret changed
+    since it was issued, is deleted: like an access token
+    (``PasswordBoundJWTStrategy``) it must not outlive either.
     """
     now = datetime.now(timezone.utc)
 
@@ -90,6 +104,7 @@ async def redeem_refresh_token(token: str) -> User | None:
                 select(UserRefreshToken).where(
                     UserRefreshToken.token_hash == _hash_token(token),
                     UserRefreshToken.expires_at > now,
+                    UserRefreshToken.created_at > now - get_refresh_token_max_lifetime(),
                 )
             )
         ).scalar()

@@ -7,7 +7,7 @@ Create Date: 2026-11-27 06:57:53.251076
 A browser login ended with its access token (one hour by default). Login now
 also issues a refresh token that the web UI exchanges for a new access token;
 this table holds each token's hash, the fingerprint of the password it was
-issued under and the end of its allowed idle time.
+issued under, when the login started and the end of its allowed idle time.
 
 Idempotent: the table is created or dropped only when the inspector says so.
 """
@@ -42,6 +42,7 @@ def upgrade() -> None:
         ),
         sa.Column("token_hash", sa.String, nullable=False, unique=True, index=True),
         sa.Column("password_fingerprint", sa.String, nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False, index=True),
     )
 

@@ -24,6 +24,8 @@ class UserRefreshToken(Base):
     # Fingerprint of the password the token was issued under, keyed with the
     # token secret: a change of either ends the login.
     password_fingerprint: Mapped[str] = mapped_column(nullable=False)
+    # When the login started: it ends a maximum lifetime later, however often it is used.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     # Moved forward on every use, so it is the end of the allowed idle time.
     # Indexed for the removal of expired rows on login.
     expires_at: Mapped[datetime] = mapped_column(

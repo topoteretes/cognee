@@ -114,7 +114,8 @@ def get_auth_router():
 
         Takes no body: the refresh token is read from the cookie login set. Returns
         access_token and token_type, sets the new token as the authentication cookie, and
-        extends the refresh token by REFRESH_TOKEN_LIFETIME_SECONDS. A missing, unknown or
+        extends the refresh token by REFRESH_TOKEN_LIFETIME_SECONDS, up to
+        REFRESH_TOKEN_MAX_LIFETIME_SECONDS after the login. A missing, unknown or
         expired refresh token returns 401 with detail REFRESH_BAD_TOKEN, as does one whose
         user is inactive or has changed their password since logging in, and one issued
         under another FASTAPI_USERS_JWT_SECRET.

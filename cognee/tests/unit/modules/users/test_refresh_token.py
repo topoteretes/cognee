@@ -3,8 +3,9 @@
 An access token lasts an hour and cannot be extended, so a web UI session ended
 with it. Login now also issues a refresh token that POST /api/v1/auth/refresh
 exchanges for a new access token. The contract: a token names its user and each
-use restarts its lifetime; an expired or deleted token, a changed password and
-an inactive user all end the login. The stored tokens run against a real
+use restarts its lifetime, up to a maximum counted from the login; an expired
+or deleted token, a changed password or token secret and an inactive user all
+end the login. The stored tokens run against a real
 database, because the point is what a stored row does; the routes run with the
 storage replaced, because the point there is the cookies and status codes.
 """
@@ -29,6 +30,7 @@ from cognee.modules.users.authentication.refresh_token import (
     create_refresh_token,
     delete_refresh_token,
     get_refresh_token_lifetime,
+    get_refresh_token_max_lifetime,
     redeem_refresh_token,
 )
 from cognee.modules.users.models import User
@@ -156,6 +158,39 @@ async def test_an_expired_token_is_refused():
 
 
 @pytest.mark.asyncio
+async def test_a_login_ends_after_its_maximum_lifetime_however_often_it_is_used():
+    """Each use restarts the idle time, so without this end a copied token never dies."""
+    user = await _user()
+    token = await create_refresh_token(user)
+    row_id = (await _stored(token)).id
+    now = datetime.now(timezone.utc)
+    used_a_minute_ago = now + timedelta(days=7) - timedelta(minutes=1)
+
+    await _change(
+        UserRefreshToken, row_id, created_at=now - timedelta(days=29), expires_at=used_a_minute_ago
+    )
+    assert (await redeem_refresh_token(token)).id == user.id, "a 29 day old login is renewed"
+
+    await _change(
+        UserRefreshToken, row_id, created_at=now - timedelta(days=31), expires_at=used_a_minute_ago
+    )
+    assert await redeem_refresh_token(token) is None
+    assert _utc((await _stored(token)).expires_at) == used_a_minute_ago, "and is not extended"
+
+
+@pytest.mark.asyncio
+async def test_the_login_start_is_kept_when_the_token_is_used():
+    """The maximum lifetime counts from the login, not from the last use."""
+    token = await create_refresh_token(await _user())
+    started = _utc((await _stored(token)).created_at)
+    assert datetime.now(timezone.utc) - started < timedelta(minutes=1)
+
+    await redeem_refresh_token(token)
+
+    assert _utc((await _stored(token)).created_at) == started
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_token_is_refused():
     assert await redeem_refresh_token("never-issued") is None
     assert await redeem_refresh_token("") is None
@@ -256,6 +291,18 @@ def test_the_lifetime_is_seven_days_unless_the_environment_says_otherwise(monkey
     monkeypatch.setenv("REFRESH_TOKEN_LIFETIME_SECONDS", "a week")
     with pytest.raises(ValueError):
         get_refresh_token_lifetime()
+
+
+def test_the_maximum_lifetime_is_thirty_days_unless_the_environment_says_otherwise(monkeypatch):
+    monkeypatch.delenv("REFRESH_TOKEN_MAX_LIFETIME_SECONDS", raising=False)
+    assert get_refresh_token_max_lifetime() == timedelta(days=30)
+
+    monkeypatch.setenv("REFRESH_TOKEN_MAX_LIFETIME_SECONDS", "3600")
+    assert get_refresh_token_max_lifetime() == timedelta(hours=1)
+
+    monkeypatch.setenv("REFRESH_TOKEN_MAX_LIFETIME_SECONDS", "a month")
+    with pytest.raises(ValueError):
+        get_refresh_token_max_lifetime()
 
 
 def _client() -> TestClient:
