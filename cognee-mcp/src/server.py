@@ -882,6 +882,8 @@ async def improve(
     build_global_context_index: bool = False,
     build_truth_subspace: bool = False,
     dataset_id: str | None = None,
+    # Not `background` as on remember: tool search indexes parameter names, and that
+    # one ranks improve above cognify_status for a question about background ingestion.
     wait: bool = True,
 ) -> list:
     """Run the self-improvement loop over a dataset and report what each stage did.
@@ -921,7 +923,9 @@ async def improve(
         a dataset shared with you.
     wait : bool
         False returns at once while the stages go on, for a dataset whose
-        improve outlasts a tool call. The reply then lists no stages.
+        improve outlasts a tool call. The reply then lists no stages, and
+        their outcome is only logged. No tool reports it. In direct mode
+        the run ends with the MCP server.
     """
     from uuid import UUID
 
@@ -980,7 +984,10 @@ def format_improve_result(result, dataset_name: str) -> str:
         suffix = f" ({'; '.join(detail)})" if detail else ""
         lines.append(f"- {stage.get('stage', '?')}: {stage.get('status', '?')}{suffix}")
     if not stages and status == "running":
-        lines.append("The chain is running in the background.")
+        lines.append(
+            "The chain is running in the background. Its outcome is only logged: by the "
+            f"Cognee server when one is connected, otherwise in {get_log_file_location()}"
+        )
     if result.get("error") and status == "errored":
         lines.append(f"error: {result['error']}")
     return "\n".join(lines)

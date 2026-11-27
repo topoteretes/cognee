@@ -161,6 +161,7 @@ def test_format_improve_result_handles_running_and_legacy_payloads():
     )
     assert "running" in running.splitlines()[0]
     assert "background" in running
+    assert str(server.get_log_file_location()) in running
 
     legacy = server.format_improve_result({"some-uuid": {"status": "completed"}}, "ds")
     assert legacy.startswith("Improve completed for dataset 'ds'.")
