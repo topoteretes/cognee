@@ -33,7 +33,7 @@ integrations:
     registry: pypi
     package_name: "cognee-integration-hermes-agent"
     cognee_dependency: http-api
-    current_version: "1.4.3"
+    current_version: "1.4.4"
     path: integrations/hermes-agent
     tag_prefix: hermes-agent-v
     release_workflow: release_hermes_plugin.yml

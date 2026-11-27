@@ -56,10 +56,12 @@ class _FakeRun:
         self.root, self.version, self.fail_on = root, version, fail_on
         self.commands = []
         self.envs = []
+        self.probe_envs = []
 
     def __call__(self, command, **kwargs):
         command = [str(c) for c in command]
         if command[-2:] == ["-c", "import importlib.metadata as m; print(m.version('cognee'))"]:
+            self.probe_envs.append(kwargs.get("env"))
             return subprocess.CompletedProcess(command, 0, stdout=f"{self.version}\n", stderr="")
         self.commands.append(command)
         self.envs.append(kwargs.get("env"))
@@ -152,6 +154,27 @@ def test_install_without_uv_uses_venv_and_pip(runtime):
         [str(_python(runtime)), "-m", "pip", "install", LOCAL_COGNEE_REQUIREMENT],
     ]
     assert runtime_env.runtime_python() == str(_python(runtime))
+
+
+@pytest.mark.parametrize("uv", ["/bin/uv", None])
+def test_commands_on_the_venv_drop_the_host_import_paths(runtime, monkeypatch, uv):
+    # A host PYTHONPATH makes pip count the host's packages as installed and
+    # leave them out of the venv, and makes the version probe read the host's
+    # cognee. Creating the venv runs the host's interpreter, so it keeps them.
+    monkeypatch.setenv("PYTHONPATH", "/host/site-packages")
+    monkeypatch.setenv("PYTHONHOME", "/host")
+    run = _FakeRun(runtime)
+    with (
+        mock.patch.object(runtime_env, "_find_uv", return_value=uv),
+        mock.patch.object(runtime_env.subprocess, "run", side_effect=run),
+    ):
+        runtime_env.install_runtime(output=lambda _: None)
+    create_env, install_env = run.envs
+    (probe_env,) = run.probe_envs
+    for env in (install_env, probe_env):
+        assert "PYTHONPATH" not in env
+        assert "PYTHONHOME" not in env
+    assert (create_env or os.environ)["PYTHONPATH"] == "/host/site-packages"
 
 
 def test_a_ready_runtime_is_not_reinstalled(runtime):

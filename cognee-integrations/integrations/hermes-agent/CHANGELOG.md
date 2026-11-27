@@ -9,7 +9,7 @@ The version must match the `version` field in both `pyproject.toml` and
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.4]
 
 ### Changed
 - **The plugin's source moved to the cognee repository (SDK-1489).** It now lives in
@@ -17,6 +17,17 @@ project adheres to [Semantic Versioning](https://semver.org/).
   [topoteretes/cognee](https://github.com/topoteretes/cognee); earlier history is in
   `integrations/hermes-agent` of topoteretes/cognee-integrations. The PyPI package name,
   the entry points and `cognee-hermes-install` are unchanged.
+
+### Fixed
+- **The local runtime ignores the host's `PYTHONPATH` and `PYTHONHOME` (#6808).** A packaged
+  Hermes (the Windows desktop app) exports `PYTHONPATH` into its own package tree. The local
+  server then imported `pydantic` and `uvicorn` from there and died at start with
+  `DLL load failed while importing _pydantic_core: Access is denied`. The server, the
+  `install-runtime` install step and its version check now run on the runtime venv without
+  those two variables. A cognee in Hermes's own environment still gets them.
+  A runtime that pip built (no `uv` on PATH) while `PYTHONPATH` was set can be missing
+  packages the host already had: rebuild it with `hermes cognee remove-runtime`, then
+  `hermes cognee install-runtime`.
 
 ## [1.4.3]
 
