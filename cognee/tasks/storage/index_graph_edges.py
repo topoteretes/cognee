@@ -3,6 +3,7 @@ from typing import Any
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.graph_db_interface import EdgeData
+from cognee.infrastructure.databases.postgres.transient import retry_postgres
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.shared.logging_utils import get_logger
@@ -88,7 +89,13 @@ async def index_graph_edges(
 
         edge_type_datapoints = create_edge_type_datapoints(edges_data)
 
-        await index_data_points(edge_type_datapoints, vector_engine=vector_engine, budget=budget)
+        # EdgeType IDs are deterministic and the vector write is an upsert.
+        # Retry this stage only; extraction has already completed and is paid for.
+        await retry_postgres(
+            lambda: index_data_points(
+                edge_type_datapoints, vector_engine=vector_engine, budget=budget
+            )
+        )
     except Exception as e:
         logger.error("Failed to index graph edges: %s", e)
         raise RuntimeError("Graph edge indexing error") from e

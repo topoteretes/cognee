@@ -24,7 +24,7 @@ from openai import AsyncOpenAI
 from tenacity import (
     before_sleep_log,
     retry,
-    stop_after_delay,
+    stop_before_delay,
     wait_exponential_jitter,
 )
 
@@ -50,7 +50,9 @@ from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
+    EMBEDDING_RETRY_WINDOW,
     embedding_retry_condition,
+    get_embedding_attempt_timeout,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     count_input_tokens,
@@ -108,6 +110,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         input_type: str | None = None,
         encoding_format: EncodingFormat | None = None,
     ):
+        self.attempt_timeout = get_embedding_attempt_timeout()
         self.model = model or "default"
         self.dimensions = dimensions
         self.endpoint = endpoint or "http://localhost:8080"
@@ -133,11 +136,16 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             base = base[: -len("/embeddings")]
         if not base.endswith("/v1"):
             base = base + "/v1"
-        self._client = AsyncOpenAI(api_key=self.api_key, base_url=base, timeout=120)
+        self._client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=base,
+            timeout=self.attempt_timeout,
+            max_retries=0,
+        )
 
     @observe(as_type="embeddings")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_before_delay(EMBEDDING_RETRY_WINDOW),
         wait=wait_exponential_jitter(2, 128),
         # Budget exhaustion is terminal too: this engine talks to any
         # OpenAI-compatible base URL, a LiteLLM proxy included. It is classified
@@ -192,7 +200,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             async with embedding_rate_limiter_context_manager():
                 response = await asyncio.wait_for(
                     self._client.embeddings.create(**create_kwargs),
-                    timeout=300.0,
+                    timeout=self.attempt_timeout,
                 )
             embeddings = [
                 decode_embedding(item.embedding, self.encoding_format) for item in response.data

@@ -12,7 +12,7 @@ import numpy as np
 from tenacity import (
     before_sleep_log,
     retry,
-    stop_after_delay,
+    stop_before_delay,
     wait_exponential_jitter,
 )
 
@@ -38,7 +38,9 @@ from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
+    EMBEDDING_RETRY_WINDOW,
     embedding_retry_condition,
+    get_embedding_attempt_timeout,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     count_input_tokens,
@@ -181,6 +183,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.endpoint = endpoint
         self.api_version = api_version
         self.provider = provider
+        self.attempt_timeout = get_embedding_attempt_timeout()
         self.model = model
         self.dimensions = dimensions
         self.tokenizer = self.get_tokenizer()
@@ -220,7 +223,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
     @observe(as_type="embeddings")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_before_delay(EMBEDDING_RETRY_WINDOW),
         wait=wait_exponential_jitter(2, 128),
         # Skip the retry chain for terminal error classes. Authentication /
         # authorization / not-found / bad-request / unprocessable errors will
@@ -322,16 +325,13 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     if self.input_type:
                         embedding_kwargs["input_type"] = self.input_type
 
-                    # Ensure each attempt does not hang indefinitely
-                    # Ensure each attempt does not hang indefinitely. The
-                    # deadline is TOTAL per attempt and starts before any
-                    # network I/O, so under large loads a request can spend
-                    # most of it queued client-side; 300s absorbs that while
-                    # still catching a genuinely hung request (matches the
-                    # OpenAI-compatible engine's deadline).
+                    # Tenacity owns retries. wait_for completes cancellation
+                    # of the timed-out request before another attempt starts.
+                    embedding_kwargs["timeout"] = self.attempt_timeout
+                    embedding_kwargs["num_retries"] = 0
                     response = await asyncio.wait_for(
                         litellm.aembedding(**embedding_kwargs),
-                        timeout=300.0,
+                        timeout=self.attempt_timeout,
                     )
 
                 embedding_response = [

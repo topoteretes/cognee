@@ -35,7 +35,8 @@ class CogneeGraph(CogneeAbstractGraph):
     feedback_influence: float
     personal_influence: float
 
-    def __init__(self, directed: bool = True):
+    def __init__(self, directed: bool = True, excluded_node_types: tuple[str, ...] = ()):
+        self.excluded_node_types = excluded_node_types
         self.nodes = {}
         self.edges = []
         self.edges_by_distance_key = {}
@@ -190,7 +191,7 @@ class CogneeGraph(CogneeAbstractGraph):
         start_time = time.time()
         # Process nodes
         for node_id, properties in nodes_data:
-            if is_internal_node(properties):
+            if is_internal_node(properties) or properties.get("type") in self.excluded_node_types:
                 continue
             node_attributes = {key: properties.get(key) for key in node_properties_to_project}
             self.add_node(

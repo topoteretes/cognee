@@ -23,6 +23,9 @@ _SCRUB_WINDOW = ERROR_MESSAGE_MAX_LENGTH * 4
 # Order matters: secret-shaped tokens are redacted before digit runs so a
 # key is reported as one [secret], not a shredded mix of both markers.
 _SCRUB_PATTERNS = [
+    # Connection strings and credential assignments can appear in database causes.
+    (re.compile(r"(?i)([a-z][a-z0-9+.-]*://)[^/@\s]+:[^/@\s]+@"), r"\1[secret]@"),
+    (re.compile(r"(?i)\b(password|api_key|access_token)\s*[=:]\s*[^\s,;]+"), r"\1=[secret]"),
     # email addresses
     (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "[email]"),
     # bearer tokens and key-prefixed credentials (sk-..., api_key_..., token-...)
@@ -44,6 +47,21 @@ def scrub_error_message(message: object | None) -> str | None:
     if message is None:
         return None
     text = str(message)
+    if isinstance(message, BaseException):
+        text = text or type(message).__name__
+        seen = {id(message)}
+        cause = message.__cause__
+        # Only explicit causes: implicit context may be an unrelated exception
+        # handled earlier. Bound the work by the existing scrub window.
+        while cause is not None and id(cause) not in seen and len(text) < _SCRUB_WINDOW:
+            seen.add(id(cause))
+            detail = str(cause)[:_SCRUB_WINDOW]
+            text += (
+                f"; caused by {type(cause).__name__}: {detail}"
+                if detail
+                else f"; caused by {type(cause).__name__}"
+            )
+            cause = cause.__cause__
     if not text:
         return None
     text = text[:_SCRUB_WINDOW]

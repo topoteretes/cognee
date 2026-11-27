@@ -1578,3 +1578,24 @@ async def test_neighborhood_scores_only_expansion_ids(unsupported):
     graph.map_vector_distances_to_graph_nodes.assert_awaited_once_with(
         node_distances={"Entity_name": expected}, query_list_length=None
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("neighborhood", [False, True])
+async def test_procedures_are_excluded_before_ranking_but_user_data_remains(neighborhood):
+    graph = AsyncMock()
+    nodes = [
+        ("guide", {"type": "Skill", "name": "cognee-with-memgraph"}),
+        ("user", {"type": "Entity", "name": "Our company"}),
+        ("fact", {"type": "Entity", "name": "Uses Postgres"}),
+    ]
+    edges = [("guide", "fact", "mentions", {}), ("user", "fact", "uses", {})]
+    graph.get_graph_data.return_value = (nodes, edges)
+    graph.get_neighborhood.return_value = (nodes, edges)
+    kwargs = {"graph_engine": graph, "excluded_node_types": ("Skill",)}
+    if neighborhood:
+        kwargs.update(neighborhood_depth=1, relevant_ids_to_filter=["guide", "user"])
+    fragment = await get_memory_fragment(**kwargs)
+    assert "guide" not in fragment.nodes
+    assert "user" in fragment.nodes
+    assert [(e.node1.id, e.node2.id) for e in fragment.edges] == [("user", "fact")]

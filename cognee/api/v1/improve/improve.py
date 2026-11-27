@@ -283,6 +283,18 @@ async def improve(
                 # must still say "failed" — conservative: it invalidates any
                 # stamp this run wrote (row contract, module docstring).
                 operation.set_outcome(OperationOutcome.FAILED)
+                failed_stage = next(
+                    (stage for stage in result.stages if stage.status == "errored"), None
+                )
+                if failed_stage is not None:
+                    operation.set_error(
+                        failed_stage.exception
+                        if failed_stage.exception is not None
+                        else RuntimeError(
+                            f"improve stage '{failed_stage.stage}' failed: "
+                            f"{failed_stage.error or 'no error detail returned'}"
+                        )
+                    )
             elif result.status == "skipped":
                 # Nothing ran: record that truthfully, and keep the stamp-less
                 # row out of the stage watermark queries.

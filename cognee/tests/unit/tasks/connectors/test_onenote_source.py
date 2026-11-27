@@ -10,8 +10,8 @@ request budget and the arguments checked when the source is built. No network, n
 import json
 import subprocess
 import sys
-import time
 from copy import deepcopy
+from functools import partial
 
 import dlt
 import fake_onenote
@@ -985,7 +985,11 @@ def test_container_listing_errors_other_than_20113_are_never_no_children(
 ):
     from cognee.tasks.ingestion.connectors import onenote
 
-    monkeypatch.setattr(time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        onenote.dlt_utils,
+        "with_retries",
+        partial(onenote.dlt_utils.with_retries, sleep=lambda _: None),
+    )
     graph = Graph()
     if not first_sync:
         (table,) = sync(pipeline, graph)
@@ -1042,7 +1046,11 @@ def test_check_active_failure_reaches_the_host_unchanged(pipeline, monkeypatch, 
     cancelled = MyCancelled("connection revoked")
     attempts = []
     original = graph.handle
-    monkeypatch.setattr(time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        onenote.dlt_utils,
+        "with_retries",
+        partial(onenote.dlt_utils.with_retries, sleep=lambda _: None),
+    )
 
     def handler(request):
         attempts.append(request)
@@ -1237,7 +1245,11 @@ def test_page_without_a_web_link_syncs_with_an_empty_url(pipeline):
 def test_rate_limit_and_budget_stop_the_run_with_their_own_counts(pipeline, monkeypatch):
     from cognee.tasks.ingestion.connectors import onenote
 
-    monkeypatch.setattr(time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        onenote.dlt_utils,
+        "with_retries",
+        partial(onenote.dlt_utils.with_retries, sleep=lambda _: None),
+    )
     graph = Graph()
     original = graph.handle
     graph.handle = lambda request: httpx.Response(429, json={"error": {"code": "10001"}})
@@ -1254,7 +1266,12 @@ def test_retry_after_beyond_the_wait_budget_counts_as_a_rate_limit(pipeline, mon
     from cognee.tasks.ingestion.connectors import onenote
 
     delays = []
-    monkeypatch.setattr(time, "sleep", delays.append)
+    # Patch only connector backoff, not time.sleep in unrelated worker threads.
+    monkeypatch.setattr(
+        onenote.dlt_utils,
+        "with_retries",
+        partial(onenote.dlt_utils.with_retries, sleep=delays.append),
+    )
     graph = Graph()
     graph.handle = lambda request: httpx.Response(
         429, headers={"Retry-After": "999"}, json={"error": {"code": "10001"}}
@@ -1463,7 +1480,12 @@ def test_a_server_error_exhausts_five_attempts_without_counting_as_a_rate_limit(
     from cognee.tasks.ingestion.connectors import onenote
 
     delays = []
-    monkeypatch.setattr(time, "sleep", delays.append)
+    # Patch only connector backoff, not time.sleep in unrelated worker threads.
+    monkeypatch.setattr(
+        onenote.dlt_utils,
+        "with_retries",
+        partial(onenote.dlt_utils.with_retries, sleep=delays.append),
+    )
     graph = Graph()
     graph.script("notebooks", *[(500, {})] * 5)
     sync(pipeline, graph)
@@ -1477,7 +1499,12 @@ def test_a_throttled_request_waits_for_retry_after_and_the_run_completes(pipelin
     from cognee.tasks.ingestion.connectors import onenote
 
     delays = []
-    monkeypatch.setattr(time, "sleep", delays.append)
+    # Patch only connector backoff, not time.sleep in unrelated worker threads.
+    monkeypatch.setattr(
+        onenote.dlt_utils,
+        "with_retries",
+        partial(onenote.dlt_utils.with_retries, sleep=delays.append),
+    )
     graph = Graph()
     graph.script("notebooks", (429, {"Retry-After": "3"}), (503, {"Retry-After": "1"}))
     (table,) = sync(pipeline, graph)
@@ -1658,7 +1685,12 @@ def test_the_retry_wait_budget_is_one_budget_for_the_whole_sync(pipeline, monkey
     from cognee.tasks.ingestion.connectors import onenote
 
     delays = []
-    monkeypatch.setattr(time, "sleep", delays.append)
+    # Patch only connector backoff, not time.sleep in unrelated worker threads.
+    monkeypatch.setattr(
+        onenote.dlt_utils,
+        "with_retries",
+        partial(onenote.dlt_utils.with_retries, sleep=delays.append),
+    )
     graph = Graph()
     graph.script("notebooks", (429, {"Retry-After": "40"}))
     graph.script("notebooks/a/sections", (429, {"Retry-After": "40"}))
