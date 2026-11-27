@@ -202,7 +202,7 @@ class TestServerLogRotation(unittest.TestCase):
 class TestSpawnEnvironment(unittest.TestCase):
     """The spawned server's environment — where the session cache lives or dies."""
 
-    def _spawn_env(self, **env_overrides):
+    def _spawn_env(self, *, python=None, **env_overrides):
         captured = {}
 
         def fake_popen(args, env=None, **kwargs):
@@ -213,7 +213,7 @@ class TestSpawnEnvironment(unittest.TestCase):
             mock.patch.dict("os.environ", env_overrides, clear=False),
             mock.patch.object(sb.subprocess, "Popen", side_effect=fake_popen),
         ):
-            sb._spawn(9999, "", "", "/dev/null")
+            sb._spawn(9999, "", "", "/dev/null", python=python)
         return captured
 
     def test_caching_is_enabled_for_the_session_tier(self):
@@ -256,6 +256,33 @@ class TestSpawnEnvironment(unittest.TestCase):
         # Not asserting absence outright: the ambient environment may legitimately
         # carry them. What matters is we do not invent an empty value.
         self.assertNotEqual(env.get("DATA_ROOT_DIRECTORY", "unset"), "")
+
+    def test_inherited_import_paths_are_dropped_for_the_runtime_venv(self):
+        # Regression for #6808: a packaged/MSIX Hermes exports PYTHONPATH into its
+        # own package tree. When the server runs on the runtime venv (an
+        # interpreter that is not sys.executable), inheriting PYTHONPATH makes it
+        # import pydantic/uvicorn from the host app, and Windows denies loading the
+        # native .pyd from an MSIX path ("_pydantic_core: Access is denied"). The
+        # venv is self-contained, so the inherited import paths must be dropped.
+        env = self._spawn_env(
+            python="/some/runtime/venv/python",
+            PYTHONPATH="C:/Program Files/WindowsApps/host/site-packages",
+            PYTHONHOME="C:/Program Files/WindowsApps/host",
+        )
+        self.assertNotIn("PYTHONPATH", env)
+        self.assertNotIn("PYTHONHOME", env)
+
+    def test_inherited_import_paths_are_kept_for_the_host_interpreter(self):
+        # The fallback interpreter IS the host's own (server_python returns
+        # sys.executable when cognee lives in Hermes's environment). It needs the
+        # host's PYTHONPATH to find its dependencies, so it must keep them.
+        env = self._spawn_env(python=sys.executable, PYTHONPATH="/host/site-packages")
+        self.assertEqual(env["PYTHONPATH"], "/host/site-packages")
+
+    def test_default_interpreter_keeps_import_paths(self):
+        # python=None resolves to sys.executable (the host), so nothing is stripped.
+        env = self._spawn_env(PYTHONPATH="/host/site-packages")
+        self.assertEqual(env["PYTHONPATH"], "/host/site-packages")
 
 
 class TestOllamaEmbeddingPins(unittest.TestCase):
