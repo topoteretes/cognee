@@ -250,6 +250,31 @@ async def test_hybrid_expand_returns_an_entity_with_every_edge_and_no_query(monk
 
 
 @pytest.mark.asyncio
+async def test_an_entity_with_two_types_has_one_version_whatever_the_edge_order(monkeypatch):
+    entity_hit = _hit("apple", 0.0, name="apple")
+    entity_id = entity_hit.payload["id"]
+
+    def typed(type_names: list[str]):
+        nodes = [(entity_id, {"name": "apple", "type": "Entity"})] + [
+            (f"type-{name}", {"name": name}) for name in type_names
+        ]
+        return nodes, [(entity_id, f"type-{name}", "is_a", {}) for name in type_names]
+
+    # The search and the expand read the same two is_a edges in opposite orders.
+    reads = [typed(["company", "fruit"]), typed(["fruit", "company"])]
+    graph = SimpleNamespace(get_neighborhood=AsyncMock(side_effect=reads))
+    _entity_store(monkeypatch, entity_hit, graph)
+
+    (searched,), _ = await build_entities(graph, [entity_hit], max_edges_per_entity=5)
+    stamp_full_version(searched, citable=True)
+    expanded = await HybridRetriever().expand_records({"entity": [entity_id]})
+
+    body = expanded[("entity", entity_id)]["body"]
+    assert body.startswith("### apple (company)\n")
+    assert searched["full_version"] == compute_content_hash(body)
+
+
+@pytest.mark.asyncio
 async def test_hybrid_expand_fails_when_the_graph_read_fails(monkeypatch):
     # build_entities would return the entity without edges: a new version, as if it
     # had changed.

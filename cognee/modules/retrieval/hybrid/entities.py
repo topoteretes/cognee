@@ -258,11 +258,16 @@ def stamp_full_version(entity: dict, *, citable: bool) -> None:
 def _type_from_connections(
     entity_id: str, current_type: Any, connections: list[tuple[dict, dict, dict]]
 ) -> Any:
-    """The last ``is_a`` target that names a type; an unnamed one keeps what we had."""
-    for source, edge, target in connections:
-        if _is_type_relationship(edge["relationship_name"]) and str(source.get("id")) == entity_id:
-            current_type = display_value(target.get("name")) or current_type
-    return current_type
+    """The first ``is_a`` target by name, so the heading (and the version cited recall
+    hashes it into) does not depend on the order the graph returns edges in. With no
+    named target the entity keeps what it had."""
+    type_names = sorted(
+        type_name
+        for source, edge, target in connections
+        if _is_type_relationship(edge["relationship_name"]) and str(source.get("id")) == entity_id
+        if (type_name := display_value(target.get("name")))
+    )
+    return type_names[0] if type_names else current_type
 
 
 def _conflict_explanations(connections: list[tuple[dict, dict, dict]]) -> list[str]:

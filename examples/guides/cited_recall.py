@@ -14,22 +14,30 @@ import asyncio
 import cognee
 from cognee import SearchType
 
+DATASET = "cited_recall_guide"
 QUERY = "What did Alice and Bob work on together?"
 
 
 async def main():
+    # Start from an empty dataset on every run.
+    if any(dataset.name == DATASET for dataset in await cognee.datasets.list_datasets()):
+        await cognee.forget(dataset=DATASET)
+
     await cognee.remember(
         [
             "Alice and Bob were PhD students in Berlin from 2021 to 2024.",
             "Alice and Bob worked on a paper together in 2023.",
             "Alice joined Cognee as a backend engineer in 2025.",
         ],
+        dataset_name=DATASET,
         self_improvement=False,
     )
 
+    # One item per dataset searched: without `datasets`, every dataset you can read.
     (cited,) = await cognee.recall(
         query_text=QUERY,
         query_type=SearchType.HYBRID_COMPLETION,
+        datasets=[DATASET],
         only_context=True,
         result_mode="cited",
     )
