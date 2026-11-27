@@ -18,6 +18,7 @@ from cognee.tasks.code_graph.cluster import (
     code_repo_path,
     load_dataset_cluster,
     mark_dataset_code_repos_for_rebuild,
+    plan_dataset_refresh,
     refresh_dataset_code_graph,
     resolve_member_labels,
     snapshot_dataset_code_repos,
@@ -229,6 +230,19 @@ async def test_cluster_timeout_scales_with_the_members_up_to_the_cap(monkeypatch
     await snapshot_dataset_code_repos(uuid4(), repos, timeout=7200.0)
     # ... but never less than one repository's own budget.
     assert run_cluster.await_args.kwargs["timeout"] == 7200.0
+
+
+@pytest.mark.asyncio
+async def test_cluster_has_no_time_limit_by_default(monkeypatch, tmp_path):
+    golf, ui = _repos(tmp_path, "golf", "ui")
+    snapshot_dir = _write_snapshot(tmp_path, members=[("golf", golf), ("ui", ui)])
+    run_cluster = AsyncMock(return_value=snapshot_dir)
+    monkeypatch.setattr(cluster_module, "run_enola_cluster", run_cluster)
+
+    await snapshot_dataset_code_repos(uuid4(), [(_row(golf), golf), (_row(ui), ui)])
+
+    # No per-repository timeout, so none to scale: the cluster run has no limit either.
+    assert run_cluster.await_args.kwargs["timeout"] is None
 
 
 # --- loading one member of a cluster snapshot ---------------------------------
@@ -455,6 +469,34 @@ async def test_refresh_runs_each_member_over_its_own_row_from_one_snapshot(refre
     }
     assert [_task_kwargs(call)["repo_scope"] for call in calls] == ["golf", "ui"]
     assert [call.args[0] for call in env.mark.await_args_list] == [env.golf_row.id, env.ui_row.id]
+
+
+@pytest.mark.asyncio
+async def test_refresh_sets_no_time_limit_on_enola_by_default(refresh_env):
+    """With no timeout given, neither the cluster's enola run nor a repository's
+    own run is ever cut off (SDK-1776)."""
+    env = refresh_env
+
+    await refresh_dataset_code_graph(env.dataset, env.user, known_repos=[(env.ui_row, env.ui)])
+
+    assert env.snapshot_mock.await_args.kwargs["timeout"] is None
+    assert [_task_kwargs(call)["timeout"] for call in env.pipeline.await_args_list] == [None, None]
+
+
+@pytest.mark.asyncio
+async def test_a_planned_refresh_sets_no_time_limit_on_enola_by_default(refresh_env):
+    """remember(content_type="code") plans the refresh first, with no timeout,
+    and hands the plan over: the cluster run is the plan's (SDK-1776)."""
+    env = refresh_env
+
+    plan = await plan_dataset_refresh(env.dataset, [env.ui])
+    assert env.snapshot_mock.await_args.kwargs["timeout"] is None
+
+    await refresh_dataset_code_graph(
+        env.dataset, env.user, known_repos=[(env.ui_row, env.ui)], plan=plan
+    )
+    env.snapshot_mock.assert_awaited_once()  # the plan's snapshot is used
+    assert [_task_kwargs(call)["timeout"] for call in env.pipeline.await_args_list] == [None, None]
 
 
 @pytest.mark.asyncio

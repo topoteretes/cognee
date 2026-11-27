@@ -43,9 +43,10 @@ if TYPE_CHECKING:
 
 logger = get_logger("code_graph")
 
-# One enola run covers every repository of the cluster, so its budget scales
-# with the members (the per-repository ``timeout``), up to this ceiling: a
-# dataset of many repositories must not hold its lock for hours on one run.
+# enola has no time limit unless the caller sets ``timeout`` (per repository).
+# One enola run covers every repository of the cluster, so a set timeout
+# scales with the members, up to this ceiling: with a limit set, a dataset of
+# many repositories must not hold its lock for hours on one run.
 CLUSTER_ENOLA_TIMEOUT_CAP_SECONDS = 3600.0
 
 # remember(content_type="code") rebuilds the repositories already in the
@@ -165,16 +166,17 @@ def resolve_member_labels(repo_paths: list[Path], receipt: dict | None) -> list[
 async def snapshot_dataset_code_repos(
     dataset_id: UUID,
     repos: list[tuple[Any, Path]],
-    timeout: float = 600.0,
+    timeout: float | None = None,
 ) -> DatasetCodeSnapshot | None:
     """Run enola once over a dataset's repositories.
 
     ``repos`` pairs each ``code_repo`` Data row with its directory. Returns
     None when the dataset is not a cluster: fewer than two repositories whose
     directory exists, or labels that cannot be matched to their repository.
-    The caller then runs each repository on its own. The timeout is per
-    repository, since one run now covers all of them, capped at
-    CLUSTER_ENOLA_TIMEOUT_CAP_SECONDS (never below one repository's budget).
+    The caller then runs each repository on its own. enola has no time limit
+    unless ``timeout`` is set. A set timeout is per repository, since one run
+    now covers all of them, capped at CLUSTER_ENOLA_TIMEOUT_CAP_SECONDS (never
+    below one repository's budget).
 
     The snapshot is parsed here, once and off the event loop, and the parse
     travels with the result (``parsed``) to every member's load.
@@ -197,7 +199,11 @@ async def snapshot_dataset_code_repos(
         return None
 
     repo_paths = [repo_path for _data, repo_path in members]
-    cluster_timeout = max(timeout, min(timeout * len(members), CLUSTER_ENOLA_TIMEOUT_CAP_SECONDS))
+    cluster_timeout = (
+        None
+        if timeout is None
+        else max(timeout, min(timeout * len(members), CLUSTER_ENOLA_TIMEOUT_CAP_SECONDS))
+    )
     output_dir = cluster_output_dir(dataset_id)
     # The members' load_code_graph checks too, but only after this enola run:
     # an adapter without the lookups must fail before it.
@@ -251,7 +257,7 @@ class RefreshPlan:
 async def plan_dataset_refresh(
     dataset: Any,
     new_repo_paths: list[Path],
-    timeout: float = 600.0,
+    timeout: float | None = None,
 ) -> RefreshPlan:
     """Take the cluster snapshot for adding ``new_repo_paths`` to a dataset.
 
@@ -291,7 +297,7 @@ async def refresh_dataset_code_graph(
     user: Any,
     known_repos: list[tuple[Any, Path]] | None = None,
     index_vectors: bool = False,
-    timeout: float = 600.0,
+    timeout: float | None = None,
     plan: RefreshPlan | None = None,
 ) -> list[MemberRun]:
     """Rebuild the code graph of every repository in a dataset.

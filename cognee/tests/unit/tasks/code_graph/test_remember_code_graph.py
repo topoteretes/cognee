@@ -166,6 +166,17 @@ async def test_code_defaults_to_graph_only(code_remember_env):
 
 
 @pytest.mark.asyncio
+async def test_code_sets_no_time_limit_on_enola(code_remember_env):
+    """Neither the dataset's cluster run nor the repository's own enola run is
+    cut off, however long a large repository takes (SDK-1776)."""
+    await remember("/some/repo", content_type="code")
+
+    assert code_remember_env["cluster"].await_args.kwargs["timeout"] is None
+    tasks = code_remember_env["pipeline"].await_args.kwargs["tasks"]
+    assert tasks[0].default_params["kwargs"]["timeout"] is None
+
+
+@pytest.mark.asyncio
 async def test_session_id_is_rejected_for_code(code_remember_env):
     with pytest.raises(ValueError, match="session_id"):
         await remember("/some/repo", content_type="code", session_id="s1")
