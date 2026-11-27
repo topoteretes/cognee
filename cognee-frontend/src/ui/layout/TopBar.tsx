@@ -1,4 +1,5 @@
 "use client";
+import { uiPath } from "@/modules/config/uiBasePath";
 
 import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
@@ -128,7 +129,7 @@ export default function TopBar() {
       <div className="flex items-center" style={{ gap: 8 }}>
         {/* Logo fixed-width box so workspace aligns with right edge of navbar (240px - 24px padding) */}
         <div style={{ width: 240, flexShrink: 0, display: "flex", alignItems: "center" }}>
-          <Image src="/cognee-logo-black.svg" alt="Cognee" width={110} height={32} loading="eager" style={{ width: 110, height: "auto", flexShrink: 0, filter: "invert(1)" }} />
+          <Image src={uiPath("/cognee-logo-black.svg")} alt="Cognee" width={110} height={32} loading="eager" style={{ width: 110, height: "auto", flexShrink: 0, filter: "invert(1)" }} />
         </div>
 
         {/* 1. Workspace switcher */}

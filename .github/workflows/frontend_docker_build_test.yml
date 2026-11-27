@@ -11,8 +11,28 @@ permissions:
   contents: read
 
 jobs:
+  ui_subpath_regressions:
+    name: UI subpath regressions
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: cognee-frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 22
+      - run: npm ci --include=dev
+      - run: npx jest --runInBand --runTestsByPath src/modules/config/__tests__/uiBasePath.test.ts src/modules/tenant/__tests__/LocalProvider.basePath.test.tsx src/ui/layout/__tests__/ProfileMenu.basePath.test.tsx src/app/api/__tests__/localBackendRoutes.test.ts
+
   build_ui_docker:
-    name: Build Cognee UI Docker Image
+    name: Build Cognee UI Docker Image (${{ matrix.base_path || '/' }})
+    strategy:
+      fail-fast: false
+      matrix:
+        base_path: ["", "/cognee"]
+    env:
+      UI_BASE_PATH: ${{ matrix.base_path }}
     runs-on: ubuntu-22.04
     steps:
       - name: Check out Cognee code
@@ -31,6 +51,8 @@ jobs:
           push: false
           load: true
           tags: cognee-ui:ci
+          build-args: |
+            NEXT_PUBLIC_UI_BASE_PATH=${{ matrix.base_path }}
 
       - name: Serve a page from the built image
         # Proves more than "it compiled": the standalone server boots, and the
@@ -42,7 +64,7 @@ jobs:
             -e COGNEE_BACKEND_URL=http://127.0.0.1:9100 cognee-ui:ci
 
           for attempt in $(seq 1 30); do
-            if curl -fsS http://localhost:3000/local-login -o /tmp/page.html; then
+            if curl -fsS "http://localhost:3000${UI_BASE_PATH}/local-login" -o /tmp/page.html; then
               break
             fi
             if [ "$attempt" -eq 30 ]; then
@@ -62,7 +84,7 @@ jobs:
             exit 1
           }
 
-          curl -fsS http://localhost:3000/api/runtime-config
+          curl -fsS "http://localhost:3000${UI_BASE_PATH}/api/runtime-config"
 
       - name: Verify actual runtime backend requests
         run: |
@@ -83,19 +105,22 @@ jobs:
           # their own, so an anonymous request must stay unauthorized.
           for route in 'visualize?dataset_id=demo' 'schema/inventory?dataset_id=demo' 'schema/provenance' 'schema-provenance'; do
             curl -fsS -H 'Authorization: Bearer runtime-test-token' \
-              "http://localhost:3000/api/$route" | grep -q runtime_backend
-            status=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3000/api/$route")
+              "http://localhost:3000${UI_BASE_PATH}/api/$route" | grep -q runtime_backend
+            status=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3000${UI_BASE_PATH}/api/$route")
             if [ "$status" != "401" ]; then
               echo "::error::anonymous /api/$route returned $status, expected 401"
               exit 1
             fi
           done
           # Sign-out goes through the server too: it must end up at the login page.
-          redirect=$(curl -s -o /dev/null -w '%{redirect_url}' http://localhost:3000/api/local-signout)
-          case "$redirect" in */local-login) ;; *)
+          redirect=$(curl -s -o /dev/null -w '%{redirect_url}' "http://localhost:3000${UI_BASE_PATH}/api/local-signout")
+          case "$redirect" in "http://localhost:3000${UI_BASE_PATH}/local-login") ;; *)
             echo "::error::/api/local-signout redirected to '$redirect', expected the login page"
             exit 1 ;;
           esac
+
+      - name: Verify built public assets and font URLs
+        run: node cognee-frontend/scripts/check-ui-subpath.mjs "http://localhost:3000" "$UI_BASE_PATH"
 
       - name: Reject a misconfigured backend URL
         # The container must refuse to start and name the variable, instead of

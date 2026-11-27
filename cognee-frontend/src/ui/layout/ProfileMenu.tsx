@@ -1,4 +1,5 @@
 "use client";
+import { uiPath } from "@/modules/config/uiBasePath";
 
 import { useCallback } from "react";
 import Link from "next/link";
@@ -97,7 +98,7 @@ export default function ProfileMenu({ userName, userEmail, profileHref = "/setti
           <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "2px -6px" }} />
 
           <a
-            href={logoutHref}
+            href={uiPath(logoutHref)}
             onClick={close}
             className="flex items-center gap-[10px] rounded-[6px] px-3 py-[10px] hover:bg-white/[0.07] focus-visible:bg-white/[0.07] focus-visible:outline-2 focus-visible:outline-[#BC9BFF]"
             style={{ fontSize: 13, color: "#FF8A80", textDecoration: "none" }}

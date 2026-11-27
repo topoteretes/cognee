@@ -1,3 +1,38 @@
+## Serve the local UI under a subpath
+
+Set the path **before building**. The default is an empty path (serve at `/`).
+Use slash-separated letters, digits, underscores or hyphens without a trailing
+slash, for example `/cognee` or `/tools/cognee`.
+
+From `cognee-frontend`, with Node.js 22 and a running Cognee backend:
+
+```bash
+npm ci
+NEXT_PUBLIC_UI_BASE_PATH=/cognee npm run build
+COGNEE_BACKEND_URL=http://localhost:8000 npm start
+```
+
+Open `http://localhost:3000/cognee/local-login`. UI assets and local login/logout
+redirects stay under `/cognee`. Next.js links and router calls apply the prefix
+automatically; `uiPath()` is only for raw browser URLs, public assets and native
+anchors. The backend URL remains independent: do not add the UI prefix to it.
+A reverse proxy must forward `/cognee` unchanged, not strip the prefix.
+
+To build the standalone Docker image instead:
+
+```bash
+docker build --build-arg NEXT_PUBLIC_UI_BASE_PATH=/cognee -t cognee-ui:subpath .
+docker run --rm -p 3000:3000 \
+  -e COGNEE_BACKEND_URL=http://localhost:8000 cognee-ui:subpath
+```
+
+The backend URL is the address visible to the browser. Server-side routes also
+need to reach it; `localhost` inside Docker refers to that container. Supply a
+backend address reachable from both contexts for a non-local deployment.
+Changing `NEXT_PUBLIC_UI_BASE_PATH` at container startup cannot move an already
+built UI: rebuild the image to change its mount. This option targets the local
+open-source UI; it does not configure cloud authentication callback URLs.
+
 This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
 
 ## Testing Google Drive and Gmail against the SDK
