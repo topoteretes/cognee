@@ -61,7 +61,8 @@ def get_add_router() -> APIRouter:
                 "require ALLOW_HTTP_REQUESTS=true on the server), or a database "
                 "connection string (postgresql://, mysql://, sqlite:///, ...), refused "
                 "over the API with 422 DatabaseIngestionDisabled unless the server sets "
-                "ALLOW_DATABASE_INGESTION=true. Combined with "
+                "ALLOW_DATABASE_INGESTION=true, and then only for a database on a "
+                "public server (422 DatabaseSourceRefused otherwise). Combined with "
                 "'data': uploads come first, then these entries; labels and "
                 "external_metadata pair with that combined order. Empty entries are "
                 "ignored."
@@ -145,8 +146,11 @@ def get_add_router() -> APIRouter:
             read with the server's own network position. Disabled over the API by
             default: the request fails with 422 DatabaseIngestionDisabled unless the
             server sets ALLOW_DATABASE_INGESTION=true (the SDK, CLI and MCP server
-            ingest databases without the setting). Cognee's own databases are refused
-            either way, and a sqlite:/// path must be an existing file.
+            ingest databases without the setting). With the setting on, the API admits
+            only a database on a public server: a host that is, or resolves to, a
+            loopback, private or otherwise non-public address fails with 422
+            DatabaseSourceRefused. Cognee's own databases are refused either way, and a
+            sqlite:/// path must be an existing file.
           At least one of data or raw_data is required. Uploads come first, then
           raw_data entries; labels and external_metadata pair with that combined order.
         - **labels** (Optional[str]): JSON array of per-item labels, e.g.

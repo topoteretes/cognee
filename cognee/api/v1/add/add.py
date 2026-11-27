@@ -145,8 +145,11 @@ async def add(
           made from the machine running cognee: the SDK, CLI and MCP server ingest a
           database by default, the API server refuses it (422
           ``DatabaseIngestionDisabled``) unless ``ALLOW_DATABASE_INGESTION=true``, and
-          ``false`` refuses it everywhere. Cognee's own databases are refused whatever
-          the setting, and a sqlite:/// path must be an existing file.
+          ``false`` refuses it everywhere. A network caller (the API, MCP over sse /
+          http) may reach only a database on a public server; the SDK, CLI and MCP over
+          stdio also reach ``localhost`` and private addresses. Cognee's own databases
+          are refused whatever the setting, and a sqlite:/// path must be an existing
+          file.
         - **Lists**: Multiple files or text strings in a single call
 
     Supported File Formats:

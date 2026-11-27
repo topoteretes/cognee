@@ -127,16 +127,24 @@ def require_http_requests_allowed_for(data) -> None:
         require_http_requests_allowed()
 
 
-def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
-    """Return True if ``ip`` is not a routable, public address."""
+def is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
+    """Return True if ``ip`` is not a routable, public address.
+
+    An IPv4-mapped IPv6 address is judged as its IPv4 address. ``is_global`` adds
+    what the named ranges miss: the carrier-grade NAT range ``100.64.0.0/10``,
+    which is neither private nor public.
+    """
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
     return (
-        ip.is_private
+        not ip.is_global
+        or ip.is_private
         or ip.is_loopback
         or ip.is_link_local
         or ip.is_reserved
         or ip.is_multicast
         or ip.is_unspecified
-        # IPv6 site-local (deprecated) and IPv4-mapped IPv6 that decodes to a blocked v4.
+        # IPv6 site-local (deprecated).
         or getattr(ip, "is_site_local", False)
     )
 
@@ -187,7 +195,7 @@ async def validate_outbound_url(url: str) -> None:
         literal_ip = None
 
     if literal_ip is not None:
-        if _is_blocked_ip(literal_ip):
+        if is_blocked_ip(literal_ip):
             raise SSRFProtectionError(
                 f"URL host '{host}' points to a non-public address and is blocked."
             )
@@ -202,7 +210,7 @@ async def validate_outbound_url(url: str) -> None:
         raise SSRFProtectionError(f"Could not resolve URL host '{host}'.")
 
     for ip in resolved_ips:
-        if _is_blocked_ip(ip):
+        if is_blocked_ip(ip):
             raise SSRFProtectionError(
                 f"URL host '{host}' resolves to a non-public address ({ip}) and is blocked."
             )

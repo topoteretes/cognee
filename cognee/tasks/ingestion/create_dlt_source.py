@@ -57,7 +57,8 @@ def create_dlt_source_from_connection_string(
     the staging tables dlt creates carry no key constraints to reflect them from.
 
     The connection is opened here: ``sql_database`` connects and reflects the schema
-    when it is built. Driver errors are reported by class only — the driver message
+    when it is built, to the address :func:`_require_foreign_database_server`
+    checked (see :func:`_pin_to_addresses`). Driver errors are reported by class only — the driver message
     names the target and says whether it refused, timed out or rejected the
     credentials, which would make this call a scanner for every server it can reach.
     The full error is logged.
@@ -69,13 +70,15 @@ def create_dlt_source_from_connection_string(
 
     _require_database_ingestion_allowed()
     apply_dlt_runtime_defaults()
+    engine_kwargs: dict = {}
     if connection_string.startswith("sqlite:///"):
         connection_string = _allowed_sqlite_connection_string(connection_string)
     else:
-        _require_foreign_database_server(connection_string)
+        addresses = _require_foreign_database_server(connection_string)
+        connection_string, engine_kwargs = _pin_to_addresses(connection_string, addresses)
 
     try:
-        return _build_sql_source(sql_database, sqlalchemy, connection_string, query)
+        return _build_sql_source(sql_database, sqlalchemy, connection_string, query, engine_kwargs)
     except CogneeValidationError:
         raise
     except Exception as error:
@@ -92,7 +95,17 @@ def create_dlt_source_from_connection_string(
         ) from error
 
 
-def _build_sql_source(sql_database, sqlalchemy, connection_string: str, query: str | None):
+def _build_sql_source(
+    sql_database, sqlalchemy, connection_string: str, query: str | None, engine_kwargs: dict
+):
+    # The pin travels in an engine built here: dlt takes an engine as credentials
+    # across its whole supported range, and its ``engine_kwargs`` only in later
+    # releases. NullPool, so no idle connection to the source outlives its use.
+    credentials = (
+        sqlalchemy.create_engine(connection_string, poolclass=sqlalchemy.NullPool, **engine_kwargs)
+        if engine_kwargs
+        else connection_string
+    )
     if query:
         table_name, where_clause = _parse_sql_query(query)
         schema_name, bare_table_name = _split_schema_and_table(table_name)
@@ -104,7 +117,7 @@ def _build_sql_source(sql_database, sqlalchemy, connection_string: str, query: s
             return q
 
         source_kwargs = {
-            "credentials": connection_string,
+            "credentials": credentials,
             "table_names": [bare_table_name],
             "query_adapter_callback": query_adapter_callback,
             "resolve_foreign_keys": True,
@@ -114,7 +127,7 @@ def _build_sql_source(sql_database, sqlalchemy, connection_string: str, query: s
 
         source = sql_database(**source_kwargs)
     else:
-        source = sql_database(credentials=connection_string, resolve_foreign_keys=True)
+        source = sql_database(credentials=credentials, resolve_foreign_keys=True)
 
     setattr(source, SOURCE_LABEL_ATTR, _database_label(connection_string))
     return source
@@ -258,12 +271,13 @@ def _parse_connection_string(connection_string: str):
         ) from error
 
 
-def _require_foreign_database_server(connection_string: str) -> None:
-    """Raise when a network connection string targets a server cognee itself uses.
+def _require_foreign_database_server(connection_string: str) -> list[str]:
+    """Raise when a network connection string targets a server it must not reach;
+    return the checked addresses the connection is to be made to.
 
-    Two checks, by server and not by database name: the per-dataset Postgres
-    handlers keep one database per dataset on the same server, so any database
-    there may belong to another user.
+    Cognee's own servers are refused for every caller. Two checks, by server and
+    not by database name: the per-dataset Postgres handlers keep one database per
+    dataset on the same server, so any database there may belong to another user.
 
     1. Credentials. A string that carries one of cognee's own username/password
        pairs is refused whatever host it names. This needs no address, so it holds
@@ -277,10 +291,29 @@ def _require_foreign_database_server(connection_string: str) -> None:
        hostname resolves to, but cannot list every address of this machine or of
        another host.
 
+    A network caller (an API request, MCP over sse / streamable http) is further
+    held to public servers: every address the host resolves to must be globally
+    routable, so nothing on the server's own network is reachable through it. The
+    SDK, CLI and MCP over stdio keep ``localhost`` and private addresses: their
+    caller already owns the machine. The refusal names neither the address nor
+    whether the host resolved, so it cannot be used to map internal DNS names.
+
     ``ALLOW_DATABASE_INGESTION`` and network egress rules are the controls; these
     checks are the layer underneath for the deployments they do cover.
     """
+    import ipaddress
+
     from cognee.exceptions import CogneeValidationError
+    from cognee.modules.operations import is_remote_caller
+    from cognee.tasks.web_scraper.ssrf_protection import is_blocked_ip
+
+    def not_public() -> CogneeValidationError:
+        # Built when raised: a cognee error logs itself on construction.
+        return CogneeValidationError(
+            message="Network callers can ingest only databases on public servers; this "
+            "connection string's host is not one. Ingest it with the SDK or CLI instead.",
+            name="DatabaseSourceRefused",
+        )
 
     url = _parse_connection_string(connection_string)
     # A target the URL does not state (a socket, a host or service given as an
@@ -297,18 +330,52 @@ def _require_foreign_database_server(connection_string: str) -> None:
             "cannot be ingested as a source.",
             name="DatabaseSourceRefused",
         )
-    target = _server_addresses(url.host, url.port or _DEFAULT_PORTS.get(url.get_backend_name()))
-    if not target:
+    addresses = _resolved_addresses(url.host)
+    if not addresses:
+        if is_remote_caller():
+            raise not_public()
         raise CogneeValidationError(
             message=f"The database host '{url.host}' does not resolve.",
             name="DatabaseSourceRefused",
         )
+    port = url.port or _DEFAULT_PORTS.get(url.get_backend_name())
+    target = {(address, port) for address in addresses}
     if _shares_a_server(target, get_cognee_database_servers()):
         raise CogneeValidationError(
             message="This database server is part of cognee's own storage and cannot be "
             "ingested as a source.",
             name="DatabaseSourceRefused",
         )
+    if is_remote_caller() and any(
+        # A scoped address ("fe80::1%eth0") is parsed without its zone.
+        is_blocked_ip(ipaddress.ip_address(address.split("%", 1)[0]))
+        for address in addresses
+    ):
+        raise not_public()
+    return addresses
+
+
+def _pin_to_addresses(connection_string: str, addresses: list[str]) -> tuple[str, dict]:
+    """The connection string and engine options that connect only to ``addresses``.
+
+    The driver would otherwise resolve the host again when it connects, and a name
+    whose record changed since :func:`_require_foreign_database_server` checked it
+    would lead somewhere unchecked (DNS rebinding). Postgres takes every address as
+    libpq's ``hostaddr`` and tries them in order, as it would have after resolving
+    the name itself; the host name is kept for TLS verification, repeated once per
+    address because libpq pairs the two lists. The other drivers have no such
+    option, so the first address replaces the host in the URL.
+    """
+    from sqlalchemy.engine import make_url
+
+    url = make_url(connection_string)
+    if url.get_backend_name() in ("postgresql", "postgres"):
+        connect_args = {
+            "host": ",".join([url.host] * len(addresses)),
+            "hostaddr": ",".join(addresses),
+        }
+        return connection_string, {"connect_args": connect_args}
+    return url.set(host=addresses[0]).render_as_string(hide_password=False), {}
 
 
 def get_cognee_database_credentials() -> set[tuple[str, str]]:
@@ -464,19 +531,24 @@ def _this_machine_addresses() -> frozenset:
     return frozenset(addresses)
 
 
+def _resolved_addresses(host: str) -> list[str]:
+    """The addresses ``host`` resolves to, in the resolver's order; empty if unresolvable."""
+    import socket
+
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (socket.gaierror, UnicodeError):
+        return []
+    return list(dict.fromkeys(info[4][0] for info in infos))
+
+
 def _server_addresses(host: str, port: int | None) -> set[tuple[str, int | None]]:
     """``host`` resolved to its addresses, each paired with ``port``; empty if unresolvable.
 
     Resolving makes ``localhost``, ``127.0.0.1`` and a service name for the same
     server compare equal; :func:`_shares_a_server` then compares them as addresses.
     """
-    import socket
-
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except (socket.gaierror, UnicodeError):
-        return set()
-    return {(info[4][0], port) for info in infos}
+    return {(address, port) for address in _resolved_addresses(host)}
 
 
 def _port(value) -> int | None:
