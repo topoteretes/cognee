@@ -55,3 +55,5 @@ __all__ = [
     "telegram_source",
     "vercel_source",
 ]
+from .readwise import readwise_source
+__all__.append("readwise_source")
