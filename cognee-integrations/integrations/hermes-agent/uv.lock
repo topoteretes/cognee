@@ -17,12 +17,12 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-11-08T18:59:36.636987Z"
+exclude-newer = "2026-11-25T14:29:34.714202Z"
 exclude-newer-span = "P2D"
 
 [[package]]
 name = "cognee-integration-hermes-agent"
-version = "1.4.3"
+version = "1.4.4"
 source = { editable = "." }
 
 [package.dev-dependencies]

@@ -15,7 +15,7 @@ releases are still in that repository.
 
 | Integration | Package | Version | Source | Release |
 |---|---|---|---|---|
-| Cognee Memory Plugin for Hermes Agent | [`cognee-integration-hermes-agent`](https://pypi.org/project/cognee-integration-hermes-agent/) | 1.4.3 | [`integrations/hermes-agent`](integrations/hermes-agent) | [`release_hermes_plugin.yml`](../.github/workflows/release_hermes_plugin.yml), tags `hermes-agent-v*` |
+| Cognee Memory Plugin for Hermes Agent | [`cognee-integration-hermes-agent`](https://pypi.org/project/cognee-integration-hermes-agent/) | 1.4.4 | [`integrations/hermes-agent`](integrations/hermes-agent) | [`release_hermes_plugin.yml`](../.github/workflows/release_hermes_plugin.yml), tags `hermes-agent-v*` |
 
 <!-- inventory:end -->
 

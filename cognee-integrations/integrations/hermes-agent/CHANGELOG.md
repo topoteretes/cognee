@@ -9,7 +9,7 @@ The version must match the `version` field in both `pyproject.toml` and
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.4]
 
 ### Changed
 - **The plugin's source moved to the cognee repository (SDK-1489).** It now lives in

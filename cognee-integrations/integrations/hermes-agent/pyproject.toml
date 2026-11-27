@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cognee-integration-hermes-agent"
-version = "1.4.3"
+version = "1.4.4"
 description = "Cognee memory provider plugin for Hermes Agent. After installing, run `hermes memory setup cognee`; Cognee Cloud needs nothing else, local mode runs cognee from a private environment the plugin installs on request."
 readme = "README.md"
 license = "Apache-2.0"
