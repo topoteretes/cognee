@@ -29,7 +29,7 @@ import os
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models import User
@@ -39,14 +39,28 @@ from .get_auth_secret import get_auth_secret
 from .password_bound_jwt_strategy import password_fingerprint
 
 
+def _seconds_setting(name: str, default: str) -> timedelta:
+    """A lifetime setting, which has to be a positive whole number of seconds.
+
+    Zero or less would issue tokens that have already expired: every browser
+    would be logged out after one access token, with no error anywhere. The
+    server reads both settings at start-up (``cognee/api/client.py``), so a
+    wrong value stops it there instead of failing each login.
+    """
+    value = os.getenv(name, default)
+    if not value.isdecimal() or int(value) == 0:
+        raise ValueError(f"{name} must be a positive whole number of seconds, got {value!r}")
+    return timedelta(seconds=int(value))
+
+
 def get_refresh_token_lifetime() -> timedelta:
     """How long a refresh token stays valid after its last use."""
-    return timedelta(seconds=int(os.getenv("REFRESH_TOKEN_LIFETIME_SECONDS", "604800")))
+    return _seconds_setting("REFRESH_TOKEN_LIFETIME_SECONDS", "604800")
 
 
 def get_refresh_token_max_lifetime() -> timedelta:
     """How long a refresh token stays valid after the login, however often it is used."""
-    return timedelta(seconds=int(os.getenv("REFRESH_TOKEN_MAX_LIFETIME_SECONDS", "2592000")))
+    return _seconds_setting("REFRESH_TOKEN_MAX_LIFETIME_SECONDS", "2592000")
 
 
 def _hash_token(token: str) -> str:
@@ -92,6 +106,7 @@ async def redeem_refresh_token(token: str) -> User | None:
     None for an unknown token, for one not used for
     ``REFRESH_TOKEN_LIFETIME_SECONDS``, and for one issued
     ``REFRESH_TOKEN_MAX_LIFETIME_SECONDS`` ago, however recently it was used.
+    Also None for one that is signed out while this call is running.
     A token whose user is inactive, or whose password or token secret changed
     since it was issued, is deleted: like an access token
     (``PasswordBoundJWTStrategy``) it must not outlive either.
@@ -123,9 +138,16 @@ async def redeem_refresh_token(token: str) -> User | None:
             await session.commit()
             return None
 
-        refresh_token.expires_at = now + get_refresh_token_lifetime()
+        # One statement on the stored row, not a change to the row read above:
+        # another request may have signed this login out since, and then there
+        # is nothing left to extend.
+        extended = await session.execute(
+            update(UserRefreshToken)
+            .where(UserRefreshToken.id == refresh_token.id)
+            .values(expires_at=now + get_refresh_token_lifetime())
+        )
         await session.commit()
-        return user
+        return user if extended.rowcount > 0 else None
 
 
 async def delete_refresh_token(token: str) -> None:

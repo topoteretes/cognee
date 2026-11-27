@@ -1,6 +1,6 @@
 /** @jest-environment-options {"url": "https://ui.example.test/dashboard"} */
 import fetchMock from "jest-fetch-mock";
-import localFetch from "../localFetch";
+import localFetch, { setApiKey } from "../localFetch";
 import { HttpError } from "@/services/http/errors";
 
 describe("localFetch errors", () => {
@@ -47,19 +47,37 @@ describe("localFetch login renewal", () => {
     jest.spyOn(console, "log").mockImplementation(() => {});
     jest.spyOn(console, "error").mockImplementation(() => {});
   });
-  afterEach(() => jest.restoreAllMocks());
+  afterEach(() => {
+    jest.restoreAllMocks();
+    // The key is kept by the module; an empty one sends no header.
+    setApiKey("");
+  });
 
-  it("renews an expired login and sends the request again", async () => {
+  it("renews an expired login and sends the request again, as it was sent the first time", async () => {
+    setApiKey("test-key");
     fetchMock.mockResponses(
       ["", { status: 401 }],
       ["", { status: 200 }],
       [JSON.stringify({ saved: true }), { status: 200 }],
     );
-    const response = await localFetch("/v1/datasets", { method: "POST", body: "payload" });
+    const response = await localFetch("/v1/datasets", {
+      method: "POST",
+      body: "payload",
+      headers: { "Content-Type": "application/json" },
+    });
     expect(await response.json()).toEqual({ saved: true });
     expect(requested()).toEqual(["/datasets", "/auth/refresh", "/datasets"]);
+    // Compared whole: without `credentials` the browser sends no cookie to the
+    // backend, which is on another port, and every request would be a 401.
+    const sent = {
+      method: "POST",
+      body: "payload",
+      headers: { "Content-Type": "application/json", "X-Api-Key": "test-key" },
+      credentials: "include",
+    };
+    expect(fetchMock.mock.calls[0][1]).toEqual(sent);
     expect(fetchMock.mock.calls[1][1]).toEqual({ method: "POST", credentials: "include" });
-    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: "POST", body: "payload" });
+    expect(fetchMock.mock.calls[2][1]).toEqual(sent);
   });
 
   it("asks for a new sign-in when the login cannot be renewed", async () => {
