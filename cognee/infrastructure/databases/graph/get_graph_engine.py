@@ -510,7 +510,8 @@ def _create_graph_engine(
     ]
     raise OSError(
         f"Unsupported graph database provider: {graph_database_provider}. "
-        f"Supported providers are: {', '.join(all_providers)}"
+        f"Supported providers are: {', '.join(all_providers)}. "
+        "Other providers are community adapters that must be installed and registered first: https://github.com/topoteretes/cognee-community"
     )
 
 

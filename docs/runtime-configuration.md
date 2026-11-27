@@ -52,6 +52,9 @@ VECTOR_DB_URL=postgresql://cognee:cognee@localhost:5432/cognee_db
 
 #### Graph Databases
 Supported: ladybug (default), neo4j, ladybug-remote, turso (local file, requires the turso extra), postgres_demo (demo; `postgres` is an accepted alias)
+
+**Amazon Neptune moved out of core.** The `neptune` and `neptune_analytics` providers and the `cognee[neptune]` extra are no longer part of cognee; setting either provider now raises "Unsupported graph database provider" / "Unsupported vector database provider". To keep using them, `pip install cognee-community-hybrid-adapter-neptune` and import its `register` module before using cognee (`from cognee_community_hybrid_adapter_neptune import register`). Provider names, the `neptune-graph://<GRAPH_ID>` endpoint and the stored data layout are unchanged, and Neptune still requires `ENABLE_BACKEND_ACCESS_CONTROL=false`. See the [package README](https://github.com/topoteretes/cognee-community/tree/main/packages/hybrid/neptune).
+
 ```bash
 # Neo4j (requires neo4j extra: pip install cognee[neo4j])
 GRAPH_DATABASE_PROVIDER=neo4j

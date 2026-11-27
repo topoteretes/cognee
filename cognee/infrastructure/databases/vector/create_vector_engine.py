@@ -295,7 +295,8 @@ def _create_vector_engine(
     else:
         raise OSError(
             f"Unsupported vector database provider: {vector_db_provider}. "
-            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'Turso'])}"
+            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'Turso'])}. "
+            "Other providers are community adapters that must be installed and registered first: https://github.com/topoteretes/cognee-community"
         )
 
 
