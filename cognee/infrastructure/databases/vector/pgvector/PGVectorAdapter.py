@@ -24,7 +24,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import DBAPIError, ProgrammingError, SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.inspection import inspect
 from tenacity import (
     retry,
@@ -803,6 +803,28 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         return key in self._metadata.tables
 
+    async def get_collection_names(self) -> list[str]:
+        """The tables of this adapter's schema that are collections.
+
+        The store can share its database with other tables (with no ``VECTOR_DB_NAME``
+        the default vector store is the relational database), so a collection is
+        recognised by its pgvector ``vector`` column (``_VECTOR_COLLECTIONS_SQL``).
+        A partitioned collection is listed once, as its parent table.
+        """
+        async with self.engine.connect() as connection:
+            collections = (await connection.execute(text(_VECTOR_COLLECTIONS_SQL))).all()
+        return [table_name for table_name, _column_type, _dimensions in collections]
+
+    async def get_data_point_ids(self, collection_name: str) -> list[str]:
+        """The id of every row in ``collection_name``; none for a missing table."""
+        try:
+            table = await self.get_table(collection_name)
+        except CollectionNotFoundError:
+            return []
+        async with self.get_async_session() as session:
+            row_ids = (await session.execute(select(table.c.id))).scalars().all()
+        return [str(row_id) for row_id in row_ids]
+
     async def delete_collection(self, collection_name: str) -> None:
         """Drop the table for ``collection_name``; a missing table is not an error.
 
@@ -817,9 +839,15 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if table is not None:
             self._metadata.remove(table)
 
+    # Two processes creating one collection at once (workers of one run, see
+    # cognee.modules.pipelines.execution) both pass has_collection, and
+    # VECTOR_DB_LOCK is per process. Postgres then fails the loser's CREATE TABLE
+    # on its catalog (pg_type_typname_nsp_index), which SQLAlchemy raises as
+    # IntegrityError, not as the asyncpg classes; without it here the loser's data
+    # item failed. On the retry has_collection finds the winner's table.
     @retry(
         retry=retry_if_exception_type(
-            (DuplicateTableError, UniqueViolationError, ProgrammingError)
+            (DuplicateTableError, UniqueViolationError, ProgrammingError, IntegrityError)
         ),
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=2, min=1, max=6),

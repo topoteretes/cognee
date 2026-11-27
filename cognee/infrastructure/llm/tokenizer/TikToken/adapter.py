@@ -83,6 +83,15 @@ class TikTokenTokenizer(TokenizerInterface):
         """
         Count tokens, treating special-token spellings as ordinary text.
 
+        A space that ends the text is counted in front of it instead. The chunker
+        sizes a chunk by adding up the counts of its words, and it hands each word
+        over with the space that follows it. Behind the word that space is always a
+        token of its own ("was " is "was" and " "), so every word counted double and
+        chunks came out half as long as their limit. In running text the space goes
+        with what follows it, and in front of the word the encoding decides as it
+        does there: " was" is one token, " 5" is two. Dropping the space would count
+        too few tokens wherever numbers follow each other.
+
         Parameters:
         -----------
 
@@ -93,6 +102,8 @@ class TikTokenTokenizer(TokenizerInterface):
 
             - int: The number of tokens in the given text.
         """
+        if text.endswith(" ") and not text.isspace():
+            text = " " + text[:-1]
         num_tokens = len(self.tokenizer.encode(text, disallowed_special=()))
         return num_tokens
 

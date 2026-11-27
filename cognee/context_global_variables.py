@@ -210,6 +210,7 @@ class DatabaseContextManager:
 
     __slots__ = (
         "_applied",
+        "_check_embedding_model",
         "_dataset",
         "_dataset_token",
         "_embedding_config",
@@ -227,12 +228,17 @@ class DatabaseContextManager:
         llm_config: LLMConfig | None = None,
         embedding_config: EmbeddingConfig | None = None,
         permission_type: str | None = None,
+        *,
+        check_embedding_model: bool = True,
     ) -> None:
         self._dataset = dataset
         self._user_id = user_id
         self._llm_config = llm_config
         self._embedding_config = embedding_config
         self._permission_type = permission_type
+        # False only for the re-embed of a dataset (``reembed_dataset``): the one
+        # operation that enters a dataset with a model other than the one that built it.
+        self._check_embedding_model = check_embedding_model
         self._applied = False
         self._dataset_token = None
         self._llm_token = None
@@ -413,7 +419,8 @@ class DatabaseContextManager:
 
         # With this dataset's vector store bound: refuse a configured embedding
         # model whose width differs from the one that built the dataset.
-        await ensure_embedding_model_matches(dataset_database)
+        if self._check_embedding_model:
+            await ensure_embedding_model_matches(dataset_database)
 
     async def _apply(self) -> None:
         if self._applied:

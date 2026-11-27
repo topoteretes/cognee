@@ -3,9 +3,8 @@
 A repository extracted on its own cannot see the others: a frontend's HTTP call
 names a path, and only a snapshot that also covers the backend can say which
 route serves it. enola links repositories when it is given a cluster config
-listing them, and writes the whole linked graph into every member, under a
-directory of the dataset's own (``.enola-<dataset_id>``, see
-:func:`cluster_output_dir`) rather than the shared ``.enola``.
+listing them, and writes the whole linked graph once, to a directory of the
+dataset's own outside the repositories (see :func:`cluster_snapshot_dir`).
 
 A dataset is the cluster. When it holds more than one ``code_repo`` Data row,
 :func:`snapshot_dataset_code_repos` runs enola once over all of them and the
@@ -25,17 +24,18 @@ snapshot would keep cross-repository facts the current one no longer holds.
 
 import asyncio
 import json
+import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.config import DEFAULT_CODE_GRAPH_BATCH_SIZE
 from cognee.tasks.code_graph.enola import (
     ParsedSnapshot,
     parse_enola_snapshot,
     run_enola_cluster,
-    snapshot_identity,
 )
 
 if TYPE_CHECKING:
@@ -112,93 +112,53 @@ async def dataset_code_repo_rows(dataset_id: UUID) -> list:
 
 
 def cluster_output_dir(dataset_id: UUID) -> str:
-    """Where, inside each member repository, a dataset's cluster snapshot is written.
+    """The working directory enola keeps inside each member for a dataset's cluster runs.
 
-    A remote clone is shared by every dataset that adds its URL, and a cluster
-    snapshot holds the facts of all the dataset's repositories. One directory
-    per dataset keeps a cluster run from overwriting the snapshot another
-    dataset is reading. enola takes the name relative to each repository.
+    It holds the member's extractor cache, not a snapshot. A remote clone is
+    shared by every dataset that adds its URL, so the name is the dataset's
+    own rather than the ``.enola`` a single-repository run writes its snapshot
+    to. enola takes the name relative to each repository.
     """
     return f".enola-{dataset_id}"
 
 
-def _written_label(repo_path: Path, output_dir: str, snapshot_id: str | None) -> str | None:
-    """The label enola gave a member in the snapshot just taken, or None.
+def cluster_snapshot_dir(dataset_id: UUID) -> Path:
+    """Where a dataset's cluster snapshot is written: one directory per dataset.
 
-    A cluster run writes ``snapshot.meta.json`` into every member's
-    ``output_dir`` with the member's own ``repo_label`` — the exact name its
-    facts carry. The file is enola's own bookkeeping rather than part of the
-    documented snapshot contract, so it is only trusted when it describes
-    this snapshot (same ``snapshot_id``) and the caller falls back to
-    deriving the label when it is missing or stale.
+    enola writes a cluster's graph once and refuses a directory inside a
+    member repository, so it lives next to the clones, under
+    ``BaseConfig.repos_root_directory`` (``COGNEE_REPOS_DIR``), which is a
+    local directory whatever the storage backend. A clone's directory name
+    never starts with a dot, so no clone can take this one's place.
     """
-    try:
-        meta = json.loads(
-            (repo_path / output_dir / "snapshot.meta.json").read_text(encoding="utf-8")
-        )
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(meta, dict):
-        return None
-    if snapshot_id is not None and meta.get("snapshot_id") != snapshot_id:
-        return None
-    label = meta.get("repo_label")
-    return label if isinstance(label, str) and label else None
+    from cognee.tasks.code_graph.resolve_repo import default_clones_dir
+
+    return default_clones_dir() / ".enola-clusters" / str(dataset_id)
 
 
-def _label_candidates(repo_path: Path, output_dir: str) -> list[str]:
-    """The labels enola may have given a repository, most likely first.
-
-    enola labels a repository by its own name from the git remote, and by its
-    directory name when there is no usable remote or the name is already taken
-    in the cluster. The remote is read from the member's own receipt.
-    """
-    candidates = []
-    try:
-        receipt = json.loads((repo_path / output_dir / "receipt.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        receipt = None
-    git = receipt.get("git") if isinstance(receipt, dict) else None
-    remote = git.get("remote") if isinstance(git, dict) else None
-    if isinstance(remote, str) and "/" in remote.strip("/"):
-        candidates.append(remote.strip("/").rsplit("/", 1)[-1])
-    if repo_path.name not in candidates:
-        candidates.append(repo_path.name)
-    return candidates
-
-
-def resolve_member_labels(
-    repo_paths: list[Path],
-    fact_labels: set[str],
-    output_dir: str,
-    snapshot_id: str | None = None,
-) -> list[str] | None:
+def resolve_member_labels(repo_paths: list[Path], receipt: dict | None) -> list[str] | None:
     """The enola label of each member, or None when they cannot be told apart.
 
-    A member whose ``output_dir`` carries the label enola wrote for this snapshot
-    uses it as is. For the rest the label is derived: members are taken in
-    cluster order, as enola takes them, a label another member holds is not
-    available, a candidate the snapshot's facts actually carry wins, and a
-    member that produced no facts keeps its first free candidate. Members are
-    loaded by label, so one left without a label of its own — or two members
-    claiming the same written label — means no cluster.
+    The cluster's receipt lists its members, each with the path it was given
+    and the ``repo`` label its facts carry. Members are loaded by label, so a
+    member the receipt does not list, or two members under one label (enola
+    labels a repository by its name, and two repositories of the same name
+    get the same one), means no cluster.
     """
-    written = [_written_label(repo_path, output_dir, snapshot_id) for repo_path in repo_paths]
-    taken = [label for label in written if label is not None]
-    if len(set(taken)) != len(taken):
+    listed = receipt.get("members") if isinstance(receipt, dict) else None
+    if not isinstance(listed, list):
         return None
-
-    labels: list[str] = []
-    for repo_path, written_label in zip(repo_paths, written):
-        if written_label is not None:
-            labels.append(written_label)
-            continue
-        free = [label for label in _label_candidates(repo_path, output_dir) if label not in taken]
-        if not free:
-            return None
-        label = next((label for label in free if label in fact_labels), free[0])
-        labels.append(label)
-        taken.append(label)
+    label_by_path = {
+        os.path.normpath(member["repo_path"]): member["repo"]
+        for member in listed
+        if isinstance(member, dict)
+        and isinstance(member.get("repo_path"), str)
+        and isinstance(member.get("repo"), str)
+        and member["repo"]
+    }
+    labels = [label_by_path.get(os.path.normpath(repo_path)) for repo_path in repo_paths]
+    if None in labels or len(set(labels)) != len(labels):
+        return None
     return labels
 
 
@@ -219,7 +179,10 @@ async def snapshot_dataset_code_repos(
     The snapshot is parsed here, once and off the event loop, and the parse
     travels with the result (``parsed``) to every member's load.
     """
-    from cognee.tasks.code_graph.extract_code_graph import build_code_graph_edges
+    from cognee.tasks.code_graph.extract_code_graph import (
+        _require_code_graph_lookups,
+        build_code_graph_edges,
+    )
 
     members = []
     for data, repo_path in repos:
@@ -236,13 +199,15 @@ async def snapshot_dataset_code_repos(
     repo_paths = [repo_path for _data, repo_path in members]
     cluster_timeout = max(timeout, min(timeout * len(members), CLUSTER_ENOLA_TIMEOUT_CAP_SECONDS))
     output_dir = cluster_output_dir(dataset_id)
-    snapshot_dir = await run_enola_cluster(repo_paths, output_dir, timeout=cluster_timeout)
+    # The members' load_code_graph checks too, but only after this enola run:
+    # an adapter without the lookups must fail before it.
+    await _require_code_graph_lookups()
+    snapshot_dir = await run_enola_cluster(
+        repo_paths, output_dir, cluster_snapshot_dir(dataset_id), timeout=cluster_timeout
+    )
 
     facts, receipt = await asyncio.to_thread(parse_enola_snapshot, snapshot_dir)
-    fact_labels = {fact["repo"] for fact in facts if isinstance(fact.get("repo"), str)}
-    labels = resolve_member_labels(
-        repo_paths, fact_labels, output_dir, snapshot_id=snapshot_identity(snapshot_dir, receipt)
-    )
+    labels = resolve_member_labels(repo_paths, receipt)
     if labels is None:
         logger.warning(
             "The repositories of dataset %s do not have distinct names; "
@@ -534,7 +499,10 @@ def _cluster_run(dataset_id: UUID, run_id: Any) -> _ClusterRun:
     return current
 
 
-async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
+async def load_dataset_cluster(
+    ctx: Optional["PipelineContext"],
+    batch_size: int = DEFAULT_CODE_GRAPH_BATCH_SIZE,
+) -> bool:
     """Load the whole cluster of the dataset a CODE_REPO item belongs to.
 
     Returns False when the dataset is not a cluster, and the caller then loads
@@ -566,7 +534,11 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
         try:
             snapshot = await snapshot_dataset_code_repos(dataset_id, repos)
             if snapshot is not None:
-                await _load_cluster_members(snapshot, ctx)
+                await _load_cluster_members(
+                    snapshot,
+                    ctx,
+                    batch_size=batch_size,
+                )
         except Exception as error:
             # An enola or member-load failure: the run's later rows re-raise
             # it rather than load the whole cluster again, failing the same way.
@@ -578,35 +550,31 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
     return run.is_cluster
 
 
-async def _load_cluster_members(snapshot: DatasetCodeSnapshot, ctx: "PipelineContext") -> None:
-    """Load every member of a cluster snapshot, one at a time, each under its own Data row."""
+async def _load_cluster_members(
+    snapshot: DatasetCodeSnapshot,
+    ctx: "PipelineContext",
+    batch_size: int = DEFAULT_CODE_GRAPH_BATCH_SIZE,
+) -> None:
+    """Load every member of a cluster snapshot, one at a time, each under its own Data row.
+
+    The cluster snapshot is parsed once and held for all its members
+    (``snapshot.parsed``), its edges resolved once: the one case where the
+    facts are not streamed from facts.jsonl. Each member's load still writes
+    in batches of ``batch_size``.
+    """
     from cognee.tasks.code_graph.code_repo import code_repo_node_set
-    from cognee.tasks.code_graph.extract_code_graph import (
-        add_code_graph_data_points,
-        add_code_graph_edges,
-        extract_code_graph,
-    )
+    from cognee.tasks.code_graph.extract_code_graph import load_code_graph
 
     for member in snapshot.members:
         member_ctx = replace(ctx, data_item=member.data)
         # Each row's own add()/remember() tag, exactly as the per-repo
         # route reads it, so a member's code nodes carry its node_set.
-        node_set = code_repo_node_set(member.data)
-        data_points = await extract_code_graph(
+        await load_code_graph(
             repo_path=member.repo_path,
-            snapshot_dir=snapshot.snapshot_dir,
-            repo_scope=member.label,
-            node_set=node_set,
-            snapshot=snapshot.parsed,
-        )
-        state = await add_code_graph_data_points(data_points, ctx=member_ctx, graph_only=True)
-        await add_code_graph_edges(
-            state,
-            repo_path=member.repo_path,
-            snapshot_dir=snapshot.snapshot_dir,
             ctx=member_ctx,
             repo_scope=member.label,
-            node_set=node_set,
+            node_set=code_repo_node_set(member.data),
             snapshot=snapshot.parsed,
+            batch_size=batch_size,
         )
         logger.info("Code repo graph extracted for %s (%s).", member.repo_path, member.label)

@@ -23,11 +23,18 @@ DEFAULT_EMBEDDING_MODEL = "openai/text-embedding-3-large"
 # What embeddings run on when nothing is configured and no usable LLM key
 # exists to reuse for the OpenAI default: a local CPU model (`fastembed`
 # extra), matching the local GLiNER extractor cognify picks in that state.
-# bge-small is the smallest download in the fastembed registry (67 MB) that
-# is a real retrieval model; its vector size is read from the registry so
-# the model is the only thing to change here.
+# pplx-embed-v1-0.6b (0.7 GB, 1024 dimensions, multilingual) replaced bge-small
+# (67 MB, 384 dimensions, English) and should provide better accuracy. It is not in
+# fastembed's own list: embeddings/fastembed_models.py registers it. Its vector
+# size is read from the registry. Datasets built with the previous default are
+# re-embedded by the reembed_local_default_embedding_model data migration.
 DEFAULT_LOCAL_EMBEDDING_PROVIDER = "fastembed"
-DEFAULT_LOCAL_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+DEFAULT_LOCAL_EMBEDDING_MODEL = "perplexity-ai/pplx-embed-v1-0.6b"
+# The chunk-token cap of the local default model when EMBEDDING_MAX_COMPLETION_TOKENS
+# is not set. The model reads 32,000 tokens, so without this chunks would grow to
+# DEFAULT_EMBEDDING_INPUT_CAP (4096), which a CPU embeds in about 14 s and 4 GB of
+# memory each (512 tokens: about 1 s). 512 is the budget the previous default had.
+DEFAULT_LOCAL_EMBEDDING_INPUT_CAP = 512
 
 
 class KeylessEmbedderNotInstalledError(CogneeConfigurationError):
@@ -64,9 +71,11 @@ def _resolve_embedding_dimensions(provider: str | None, model: str | None) -> in
 
     if provider_lower == "fastembed":
         try:
-            from fastembed import TextEmbedding
+            from cognee.infrastructure.databases.vector.embeddings.fastembed_models import (
+                fastembed_text_models,
+            )
 
-            for entry in TextEmbedding.list_supported_models():
+            for entry in fastembed_text_models():
                 if entry.get("model") in candidates:
                     # fastembed has shipped both `dim` and `embed_dim` over time
                     dim = entry.get("dim") or entry.get("embed_dim")

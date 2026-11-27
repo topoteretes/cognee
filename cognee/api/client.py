@@ -1,5 +1,6 @@
 """FastAPI server for the Cognee API."""
 
+import math
 import os
 from contextlib import asynccontextmanager
 from traceback import format_exc
@@ -303,9 +304,14 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
             content={"detail": "LOGIN_BAD_CREDENTIALS"},
         )
 
+    # The rejected input is echoed back, and JSON cannot hold NaN or Infinity: those are
+    # written as text so the answer stays the 400 it is.
     return JSONResponse(
         status_code=400,
-        content=jsonable_encoder({"detail": exc.errors(), "body": exc.body}),
+        content=jsonable_encoder(
+            {"detail": exc.errors(), "body": exc.body},
+            custom_encoder={float: lambda value: value if math.isfinite(value) else str(value)},
+        ),
     )
 
 

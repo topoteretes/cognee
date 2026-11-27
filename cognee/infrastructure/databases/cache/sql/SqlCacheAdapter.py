@@ -952,7 +952,12 @@ class SqlCacheAdapter(CacheDBInterface):
         await self._maybe_purge_expired()
 
     async def get_agent_trace_session(
-        self, user_id: str, session_id: str, last_n: int | None = None
+        self,
+        user_id: str,
+        session_id: str,
+        last_n: int | None = None,
+        start: int | None = None,
+        end: int | None = None,
     ) -> list[SessionAgentTraceEntry]:
         """Retrieve stored trace steps for the given session (reads don't refresh TTL)."""
         await self._ensure_initialized()
@@ -967,6 +972,13 @@ class SqlCacheAdapter(CacheDBInterface):
                         query.order_by(cache_trace_entries.c.seq.desc()).limit(last_n)
                     )
                     rows = list(reversed(result.scalars().all()))
+                elif start is not None:
+                    result = await session.execute(
+                        query.order_by(cache_trace_entries.c.seq.asc())
+                        .offset(start)
+                        .limit(end - start)
+                    )
+                    rows = result.scalars().all()
                 else:
                     result = await session.execute(query.order_by(cache_trace_entries.c.seq.asc()))
                     rows = result.scalars().all()

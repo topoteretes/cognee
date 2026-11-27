@@ -109,13 +109,13 @@ jobs:
           EOF
 
       - name: Restore the local models
-        # GLiNER (~750 MB) and bge-small (~67 MB); the key names the models the
+        # GLiNER (~750 MB) and pplx-embed (~710 MB); the key names the models the
         # flow downloads, so a model change gets a fresh cache.
         id: models
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: .model-cache
-          key: keyless-models-${{ runner.os }}-gliner2.5-base-v1-bge-small-en-v1.5
+          key: keyless-models-${{ runner.os }}-gliner2.5-base-v1-pplx-embed-v1-0.6b
 
       # No LLM_API_KEY, no EMBEDDING_*: GRAPH_EXTRACTOR=auto resolves to GLiNER
       # and embeddings to fastembed. The first cognify installs the GLiNER
@@ -126,9 +126,9 @@ jobs:
       - name: Save the local models
         # Saved on a red run as well (`actions/cache` alone saves only on
         # success): a release that breaks search still downloaded the models,
-        # and the next run should not fetch 800 MB again to hit the same error.
+        # and the next run should not fetch 1.5 GB again to hit the same error.
         if: always() && steps.models.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: .model-cache
-          key: keyless-models-${{ runner.os }}-gliner2.5-base-v1-bge-small-en-v1.5
+          key: keyless-models-${{ runner.os }}-gliner2.5-base-v1-pplx-embed-v1-0.6b

@@ -659,18 +659,20 @@ recall(query="What is the vault recovery phrase?", include_references=True)
 #
 #    Evidence:
 #    - chunk 1 of document text_<hash> (data_id: <uuid>, chunk_id: <uuid>): "The vault recovery phrase is ..."
-#      dataset: main_dataset (dataset_id=<uuid>)
+#      refs: data_id=<uuid>, dataset_id=<uuid>, document=text_<hash>
 forget(data_id="<uuid>", dataset_id="<uuid>")
 ```
 
 `include_references=True` shows the ids `forget` needs; without it the output is
-unchanged. The default answer cites its sources in an `Evidence:` block (best
-match first) and gets a `dataset:` line. CHUNKS, SUMMARIES, RAG and
-graph-completion hits get `refs: data_id=..., dataset_id=..., document=...`
-lines instead (at most five per hit, best match first). A chunk hit names the
-one item its text came from, while a graph-completion answer lists every item
-in its context, so use the default type or `search_type="CHUNKS"` to find one
-fact. Session hits are not stored data and carry no ids. With backend access
+unchanged. Every hit backed by stored data gets
+`refs: data_id=..., dataset_id=..., document=...` lines (at most five per hit,
+best match first), read from the hit's structured references. A chunk hit
+lists the one item its text came from, and the default answer the items its
+`Evidence:` block cites. A RAG or graph-completion answer lists every item in
+its context, and so does the default answer when it falls back to graph
+completion (for example when the dataset has no chunk index yet). To find one
+fact, use `search_type="CHUNKS"`. Session hits are not
+stored data and carry no ids. With backend access
 control off, ids are only shown when recall is scoped to a single dataset.
 
 `self_improvement` defaults to `True`; only an explicit `False` is forwarded, so
@@ -755,7 +757,7 @@ In order to use local cognee:
     #"cognee[postgres-binary,docs,neo4j] @ file:/path/to/your/cognee"
     ```
     Replace `/path/to/your/cognee` with the absolute path to your cognee checkout, and
-    comment out the released `"cognee[...]>=1.5.0,<2.0.0"` line directly below it —
+    comment out the released `"cognee[...]==1.6.11"` line directly below it —
     otherwise both requirements apply and uv resolves the published package instead.
 
 2. Install dependencies with uv in the mcp folder

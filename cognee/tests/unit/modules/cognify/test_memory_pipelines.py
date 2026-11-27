@@ -170,7 +170,7 @@ async def test_the_cognify_run_opens_first_and_the_indexing_run_works_in_between
     cognify_run_id = events[0].pipeline_run_id
     assert {event.pipeline_run_id for event in events} == {cognify_run_id}
     # None of the cognify run's extras; only the run the ledger rows it writes name.
-    assert indexing["extras"] == {LEDGER_RUN_ID: cognify_run_id}
+    assert indexing["extras"] == {LEDGER_RUN_ID: str(cognify_run_id)}
     # Its subscriber learns that the indexing run works for it.
     assert [run_id for run_id, _ in pushed] == [cognify_run_id, cognify_run_id]
     progress = [event for _, event in pushed]
@@ -179,6 +179,20 @@ async def test_the_cognify_run_opens_first_and_the_indexing_run_works_in_between
         ("indexing_pipeline", 0, 2),
         ("indexing_pipeline", 2, 2),
     ]
+
+
+@pytest.mark.asyncio
+async def test_an_executor_given_to_the_call_goes_to_both_runs(monkeypatch, datasets, pushed):
+    """``cognify(data_item_executor=...)`` is for the call, so the indexing run it
+    starts gets the executor the cognify run gets."""
+    calls = _install_fake_run_pipeline(monkeypatch, ALL_COMPLETE)
+    executor = object()
+
+    await _collect(indexing_tasks="INDEX", data_item_executor=executor, **COGNIFY_PARAMS)
+
+    cognify, indexing = calls
+    assert cognify["data_item_executor"] is executor
+    assert indexing["data_item_executor"] is executor
 
 
 @pytest.mark.asyncio

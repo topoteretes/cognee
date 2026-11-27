@@ -21,6 +21,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from cognee.infrastructure.files.utils.decode_text_sample import decode_text_sample
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.graph_models import GraphSchemaSpec, RelationFieldSpec
@@ -169,7 +170,10 @@ async def _llm_detect(ctx: RelationContext) -> list[RelationInstance]:
         async with semaphore:
             try:
                 with open(record.path, "rb") as file:
-                    sample = file.read(ctx.max_sample_bytes).decode("utf-8", errors="replace")
+                    # BOM-aware: is_text_content now admits UTF-16/UTF-32 files,
+                    # so a raw utf-8 decode would feed the LLM interleaved null
+                    # bytes. Decode by the BOM so the extraction sees the text.
+                    sample = decode_text_sample(file.read(ctx.max_sample_bytes))
                 extraction = await LLMGateway.acreate_structured_output(
                     f"File name: {record.name}\n\n{sample}", system_prompt, RelationExtraction
                 )

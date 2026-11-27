@@ -449,6 +449,19 @@ class LanceDBAdapter(VectorDBInterface):
         table_names = set(await connection.table_names())
         return [name for name in collection_names if name in table_names]
 
+    async def get_collection_names(self) -> list[str]:
+        """Every table of this store: a LanceDB store holds collections only."""
+        connection = await self.get_connection()
+        return list(await connection.table_names())
+
+    async def get_data_point_ids(self, collection_name: str) -> list[str]:
+        """The id of every row in ``collection_name``; none for a missing table."""
+        try:
+            collection = await self.get_collection(collection_name)
+        except CollectionNotFoundError:
+            return []
+        return [row["id"] for row in await collection.query().select(["id"]).to_list()]
+
     async def delete_collection(self, collection_name: str) -> None:
         """Drop the table for ``collection_name``; a missing table is not an error.
 
@@ -485,8 +498,16 @@ class LanceDBAdapter(VectorDBInterface):
                 widths.append(list_size)
         return choose_stored_vector_size(widths, self.name)
 
-    async def create_collection(self, collection_name: str, payload_schema: BaseModel):
-        """Create the LanceDB table for `collection_name` if it does not already exist."""
+    async def create_collection(
+        self, collection_name: str, payload_schema: BaseModel | None = None
+    ):
+        """Create the LanceDB table for `collection_name` if it does not already exist.
+
+        With no ``payload_schema`` the table takes index rows (``IndexSchema``), the rows
+        ``upsert_raw_vectors`` writes without one.
+        """
+        if payload_schema is None:
+            payload_schema = IndexSchema
         vector_size = self.embedding_engine.get_vector_size()
 
         payload_schema = self.get_data_point_schema(payload_schema)

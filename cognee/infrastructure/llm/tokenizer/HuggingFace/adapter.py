@@ -109,6 +109,16 @@ class HuggingFaceTokenizer(TokenizerInterface):
         """
         Count the number of tokens in the given text.
 
+        A space that ends the text is counted in front of it instead. The chunker
+        sizes a chunk by adding up the counts of its words, and it hands each word
+        over with the space that follows it. With a BPE or SentencePiece tokenizer
+        that space, behind the word, is a token of its own, so every word counted
+        double and chunks came out half as long as their limit. In running text the
+        space goes with what follows it, and in front of the word the tokenizer
+        decides as it does there: one token with a word, two with a number where the
+        vocabulary has it so. A WordPiece tokenizer drops white space and counts the
+        same either way.
+
         Parameters:
         -----------
 
@@ -119,6 +129,8 @@ class HuggingFaceTokenizer(TokenizerInterface):
 
             - int: The total number of tokens in the input text.
         """
+        if text.endswith(" ") and not text.isspace():
+            text = " " + text[:-1]
         return len(self._tokenize(text))
 
     @property
