@@ -1,12 +1,16 @@
 import os
+import posixpath
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from os import path
-from urllib.parse import urlparse
 
 from cognee.infrastructure.files.encryption import wrap_storage_if_encrypted
 from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+from cognee.infrastructure.files.storage.remote_storage import (
+    get_remote_scheme,
+    get_remote_storage_class,
+)
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 
@@ -16,8 +20,8 @@ def _with_encoding(kwargs: dict, encoding: str | None) -> dict:
 
     The local backend forwards extra keyword arguments to the builtin ``open()``,
     where an explicit ``None`` equals omitting it; the Storage protocol itself does
-    not name ``encoding``, and S3FileStorage.open() takes none at all, so the S3
-    branch never receives it.
+    not name ``encoding``, and the object-store backends' open() takes none at all,
+    so the remote branch never receives it.
     """
     if encoding is None:
         return kwargs
@@ -49,21 +53,16 @@ async def open_data_file(
         ) as file:
             yield file
 
-    elif file_path.startswith("s3://"):
-        try:
-            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-        except ImportError:
-            raise ImportError(
-                "S3 dependencies are not installed. Please install with 'pip install cognee\"[aws]\"' to use S3 functionality."
-            )
-
+    elif (scheme := get_remote_scheme(file_path)) is not None:
+        # An object-store URL (s3://, az://): read through the backend for its scheme,
+        # which raises its own install hint when its extra is missing.
         normalized_url = get_data_file_path(file_path)
-        s3_dir_path = os.path.dirname(normalized_url)
-        s3_filename = os.path.basename(normalized_url)
+        storage_class = get_remote_storage_class(scheme)
 
-        file_storage = wrap_storage_if_encrypted(S3FileStorage(s3_dir_path))
+        file_dir_path, file_name = posixpath.split(normalized_url)
+        file_storage = wrap_storage_if_encrypted(storage_class(file_dir_path))
 
-        async with file_storage.open(s3_filename, mode=mode, **kwargs) as file:
+        async with file_storage.open(file_name, mode=mode, **kwargs) as file:
             yield file
 
     else:

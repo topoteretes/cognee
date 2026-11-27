@@ -56,9 +56,10 @@ def _resolve_root(data_path: str | Path | list) -> Path:
 
 def _report_destination(scan_id: str) -> Path | None:
     from cognee.base_config import get_base_config
+    from cognee.infrastructure.files.storage.remote_storage import is_remote_path
 
     system_root = get_base_config().system_root_directory
-    if not system_root or str(system_root).startswith("s3://"):
+    if not system_root or is_remote_path(str(system_root)):
         return None
     return Path(system_root) / "presort" / f"{scan_id}{REPORT_FILE_SUFFIX}"
 

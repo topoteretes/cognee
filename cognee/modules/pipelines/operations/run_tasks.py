@@ -77,13 +77,15 @@ async def close_run_with_cause(run: AsyncGenerator, cause: Exception) -> None:
 def writes_durable_before_push(*engines: Any) -> bool:
     """Whether a run's writes are durable as soon as they are written.
 
-    An engine with ``push_to_s3`` (Ladybug, SQLite) may keep its writes in a
-    local copy of an S3 database until the push after the item loop, so until
-    then they exist in this process alone; its ``needs_push_to_s3`` says so,
-    the same check its ``push_to_s3`` makes. Every such engine must define it:
+    An engine with ``push_to_remote`` (Ladybug, SQLite) may keep its writes in a
+    local copy of an object-store (S3, Azure) database until the push after the item loop, so until
+    then they exist in this process alone; its ``needs_push_to_remote`` says so,
+    the same check its ``push_to_remote`` makes. Every such engine must define it:
     a missing one raises rather than passing writes off as durable.
     """
-    return not any(engine.needs_push_to_s3() for engine in engines if hasattr(engine, "push_to_s3"))
+    return not any(
+        engine.needs_push_to_remote() for engine in engines if hasattr(engine, "push_to_remote")
+    )
 
 
 def validated_once(resolve_tasks: Callable[[Any], list[Task]]) -> Callable[[Any], list[Task]]:
@@ -491,12 +493,12 @@ async def run_tasks(
                 # the push succeeds the writes are not durable (``writes_durable``),
                 # so a failure up to here rolls back the whole run, stamps included.
                 graph_engine = await get_graph_engine()
-                if hasattr(graph_engine, "push_to_s3"):
-                    await graph_engine.push_to_s3()
+                if hasattr(graph_engine, "push_to_remote"):
+                    await graph_engine.push_to_remote()
 
                 relational_engine = get_relational_engine()
-                if hasattr(relational_engine, "push_to_s3"):
-                    await relational_engine.push_to_s3()
+                if hasattr(relational_engine, "push_to_remote"):
+                    await relational_engine.push_to_remote()
                 writes_durable = True
 
                 await log_pipeline_run_complete(

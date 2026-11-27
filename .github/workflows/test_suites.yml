@@ -275,6 +275,15 @@ jobs:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
+  azure-file-storage-test:
+    name: Azure File Storage Test
+    needs: [ build-ci-env, ci-context ]
+    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
+    uses: ./.github/workflows/test_azure_file_storage.yml
+    with:
+      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
+    secrets: inherit
+
   integration-tests:
     name: Run Integration Tests
     needs: [ build-ci-env, ci-context ]
@@ -359,6 +368,7 @@ jobs:
       different-os-tests-extended,
       llm-tests,
       s3-file-storage-test,
+      azure-file-storage-test,
       integration-tests,
       mcp-test,
       docker-compose-test,

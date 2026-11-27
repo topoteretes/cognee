@@ -256,14 +256,16 @@ async def _relational_schema_exists() -> bool:
 
     engine = get_relational_engine()
 
+    from cognee.infrastructure.files.storage.remote_storage import is_remote_path
+
     # Brand-new local SQLite database: the file is not there yet
-    # (create_database() creates the directory and file). S3-backed SQLite is
-    # excluded — its engine connects to a local temp file that always exists,
-    # and a fresh S3 database reports empty through the inspection below.
+    # (create_database() creates the directory and file). Object-store-backed
+    # SQLite (S3, Azure) is excluded — its engine connects to a local temp file
+    # that always exists, and a fresh remote database reports empty below.
     if (
         engine.engine.dialect.name == "sqlite"
         and engine.db_path
-        and "s3://" not in engine.db_path
+        and not is_remote_path(engine.db_path)
         and not os.path.exists(engine.db_path)
     ):
         return False

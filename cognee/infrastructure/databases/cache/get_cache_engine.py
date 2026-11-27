@@ -6,6 +6,7 @@ from functools import lru_cache
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.exceptions import CacheConnectionError
+from cognee.infrastructure.files.storage.remote_storage import get_remote_scheme
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("CacheEngine")
@@ -29,9 +30,10 @@ def _resolve_cache_db_url(backend: str, cache_db_url: str | None) -> str:
 
     if backend in ("sqlite", "turso"):
         db_path = relational_config.db_path
-        if "s3://" in db_path:
+        remote_scheme = get_remote_scheme(db_path)
+        if remote_scheme:
             raise CacheConnectionError(
-                f"CACHE_BACKEND={backend} cannot store cache.db on S3; "
+                f"CACHE_BACKEND={backend} cannot store cache.db on {remote_scheme}://; "
                 "set CACHE_DB_URL or CACHE_BACKEND=postgres"
             )
         os.makedirs(db_path, exist_ok=True)

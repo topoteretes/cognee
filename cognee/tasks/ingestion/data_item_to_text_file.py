@@ -5,6 +5,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from cognee.infrastructure.files.encryption import is_encrypted_local_file
+from cognee.infrastructure.files.storage.remote_storage import is_remote_path
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.loaders import get_loader_engine
@@ -31,7 +32,7 @@ def _copy_stream(source_file, destination_file) -> None:
 async def pull_to_local_copy(file_path, destination_file) -> None:
     """Copy a stored object into ``destination_file`` as the plaintext a loader can read.
 
-    Used for every object a loader cannot open by path itself: an S3 object,
+    Used for every object a loader cannot open by path itself: an S3 or Azure object,
     and a locally stored file sealed by the encryption layer (``open_data_file``
     unseals it; the copy is what the loader gets).
     """
@@ -102,8 +103,8 @@ async def data_item_to_text_file(
     if isinstance(data_item_path, str):
         parsed_url = urlparse(data_item_path)
 
-        # data is s3 file path
-        if parsed_url.scheme == "s3":
+        # data is an object-store file (s3://, az://)
+        if is_remote_path(data_item_path):
             return await _load_from_local_copy(
                 data_item_path, Path(parsed_url.path).suffix, preferred_loaders, **loader_kwargs
             )

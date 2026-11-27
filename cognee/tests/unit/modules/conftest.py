@@ -33,7 +33,7 @@ def runner_plumbing(monkeypatch):
         session_ctx = MagicMock()
         session_ctx.__aenter__ = AsyncMock(return_value=session)
         session_ctx.__aexit__ = AsyncMock(return_value=False)
-        engine = MagicMock(spec=["get_async_session"])  # no push_to_s3 attribute
+        engine = MagicMock(spec=["get_async_session"])  # no push_to_remote attribute
         engine.get_async_session.return_value = session_ctx
         monkeypatch.setattr(module, "get_relational_engine", lambda: engine)
 

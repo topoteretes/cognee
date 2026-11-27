@@ -53,8 +53,9 @@ async def _op_connect(registry: HandleRegistry, req: Request) -> None:
 
     url = req.kwargs["url"]
     api_key = req.kwargs.get("api_key")
+    storage_options = req.kwargs.get("storage_options")  # Azure credentials for az:// stores
 
-    connection = await lancedb.connect_async(url, api_key=api_key)
+    connection = await lancedb.connect_async(url, api_key=api_key, storage_options=storage_options)
     registry.register_at(_CONNECTION_HANDLE, connection)  # fixed singleton slot
 
 

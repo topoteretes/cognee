@@ -33,6 +33,7 @@ from cognee.infrastructure.databases.vector.pgvector.serialize_data import seria
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.files.storage.remote_storage import get_remote_scheme
 from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
@@ -88,6 +89,19 @@ _ORIGIN_DEFAULT_FACTORIES = {
     set: set,
     tuple: tuple,
 }
+
+
+def _storage_options_for(url: str | None) -> dict[str, str] | None:
+    """LanceDB storage options for ``url``: the Azure settings for an ``az://`` store.
+
+    S3 and other stores keep reading their credentials from the environment, whose
+    names LanceDB shares with AWS. Azure's connection string has no such counterpart.
+    """
+    if not url or get_remote_scheme(url) != "az":
+        return None
+    from cognee.infrastructure.files.storage.azure_config import get_azure_config
+
+    return get_azure_config().lance_storage_options()
 
 
 class IndexSchema(DataPoint):
@@ -170,7 +184,9 @@ class LanceDBAdapter(VectorDBInterface):
 
         session = LanceDBSubprocessSession.start()
         try:
-            remote_conn = RemoteLanceDBConnection(session, url=url, api_key=api_key)
+            remote_conn = RemoteLanceDBConnection(
+                session, url=url, api_key=api_key, storage_options=_storage_options_for(url)
+            )
         except Exception:
             session.shutdown(timeout=2.0)
             raise
@@ -338,7 +354,9 @@ class LanceDBAdapter(VectorDBInterface):
         # commit under the lock with a re-check. A concurrent ``close()``
         # that ran during our await must NOT be silently overwritten —
         # we discard the new connection and raise instead.
-        new_conn = await lancedb.connect_async(self.url, api_key=self.api_key)
+        new_conn = await lancedb.connect_async(
+            self.url, api_key=self.api_key, storage_options=_storage_options_for(self.url)
+        )
         stale = None
         # Capture the *winning* connection under the lock. Reading
         # ``self.connection`` after the lock release would race a

@@ -15,6 +15,7 @@ import aiohttp
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
+from cognee.infrastructure.files.storage.remote_storage import is_remote_path
 from cognee.infrastructure.files.storage.StorageManager import StorageManager
 from cognee.shared.utils import create_secure_ssl_context
 
@@ -42,8 +43,8 @@ class StorageAwareCache:
 
         # Print absolute path
         storage_path = self.storage_manager.storage.storage_path
-        if storage_path.startswith("s3://"):
-            absolute_path = storage_path  # S3 paths are already absolute
+        if is_remote_path(storage_path):
+            absolute_path = storage_path  # object-store URLs are already absolute
         else:
             import os
 
@@ -65,7 +66,7 @@ class StorageAwareCache:
         await self.storage_manager.ensure_directory_exists(cache_path)
 
         # Return the absolute path based on storage system
-        if self.storage_manager.storage.storage_path.startswith("s3://"):
+        if is_remote_path(self.storage_manager.storage.storage_path):
             return cache_path
         elif hasattr(self.storage_manager.storage, "storage_path"):
             return f"{self.storage_manager.storage.storage_path}/{cache_path}"
@@ -253,12 +254,12 @@ class StorageAwareCache:
         try:
             file_list = await self.storage_manager.list_files(directory_path)
 
-            # For S3 storage, convert relative paths to full S3 URLs
-            if self.storage_manager.storage.storage_path.startswith("s3://"):
+            # For object storage (S3, Azure), convert relative paths to full URLs
+            if is_remote_path(self.storage_manager.storage.storage_path):
                 full_paths = []
                 for file_path in file_list:
-                    full_s3_path = f"{self.storage_manager.storage.storage_path}/{file_path}"
-                    full_paths.append(full_s3_path)
+                    full_url = f"{self.storage_manager.storage.storage_path}/{file_path}"
+                    full_paths.append(full_url)
                 return full_paths
             else:
                 # For local storage, return absolute paths

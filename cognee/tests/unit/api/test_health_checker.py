@@ -1,5 +1,7 @@
 import asyncio
+import importlib
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -38,3 +40,32 @@ async def test_health_check_does_not_delete_existing_file():
 
     # Clean up
     os.remove(existing_file)
+
+
+class _RecordingStorage:
+    """A remote backend stand-in that records the probe's store and remove calls."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def store(self, path, data):
+        self.calls.append(("store", path))
+
+    async def remove(self, path):
+        self.calls.append(("remove", path))
+
+
+@pytest.mark.asyncio
+async def test_azure_data_root_is_probed_through_its_backend():
+    storage = _RecordingStorage()
+    storage_module = importlib.import_module("cognee.infrastructure.files.storage.get_file_storage")
+    roots = SimpleNamespace(data_root_directory="az://box/data")
+
+    with (
+        patch("cognee.base_config.get_base_config", return_value=roots),
+        patch.object(storage_module, "get_file_storage", return_value=storage),
+    ):
+        result = await HealthChecker().check_file_storage()
+
+    assert (result.status, result.provider) == (HealthStatus.HEALTHY, "azure")
+    assert [operation for operation, _ in storage.calls] == ["store", "remove"]

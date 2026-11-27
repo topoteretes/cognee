@@ -2,11 +2,13 @@ import os
 import posixpath
 from urllib.parse import unquote, urlparse
 
+from cognee.infrastructure.files.storage.remote_storage import is_remote_path
+
 
 def get_data_file_path(file_path: str) -> str:
     """Normalize file paths from various URI schemes to filesystem paths.
 
-    Handles file://, s3://, and regular filesystem paths. Decodes
+    Handles file://, object-store URLs (s3://, az://) and regular filesystem paths. Decodes
     percent-encoded characters and preserves UNC network paths.
     """
     parsed = urlparse(file_path)
@@ -37,14 +39,14 @@ def get_data_file_path(file_path: str) -> str:
 
         return os.path.normpath(fs_path)
 
-    elif parsed.scheme == "s3":
-        # Handle S3 URLs without normalization (which corrupts them)
+    elif is_remote_path(file_path):
+        # Object-store URLs (s3://, az://) without OS normalization (which corrupts them)
         if not parsed.path or parsed.path == "/":
-            return f"s3://{parsed.netloc}{parsed.path}"
+            return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
 
         normalized_path = posixpath.normpath(parsed.path).lstrip("/")
 
-        return f"s3://{parsed.netloc}/{normalized_path}"
+        return f"{parsed.scheme}://{parsed.netloc}/{normalized_path}"
 
     elif parsed.scheme == "":
         # Regular file path - normalize separators

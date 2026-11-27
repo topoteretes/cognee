@@ -223,6 +223,15 @@ AWS_ACCESS_KEY_ID="your_access_key"
 AWS_SECRET_ACCESS_KEY="your_secret_key"
 DATA_ROOT_DIRECTORY="s3://your-bucket/cognee/data"
 SYSTEM_ROOT_DIRECTORY="s3://your-bucket/cognee/system"
+
+# Azure Blob Storage (requires azure extra: pip install cognee[azure])
+STORAGE_BACKEND="azure"
+STORAGE_BUCKET_NAME="your-container"
+# Or AZURE_STORAGE_ACCOUNT_NAME with AZURE_STORAGE_ACCOUNT_KEY, AZURE_STORAGE_SAS_TOKEN,
+# or neither (Azure's credential chain, e.g. managed identity); see .env.template
+AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net"
+DATA_ROOT_DIRECTORY="az://your-container/cognee/data"
+SYSTEM_ROOT_DIRECTORY="az://your-container/cognee/system"
 ```
 
 ## Security Considerations

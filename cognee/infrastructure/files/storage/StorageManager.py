@@ -2,8 +2,6 @@ import inspect
 from contextlib import asynccontextmanager
 from typing import BinaryIO
 
-from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-
 from .storage import Storage
 
 

@@ -16,6 +16,7 @@ from cognee.api.v1.datasets.dto import DataDTO, DeleteDataReceiptDTO
 from cognee.api.v1.exceptions import DataNotFoundError
 from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.files.storage.remote_storage import is_remote_path
 from cognee.infrastructure.locks import dataset_schema_lock
 from cognee.modules.data.content_hash import normalize_content_hash
 from cognee.modules.data.methods import (
@@ -1264,7 +1265,7 @@ def get_datasets_router() -> APIRouter:
                 headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
             )
 
-        if parsed_uri.scheme == "s3":
+        if is_remote_path(raw_location):
             return stream_through_storage(Path(parsed_uri.path).name or data.name)
 
         if parsed_uri.scheme in ("file", "") or (

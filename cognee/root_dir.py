@@ -20,8 +20,11 @@ def ensure_absolute_path(path: str) -> str:
     if path is None:
         raise ValueError("Path cannot be None")
 
-    # Check if it's an S3 URL - S3 URLs are absolute by definition
-    if path.startswith("s3://"):
+    # Imported here: the storage package imports base_config, which imports this module.
+    from cognee.infrastructure.files.storage.remote_storage import is_remote_path
+
+    # Object-store URLs (s3://, az://) are absolute by definition
+    if is_remote_path(path):
         return path
 
     path_obj = Path(path).expanduser()
