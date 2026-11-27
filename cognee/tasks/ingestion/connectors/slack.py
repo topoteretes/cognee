@@ -28,7 +28,8 @@ Design
   ``slack:channel:<channel_id>`` and the structure names the channel as the
   container of every row. Authors are rendered by name (``users.info``, one
   lookup per person and run). Attachments are named, never downloaded.
-* **Incremental** by a re-walk with fingerprints, with no time window.
+* **Incremental** by a re-walk with fingerprints. It reads the whole channel unless
+  ``history_since`` names the oldest UTC day to keep: nothing older is read.
   ``conversations.history`` is read newest first and paged with ``latest``, so a
   walk cut short resumes from the end of the oldest day it reached. Every root keeps a
   fingerprint ``(reply_count, latest_reply, edited.ts, subtype)``, and
@@ -37,8 +38,11 @@ Design
 * **Deletion**: a root missing from a *complete* walk is emitted as a tombstone.
   A walk cut short forgets nothing. A root older than the oldest message Slack
   still shows is forgotten too: Slack does not tell a deletion, a retention policy
-  and a free plan's hidden history apart, and memory follows what Slack shows. A
-  thread Slack reports as gone while the walk reads it is a tombstone too.
+  and a free plan's hidden history apart, and memory follows what Slack shows. With
+  ``history_since`` that is everything before its day, so moving it later forgets the
+  older part when the next walk completes, and moving it earlier reads the older part
+  back. A thread belongs to the period by its first message. A thread Slack reports as
+  gone while the walk reads it is a tombstone too.
 * **A run is bounded and resumable.** A spent request or wall-clock budget, a rate
   limit asking for more than 60 s or outlasting the retries, or an expired token or an
   outage after rows were emitted stops the run
@@ -441,6 +445,31 @@ def _day_end(day: str) -> int:
     return _day_start(day) + 86_400
 
 
+def _history_floor(history_since: Any) -> int | None:
+    """The first second of the UTC day ``history_since`` names; ``None`` is no bound.
+
+    Only ``YYYY-MM-DD`` is accepted. A day that has not started is refused: the walk
+    would find nothing, and a complete walk forgets what it does not find.
+    """
+    if history_since is None:
+        return None
+    try:
+        floor = _day_start(history_since)
+    except (TypeError, ValueError):
+        floor = None
+    # strptime also takes "2026-11-5"; the one form is the one `_day` writes.
+    if floor is None or _day(str(floor)) != history_since:
+        raise ValueError("slack_source needs history_since as a UTC day, YYYY-MM-DD")
+    if floor > time.time():
+        raise ValueError("slack_source needs a history_since that is not later than today")
+    return floor
+
+
+def _oldest(start: int) -> str:
+    """``oldest`` for a read of every message from second ``start`` on (Slack's is exclusive)."""
+    return f"{start - 1}.999999"
+
+
 def _standalone(fingerprint: str) -> bool:
     """Whether a stored fingerprint is of a message without replies (part of its day)."""
     return fingerprint.removeprefix(_EMPTY).split("|", 1)[0] == "0"
@@ -498,8 +527,11 @@ class _Walker:
         clock: Callable[[], float],
         changed_roots: set[str] | None = None,
         excluded_messages: set[str] | None = None,
+        floor: int | None = None,
     ):
         self.client = client
+        # The first second of the oldest day to keep (``history_since``).
+        self.floor = floor
         # Messages taken out of memory by their author or the connection's owner.
         self.excluded = frozenset(excluded_messages or ())
         # Roots whose thread changed where their fingerprint cannot see it (an edited or
@@ -882,7 +914,7 @@ class _Walker:
         params: dict[str, Any] = {
             "channel": self.channel_id,
             "limit": PAGE_SIZE,
-            "oldest": f"{head - 1}.999999",
+            "oldest": _oldest(head),
         }
         if latest is not None:
             params["latest"] = latest
@@ -941,6 +973,13 @@ class _Walker:
         self.apps = state.setdefault("apps", [])
         self.dirty = set(state.get("dirty_days", []))
         position = state.get("position")
+        if position is not None and self.floor is not None and Decimal(position) < self.floor:
+            # The bound moved past where an unfinished walk stood: nothing left unread is
+            # inside the window, and the roots it read above that point still have to be
+            # checked against it, which only a walk from the newest message does.
+            del state["position"]
+            state.pop("newer", None)
+            position = None
         # Where this run's walk starts: the end of a day, so every day it reaches is read
         # from its first message (a cut stores its position that way).
         top = Decimal(position) if position is not None else None
@@ -970,6 +1009,8 @@ class _Walker:
             params: dict[str, Any] = {"channel": self.channel_id, "limit": PAGE_SIZE}
             if position is not None:
                 params["latest"] = position
+            if self.floor is not None:
+                params["oldest"] = _oldest(self.floor)
             page = self._call("conversations.history", **params)
             self.reading_pages += 1
             messages = page.get("messages")
@@ -1047,6 +1088,7 @@ def _iter_rows(
     clock: Callable[[], float] = time.monotonic,
     changed_roots: set[str] | None = None,
     excluded_messages: set[str] | None = None,
+    floor: int | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield the changed rows of a channel. Pure of dlt, so tests drive it with a dict."""
     walker = _Walker(
@@ -1061,6 +1103,7 @@ def _iter_rows(
         clock=clock,
         changed_roots=changed_roots,
         excluded_messages=excluded_messages,
+        floor=floor,
     )
     try:
         yield from walker.rows()
@@ -1109,6 +1152,7 @@ def slack_source(
     max_requests: int = DEFAULT_MAX_REQUESTS,
     changed_roots: set[str] | None = None,
     excluded_messages: set[str] | None = None,
+    history_since: str | None = None,
 ):
     """Return a ``dlt`` resource that yields one Slack channel's documents for ``remember``.
 
@@ -1133,6 +1177,10 @@ def slack_source(
         excluded_messages: Timestamps of messages taken out of memory: they are left out
             of every document they would be in. Changing the set re-renders nothing by
             itself; the host marks their threads in ``changed_roots``.
+        history_since: The oldest UTC day to keep, ``YYYY-MM-DD``, not later than today;
+            ``None`` keeps the whole history. Nothing older is read, and when a walk
+            completes what is older is forgotten, so a later day forgets and an earlier
+            day reads the older part back. A thread belongs to the day of its first message.
         max_requests: Request budget of one run. A bigger channel finishes over several
             runs. A call retried after a rate limit or a 5xx counts once.
 
@@ -1154,6 +1202,7 @@ def slack_source(
         raise ValueError("slack_source needs a resource_name, one per channel")
     if service is None and not access_token:
         raise ValueError("slack_source needs a service or an access_token")
+    floor = _history_floor(history_since)
 
     # Built here so a malformed token fails at construction, and the closure holds
     # the client, not the raw token.
@@ -1179,6 +1228,7 @@ def slack_source(
             max_requests=max_requests,
             changed_roots=changed_roots,
             excluded_messages=excluded_messages,
+            floor=floor,
         )
         yield from dlt_utils.guarded_rows(rows, check_active)
 
