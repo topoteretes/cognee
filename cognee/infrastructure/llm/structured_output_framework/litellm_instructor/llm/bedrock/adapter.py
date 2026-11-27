@@ -87,6 +87,7 @@ class BedrockAdapter(LLMInterface):
             "response_model": response_model,
             "max_retries": self.MAX_RETRIES,
             "stream": self.streaming,
+            "max_completion_tokens": self.max_completion_tokens,
             **merged_kwargs,
         }
 
