@@ -1,5 +1,6 @@
 """Which entities a review makes subjects, and which facts each subject's section holds."""
 
+from copy import deepcopy
 from datetime import datetime, timezone
 
 import pytest
@@ -50,6 +51,32 @@ def test_value_groups(scope, case, grouped):
     assert find_value_groups(scope.facts, scope.nodes).get("acme") == (
         [{"e1", "e2"}] if grouped else None
     )
+
+
+@pytest.mark.parametrize(
+    "other_type, grouped",
+    [
+        ("softwaresystem", True),
+        ("Software System", True),
+        (" Software  System ", True),
+        ("Software\tSystem", True),
+        ("Software\nSystem", True),
+        ("Software\u00a0System", True),
+        ("Software\u3000System", True),
+        ("software_system", False),
+        ("software-system", False),
+        ("Department", False),
+    ],
+)
+def test_value_groups_compare_normalized_types_without_changing_nodes(scope, other_type, grouped):
+    scope.nodes["alice"]["types"] = ["SoftwareSystem"]
+    scope.nodes["bob"]["types"] = [other_type]
+    original_nodes = deepcopy(scope.nodes)
+
+    assert find_value_groups(scope.facts, scope.nodes).get("acme") == (
+        [{"e1", "e2"}] if grouped else None
+    )
+    assert scope.nodes == original_nodes
 
 
 @pytest.mark.parametrize(
