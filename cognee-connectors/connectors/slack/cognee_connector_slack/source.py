@@ -467,6 +467,11 @@ def _history_floor(history_since: Any) -> int | None:
     return floor
 
 
+# With ``oldest`` and no ``latest`` Slack answers the messages closest to ``oldest`` and pages
+# forward, not the newest ones; every read from a lower edge names the upper one too.
+_FAR_FUTURE = "9999999999.999999"
+
+
 def _oldest(start: int) -> str:
     """``oldest`` for a read of every message from second ``start`` on (Slack's is exclusive)."""
     return f"{start - 1}.999999"
@@ -557,6 +562,9 @@ class _Walker:
         self.shared = False
         # The messages without replies this run read, by day, and the days to render.
         self.day_messages: dict[str, dict[str, dict[str, Any]]] = {}
+        # The roots this run read: a root an earlier cut run left as missing and Slack
+        # shows again must not be forgotten.
+        self.read: set[str] = set()
         self.dirty: set[str] = set()
         # The read in progress ("newer" or "walk"), where it resumed and the pages it read
         # this run: a budget cut after pages that left its position where it resumed is a
@@ -807,6 +815,7 @@ class _Walker:
         belongs to the document of its day, rendered once the walk has read that whole day
         (G7)."""
         ts = message["ts"]
+        self.read.add(ts)
         self.stats["scanned"] += 1
         fingerprint = _fingerprint(message)
         known = roots.get(ts)
@@ -863,9 +872,9 @@ class _Walker:
         self.stats["emitted"] += 1
         yield row
 
-    def _mark_day(self, day: str) -> None:
-        """Have ``day``'s document rendered again; kept in the state until it is."""
-        self.dirty.add(day)
+    def _mark_day(self, *days: str) -> None:
+        """Have the documents of ``days`` rendered again; kept in the state until they are."""
+        self.dirty.update(days)
         self.state["dirty_days"] = sorted(self.dirty)
 
     def _render_days(self, complete: Callable[[str], bool]) -> Iterator[dict[str, Any]]:
@@ -917,9 +926,8 @@ class _Walker:
             "channel": self.channel_id,
             "limit": PAGE_SIZE,
             "oldest": _oldest(head),
+            "latest": latest if latest is not None else _FAR_FUTURE,
         }
-        if latest is not None:
-            params["latest"] = latest
 
         def read_whole(day: str, reached: Decimal | None = None) -> bool:
             return (
@@ -976,12 +984,16 @@ class _Walker:
         self.dirty = set(state.get("dirty_days", []))
         position = state.get("position")
         if position is not None and self.floor is not None and Decimal(position) < self.floor:
-            # The bound moved past where an unfinished walk stood: nothing left unread is
-            # inside the window, and the roots it read above that point still have to be
-            # checked against it, which only a walk from the newest message does.
-            del state["position"]
-            state.pop("newer", None)
-            position = None
+            # The bound moved past where an unfinished walk stood: the walk already checked
+            # every root above that point, so it resumes at the bound, reads an empty page
+            # and forgets what is below. A cut read of what is newer keeps what it had not
+            # read, from the bound on, and is dropped once its whole window is below it.
+            position = state["position"] = f"{self.floor}.000000"
+            if newer := state.get("newer"):
+                if Decimal(newer[1]) <= self.floor:
+                    del state["newer"]
+                else:
+                    state["newer"] = [str(max(int(newer[0]), self.floor)), newer[1]]
         # Where this run's walk starts: the end of a day, so every day it reaches is read
         # from its first message (a cut stores its position that way).
         top = Decimal(position) if position is not None else None
@@ -1013,6 +1025,7 @@ class _Walker:
                 params["latest"] = position
             if self.floor is not None:
                 params["oldest"] = _oldest(self.floor)
+                params.setdefault("latest", _FAR_FUTURE)
             page = self._call("conversations.history", **params)
             self.reading_pages += 1
             messages = page.get("messages")
@@ -1047,9 +1060,8 @@ class _Walker:
                 state.setdefault("missing", []).extend(missing)
                 # A message of a day that is gone: the day is read whole in this run, so its
                 # document is rendered again from what Slack shows.
-                for ts in missing:
-                    if _standalone(roots[ts]):
-                        self._mark_day(_day(ts))
+                if days := {_day(ts) for ts in missing if _standalone(roots[ts])}:
+                    self._mark_day(*days)
             if not more:
                 break
             reached = Decimal(oldest)
@@ -1064,7 +1076,7 @@ class _Walker:
         yield from self._render_days(lambda day: top is None or _day_end(day) <= top)
         # Only now may the threads it did not see be forgotten; a day's messages went with
         # its document.
-        for ts in sorted(set(state.pop("missing", [])), key=Decimal):
+        for ts in sorted(set(state.pop("missing", [])) - self.read, key=Decimal):
             stored = roots.pop(ts, None)
             if stored is not None and not stored.startswith(_EMPTY) and not _standalone(stored):
                 self.stats["deleted"] += 1

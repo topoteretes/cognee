@@ -4,7 +4,8 @@ Copied from cognee.tests.unit.tasks.connectors.fake_slack (cognee dev, 2026-11-1
 
 It follows Slack's documented behaviour where the source depends on it:
 ``conversations.history`` lists top-level messages (and replies also sent to the
-channel) newest first, pages with ``latest`` (exclusive) and says ``has_more``;
+channel) newest first, pages with ``latest`` (exclusive) and says ``has_more``, but pages forward
+from ``oldest`` when that is given without ``latest``;
 a root with replies carries ``reply_count`` and ``latest_reply``;
 ``conversations.replies`` lists the root and its replies oldest first, paged
 with a cursor; a missing thread answers ``thread_not_found`` and an unknown user
@@ -157,7 +158,9 @@ class FakeSlack:
         cursor: str = "",
     ):
         """Newest first; ``latest`` and ``oldest`` exclusive, as Slack's defaults; the
-        cursor is an offset into what they select."""
+        cursor is an offset into what they select. With ``oldest`` and no ``latest``
+        Slack answers the messages closest to ``oldest`` and pages forward (the SDK-1777
+        review saw it on a real channel), so a page is the oldest ones after it, listed newest first."""
         if channel not in self.channels:
             raise SlackAPIError("conversations.history", "channel_not_found")
         top = [
@@ -172,7 +175,11 @@ class FakeSlack:
             top = [m for m in top if Decimal(m["ts"]) > Decimal(oldest)]
         start = int(cursor or 0)
         size = min(int(limit), self.page_limit)
-        page = {"messages": top[start : start + size], "has_more": len(top) > start + size}
+        if oldest is not None and latest is None:
+            window = top[::-1][start : start + size][::-1]
+        else:
+            window = top[start : start + size]
+        page = {"messages": window, "has_more": len(top) > start + size}
         if page["has_more"]:
             page["response_metadata"] = {"next_cursor": str(start + size)}
         return page

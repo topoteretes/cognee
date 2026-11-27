@@ -11,6 +11,7 @@ import copy
 import json
 import random
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 from fake_slack import (
@@ -929,7 +930,143 @@ def test_a_bound_that_moves_past_where_an_unfinished_walk_stood_forgets_what_it_
 
     assert {row["id"] for row in rows} >= {_day_id(_at(4, 0)), _day_id(_at(5, 0))}
     assert set(state["roots"]) == {_at(6, 0)} and "position" not in state
-    assert {params["oldest"] for params in _history_calls(fake)} == {f"{floor - 1}.999999"}
+    assert all(
+        Decimal(params["oldest"]) >= Decimal(f"{floor - 1}.999999")
+        for params in _history_calls(fake)
+    ), "no request reads below the bound, the read of what is newer included"
+
+
+def test_a_first_walk_under_a_bound_starts_from_the_newest_message():
+    """With ``oldest`` alone Slack answers the messages just after it and pages forward, so
+    a bound without an upper edge would read the wrong end of the window first."""
+    fake = _six_messages()
+    state: dict = {}
+
+    rows = _walk(fake, state, floor=_floor(2))
+
+    assert {row["id"] for row in rows} == {_day_id(_at(day, 0)) for day in range(2, 7)}
+    assert set(state["roots"]) == {_at(day, 0) for day in range(2, 7)}
+
+
+def test_every_history_request_that_has_a_lower_edge_has_an_upper_one():
+    fake = _six_messages()
+    state: dict = {}
+    _walk(fake, state, max_requests=4)
+    for day in range(7, 12):
+        fake.post(_at(day, 0), "U1", f"message {day}")
+    _walk(fake, state, max_requests=3)
+    assert "newer" in state, "a cut read of what is newer, the request that resumes it"
+    _walk(fake, state)
+    _walk(fake, state, floor=_floor(3))
+
+    bounded = [params for params in _history_calls(fake) if "oldest" in params]
+    assert bounded and all("latest" in params for params in bounded)
+
+
+def test_a_read_of_what_is_newer_starts_from_the_newest_message():
+    fake = _six_messages()
+    state: dict = {}
+    _walk(fake, state, max_requests=4)
+    for day in range(7, 12):
+        fake.post(_at(day, 0), "U1", f"message {day}")
+
+    rows = _walk(fake, state, max_requests=3)
+
+    assert _day_id(_at(11, 0)) in {row["id"] for row in rows}, "the newest day is read first"
+
+
+def test_a_bound_that_moves_past_a_stored_position_ends_in_one_empty_read():
+    """Everything above the position was checked by the walk that stopped there, so the
+    resumed walk reads only what is newer and the empty window under the bound."""
+    fake = FakeSlack(page_limit=2)
+    fake.add_user("U1", "ana")
+    for day in range(1, 13):
+        fake.post(_at(day, 0), "U1", f"message {day}")
+    state: dict = {}
+    _walk(fake, state, max_requests=8)
+    assert Decimal(state["position"]) < _floor(6)
+    held = {f"{CHANNEL}:day:{day}" for day in state["days"] if day < _since(6)}
+    assert held, "the walk had rendered days under the new bound"
+
+    fake.calls.clear()
+    rows = _walk(fake, state, floor=_floor(6))
+
+    assert len(_history_calls(fake)) <= 2
+    assert {row["id"] for row in rows} == held
+    assert set(state["roots"]) == {_at(day, 0) for day in range(6, 13)}
+
+
+class _RecordingState(dict):
+    """Keeps every value written to ``dirty_days``."""
+
+    def __init__(self):
+        super().__init__()
+        self.dirty_days_writes: list[list[str]] = []
+
+    def __setitem__(self, key, value):
+        if key == "dirty_days":
+            self.dirty_days_writes.append(list(value))
+        super().__setitem__(key, value)
+
+
+def test_forgetting_many_days_writes_the_marked_days_once_not_once_per_message():
+    fake = FakeSlack(page_limit=20)
+    fake.add_user("U1", "ana")
+    for day in range(1, 41):
+        fake.post(_at(day, 0), "U1", f"message {day}")
+    state = _RecordingState()
+    _walk(fake, state)
+
+    state.dirty_days_writes.clear()
+    rows = _walk(fake, state, floor=_floor(40))
+
+    assert len(rows) == 39 and all(row["_deleted"] for row in rows)
+    assert len(state.dirty_days_writes[0]) == 39, "all the days are marked by the first write"
+
+
+@pytest.mark.parametrize("bound_day", [7, 10, 15])
+def test_a_bound_that_moves_past_a_cut_read_of_what_is_newer_still_reads_what_it_left(bound_day):
+    fake = _six_messages()
+    state: dict = {}
+    _walk(fake, state, max_requests=4)
+    for day in range(7, 15):
+        fake.post(_at(day, 0), "U1", f"message {day}")
+    _walk(fake, state, max_requests=3)
+    assert "newer" in state and "position" in state
+
+    fake.calls.clear()
+    _walk(fake, state, floor=_floor(bound_day))
+    bounded = [p for p in _history_calls(fake) if "oldest" in p and "latest" in p]
+    fresh: dict = {}
+    _walk(fake, fresh, floor=_floor(bound_day))
+
+    assert "position" not in state
+    assert set(state["roots"]) == set(fresh["roots"])
+    assert set(state.get("days", {})) == set(fresh.get("days", {}))
+    assert all(Decimal(p["oldest"]) < Decimal(p["latest"]) for p in bounded), "no empty window"
+
+
+@pytest.mark.parametrize("budget", [2, 3])
+def test_a_root_read_again_after_a_cut_that_left_it_missing_is_kept(budget):
+    """A cut after the last page keeps the roots that page lacked as missing; a later walk
+    under a wider bound reads one of them again, and it must not be forgotten."""
+    fake = FakeSlack(page_limit=10)
+    fake.add_user("U1", "ana")
+    fake.post(_at(1, 0), "U1", "thread on day 1")
+    fake.reply(_at(1, 0), _at(1, 1), "U1", "a reply")
+    for day in (2, 4, 5, 6):
+        fake.post(_at(day, 0), "U1", f"message {day}")
+    state: dict = {}
+    _walk(fake, state, floor=_floor(1))
+    fake.post(_at(7, 0), "U1", "a new message")
+    cut = _stats()
+    _walk(fake, state, cut, floor=_floor(3), max_requests=budget)
+    assert cut["failed"] and _at(1, 0) in state["missing"], "the run was cut after the last page"
+
+    rows = _walk(fake, state, floor=_floor(1))
+
+    assert {"id": f"{CHANNEL}:{_at(1, 0)}", "_deleted": True} not in rows
+    assert _at(1, 0) in state["roots"]
 
 
 def test_the_first_second_of_the_bound_day_is_read_and_the_second_before_it_is_not():
