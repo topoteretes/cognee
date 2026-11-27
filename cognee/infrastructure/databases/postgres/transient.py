@@ -12,10 +12,24 @@ import socket
 from cognee.infrastructure.databases.exceptions import EmbeddingException
 
 
-def is_transient_postgres_error(error: Exception) -> bool:
+def _error_chain(error):
     seen = set()
     while error is not None and id(error) not in seen:
         seen.add(id(error))
+        yield error
+        error = getattr(error, "orig", None) or error.__cause__
+
+
+def connection_retry_exhausted(error: Exception) -> bool:
+    """Honor the Cloud connection hook's budget through driver wrappers."""
+    return any(
+        getattr(cause, "_cognee_connect_retries_exhausted", False) is True
+        for cause in _error_chain(error)
+    )
+
+
+def is_transient_postgres_error(exception: Exception) -> bool:
+    for error in _error_chain(exception):
         if isinstance(error, EmbeddingException):
             return False
         state = getattr(error, "sqlstate", None)
@@ -31,7 +45,6 @@ def is_transient_postgres_error(error: Exception) -> bool:
             errno.ETIMEDOUT,
         }:
             return True
-        error = getattr(error, "orig", None) or error.__cause__
     return False
 
 
@@ -40,6 +53,10 @@ async def retry_postgres(operation):
         try:
             return await operation()
         except Exception as error:
-            if attempt == 2 or not is_transient_postgres_error(error):
+            if (
+                attempt == 2
+                or connection_retry_exhausted(error)
+                or not is_transient_postgres_error(error)
+            ):
                 raise
             await asyncio.sleep(random.uniform(0.5, 1.0) * (2**attempt))

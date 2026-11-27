@@ -162,6 +162,8 @@ async def test_embed_text_sets_encoding_format_per_route(
         "api_key": "test-key",
         "api_base": endpoint,
         "api_version": None,
+        "timeout": 60.0,
+        "num_retries": 0,
         "dimensions": 2,
     }
     if expected_encoding_format is not None:

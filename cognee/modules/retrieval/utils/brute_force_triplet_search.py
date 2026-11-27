@@ -6,6 +6,7 @@ from cognee.base_config import get_base_config
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.postgres.transient import (
+    connection_retry_exhausted,
     is_transient_postgres_error,
     retry_postgres,
 )
@@ -129,7 +130,7 @@ async def get_memory_fragment(
     except EntityNotFoundError:
         pass
     except Exception as error:
-        if is_transient_postgres_error(error):
+        if is_transient_postgres_error(error) or connection_retry_exhausted(error):
             # An unavailable store is not an empty memory. Preserve the cause
             # after the read's retry budget is exhausted.
             raise

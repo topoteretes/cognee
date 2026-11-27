@@ -44,6 +44,30 @@ def test_wrapped_driver_errors_and_cause_cycles():
 
 
 @pytest.mark.asyncio
+async def test_exhausted_connection_budget_is_not_multiplied():
+    cause = ConnectionLost("closed after three connect attempts")
+    cause._cognee_connect_retries_exhausted = True
+    outer = RuntimeError("driver wrapper")
+    outer.__cause__ = cause
+    operation = AsyncMock(side_effect=outer)
+    with pytest.raises(RuntimeError):
+        await transient.retry_postgres(operation)
+    operation.assert_awaited_once()
+    assert transient.connection_retry_exhausted(outer)
+
+
+@pytest.mark.asyncio
+async def test_exhausted_connection_timeout_remains_a_failure(monkeypatch):
+    cause = TimeoutError()
+    cause._cognee_connect_retries_exhausted = True
+    project = AsyncMock(side_effect=cause)
+    monkeypatch.setattr(CogneeGraph, "project_graph_from_db", project)
+    with pytest.raises(TimeoutError):
+        await get_memory_fragment(graph_engine=AsyncMock())
+    project.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("neighborhood", [False, True])
 async def test_unavailable_graph_is_not_reported_as_empty(monkeypatch, neighborhood):
     monkeypatch.setattr(transient.asyncio, "sleep", AsyncMock())
