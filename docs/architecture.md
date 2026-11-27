@@ -96,6 +96,30 @@ Factory pattern for embeddings: `cognee/infrastructure/databases/vector/embeddin
 #### Document Loaders
 Support for PDF, CSV, images, audio, video, code files (DOCX/PPTX and other office formats through the `docs`/`docling` extras) in `cognee/infrastructure/loaders/` — core loaders in `core/`; loaders backed by third-party libraries in `external/` (pypdf and dlt are core deps; unstructured and beautiful_soup register only with their extras, `docs` / `scraping`; docling registers without its extra but raises on first use; advanced_pdf falls back to pypdf without `docs`); registry in `supported_loaders.py`
 
+## Cognify and Search Lifecycle
+
+```mermaid
+flowchart LR
+    A[add: raw data] --> B[cognify]
+    B --> C[classify and chunk documents]
+    C --> D[extract entities and edges with LLM]
+    D --> E[(Graph DB: nodes and edges)]
+    D --> F[(Vector DB: embeddings)]
+    G[search query] --> H[hybrid retrieval]
+    E --> H
+    F --> H
+    H --> I[results]
+```
+
+`cognify()` turns raw text into graph nodes, edges, and vector embeddings. `search()` queries both the graph and the vector index (hybrid retrieval).
+
+### Removing Data
+
+> **Warning:** Pruning is irreversible. Deleted data cannot be recovered.
+
+- `await cognee.prune.prune_data()` deletes the data files added to cognee.
+- `await cognee.prune.prune_system(graph=True, vector=True, metadata=False, cache=True)` clears the graph, vector, and cache stores; set `metadata=True` to also drop relational metadata.
+
 ## Extension Points
 
 ### Adding New Functionality
