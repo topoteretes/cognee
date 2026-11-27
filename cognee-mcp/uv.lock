@@ -1076,7 +1076,7 @@ postgres-binary = [
 
 [[package]]
 name = "cognee-mcp"
-version = "0.5.9"
+version = "0.5.10"
 source = { editable = "." }
 dependencies = [
     { name = "certifi" },
