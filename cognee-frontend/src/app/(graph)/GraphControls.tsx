@@ -178,7 +178,7 @@ export default function GraphControls({ data, isAddNodeFormOpen, onGraphShapeCha
 
 
           {isAddNodeFormOpen ? (
-            <form className="flex flex-col gap-4" onSubmit={() => {}}>
+            <form className="flex flex-col gap-4" onSubmit={(event) => event.preventDefault()}>
               <div className="flex flex-row gap-4 items-center">
                 <span className="text-gray-300 whitespace-nowrap">Source Node ID:</span>
                 <Input readOnly type="text" defaultValue={selectedNode!.id} />
@@ -188,7 +188,7 @@ export default function GraphControls({ data, isAddNodeFormOpen, onGraphShapeCha
                   <div key={property.id} className="w-full flex flex-row gap-2 items-center">
                     <Input className="flex-1/3" type="text" placeholder="Property name" required value={property.name} onChange={handlePropertyChange.bind(null, property, "name")} />
                     <Input className="flex-2/3" type="text" placeholder="Property value" required value={property.value} onChange={handlePropertyChange.bind(null, property, "value")} />
-                    <button className="border-1 border-white p-2 rounded-sm" onClick={handlePropertyDelete.bind(null, property)}>
+                    <button type="button" className="border-1 border-white p-2 rounded-sm" onClick={handlePropertyDelete.bind(null, property)}>
                       <DeleteIcon width={16} height={18} color="white" />
                     </button>
                   </div>
@@ -214,7 +214,7 @@ export default function GraphControls({ data, isAddNodeFormOpen, onGraphShapeCha
                     <span className="text-white">{selectedNode.label}</span>
                   </div>
 
-                  {Object.entries(selectedNode.properties).map(([key, value]) => (
+                  {Object.entries(selectedNode.properties ?? {}).map(([key, value]) => (
                     <div key={key} className="flex gap-2 items-top">
                       <span className="text-gray-300">{key.charAt(0).toUpperCase() + key.slice(1)}:</span>
                       <span className="text-white">{typeof value === "object" ? JSON.stringify(value) : value as string}</span>
