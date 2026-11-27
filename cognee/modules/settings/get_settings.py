@@ -114,14 +114,6 @@ def get_settings() -> SettingsDict:
                             "value": "gpt-4o",
                             "label": "gpt-4o",
                         },
-                        {
-                            "value": "gpt-4-turbo",
-                            "label": "gpt-4-turbo",
-                        },
-                        {
-                            "value": "gpt-3.5-turbo",
-                            "label": "gpt-3.5-turbo",
-                        },
                     ],
                     "ollama": [
                         {
@@ -155,20 +147,8 @@ def get_settings() -> SettingsDict:
                     ],
                     "mistral": [
                         {
-                            "value": "mistral-medium-2508",
-                            "label": "Mistral Medium 3.1",
-                        },
-                        {
-                            "value": "magistral-medium-2509",
-                            "label": "Magistral Medium 1.2",
-                        },
-                        {
-                            "value": "magistral-medium-2507",
-                            "label": "Magistral Medium 1.1",
-                        },
-                        {
-                            "value": "mistral-large-2411",
-                            "label": "Mistral Large 2.1",
+                            "value": "mistral-large-4",
+                            "label": "Mistral Large 4",
                         },
                     ],
                     "bedrock": [
