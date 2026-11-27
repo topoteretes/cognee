@@ -1,5 +1,6 @@
 import importlib
 from itertools import product
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -17,7 +18,8 @@ maximum_length_vals = [None, 16, 64]
 
 
 def _sentences(text, maximum_size, word_size):
-    with patch.object(_chunk_by_sentence, "get_word_size", side_effect=word_size):
+    engine = SimpleNamespace(tokenizer=SimpleNamespace(count_tokens=word_size))
+    with patch.object(_chunk_by_sentence, "get_embedding_engine", return_value=engine):
         return [
             (sentence, end_type)
             for _, sentence, _, end_type in chunk_by_sentence(text, maximum_size)
