@@ -47,8 +47,9 @@ class PermissionDeniedError(CogneeValidationError):
         status_code=status.HTTP_403_FORBIDDEN,
         log: bool = True,
         log_level: str = "ERROR",
+        remediation: str | None = None,
     ):
-        super().__init__(message, name, status_code, log, log_level)
+        super().__init__(message, name, status_code, log, log_level, remediation=remediation)
 
 
 class CapabilityDeniedError(PermissionDeniedError):
