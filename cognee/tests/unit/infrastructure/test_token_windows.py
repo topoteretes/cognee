@@ -238,3 +238,82 @@ async def test_ollama_embeds_each_window_and_pools_them(monkeypatch):
     assert prompts == ["short", *[w for w, _ in windows_by_count(long_text, count, 5)]]
     assert list(result) == [vector_for("short"), expected_vector(long_text)]
     assert result.tokens == count("short") + 12
+
+
+@pytest.mark.asyncio
+async def test_windows_go_out_in_requests_of_at_most_the_batch_size(monkeypatch):
+    """Windows add inputs to a request the gateway sized to the engine's batch size
+    (TEI refuses more than 32), so they are sent in requests of at most that many."""
+    from cognee.infrastructure.databases.vector.embeddings.OpenAICompatibleEmbeddingEngine import (
+        OpenAICompatibleEmbeddingEngine,
+    )
+
+    monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
+    engine = OpenAICompatibleEmbeddingEngine(
+        model="test-model",
+        dimensions=2,
+        endpoint="http://localhost:8099",
+        api_key="k",
+        batch_size=3,
+    )
+    use_limit(engine)
+    requests: list[list[str]] = []
+
+    async def fake_create(**kwargs):
+        assert len(kwargs["input"]) <= 3, "a request over the batch size is refused"
+        requests.append(kwargs["input"])
+        return SimpleNamespace(
+            data=[SimpleNamespace(embedding=vector_for(text)) for text in kwargs["input"]],
+            usage=SimpleNamespace(prompt_tokens=sum(count(text) for text in kwargs["input"])),
+        )
+
+    monkeypatch.setattr(engine._client.embeddings, "create", fake_create)
+    long_text = words(12)  # 3 windows
+
+    result = await engine.embed_text(["short", long_text, "also short"])
+
+    assert [len(request) for request in requests] == [3, 2]
+    assert list(result) == [
+        vector_for("short"),
+        expected_vector(long_text),
+        vector_for("also short"),
+    ]
+    assert result.tokens == count("short") + 12 + count("also short")
+
+
+def test_a_text_of_limit_bytes_is_counted_when_its_tokenizer_adds_a_token():
+    """SentencePiece counts a text at up to one token per byte plus its leading "▁"
+    (SFR-Mistral: "11111111" is 9 tokens), so a text of exactly ``limit`` bytes is
+    counted and cut, not sent as fitting."""
+    from cognee.infrastructure.databases.vector.embeddings.token_windows import _fits_unseen
+
+    def sentencepiece_like(text: str) -> int:
+        return len(text.encode("utf-8")) + 1
+
+    text = "1" * 8
+    assert not _fits_unseen(text, 8)
+    windows = windows_by_count(text, sentencepiece_like, 8)
+    assert "".join(window for window, _ in windows) == text
+    assert all(sentencepiece_like(window) <= 8 for window, _ in windows)
+
+
+def test_a_long_unbroken_string_is_cut_in_linear_time():
+    """A whitespace-free blob is cut by prefixes that grow from the limit, so the
+    tokenizer sees each part a few times, not the whole remainder for every part."""
+    from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+
+    tokenizer = TikTokenTokenizer()
+    blob = base64.b64encode(random.Random(3).randbytes(150_000)).decode()  # 200 KB
+    counted: list[int] = []
+
+    def counting(text: str) -> int:
+        counted.append(len(text))
+        return tokenizer.count_tokens(text)
+
+    windows = windows_by_count(blob, counting, 4096)
+
+    assert "".join(window for window, _ in windows) == blob
+    assert all(tokenizer.count_tokens(window) <= 4096 for window, _ in windows)
+    assert sum(counted) < 40 * len(blob), (
+        "the characters counted grow with the text, not its square"
+    )

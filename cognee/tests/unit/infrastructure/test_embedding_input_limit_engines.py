@@ -323,7 +323,9 @@ async def test_openai_compatible_unknown_model_keeps_the_cap():
 
 def _ollama_engine(monkeypatch, configured, endpoint="http://localhost:11434/api/embed"):
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
-    with patch.object(OllamaEmbeddingEngine, "get_tokenizer", return_value=MagicMock()):
+    # A tokenizer that counts about four characters a token and adds no special tokens.
+    tokenizer = MagicMock(special_tokens=0, count_tokens=lambda text: len(text) // 4)
+    with patch.object(OllamaEmbeddingEngine, "get_tokenizer", return_value=tokenizer):
         return OllamaEmbeddingEngine(
             model="nomic-embed-text",
             dimensions=4,

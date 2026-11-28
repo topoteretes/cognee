@@ -256,11 +256,11 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 # fastembed cuts input past the model's limit without an error, so
                 # an over-length text is embedded as consecutive token windows whose
                 # vectors are pooled; every window of the batch goes to the model at once.
-                limit = await resolve_input_limit(self)
-                # Without the model's own limit there is no truncation point to cut at.
-                windows = self._windows(
-                    sanitized_text, limit if self.model_input_limit is not None else None
-                )
+                # The model's own truncation point, lowered to the configured cap;
+                # without it there is nothing to cut at.
+                model_limit = await self.input_limit()
+                limit = None if model_limit is None else await resolve_input_limit(self)
+                windows = self._windows(sanitized_text, limit)
                 window_texts = [window for text_windows in windows for window, _ in text_windows]
                 async with embedding_rate_limiter_context_manager():
                     vectors = await run_cpu_bound(self._run_model, window_texts)

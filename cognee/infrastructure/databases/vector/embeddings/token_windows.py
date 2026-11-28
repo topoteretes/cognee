@@ -84,20 +84,38 @@ def windows_by_count(text: str, count_tokens: Callable[[str], int], limit: int) 
 
 
 def _fits_unseen(text: str, limit: int) -> bool:
-    """Whether ``text`` fits without being counted: a token covers at least one byte
-    of text, so a text of no more bytes than the limit always fits. Most texts
-    embedded (entity names, relation lines, queries) are far shorter than that."""
-    return len(text.encode("utf-8")) <= limit
+    """Whether ``text`` fits without being counted. Every cognee tokenizer gives a
+    text at most one token per byte plus a few: SentencePiece adds a leading "▁"
+    token (SFR-Mistral counts "11111111" as 9), and the Mistral tokenizer counts a
+    chat template around the text. Half the limit in bytes leaves that room for any
+    real limit. Most texts embedded (entity names, relation lines, queries) are far
+    shorter than that."""
+    return 2 * len(text.encode("utf-8")) <= limit
 
 
 def _cut_long_piece(piece: str, count_tokens: Callable[[str], int], limit: int) -> list[Window]:
     """``piece``, longer than ``limit`` tokens, cut into consecutive parts that each
-    fit: every part is the longest prefix of the rest whose count is within ``limit``."""
+    fit: every part is the longest prefix of the rest whose count is within ``limit``.
+
+    The prefix is found by doubling from ``limit`` characters until it no longer
+    fits, then bisecting, so each part costs a few counts of about its own length
+    and a long unbroken string (a base64 blob) is cut in linear time.
+    """
     parts: list[Window] = []
     rest = piece
-    while (size := count_tokens(rest)) > limit:
-        low, high = 1, len(rest) - 1
-        while low < high:  # the longest prefix that fits; one character always does
+    while rest:
+        fits, over = 0, min(len(rest), limit)
+        while count_tokens(rest[:over]) <= limit:
+            fits = over
+            if over == len(rest):
+                break
+            over = min(len(rest), over * 2)
+        if fits == len(rest):
+            parts.append((rest, count_tokens(rest)))
+            break
+        # rest[:fits] fits (nothing yet when fits is 0) and rest[:over] does not.
+        low, high = max(fits, 1), over - 1  # one character always fits
+        while low < high:
             middle = (low + high + 1) // 2
             if count_tokens(rest[:middle]) <= limit:
                 low = middle
@@ -105,7 +123,6 @@ def _cut_long_piece(piece: str, count_tokens: Callable[[str], int], limit: int) 
                 high = middle - 1
         parts.append((rest[:low], count_tokens(rest[:low])))
         rest = rest[low:]
-    parts.append((rest, size))
     return parts
 
 
@@ -196,9 +213,18 @@ async def embed_in_windows(
     log_windows(engine, texts, windows, limit)
     if all(len(text_windows) == 1 for text_windows in windows):
         return await embed(texts)
-    result = await embed([window for text_windows in windows for window, _ in text_windows])
+    # Windows add inputs, so they go in requests of at most the engine's batch
+    # size, the cap the gateway sized the call to (TEI refuses more than 32).
+    inputs = [window for text_windows in windows for window, _ in text_windows]
+    size = max(1, engine.get_batch_size())
+    vectors: list[list[float]] = []
+    tokens = 0
+    for start in range(0, len(inputs), size):
+        part = await embed(inputs[start : start + size])
+        vectors.extend(part)
+        tokens += part.tokens
     return EmbeddingResult(
-        vectors=pool_windows(windows, result, unit_length=unit_length), tokens=result.tokens
+        vectors=pool_windows(windows, vectors, unit_length=unit_length), tokens=tokens
     )
 
 
