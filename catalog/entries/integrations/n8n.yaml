@@ -1,0 +1,30 @@
+id: n8n
+title: Cognee nodes for n8n
+kind: integration
+stack: workflow-tool
+tags:
+  - n8n
+  - node
+  - ai-agent
+  - memory
+  - integration
+summary: >-
+  Two n8n community nodes: a Cognee action node for the whole /api/v1 memory
+  API and a Cognee Memory sub-node that gives AI Agents long-term graph memory.
+what_youll_build: >-
+  An n8n AI Agent that remembers across conversations: turns are stored in a
+  Cognee session, relevant knowledge is recalled per question and sessions are
+  promoted into the graph daily.
+quickstart: |
+  npm install n8n-nodes-cognee
+  # or in n8n: Settings -> Community Nodes -> Install -> search n8n-nodes-cognee
+  # Create 'Cognee API' credentials with your Cognee Cloud tenant URL and API key.
+  # Plug 'Cognee Memory' into your AI Agent's Memory port, then chat with it
+  # again in a new conversation to see cross-session memory.
+expected_output: >-
+  The agent's turns land in a Cognee session; in a new chat the agent answers
+  from the promoted graph memory with no extra nodes.
+difficulty: medium
+repo: topoteretes/cognee-integrations
+path: integrations/n8n
+inventory_slug: n8n

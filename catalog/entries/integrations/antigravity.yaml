@@ -1,0 +1,31 @@
+id: antigravity
+title: Cognee memory plugin for Antigravity
+kind: integration
+stack: agent-runtime
+tags:
+  - antigravity
+  - python
+  - plugin
+  - hooks
+  - session-memory
+summary: >-
+  A native Antigravity plugin with durable Cognee memory: pre-invocation
+  recall, prompt and tool-result capture, and completed executions synced into the knowledge graph.
+what_youll_build: >-
+  Antigravity sessions that pull relevant context before each invocation,
+  store prompts and tool output, and persist finished turns for later recall.
+quickstart: |
+  git clone https://github.com/topoteretes/cognee-integrations.git
+  cd cognee-integrations
+  agy plugin validate integrations/antigravity
+  agy plugin install integrations/antigravity
+  mkdir -p ~/.cognee
+  printf 'LLM_API_KEY="sk-your_openai_key"\n' >> ~/.cognee/.env
+expected_output: >-
+  Opening a session starts or connects the Cognee server, recalls relevant
+  context before the invocation, captures the conversation and records hook
+  state under ~/.cognee-plugin/antigravity/.
+difficulty: medium
+repo: topoteretes/cognee-integrations
+path: integrations/antigravity
+inventory_slug: antigravity
