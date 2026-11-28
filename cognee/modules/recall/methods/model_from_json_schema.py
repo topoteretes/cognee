@@ -93,14 +93,16 @@ def _type_from(
         return Literal[tuple(values)]
 
     if "anyOf" in schema:
-        members = [
-            _type_from(member, defs, depth + 1, in_flight_refs, budget)
-            for member in schema["anyOf"]
-        ]
+        any_of = schema["anyOf"]
+        if not isinstance(any_of, list) or not any_of:
+            raise _fail("'anyOf' must be a non-empty array")
+        members = [_type_from(member, defs, depth + 1, in_flight_refs, budget) for member in any_of]
         return Union[tuple(members)]  # noqa: UP007 - built from a runtime list; no | spelling
 
     schema_type = schema.get("type")
     if isinstance(schema_type, list):
+        if not schema_type:
+            raise _fail("'type' arrays must be non-empty")
         members = [
             _type_from({**schema, "type": single}, defs, depth + 1, in_flight_refs, budget)
             for single in schema_type

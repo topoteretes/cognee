@@ -666,6 +666,42 @@ class TestRecallPermissionDenied:
         assert "cognify" not in resp.text.lower()
 
 
+class TestRecallResponseSchemaValidation:
+    """An empty union in ``response_schema`` is a 422 from the converter, and the
+    recall never runs: the schema is rejected before any retrieval or LLM call."""
+
+    @pytest.mark.parametrize(
+        "value_schema, keyword",
+        [({"anyOf": []}, "anyOf"), ({"type": []}, "type")],
+        ids=["empty-anyOf", "empty-type-array"],
+    )
+    def test_empty_union_returns_422_and_recall_never_runs(
+        self, client, monkeypatch, value_schema, keyword
+    ):
+        recall_pkg = importlib.import_module("cognee.api.v1.recall")
+        recall = AsyncMock(return_value=[])
+        monkeypatch.setattr(recall_pkg, "recall", recall)
+
+        resp = client.post(
+            "/recall",
+            json={
+                "query": "hello",
+                "response_schema": {
+                    "type": "object",
+                    "properties": {"value": value_schema},
+                    "required": ["value"],
+                },
+            },
+        )
+
+        assert resp.status_code == 422, resp.text
+        detail = resp.json()["detail"]
+        assert detail.startswith("response_schema:")
+        assert keyword in detail
+        assert detail.endswith("[CogneeValidationError]")
+        recall.assert_not_called()
+
+
 class TestCognifyExternalSchemaRef:
     """A ``graph_model`` whose ``$ref`` points outside the document is a 400, never fetched.
 

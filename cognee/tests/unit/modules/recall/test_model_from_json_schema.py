@@ -146,3 +146,48 @@ class TestRejections:
             model_from_json_schema(
                 {"type": "object", "properties": {"bad-name": {"type": "string"}}}
             )
+
+    def test_empty_any_of(self):
+        with pytest.raises(CogneeValidationError, match="anyOf.*non-empty") as exc_info:
+            model_from_json_schema({"type": "object", "properties": {"x": {"anyOf": []}}})
+        assert exc_info.value.status_code == 422
+
+    @pytest.mark.parametrize("any_of", [{}, {"type": "string"}, "string"])
+    def test_non_list_any_of(self, any_of):
+        with pytest.raises(CogneeValidationError, match="anyOf.*non-empty"):
+            model_from_json_schema({"type": "object", "properties": {"x": {"anyOf": any_of}}})
+
+    def test_empty_type_array(self):
+        with pytest.raises(CogneeValidationError, match="type.*non-empty") as exc_info:
+            model_from_json_schema({"type": "object", "properties": {"x": {"type": []}}})
+        assert exc_info.value.status_code == 422
+
+
+class TestUnions:
+    """Non-empty ``anyOf`` and ``type`` arrays build a Union of their members."""
+
+    def test_any_of_accepts_each_member(self):
+        rebuilt = model_from_json_schema(
+            {
+                "type": "object",
+                "properties": {"x": {"anyOf": [{"type": "string"}, {"type": "integer"}]}},
+                "required": ["x"],
+            }
+        )
+        assert rebuilt.model_validate({"x": "a"}).x == "a"
+        assert rebuilt.model_validate({"x": 1}).x == 1
+        with pytest.raises(ValidationError):
+            rebuilt.model_validate({"x": [1]})
+
+    def test_type_array_accepts_each_member(self):
+        rebuilt = model_from_json_schema(
+            {
+                "type": "object",
+                "properties": {"x": {"type": ["string", "null"]}},
+                "required": ["x"],
+            }
+        )
+        assert rebuilt.model_validate({"x": "a"}).x == "a"
+        assert rebuilt.model_validate({"x": None}).x is None
+        with pytest.raises(ValidationError):
+            rebuilt.model_validate({"x": [1]})
