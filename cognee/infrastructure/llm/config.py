@@ -1,6 +1,6 @@
 import json
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -166,6 +166,10 @@ class LLMConfig(BaseSettings):
     image_transcription_prompt_path: str = "transcribe_image_prompt.txt"
     image_transcription_max_completion_tokens: int = 1024
     image_transcription_reasoning_effort: str = "low"
+    # Reasoning effort for graph extraction only; empty sends none. Values are the OpenAI SDK's.
+    graph_extraction_reasoning_effort: Literal[
+        "", "none", "minimal", "low", "medium", "high", "xhigh", "max"
+    ] = ""
     llm_rate_limit_enabled: bool = False
     # Default 60 requests per interval; local inference servers get
     # LOCAL_DEFAULT_RATE_LIMIT_REQUESTS instead (see default_local_rate_limit_budget).
