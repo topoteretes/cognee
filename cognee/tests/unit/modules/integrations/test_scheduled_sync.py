@@ -172,6 +172,10 @@ async def test_the_worker_outlives_a_failed_tick(monkeypatch, caplog):
     with caplog.at_level(logging.ERROR):
         async with scheduled_sync.sync_scheduler_lifespan(None):
             await asyncio.wait_for(second.wait(), timeout=5)
+        # The lifespan exit hands the stopping worker to the app's drain; drain it here
+        # too, or it is still registered when the test ends (before Python 3.12 the
+        # worker needs more loop turns to see the stop than the test gives it).
+        assert await wait_for_background_tasks(timeout=5)
 
     # Scheduled runs are recorded as background work, not as an SDK call.
     assert origins[:2] == [ORIGIN_BACKGROUND, ORIGIN_BACKGROUND]

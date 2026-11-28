@@ -22,6 +22,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.exc import OperationalError
 
+from cognee.infrastructure.background_tasks import wait_for_background_tasks
 from cognee.modules.integrations import credentials as store
 from cognee.modules.integrations.linear import adapter
 from cognee.modules.integrations.linear.adapter import LinearAuthError, LinearIntegration
@@ -90,6 +91,9 @@ async def linear(credential_db, monkeypatch):
     for task in leftovers:
         task.cancel()
     await asyncio.gather(*leftovers, return_exceptions=True)
+    # A retry that already sent its refresh runs it as a shielded, registered task, which
+    # the cancel above does not stop. Let it finish on this test's loop.
+    assert await wait_for_background_tasks(timeout=5)
 
 
 async def install(user_id=None, *, token="access-0", refresh="refresh-0", expires_in=-1):
