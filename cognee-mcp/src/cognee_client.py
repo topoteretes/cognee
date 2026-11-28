@@ -977,8 +977,13 @@ class CogneeClient:
         session_ids: list[str] | None = None,
         build_global_context_index: bool = False,
         build_truth_subspace: bool = False,
+        dataset_id: UUID | None = None,
+        run_in_background: bool = False,
     ) -> dict[str, Any]:
         """Run the improve loop and return the ImproveResult as a JSON-shaped dict.
+
+        ``dataset_id`` takes precedence over ``dataset_name``. ``run_in_background``
+        returns the result as ``running`` while the stages go on.
 
         Both modes return the same shape: ``status`` plus one ``stages`` entry
         per stage (name, status, reason, counts). An older server that still
@@ -987,24 +992,30 @@ class CogneeClient:
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/improve"
             payload: dict[str, Any] = {"dataset_name": dataset_name}
+            if dataset_id:
+                payload["dataset_id"] = str(dataset_id)
             if session_ids:
                 payload["session_ids"] = session_ids
             if build_global_context_index:
                 payload["build_global_context_index"] = True
             if build_truth_subspace:
                 payload["build_truth_subspace"] = True
+            if run_in_background:
+                payload["run_in_background"] = True
             response = await self.client.post(endpoint, json=payload, headers=self._get_headers())
             response.raise_for_status()
             return response.json()
         else:
             with redirect_stdout(sys.stderr):
-                kwargs: dict[str, Any] = {"dataset": dataset_name}
+                kwargs: dict[str, Any] = {"dataset": dataset_id or dataset_name}
                 if session_ids:
                     kwargs["session_ids"] = session_ids
                 if build_global_context_index:
                     kwargs["build_global_context_index"] = True
                 if build_truth_subspace:
                     kwargs["build_truth_subspace"] = True
+                if run_in_background:
+                    kwargs["run_in_background"] = True
                 result = await self.cognee.improve(**kwargs)
                 if hasattr(result, "model_dump"):
                     return result.model_dump(mode="json")

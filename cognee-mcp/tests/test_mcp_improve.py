@@ -1,8 +1,7 @@
 """MCP improve / remember: the same improve options as the SDK, summarized per stage.
 
-``improve`` is not an advertised MCP tool (the LLM-facing surface is pinned to
-remember / recall / forget), but it is the coroutine an operator or a future
-registration reaches, and ``remember`` runs the same loop through
+``improve`` is registered but not advertised (the LLM-facing surface is pinned to
+remember / recall / forget), and ``remember`` runs the same loop through
 ``self_improvement``. These tests pin what both forward to ``CogneeClient``
 and what the client forwards to the SDK or the HTTP API.
 """
@@ -11,6 +10,9 @@ import importlib
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import UUID
 
 import httpx
 import pytest
@@ -20,6 +22,8 @@ if str(MCP_ROOT) not in sys.path:
     sys.path.insert(0, str(MCP_ROOT))
 
 CogneeClient = importlib.import_module("src.cognee_client").CogneeClient
+
+DATASET_ID = "00000000-0000-0000-0000-000000000001"
 
 
 def _improve_payload(**overrides):
@@ -65,6 +69,7 @@ async def test_mcp_improve_forwards_every_option(monkeypatch):
         session_ids="s1, s2",
         build_global_context_index=True,
         build_truth_subspace=True,
+        run_in_background=True,
     )
 
     assert fake_client.calls == [
@@ -73,8 +78,27 @@ async def test_mcp_improve_forwards_every_option(monkeypatch):
             "session_ids": ["s1", "s2"],
             "build_global_context_index": True,
             "build_truth_subspace": True,
+            "dataset_id": None,
+            "run_in_background": True,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_mcp_improve_forwards_a_dataset_id(monkeypatch):
+    from src import server
+
+    fake_client = RecordingImproveClient()
+    monkeypatch.setattr(server, "cognee_client", fake_client)
+
+    result = await server.improve(dataset_id=DATASET_ID, session_ids="s1")
+
+    assert fake_client.calls[0]["dataset_id"] == UUID(DATASET_ID)
+    assert result[0].text.startswith(f"Improve completed for dataset '{DATASET_ID}'.")
+
+    result = await server.improve(dataset_id="not-a-uuid")
+    assert result[0].text.startswith("Error: invalid UUID")
+    assert len(fake_client.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -137,6 +161,7 @@ def test_format_improve_result_handles_running_and_legacy_payloads():
     )
     assert "running" in running.splitlines()[0]
     assert "background" in running
+    assert str(server.get_log_file_location()) in running
 
     legacy = server.format_improve_result({"some-uuid": {"status": "completed"}}, "ds")
     assert legacy.startswith("Improve completed for dataset 'ds'.")
@@ -163,6 +188,7 @@ async def test_cognee_client_api_improve_sends_every_option():
             session_ids=["s1"],
             build_global_context_index=True,
             build_truth_subspace=True,
+            run_in_background=True,
         )
     finally:
         await client.close()
@@ -174,6 +200,7 @@ async def test_cognee_client_api_improve_sends_every_option():
         "session_ids": ["s1"],
         "build_global_context_index": True,
         "build_truth_subspace": True,
+        "run_in_background": True,
     }
     assert result["status"] == "completed"
     assert [stage["stage"] for stage in result["stages"]] == [
@@ -199,6 +226,33 @@ async def test_cognee_client_api_improve_omits_defaults():
         await client.close()
 
     assert json.loads(requests[0].content.decode()) == {"dataset_name": "ds"}
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_improve_addresses_the_dataset_by_id():
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=_improve_payload())
+
+    client = CogneeClient(api_url="http://cognee.local")
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        await client.improve(dataset_name="ds", dataset_id=UUID(DATASET_ID))
+    finally:
+        await client.close()
+
+    assert json.loads(requests[0].content.decode()) == {
+        "dataset_name": "ds",
+        "dataset_id": DATASET_ID,
+    }
+
+    local = CogneeClient()
+    local.cognee = SimpleNamespace(improve=AsyncMock(return_value={}))
+    await local.improve(dataset_name="ds", dataset_id=UUID(DATASET_ID))
+    assert local.cognee.improve.call_args.kwargs == {"dataset": UUID(DATASET_ID)}
 
 
 @pytest.mark.asyncio
@@ -229,6 +283,7 @@ async def test_cognee_client_local_improve_returns_the_result_as_json_dict():
         session_ids=["s1"],
         build_global_context_index=True,
         build_truth_subspace=True,
+        run_in_background=True,
     )
 
     assert fake.calls == [
@@ -237,6 +292,7 @@ async def test_cognee_client_local_improve_returns_the_result_as_json_dict():
             "session_ids": ["s1"],
             "build_global_context_index": True,
             "build_truth_subspace": True,
+            "run_in_background": True,
         }
     ]
     assert result["status"] == "skipped"

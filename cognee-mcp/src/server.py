@@ -34,7 +34,6 @@ except ImportError:  # cognee-mcp pins a released cognee; older cores have no hi
 
 
 from cognee.shared.logging_utils import get_log_file_location, get_logger, setup_logging
-from cognee.shared.usage_logger import log_usage
 
 try:
     from .cognee_client import CogneeClient
@@ -876,12 +875,14 @@ async def forget(
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
-@log_usage(function_name="MCP improve", log_type="mcp_tool")
+@registry.tool(tags={"improve"})
 async def improve(
     dataset_name: str | None = None,
     session_ids: str | None = None,
     build_global_context_index: bool = False,
     build_truth_subspace: bool = False,
+    dataset_id: str | None = None,
+    run_in_background: bool = False,
 ) -> list:
     """Run the self-improvement loop over a dataset and report what each stage did.
 
@@ -914,7 +915,23 @@ async def improve(
     build_truth_subspace : bool
         Also build the truth subspace from the sessions' distilled learnings
         (needs session_ids and a graph backend with truth state).
+    dataset_id : str, optional
+        UUID of the dataset to process; takes precedence over dataset_name.
+        A name resolves only among the datasets you own, so use the id for
+        a dataset shared with you.
+    run_in_background : bool
+        Return at once while the stages go on, for a dataset whose improve
+        outlasts a tool call. The reply then lists no stages, and their
+        outcome is only logged. No tool reports it. In direct mode the run
+        ends with the MCP server.
     """
+    from uuid import UUID
+
+    try:
+        parsed_dataset_id = UUID(dataset_id) if dataset_id else None
+    except ValueError as e:
+        return [types.TextContent(type="text", text=f"Error: invalid UUID ({e}).")]
+
     dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
         try:
@@ -924,9 +941,13 @@ async def improve(
                 session_ids=session_list,
                 build_global_context_index=build_global_context_index,
                 build_truth_subspace=build_truth_subspace,
+                dataset_id=parsed_dataset_id,
+                run_in_background=run_in_background,
             )
             return [
-                types.TextContent(type="text", text=format_improve_result(result, dataset_name))
+                types.TextContent(
+                    type="text", text=format_improve_result(result, dataset_id or dataset_name)
+                )
             ]
         except Exception as e:
             error_msg = f"Improve failed: {e!s}"
@@ -961,7 +982,10 @@ def format_improve_result(result, dataset_name: str) -> str:
         suffix = f" ({'; '.join(detail)})" if detail else ""
         lines.append(f"- {stage.get('stage', '?')}: {stage.get('status', '?')}{suffix}")
     if not stages and status == "running":
-        lines.append("The chain is running in the background.")
+        lines.append(
+            "The chain is running in the background. Its outcome is only logged: by the "
+            f"Cognee server when one is connected, otherwise in {get_log_file_location()}"
+        )
     if result.get("error") and status == "errored":
         lines.append(f"error: {result['error']}")
     return "\n".join(lines)
@@ -976,8 +1000,8 @@ def format_improve_result(result, dataset_name: str) -> str:
     tags={"status"},
     description=(
         "Check the progress of background ingestion started by remember(background=True). "
-        "Reports active and completed pipeline jobs for a dataset, including failures that "
-        "a backgrounded call could not return inline."
+        "Reports active and completed pipeline jobs for a dataset, including jobs that fail, "
+        "which a backgrounded call could not return inline."
     ),
 )
 async def cognify_status(

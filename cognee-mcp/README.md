@@ -516,9 +516,9 @@ docker run \
 - `API_TOKEN`: Authentication token (optional, required if API has authentication enabled)
 
 **API Mode behavior:**
-The MCP server intentionally exposes only the memory API: `remember`, `recall`, and `forget` (plus the `cognify_status` progress check).
+The MCP server intentionally exposes only the memory API: `remember`, `recall`, and `forget` (plus the unadvertised `cognify_status` progress check and `improve`).
 In API mode these tools call the Cognee API server endpoints directly. Operational helpers such as
-`cognify`, `search`, `list_data`, `delete`, `prune`, `improve`, and document retrieval helpers are
+`cognify`, `search`, `list_data`, `delete`, `prune`, and document retrieval helpers are
 kept internal and are not exposed as MCP tools.
 
 ## 💻 Basic Usage
@@ -528,12 +528,13 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 ### Available Tools
 
-The MCP server exposes four tools (three memory tools pinned in `tools/list`, plus `cognify_status`):
+The MCP server exposes five tools (three memory tools pinned in `tools/list`, plus `cognify_status` and `improve`):
 
 - **remember**: Store data in memory. Pass `data` for text, or `filename` + `content_base64` to ingest an uploaded file (up to 10 MB). With `session_id`: fast session cache (text only). Without `session_id`: permanent graph memory
 - **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
 - **forget**: Delete memory by dataset name or id, a single data item by `data_id` (paired with its `dataset_id`, both shown by `recall` with `include_references=True`), or delete all owned memory with `everything=True`
 - **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Unadvertised by default; discoverable via `search_tools` and callable by name
+- **improve**: Run the improve loop over a dataset and report each stage. With `session_ids` it writes those sessions into the graph. Pass `dataset_id` for a dataset shared with you, since a name resolves only among the datasets you own. With `run_in_background=True` it returns at once and the run goes on; its outcome is then only in the log. Unadvertised by default; discoverable via `search_tools` and callable by name
 
 ### Recall result summaries
 
@@ -596,6 +597,7 @@ Search works well on natural-language queries. Every phrasing below returns its 
 |---|---|
 | "is my background ingestion finished?" | `cognify_status` |
 | "check the progress of a pipeline job" | `cognify_status` |
+| "write my session into the graph" | `improve` |
 
 The one thing to know when **adding** a tool: matching is purely lexical. FastMCP's BM25 tokenizer does no stemming and drops tools that score zero, so a query shares no credit with a word it doesn't literally contain. Multi-word queries paper over this (they usually contain some matching token), which is why the table above passes, but terse queries won't.
 
@@ -605,7 +607,7 @@ So: **write descriptions in the words an agent would use, including both singula
 
 By default, each MCP client gets its own auto-named dataset (e.g. Cursor → `cursor_vscode_memory`, Claude Code → `claude_code_memory`) so different agents don't share memory unintentionally. The dataset is created on demand the first time a client writes to it.
 
-`remember` and `cognify_status` route to the agent-scoped dataset when `dataset_name` is omitted (the internal `cognify`/`improve` helpers, which are not exposed as tools, do the same). Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
+`remember`, `cognify_status` and `improve` route to the agent-scoped dataset when `dataset_name` is omitted (the internal `cognify` helper, which is not exposed as a tool, does the same). Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
 
 To disable agent scoping and have all clients share `main_dataset` as the default, set in `.env`:
 
