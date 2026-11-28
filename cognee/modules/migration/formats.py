@@ -18,6 +18,39 @@ Edge = tuple[Any, Any, str, dict[str, Any]]
 _SKIP_EDGE_KEYS = ("source_node_id", "target_node_id")
 
 
+def _xml_illegal(char: str) -> bool:
+    """Whether a character falls outside the XML 1.0 ``Char`` production.
+
+    That production allows tab/newline/carriage-return, then U+0020-U+D7FF,
+    U+E000-U+FFFD and U+10000-U+10FFFF. Everything else — the other C0 controls,
+    the surrogate block (lone surrogates survive in a Python str) and
+    U+FFFE/U+FFFF — cannot appear in a well-formed document, escaped or not.
+    """
+    code_point = ord(char)
+    return not (
+        code_point in (0x09, 0x0A, 0x0D)
+        or 0x20 <= code_point <= 0xD7FF
+        or 0xE000 <= code_point <= 0xFFFD
+        or 0x10000 <= code_point <= 0x10FFFF
+    )
+
+
+def _xml_text(value: str, field: str) -> str:
+    """Return ``value`` unchanged, or raise if it holds a character GraphML can't carry.
+
+    GraphML is XML 1.0, so a code point outside its ``Char`` range cannot be
+    escaped into a well-formed file. We fail here rather than write a document no
+    parser will read; ``write_json`` keeps full fidelity for values that need it.
+    """
+    for char in value:
+        if _xml_illegal(char):
+            raise ValueError(
+                f"graphml cannot represent U+{ord(char):04X} in {field}; "
+                "export as json to keep it"
+            )
+    return value
+
+
 def _scalar(value: Any) -> Any:
     """Coerce a property value to a JSON/graph-safe scalar."""
     if value is None or isinstance(value, (str, int, float, bool)):
@@ -49,47 +82,57 @@ def write_graphml(nodes: list[Node], edges: list[Edge], destination: Path) -> No
     for _, properties in nodes:
         for key in properties or {}:
             node_keys.setdefault(key)
-    # Every edge emits a "relationship_name" datum below. It comes from the edge
-    # tuple rather than the per-edge properties dict, so the loop below would never
-    # register it; declare it explicitly whenever edges are present, otherwise the
-    # emitted <data key="e_relationship_name"> has no matching <key> declaration and
-    # strict GraphML readers (e.g. networkx.read_graphml) reject the file.
-    if edges:
-        edge_keys.setdefault("relationship_name")
     for _, _, _, properties in edges:
         for key in properties or {}:
             if key not in _SKIP_EDGE_KEYS:
                 edge_keys.setdefault(key)
+    # Every edge emits a <data key="e_relationship_name"> element, so its <key>
+    # must be declared too or strict readers (e.g. networkx.read_graphml) reject
+    # the document.
+    if edges:
+        edge_keys.setdefault("relationship_name")
 
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<graphml xmlns="http://graphml.graphdrawing.org/xmlns">',
     ]
     for key in node_keys:
+        safe = _xml_text(key, f"node property name {key!r}")
         lines.append(
-            f'  <key id="n_{escape(key)}" for="node" attr.name={quoteattr(key)} attr.type="string"/>'
+            f'  <key id="n_{escape(safe)}" for="node" attr.name={quoteattr(safe)} attr.type="string"/>'
         )
     for key in edge_keys:
+        safe = _xml_text(key, f"edge property name {key!r}")
         lines.append(
-            f'  <key id="e_{escape(key)}" for="edge" attr.name={quoteattr(key)} attr.type="string"/>'
+            f'  <key id="e_{escape(safe)}" for="edge" attr.name={quoteattr(safe)} attr.type="string"/>'
         )
     lines.append('  <graph id="cognee" edgedefault="directed">')
 
     for node_id, properties in nodes:
-        lines.append(f"    <node id={quoteattr(str(node_id))}>")
+        node_id = _xml_text(str(node_id), f"node id {node_id!r}")
+        lines.append(f"    <node id={quoteattr(node_id)}>")
         for key, value in (properties or {}).items():
             if value is None:
                 continue
-            lines.append(f'      <data key="n_{escape(key)}">{escape(str(_scalar(value)))}</data>')
+            safe_key = _xml_text(key, f"node property name {key!r}")
+            text = _xml_text(str(_scalar(value)), f"node {node_id!r} property {key!r}")
+            lines.append(f'      <data key="n_{escape(safe_key)}">{escape(text)}</data>')
         lines.append("    </node>")
 
     for source, target, relationship, properties in edges:
-        lines.append(f"    <edge source={quoteattr(str(source))} target={quoteattr(str(target))}>")
-        lines.append(f'      <data key="e_relationship_name">{escape(str(relationship))}</data>')
+        source = _xml_text(str(source), f"edge source {source!r}")
+        target = _xml_text(str(target), f"edge target {target!r}")
+        relationship = _xml_text(str(relationship), f"edge relationship_name {relationship!r}")
+        lines.append(f"    <edge source={quoteattr(source)} target={quoteattr(target)}>")
+        lines.append(f'      <data key="e_relationship_name">{escape(relationship)}</data>')
         for key, value in (properties or {}).items():
             if value is None or key in _SKIP_EDGE_KEYS or key == "relationship_name":
                 continue
-            lines.append(f'      <data key="e_{escape(key)}">{escape(str(_scalar(value)))}</data>')
+            safe_key = _xml_text(key, f"edge property name {key!r}")
+            text = _xml_text(
+                str(_scalar(value)), f"edge {source!r}->{target!r} property {key!r}"
+            )
+            lines.append(f'      <data key="e_{escape(safe_key)}">{escape(text)}</data>')
         lines.append("    </edge>")
 
     lines.append("  </graph>")
