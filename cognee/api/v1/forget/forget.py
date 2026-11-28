@@ -589,6 +589,17 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
         # 1. Delete graph nodes/edges and vector embeddings for this data item
         deleted_elements = await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
+        # 1a. Retire conflict notes this delete left without support, as a full
+        # delete does. Not best-effort: a kept note would go on asserting a
+        # dispute the remaining data no longer supports.
+        from cognee.modules.conflicts.methods import retire_forgotten_decisions
+        from cognee.modules.data.methods.get_authorized_dataset import (
+            get_authorized_dataset,
+        )
+
+        dataset = await get_authorized_dataset(user, dataset_ref, "delete")
+        retired_conflicts = await retire_forgotten_decisions(dataset, user)
+
         # 1b. Remove session entries whose answers used the deleted graph
         # elements, so completions stop asserting the removed content (non-fatal).
         try:
@@ -598,7 +609,7 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
 
             await invalidate_sessions_for_deleted_data(
                 dataset_id,
-                deleted_elements.node_ids,
+                deleted_elements.node_ids | retired_conflicts,
                 deleted_elements.edge_ids,
                 user_id=user.id,
             )

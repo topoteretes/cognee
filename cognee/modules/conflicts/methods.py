@@ -31,7 +31,13 @@ from cognee.tasks.memify.review_conflicts.models import (
     ConflictsToFinalize,
     ConflictsToWrite,
 )
-from cognee.tasks.memify.review_conflicts.read_facts import _to_conflict_record, read_entity_facts
+from cognee.tasks.memify.review_conflicts.read_facts import (
+    _is_reviewable_entity,
+    _read_nodes_or_raise,
+    _to_conflict_record,
+    read_dataset_node_ids,
+    read_entity_facts,
+)
 from cognee.tasks.memify.review_conflicts.write_conflicts import (
     _collect_cited_sources,
     _rebuild_stored_conflict,
@@ -266,35 +272,78 @@ async def resolve_conflict(
 
 
 async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
-    """Delete the user decisions whose chosen fact no longer exists, and return their ids.
+    """Delete the conflicts a document delete left without support, and return their ids.
 
     Run after a document is deleted, inside the dataset's lock and database context;
     ``update()``'s chunk-level path runs it once the edit is written instead (see
-    ``retire_decisions_after_edit``). A fact supported by several documents stays in
-    the graph until the last of them is deleted, so its decision stays until then too.
-    The check reads what the graph holds now rather than what one delete removed, so a
-    retried delete still finds it.
+    ``retire_decisions_after_edit``). A conflict is retired when its subject entity is
+    gone, is no longer an entity, or has left the dataset; when it named at least two
+    values and fewer than two of them remain; or, for a user decision, when its chosen
+    fact no longer exists. A fact supported by several documents stays in the graph
+    until the last of them is deleted, so its conflict stays until then too. The check
+    reads what the graph holds now rather than what one delete removed, so a retried
+    delete still finds it. The full fact read runs only when a user decision must be
+    checked or a conflict is being retired; otherwise only the conflicts' subject and
+    value nodes are read, so an ordinary delete stays cheap.
     """
     graph = await get_graph_engine()
     rows, _ = await graph.get_filtered_graph_data([{"type": ["FactConflict"]}], include_edges=False)
-    decisions = {
-        str(node_id): props
+    conflicts = {
+        str(node_id): _to_conflict_record(node_id, props)
         for node_id, props in rows
         if str(props.get("dataset_id")) == str(dataset.id)
-        and props.get("resolution_source") == "user"
     }
-    if not decisions:
+    if not conflicts:
+        return set()
+    dataset_node_ids = await read_dataset_node_ids(graph, str(dataset.id))
+    required = {
+        node_id
+        for conflict in conflicts.values()
+        for node_id in [str(conflict["about_id"]), *conflict["values"]]
+    }
+    existing = {
+        str(node["id"]): node for node in await _read_nodes_or_raise(graph, sorted(required))
+    }
+
+    def _present(node_id: str) -> bool:
+        return node_id in existing and (dataset_node_ids is None or node_id in dataset_node_ids)
+
+    unsupported = set()
+    for conflict_id, conflict in conflicts.items():
+        subject_id = str(conflict["about_id"])
+        subject = existing.get(subject_id)
+        if (
+            not subject
+            or not _is_reviewable_entity(subject)
+            or (dataset_node_ids is not None and subject_id not in dataset_node_ids)
+        ):
+            unsupported.add(conflict_id)
+            continue
+        values = conflict["values"]
+        if len(values) >= 2 and sum(_present(value) for value in values) < 2:
+            unsupported.add(conflict_id)
+    decisions = {
+        conflict_id: conflict
+        for conflict_id, conflict in conflicts.items()
+        if conflict.get("resolution_source") == "user"
+    }
+    if not unsupported and not decisions:
         return set()
     ctx = PipelineContext(user=user, dataset=dataset)
     scope = await read_entity_facts(
         None,
-        entity_ids=sorted({str(decision["about_id"]) for decision in decisions.values()}),
+        entity_ids=sorted(
+            {str(conflicts[cid]["about_id"]) for cid in unsupported | decisions.keys()}
+        ),
         ctx=ctx,
     )
     forgotten = sorted(
-        conflict_id
-        for conflict_id, decision in decisions.items()
-        if decision.get("selected_fact_id") not in scope.facts
+        unsupported
+        | {
+            conflict_id
+            for conflict_id, decision in decisions.items()
+            if decision.get("selected_fact_id") not in scope.facts
+        }
     )
     if forgotten:
         # The same drop a conflict review makes: the node goes, and the marks it left
