@@ -38,14 +38,15 @@ async def test_only_a_usable_branch_name_reaches_git_and_a_local_path_takes_none
 def test_each_branch_has_a_directory_of_its_own(tmp_path):
     default = resolve_module.clone_dir(_URL, clones_dir=tmp_path)
     # The directory every clone of the URL had before a branch could be chosen.
-    assert default == tmp_path / "github.com-org-repo"
+    assert default == resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
 
     branches = ["dev", "Dev", "feature/x", "feature-x", "release/" + "x" * 300]
     dirs = [resolve_module.clone_dir(_URL, branch, tmp_path) for branch in branches]
 
     # Apart even where the file system folds case or the name had to be rewritten.
     assert len({str(path).lower() for path in [default, *dirs]}) == len(branches) + 1
-    assert all(path.parent == tmp_path and len(path.name) < 100 for path in dirs)
+    assert all(path.parent == default.parent and len(path.name) < 100 for path in dirs)
+    assert default.parent.parent == tmp_path
 
 
 @pytest.mark.asyncio

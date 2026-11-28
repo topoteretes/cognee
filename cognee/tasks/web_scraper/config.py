@@ -34,3 +34,7 @@ class DefaultCrawlerConfig(BaseModel):
     playwright_js_wait: float = 0.8
     robots_cache_ttl: float = 3600.0
     join_all_matches: bool = False
+    proxy_url: str | None = None
+    ca_bundle: str | None = None
+    browser_route_concurrency: int | None = Field(default=None, gt=0)
+    max_browser_response_bytes: int | None = Field(default=None, gt=0)

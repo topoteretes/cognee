@@ -13,6 +13,7 @@ cloned into a directory of its own.
 import asyncio
 import base64
 import hashlib
+import ipaddress
 import os
 import re
 import shutil
@@ -75,6 +76,51 @@ _GITLAB_RESERVED_GROUPS = frozenset(
 )
 
 
+def _pinned_http_env(url: str, addresses: list, env: dict | None) -> dict:
+    """Pin libcurl DNS without changing the URL, TLS hostname or credential scope.
+
+    Redirects are refused because git cannot call our guard on a new target.
+    Config is process-local, never persisted into the cloned repository.
+    """
+    parts = urlsplit(url)
+    host = parts.hostname
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    ips = ",".join(f"[{ip}]" if ip.version == 6 else str(ip) for ip in addresses)
+    result = dict(env or {})
+    config = [
+        ("http.curloptResolve", ""),  # Clear inherited resolution entries.
+        ("http.followRedirects", "false"),
+        ("http.proxy", ""),
+        ("http.sslVerify", "true"),
+    ]
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        config.insert(1, ("http.curloptResolve", f"{host}:{port}:{ips}"))
+    # Literal hosts cannot rebind; curl's HOST:PORT parser cannot encode IPv6
+    # literals on all supported versions, so they need no resolution override.
+    count = int(result.get("GIT_CONFIG_COUNT", "0"))
+    for key, value in config:
+        result[f"GIT_CONFIG_KEY_{count}"] = key
+        result[f"GIT_CONFIG_VALUE_{count}"] = value
+        count += 1
+    result["GIT_CONFIG_COUNT"] = str(count)
+    result["GIT_CONFIG_PARAMETERS"] = ""
+    result["GIT_SSL_NO_VERIFY"] = "false"
+    result["GIT_CONFIG_NOSYSTEM"] = "1"
+    result["GIT_CONFIG_GLOBAL"] = os.devnull
+    for name in (
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ):
+        result[name] = ""
+    return result
+
+
 def default_clones_dir() -> Path:
     """Where remote repositories are cloned: ``BaseConfig.repos_root_directory``.
 
@@ -100,7 +146,7 @@ def is_remote_repo(spec) -> bool:
     return isinstance(spec, str) and spec.startswith(_REMOTE_PREFIXES)
 
 
-def code_repo_clone_url(spec) -> str | None:
+def code_repo_clone_url(spec, *, normalize_transport: bool = True) -> str | None:
     """The clone URL when an http(s) string names a whole git repository, else None.
 
     This is what lets ``add()`` treat ``https://github.com/<owner>/<repo>`` as a
@@ -120,7 +166,11 @@ def code_repo_clone_url(spec) -> str | None:
     """
     if not isinstance(spec, str):
         return None
-    parts = urlsplit(spec.strip())
+    try:
+        parts = urlsplit(spec.strip())
+        port = parts.port
+    except ValueError:
+        return None
     if parts.scheme not in ("http", "https") or not parts.hostname:
         return None
     host = parts.hostname.lower()
@@ -139,7 +189,14 @@ def code_repo_clone_url(spec) -> str | None:
         is_repo = False
     if not is_repo:
         return None
-    return urlunsplit((parts.scheme, parts.netloc, "/" + "/".join(segments), "", ""))
+    scheme, netloc = parts.scheme, parts.netloc
+    if normalize_transport and host in {"github.com", "gitlab.com"} and port in {None, 80, 443}:
+        scheme = "https"
+        userinfo = parts.netloc.rpartition("@")[0]
+        netloc = (userinfo + "@" if userinfo else "") + host
+        if host == "gitlab.com" and not segments[-1].endswith(".git"):
+            segments[-1] += ".git"
+    return urlunsplit((scheme, netloc, "/" + "/".join(segments), "", ""))
 
 
 def redact_repo_spec(spec: str | Path) -> str:
@@ -161,7 +218,7 @@ def redact_repo_spec(spec: str | Path) -> str:
 
 
 def _clone_slug(url: str, branch: str | None = None) -> str:
-    """A stable directory name for a remote URL, e.g. 'github.com-org-repo'.
+    """The historical directory basename used as the code-graph repository name.
 
     A chosen branch gets its own directory beside it, e.g. 'github.com-org-repo@dev-<hash>',
     so no clone is ever replaced under another caller. The hash of the exact name keeps
@@ -177,10 +234,26 @@ def _clone_slug(url: str, branch: str | None = None) -> str:
     return f"{slug}@{readable}-{hashlib.sha256(branch.encode()).hexdigest()[:8]}"
 
 
+def repository_identity(url: str) -> Path:
+    """Pre-pinning row identity, independent of the hardened clone cache path.
+
+    This path is only a database identity input, never a directory to open.
+    Preserve the caller's historical scheme/host and unhashed slug so existing
+    Data rows and their graph ownership survive the cache hardening.
+    """
+    legacy_url = redact_repo_spec(code_repo_clone_url(url, normalize_transport=False) or url)
+    return default_clones_dir() / _clone_slug(legacy_url)
+
+
 def clone_dir(url: str, branch: str | None = None, clones_dir: Path | None = None) -> Path:
     """Where :func:`resolve_repo_source` clones the credential-free ``url`` on ``branch``
-    (None: the remote's default branch, in the directory every clone had before)."""
-    return (Path(clones_dir) if clones_dir else default_clones_dir()) / _clone_slug(url, branch)
+    (None selects the remote's default branch).
+
+    The parent hashes the exact URL to separate colliding readable slugs. Keep
+    the basename unchanged: enola and the graph mapper use it for node identity.
+    """
+    base = Path(clones_dir) if clones_dir else default_clones_dir()
+    return base / hashlib.sha256(url.encode()).hexdigest()[:16] / _clone_slug(url, branch)
 
 
 # git's refname rules that cannot appear anywhere in a branch name: control
@@ -252,7 +325,7 @@ _LFS_OFF_ARGS = (
 _LFS_OFF_ENV = {"GIT_LFS_SKIP_SMUDGE": "1"}
 
 
-async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
+async def _execute_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
     git_binary = shutil.which("git")
     if git_binary is None:
         raise CodeRepositoryError(
@@ -268,14 +341,79 @@ async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tu
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        _stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=_GIT_TIMEOUT_SECONDS
-        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=_GIT_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
         process.kill()
         await process.wait()
         raise CodeRepositoryError(message=f"git {args[0]} timed out after {_GIT_TIMEOUT_SECONDS}s.")
-    return process.returncode, stderr.decode(errors="replace")
+    return process.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+
+
+async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
+    returncode, _stdout, stderr = await _execute_git(args, cwd, env)
+    return returncode, stderr
+
+
+_pin_capable_git = set()
+
+
+async def _require_pinning_git():
+    binary = shutil.which("git")
+    if binary in _pin_capable_git:
+        return
+    code, output, _ = await _execute_git(["--version"])
+    version = re.search(r"git version (\d+)\.(\d+)", output)
+    if code or not version or tuple(map(int, version.groups())) < (2, 37):
+        raise CodeRepositoryError(message="HTTP(S) repositories require Git 2.37+ for DNS pinning.")
+    _pin_capable_git.add(binary)
+
+
+async def _http_user_config():
+    """Preserve credentials and CA trust without importing network URL rewrites.
+
+    Global/system config is disabled in the pinned process. Copy only settings
+    that cannot redirect it to an unvalidated endpoint. Values stay in memory.
+    """
+    code, output, _ = await _execute_git(["config", "--null", "--list"])
+    if code:
+        raise CodeRepositoryError(message="Could not read Git credential/CA configuration.")
+    result = {}
+    count = 0
+    for entry in output.split("\0"):
+        key, _, value = entry.partition("\n")
+        if key.startswith("credential.") or re.fullmatch(
+            r"http(?:\..+)?\.(sslcainfo|sslcapath|extraheader)", key
+        ):
+            result[f"GIT_CONFIG_KEY_{count}"] = key
+            result[f"GIT_CONFIG_VALUE_{count}"] = value
+            count += 1
+    result["GIT_CONFIG_COUNT"] = str(count)
+    return result
+
+
+def _append_git_config(base, extra):
+    count = int(base.get("GIT_CONFIG_COUNT", "0"))
+    for index in range(int(extra.get("GIT_CONFIG_COUNT", "0"))):
+        base[f"GIT_CONFIG_KEY_{count}"] = extra[f"GIT_CONFIG_KEY_{index}"]
+        base[f"GIT_CONFIG_VALUE_{count}"] = extra[f"GIT_CONFIG_VALUE_{index}"]
+        count += 1
+    base["GIT_CONFIG_COUNT"] = str(count)
+    return base
+
+
+async def _check_clone_origin(target, clean_url, env):
+    code, origin, _ = await _execute_git(
+        ["config", "--file", str(target / ".git" / "config"), "--get", "remote.origin.url"], env=env
+    )
+    if code or redact_repo_spec(origin.strip()) != clean_url:
+        raise CodeRepositoryError(
+            message=f"Cached repository at {target} has a different origin; refusing to refresh it."
+        )
+
+
+def _raise_on_redirect(stderr):
+    if re.search(r"(?:error:|code:)\s*30[12378]\b", stderr, re.IGNORECASE):
+        raise CodeRepositoryError(message="The repository redirects; pass its canonical URL.")
 
 
 async def _remote_ref_missing(remote: str, branch: str, env: dict | None) -> bool:
@@ -287,6 +425,7 @@ async def _remote_ref_missing(remote: str, branch: str, env: dict | None) -> boo
     returncode, _stderr = await _run_git(
         ["ls-remote", "--exit-code", remote, f"refs/heads/{branch}"], env=env
     )
+    _raise_on_redirect(_stderr)
     return returncode == 2
 
 
@@ -309,6 +448,10 @@ async def resolve_repo_source(
     its own (see :func:`_clone_slug`); reusing it fetches and resets, which follows a
     force push. A branch the remote does not have raises, and a local path rejects
     ``branch``.
+
+    Hosted callers accepting untrusted specs must allowlist HTTPS repositories
+    before calling this function. SSH/git@ and local paths remain trusted-SDK
+    features and are not protected by the HTTP destination policy.
 
     ``credentials`` is the preferred way to authenticate against a private
     https remote (e.g. a GitHub App installation token): it reaches git only
@@ -353,7 +496,7 @@ async def resolve_repo_source(
     except SSRFProtectionError as error:
         raise CodeRepositoryError(message=error.message, status_code=error.status_code) from error
 
-    url = str(spec)
+    url = code_repo_clone_url(str(spec)) or str(spec)
 
     # SSRF: the URL is caller-supplied and git runs server-side, so an http(s)
     # remote must clear the same outbound check add()'s http items already clear --
@@ -367,11 +510,14 @@ async def resolve_repo_source(
     # common setup. Non-http, non-ssh transports (file://, ext::, which git would
     # execute) never reach here -- they do not match _REMOTE_PREFIXES and are handled
     # as local paths above.
+    resolved_addresses = None
     if url.lower().startswith(("http://", "https://")):
         from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
 
         try:
-            await validate_outbound_url(url)
+            resolved_addresses = await asyncio.wait_for(
+                validate_outbound_url(url), _GIT_TIMEOUT_SECONDS
+            )
         except SSRFProtectionError as error:
             raise CodeRepositoryError(
                 message=f"Refusing to clone '{redact_repo_spec(url)}': {error.message}",
@@ -393,9 +539,20 @@ async def resolve_repo_source(
         return re.sub(r"://[^/\s@]+@", "://", text)
 
     auth_env = _credential_env(credentials, clean_url) if credentials else None
+    if resolved_addresses is not None:
+        await _require_pinning_git()
+        config_env = await _http_user_config()
+        auth_env = _pinned_http_env(
+            clean_url, resolved_addresses, _append_git_config(config_env, auth_env or {})
+        )
 
     base = Path(clones_dir) if clones_dir else default_clones_dir()
-    target = clone_dir(clean_url, branch, base)
+    # Transport canonicalization must not rename an already-indexed repository
+    # (e.g. www.github.com -> github.com). Preserve its historical basename.
+    identity_url = redact_repo_spec(
+        code_repo_clone_url(str(spec), normalize_transport=False) or spec
+    )
+    target = clone_dir(identity_url, branch, base)
     # The slug regex already forbids separators and dot-runs; keep an
     # explicit containment check so a clone can never land outside the
     # clones directory regardless of what the URL decomposed into.
@@ -407,24 +564,28 @@ async def resolve_repo_source(
         return CodeRepositoryError(message=f"Branch '{branch}' was not found in '{clean_url}'.")
 
     if (target / ".git").is_dir():
+        await _check_clone_origin(target, clean_url, auth_env)
         # Legacy URL-embedded credentials: fetch from the explicit URL
         # instead of the stored remote (which is deliberately
         # credential-free). Out-of-band credentials ride the environment.
         if branch is None:
-            pull_args = ["pull", "--ff-only"] + ([url] if has_credentials else [])
+            pull_args = ["pull", "--ff-only", url]
             returncode, stderr = await _run_git(pull_args, cwd=target, env=auth_env)
         else:
             # Fetch and reset, not pull: a rebased or force-pushed branch is not a
             # fast-forward. The ref is spelled out because git resolves a bare name
             # itself (a tag before a branch, '+x' as a force refspec).
-            remote = url if has_credentials else "origin"
+            remote = url
             fetch_args = ["fetch", "--depth", "1", remote, f"refs/heads/{branch}"]
             returncode, stderr = await _run_git(fetch_args, cwd=target, env=auth_env)
             if returncode != 0 and await _remote_ref_missing(url, branch, auth_env):
                 raise _branch_not_found()
             if returncode == 0:
-                returncode, stderr = await _run_git(["reset", "--hard", "FETCH_HEAD"], cwd=target)
+                returncode, stderr = await _run_git(
+                    ["reset", "--hard", "FETCH_HEAD"], cwd=target, env=auth_env
+                )
         if returncode != 0:
+            _raise_on_redirect(stderr)
             # A stale clone is still indexable; the caller asked for the repo,
             # not for freshness guarantees.
             logger.warning(
@@ -451,9 +612,10 @@ async def resolve_repo_source(
         env=auth_env,
     )
     if returncode != 0:
+        _raise_on_redirect(stderr)
         raise CodeRepositoryError(
             message=f"Failed to clone '{clean_url}': {_scrub(stderr[-1000:])}"
         )
     if has_credentials:
-        await _run_git(["remote", "set-url", "origin", clean_url], cwd=target)
+        await _run_git(["remote", "set-url", "origin", clean_url], cwd=target, env=auth_env)
     return target

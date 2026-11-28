@@ -23,12 +23,19 @@ def test_is_remote_repo_detection():
 
 
 def test_clone_slug_is_stable_and_filesystem_safe():
-    assert (
-        resolve_module._clone_slug("https://github.com/org/repo.git")
-        == resolve_module._clone_slug("https://github.com/org/repo")
-        == "github.com-org-repo"
+    url = "https://github.com/org/repo.git"
+    assert resolve_module._clone_slug(url) == resolve_module._clone_slug(url)
+    assert "/" not in resolve_module._clone_slug(url)
+    assert resolve_module._clone_slug(url) == "github.com-org-repo"
+
+
+def test_cache_paths_separate_urls_with_colliding_readable_slugs():
+    assert resolve_module.clone_dir("http://evil.example:6379/a/b.git") != resolve_module.clone_dir(
+        "https://evil.example/6379/a/b.git"
     )
-    assert resolve_module._clone_slug("git@github.com:org/repo.git") == "git-github.com-org-repo"
+    assert resolve_module.clone_dir("http://example.com/o/r.git") != resolve_module.clone_dir(
+        "https://example.com/o/r.git"
+    )
 
 
 @pytest.mark.asyncio
@@ -96,7 +103,7 @@ async def test_explicit_opt_in_allows_api_repo_cloning(monkeypatch, tmp_path):
             "https://8.8.8.8/org/repo.git", clones_dir=tmp_path
         )
 
-    assert resolved.parent == tmp_path
+    assert resolved.parent.parent == tmp_path
     assert run_git.await_count == 1
 
 
@@ -199,7 +206,7 @@ async def test_remote_is_shallow_cloned(monkeypatch, tmp_path):
         "https://github.com/org/repo", clones_dir=tmp_path
     )
 
-    assert resolved == tmp_path / "github.com-org-repo"
+    assert resolved == resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
     assert len(git_calls) == 1
     args, _cwd = git_calls[0]
     # core.symlinks=false is a security requirement, not incidental: without it a
@@ -210,8 +217,11 @@ async def test_remote_is_shallow_cloned(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_existing_clone_is_reused_with_pull(monkeypatch, tmp_path):
-    clone_dir = tmp_path / "github.com-org-repo"
+    clone_dir = resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
     (clone_dir / ".git").mkdir(parents=True)
+    (clone_dir / ".git" / "config").write_text(
+        '[remote "origin"]\nurl = https://github.com/org/repo\n'
+    )
     git_calls = []
 
     async def fake_run_git(args, cwd=None, env=None):
@@ -225,13 +235,16 @@ async def test_existing_clone_is_reused_with_pull(monkeypatch, tmp_path):
     )
 
     assert resolved == clone_dir
-    assert git_calls == [(["pull", "--ff-only"], clone_dir)]
+    assert git_calls == [(["pull", "--ff-only", "https://github.com/org/repo"], clone_dir)]
 
 
 @pytest.mark.asyncio
 async def test_failed_pull_still_reuses_stale_clone(monkeypatch, tmp_path):
-    clone_dir = tmp_path / "github.com-org-repo"
+    clone_dir = resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
     (clone_dir / ".git").mkdir(parents=True)
+    (clone_dir / ".git" / "config").write_text(
+        '[remote "origin"]\nurl = https://github.com/org/repo\n'
+    )
 
     async def fake_run_git(args, cwd=None, env=None):
         return 1, "fatal: not fast-forward"
@@ -276,15 +289,15 @@ async def test_missing_git_binary_raises(monkeypatch, tmp_path):
         ("https://github.com/org/repo", "https://github.com/org/repo"),
         ("https://github.com/org/repo.git", "https://github.com/org/repo.git"),
         ("https://github.com/org/repo/", "https://github.com/org/repo"),
-        ("http://github.com/org/repo", "http://github.com/org/repo"),
+        ("http://github.com/org/repo", "https://github.com/org/repo"),
         # Browser chrome is dropped so git gets a clean URL.
         (
             "https://www.github.com/org/repo?tab=readme-ov-file#readme",
-            "https://www.github.com/org/repo",
+            "https://github.com/org/repo",
         ),
         ("  https://github.com/org/repo  ", "https://github.com/org/repo"),
-        ("https://gitlab.com/group/repo", "https://gitlab.com/group/repo"),
-        ("https://gitlab.com/group/subgroup/repo", "https://gitlab.com/group/subgroup/repo"),
+        ("https://gitlab.com/group/repo", "https://gitlab.com/group/repo.git"),
+        ("https://gitlab.com/group/subgroup/repo", "https://gitlab.com/group/subgroup/repo.git"),
         # Any host, when the URL says so.
         ("https://git.example.com/team/repo.git", "https://git.example.com/team/repo.git"),
         # Userinfo (a token) stays: it is needed to clone, redacted before storing.
@@ -335,3 +348,21 @@ def test_default_clones_dir_comes_from_base_config():
     from cognee.base_config import get_base_config
 
     assert resolve_module.default_clones_dir() == Path(get_base_config().repos_root_directory)
+
+
+@pytest.mark.parametrize("port", ["bad", "99999", "-1"])
+def test_malformed_port_is_not_a_repository(port):
+    assert resolve_module.code_repo_clone_url(f"https://github.com:{port}/org/repo") is None
+
+
+@pytest.mark.parametrize(
+    "url,slug",
+    [
+        ("https://github.com/org/repo", "github.com-org-repo"),
+        ("http://www.github.com/org/repo.git?q=x", "www.github.com-org-repo"),
+        ("https://gitlab.com/group/project", "gitlab.com-group-project"),
+    ],
+)
+def test_data_identity_keeps_pre_pinning_slug(url, slug):
+    assert resolve_module.repository_identity(url) == resolve_module.default_clones_dir() / slug
+    assert resolve_module.clone_dir(url) != resolve_module.repository_identity(url)

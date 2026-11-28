@@ -20,7 +20,6 @@ ssrf_module = importlib.import_module("cognee.tasks.web_scraper.ssrf_protection"
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 
 _URL = "https://github.com/org/repo"
-_NAME = "github.com-org-repo"
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "t",
     "GIT_AUTHOR_EMAIL": "t@example.com",
@@ -113,7 +112,10 @@ def origin(tmp_path, monkeypatch):
     async def run_git(args, cwd=None, env=None):
         # A file:// URL, not a path: only then is the clone shallow, like a real remote.
         remote = origin.bare.resolve().as_uri()
-        return await real_run_git([remote if arg == _URL else arg for arg in args], cwd, env)
+        result = await real_run_git([remote if arg == _URL else arg for arg in args], cwd, env)
+        if args[0] == "clone" and result[0] == 0:
+            _git(args[-1], "remote", "set-url", "origin", _URL)
+        return result
 
     monkeypatch.setattr(resolve_module, "_run_git", run_git)
     monkeypatch.setattr(ssrf_module, "validate_outbound_url", AsyncMock())
@@ -131,6 +133,40 @@ async def _resolve(clones, branch=None):
 
 def _content(path):
     return (path / "BRANCH.txt").read_text().strip()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("branch,suffix", [(None, ""), ("dev", "@dev-ef260e9a")])
+@pytest.mark.parametrize(
+    "spec,legacy_name",
+    [
+        (_URL, "github.com-org-repo"),
+        ("http://www.github.com/org/repo?tab=readme", "www.github.com-org-repo"),
+    ],
+)
+async def test_new_cache_preserves_existing_code_graph_ids(
+    origin, clones, branch, suffix, spec, legacy_name
+):
+    from cognee.tasks.code_graph.extract_code_graph import map_facts_to_data_points
+
+    if branch:
+        origin.commit(branch, "dev-1")
+    legacy = clones / (legacy_name + suffix)
+    legacy.mkdir(parents=True)
+    (legacy / "existing-cache").write_text("keep")
+
+    resolved = await resolve_module.resolve_repo_source(spec, clones_dir=clones, branch=branch)
+
+    assert resolved != legacy  # Hardened caches never trust an old checkout.
+    assert _content(resolved) == ("dev-1" if branch else "main-1")
+    assert (legacy / "existing-cache").read_text() == "keep"
+    facts = [{"kind": "symbol", "name": "main", "file": "main.py"}]
+    before = map_facts_to_data_points(facts, repo_path=legacy)
+    after = map_facts_to_data_points(facts, repo_path=resolved)
+    assert [(point.name, point.id) for point in after] == [
+        (point.name, point.id) for point in before
+    ]
+    assert resolved.name == legacy.name
 
 
 # Each name is one git misreads when fetched bare.
@@ -160,7 +196,7 @@ async def test_a_tag_is_not_taken_for_a_branch(origin, clones):
     with pytest.raises(resolve_module.CodeRepositoryError, match="Branch 'v1' was not found"):
         await _resolve(clones, "v1")
 
-    assert list(clones.iterdir()) == []
+    assert not resolve_module.clone_dir(_URL, "v1", clones).exists()
 
 
 @pytest.mark.asyncio
@@ -173,8 +209,8 @@ async def test_each_branch_is_a_clone_of_its_own_that_follows_force_pushes(origi
     default = await _resolve(clones)
 
     assert [_content(path) for path in (dev, feature, default)] == ["dev-1", "ü-1", "main-1"]
-    assert default == clones / _NAME
-    assert sorted(path.name for path in clones.iterdir()) == sorted(
+    assert default == resolve_module.clone_dir(_URL, clones_dir=clones)
+    assert sorted(path.name for path in default.parent.iterdir()) == sorted(
         path.name for path in (dev, feature, default)
     )
 
@@ -197,7 +233,7 @@ async def test_each_branch_is_a_clone_of_its_own_that_follows_force_pushes(origi
 async def test_a_missing_branch_is_reported_and_never_replaces_a_clone(origin, clones):
     with pytest.raises(resolve_module.CodeRepositoryError, match="Branch 'nope' was not found"):
         await _resolve(clones, "nope")
-    assert list(clones.iterdir()) == []
+    assert not resolve_module.clone_dir(_URL, "nope", clones).exists()
 
     origin.commit("dev", "dev-1")
     dev = await _resolve(clones, "dev")

@@ -46,9 +46,9 @@ from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.config import DEFAULT_CODE_GRAPH_BATCH_SIZE
 from cognee.tasks.code_graph.resolve_repo import (
     CodeRepositoryError,
-    clone_dir,
     code_repo_clone_url,
     redact_repo_spec,
+    repository_identity,
     resolve_repo_source,
 )
 from cognee.tasks.ingestion.dlt_utils import metadata_source
@@ -376,7 +376,9 @@ async def resolve_code_repository_url(
     that branch instead of the remote's default; a dataset still holds one data
     row per URL, so adding it on another branch replaces that row's code graph.
     """
-    clone_url = code_repo_clone_url(spec)
+    # The resolver canonicalizes the transport after deriving the legacy graph
+    # identity; do not discard the caller's historical host spelling here.
+    clone_url = code_repo_clone_url(spec, normalize_transport=False)
     if clone_url is None:
         raise ValueError(
             f"'{redact_repo_spec(spec)}' is not a repository URL add() can clone; "
@@ -392,7 +394,7 @@ async def resolve_code_repository_url(
         # Keyed on the default branch's clone, as every URL row was before branches:
         # existing rows keep their ids, and branches of one URL share the row, since
         # their code graphs share the repository's node ids.
-        identity=clone_dir(source_url),
+        identity=repository_identity(str(spec)),
     )
 
 
@@ -420,6 +422,7 @@ async def add_code_repository(
         user=user,
         dataset_id=dataset.id,
         source_url=source_url,
+        identity=repository_identity(source_url) if source_url else None,
         include_documents=False,
     )
     add_result = await add(

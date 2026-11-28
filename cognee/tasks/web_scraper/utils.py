@@ -88,6 +88,10 @@ async def fetch_page_content(
             retry_delay_factor=default_crawler_config.retry_delay_factor,
             headers=default_crawler_config.headers,
             robots_cache_ttl=default_crawler_config.robots_cache_ttl,
+            proxy_url=default_crawler_config.proxy_url,
+            ca_bundle=default_crawler_config.ca_bundle,
+            browser_route_concurrency=default_crawler_config.browser_route_concurrency,
+            max_browser_response_bytes=default_crawler_config.max_browser_response_bytes,
         )
         try:
             logger.info(
