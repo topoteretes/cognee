@@ -987,3 +987,34 @@ def test_the_sync_vector_size_path_adopts_the_workers_tokenizer_too(hf_tokenizer
     engine = make_engine(transport, dimensions=None)
     assert engine.get_vector_size() == DIMS
     assert hf_tokenizers == ["BAAI/bge-small-en-v1.5"]
+
+
+# --------------------------------------------------------------------------- #
+# Over-length texts: token windows
+# --------------------------------------------------------------------------- #
+
+
+class _WordTokenizer:
+    def count_tokens(self, text: str) -> int:
+        return len(text.split())
+
+
+@pytest.mark.asyncio
+async def test_an_over_length_text_goes_out_as_token_windows_in_one_request():
+    """A text over the worker's max_text_tokens is cut into consecutive windows
+    before it is sent, so the worker never answers input_too_long for it; its
+    vector is the token-weighted mean of the windows', at unit length."""
+    transport = FakeTransport()
+    engine = make_engine(transport, batch_size=8)
+    engine.tokenizer = _WordTokenizer()
+    text = " ".join(["word"] * 1200)  # the worker takes 510 tokens of a document
+
+    result = await engine.embed_text(["short", text])
+
+    (sent,) = [payload["inputs"] for payload, _ in transport.requests]
+    assert sent[0] == "short"
+    assert "".join(sent[1:]) == text
+    assert [len(window.split()) for window in sent[1:]] == [510, 510, 180]
+    assert result[0] == vector_for("short")
+    assert math.isclose(math.hypot(*result[1]), 1.0)
+    assert result.tokens == 1 + 1200

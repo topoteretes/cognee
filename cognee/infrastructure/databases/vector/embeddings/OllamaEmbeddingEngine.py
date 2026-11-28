@@ -26,6 +26,7 @@ from cognee.infrastructure.databases.vector.embeddings.input_limit import (
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
+from cognee.infrastructure.databases.vector.embeddings.token_windows import embed_in_windows
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     count_input_tokens,
     handle_embedding_response,
@@ -100,6 +101,19 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
     async def embed_text(self, text: list[str]) -> EmbeddingResult:
         """
         Embed a list of text prompts; returns their vectors and the input-token count.
+
+        A text longer than the model's input limit is embedded as consecutive token
+        windows, and its vector is their token-weighted mean
+        (embeddings/token_windows.py). A window Ollama still rejects, when the
+        tokenizer counts fewer tokens than the model does, is recovered by
+        :meth:`_embed_request`.
+        """
+        return await embed_in_windows(self, text, self._embed_request)
+
+    async def _embed_request(self, text: list[str]) -> EmbeddingResult:
+        """
+        Embed ``text`` (already cut into windows by :meth:`embed_text`), one request per
+        prompt; a prompt Ollama still rejects as too long is split further.
 
         If mocking is enabled, returns a list of zero vectors instead of actual embeddings.
 
@@ -338,7 +352,11 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             return None
         for key, value in model_info.items():
             if key.endswith(".context_length"):
-                return sane_limit(value)
+                # The context length includes the special tokens the model adds
+                # (nomic-embed-text: 2048, of which 2 are [CLS] and [SEP]); text is
+                # counted without them, so a text of 2048 tokens is rejected.
+                limit = sane_limit(value)
+                return None if limit is None else sane_limit(limit - self.tokenizer.special_tokens)
         return None
 
     def get_tokenizer(self):

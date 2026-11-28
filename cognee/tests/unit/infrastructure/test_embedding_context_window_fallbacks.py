@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import numpy as np
 import pytest
+from tenacity import stop_after_attempt
 
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
@@ -67,55 +68,10 @@ async def test_ollama_embedding_raises_when_short_text_still_exceeds_context_win
 
 
 @pytest.mark.asyncio
-async def test_fastembed_splits_batch_on_context_window_error():
-    pytest.importorskip("fastembed")
-
-    with (
-        patch(
-            "cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine."
-            "FastembedEmbeddingEngine.get_tokenizer",
-            return_value=Mock(),
-        ),
-        patch(
-            "cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine."
-            "TextEmbedding",
-        ) as mock_text_embedding,
-    ):
-        embedding_model = Mock()
-        mock_text_embedding.return_value = embedding_model
-
-        def fake_embed(inputs, batch_size, parallel):
-            if inputs == ["too long", "ok 1", "ok 2"]:
-                raise RuntimeError("input length exceeds context window")
-            if inputs == ["too long", "ok 1"]:
-                raise RuntimeError("maximum tokens exceeded")
-            if inputs == ["too long"]:
-                raise RuntimeError("context length exceeded")
-            # "too long" (8 chars) splits into third=8//3=2 → left="too " (s[:4]), right="o long" (s[2:])
-            if inputs == ["too "]:
-                return iter([np.array([1.0, 1.0])])
-            if inputs == ["o long"]:
-                return iter([np.array([2.0, 2.0])])
-            if inputs == ["ok 1"]:
-                return iter([np.array([3.0, 3.0])])
-            if inputs == ["ok 2"]:
-                return iter([np.array([4.0, 4.0])])
-            raise AssertionError(f"Unexpected inputs: {inputs}")
-
-        embedding_model.embed.side_effect = fake_embed
-
-        from cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine import (
-            FastembedEmbeddingEngine,
-        )
-
-        engine = FastembedEmbeddingEngine(model="test-model", dimensions=2)
-        result = await engine.embed_text(["too long", "ok 1", "ok 2"])
-
-    assert result == [[1.5, 1.5], [3.0, 3.0], [4.0, 4.0]]
-
-
-@pytest.mark.asyncio
-async def test_fastembed_raises_when_short_text_still_exceeds_context_window():
+async def test_fastembed_context_window_error_is_not_split_again():
+    """fastembed truncates an over-length text instead of raising, so the engine cuts
+    it into windows before the model call. An error that still names the context
+    window is reported as it is, after the one call, never split and retried."""
     pytest.importorskip("fastembed")
 
     with (
@@ -139,10 +95,12 @@ async def test_fastembed_raises_when_short_text_still_exceeds_context_window():
 
         engine = FastembedEmbeddingEngine(model="test-model", dimensions=2)
 
-        with pytest.raises(EmbeddingException, match="too short to split further"):
-            await engine.embed_text(["ab"])
+        # One attempt: the engine's retry policy would otherwise resend the call.
+        with pytest.raises(EmbeddingException, match="Failed to index data points"):
+            await engine.embed_text.retry_with(stop=stop_after_attempt(1))(engine, ["ab"])
 
         assert embedding_model.embed.call_count == 1
+        assert embedding_model.embed.call_args.args[0] == ["ab"], "sent as is, never split"
 
 
 @pytest.mark.asyncio

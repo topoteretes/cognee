@@ -13,6 +13,9 @@ from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine im
 
 
 class _WordTokenizer:
+    model_input_limit = None
+    special_tokens = 0
+
     def count_tokens(self, text):
         return len(text.split())
 
