@@ -141,3 +141,24 @@ def test_search_dto_carries_session_id_in_both_casings():
     assert SearchPayloadDTO(query="q", sessionId="s1").session_id == "s1"
     assert SearchPayloadDTO(query="q", session_id="s1").session_id == "s1"
     assert SearchPayloadDTO(query="q").session_id is None
+
+
+@pytest.mark.asyncio
+async def test_remote_search_forwards_session_id(monkeypatch, api_search_mod):
+    """search() connected through serve() must send the caller's session to the server."""
+    import importlib
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    captured = {}
+
+    async def remote_search(query_text, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(
+        serve_state, "get_remote_client", lambda: types.SimpleNamespace(search=remote_search)
+    )
+
+    await api_search_mod.search("q", session_id="s1")
+
+    assert captured["session_id"] == "s1"
