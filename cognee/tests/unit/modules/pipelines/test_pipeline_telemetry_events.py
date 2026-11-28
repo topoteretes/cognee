@@ -356,3 +356,48 @@ async def test_a_failed_progress_push_closes_the_item_chain_at_once(events, monk
     assert names == ["Pipeline Item Started", "Pipeline Item Errored"]
     (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
     assert errored["exception_type"] == "GeneratorExit"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", [None, ""])
+@pytest.mark.parametrize("error_type", [TimeoutError, asyncio.TimeoutError])
+async def test_blank_timeout_names_originating_task_without_replaying_it(
+    events, message, error_type
+):
+    from cognee.modules.operations.scrub_error import scrub_error_message
+
+    error = error_type() if message is None else error_type(message)
+    error.__cause__ = ConnectionResetError()
+    attempts = []
+
+    async def prepare(data):
+        return data
+
+    async def embed_document(data):
+        attempts.append(True)
+        raise error
+
+    with pytest.raises(error_type) as raised:
+        await _drain(
+            [Task(prepare), Task(embed_document)], PipelineContext(pipeline_run_id=uuid4())
+        )
+
+    assert raised.value is error
+    assert isinstance(error.__cause__, ConnectionResetError)
+    assert str(error) == "Pipeline task 'embed_document' timed out"
+    assert scrub_error_message(error) == str(error)
+    assert attempts == [True]  # arbitrary task writes are not replay-safe
+    assert [p["task_name"] for _, p in _task_events(events, "Errored")] == ["embed_document"]
+
+
+@pytest.mark.asyncio
+async def test_existing_timeout_diagnostic_is_preserved(events):
+    error = TimeoutError("provider deadline exhausted")
+
+    async def extract(data):
+        raise error
+
+    with pytest.raises(TimeoutError) as raised:
+        await _drain([Task(extract)], PipelineContext(pipeline_run_id=uuid4()))
+    assert raised.value is error
+    assert str(error) == "provider deadline exhausted"

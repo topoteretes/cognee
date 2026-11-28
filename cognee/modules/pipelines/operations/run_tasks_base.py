@@ -1,3 +1,5 @@
+import asyncio
+
 from cognee import __version__ as cognee_version
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.observability import (
@@ -244,6 +246,14 @@ async def handle_task(
                 )
 
         except BaseException as error:
+            if (
+                not downstream_failed
+                and isinstance(error, (TimeoutError, asyncio.TimeoutError))
+                and not str(error)
+            ):
+                # Keep the original class, cause and traceback for retry policies;
+                # name only the failing stage, never its inputs or dataset.
+                error.args = (f"Pipeline task '{task_name}' timed out",)
             # BaseException, not Exception: a cancelled or closed task (CancelledError,
             # GeneratorExit) must still emit its terminal event, or its Started event
             # is a permanent silent gap in the warehouse. Re-raised below.
