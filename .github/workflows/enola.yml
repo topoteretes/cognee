@@ -1,0 +1,82 @@
+name: Architecture (enola)
+
+# Reports what a pull request does to the architecture declared in
+# enola-intent.yaml: layers crossed the wrong way, new cycles, new coupling.
+# Report-only: findings show as annotations and in the job summary, and never
+# fail the job. It fails only when enola-intent.yaml itself is invalid or one of
+# its layers or components selects nothing. Turning on enforcement (--fail-on)
+# is a team decision, not this workflow's.
+
+on:
+  pull_request:
+    branches: [main, dev]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: enola-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  enola:
+    name: Architecture (enola)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # check --base snapshots the merge-base with the base branch.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+
+      - name: Install enola
+        # The enola-cli pin lives only in pyproject.toml (the code-graph route
+        # uses the same binary), so CI installs that version without the rest
+        # of cognee's dependencies. `check --base` needs 0.5.4 or later.
+        run: |
+          version="$(sed -nE 's/.*"enola-cli==([0-9][0-9.]*)".*/\1/p' pyproject.toml | head -n 1)"
+          if [ -z "$version" ]; then
+            echo "::error::no enola-cli pin found in pyproject.toml"
+            exit 1
+          fi
+          uv tool install "enola-cli==${version}"
+          echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
+
+      - name: Lint the declared architecture
+        run: |
+          enola --generate .
+          enola constraints lint --fail-empty .
+
+      - name: Report what this pull request changes
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set +e
+          # enola writes one format per run, so the check runs twice: once for
+          # the annotations, once for the job summary.
+          enola check --base "origin/${BASE_REF}" --format annotations --host github .
+          code=$?
+          enola check --base "origin/${BASE_REF}" --summary . >> "$GITHUB_STEP_SUMMARY"
+          summary_code=$?
+          # With no --fail-on, enola reports every finding and exits 0, or 3 when
+          # the base cannot be compared (not a statement about the change). Any
+          # other code (2, a crash, a kill, a missing binary) means no report was
+          # made, which must not pass for a clean one.
+          for c in "$code" "$summary_code"; do
+            case "$c" in
+              0|3) ;;
+              *)
+                echo "::error::enola check could not run (exit $c)"
+                exit 1
+                ;;
+            esac
+          done
+          if [ "$code" -eq 3 ]; then
+            echo "::notice::enola declined to compare this branch with ${BASE_REF}; see the job summary"
+          fi
+          exit 0

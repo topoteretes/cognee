@@ -54,6 +54,20 @@ uv run pre-commit run --all-files
 
 Use the [test guide](cognee/tests/README.md) to choose integration and end-to-end suites. For local setup and launch commands, see [CONTRIBUTING.md](CONTRIBUTING.md), the [MCP server guide](cognee-mcp/README.md), and the [frontend guide](cognee-frontend/README.md).
 
+## Architecture checks (enola)
+
+[enola](https://github.com/enola-labs/enola) grades what a change does to the structure of the code: layers crossed the wrong way, new cycles, new coupling. The intended architecture is declared in [`enola-intent.yaml`](enola-intent.yaml): the layer order from [docs/architecture.md](docs/architecture.md#layer-structure) and the code paths the docs describe as making no LLM call. The `Architecture (enola)` CI job reports what each pull request does to it. It is report-only and fails only when `enola-intent.yaml` is invalid or one of its layers or components matches nothing.
+
+If you do not already use enola while developing, run it locally:
+
+- enola comes with cognee: `uv sync --dev` installs the `enola-cli` that `pyproject.toml` pins, the version CI uses. Run the commands below as `uv run enola …`.
+- Before changing shared code, see what depends on it: `enola impact <symbol>`, or `enola plan --paths <files>` for the declared rules that govern those files.
+- Before opening a pull request, grade the branch: `enola check --base origin/dev`. It writes nothing. In a checkout whose directory is not named `cognee` (a `git worktree`, for example), it declines to compare (exit 3); there, run `enola baseline pin` before you start editing and `enola check` when done.
+- With a coding agent, serve the graph over MCP: `claude mcp add enola -- <repo>/.venv/bin/enola <repo>`, where `<repo>` is the path to this repository.
+- After editing `enola-intent.yaml`, `enola --generate . && enola constraints lint --fail-empty .` must exit 0. Every rule needs a `because:` that says why it exists.
+
+`.enola/` holds local snapshots and is gitignored.
+
 ## Technical references
 
 - [Architecture](docs/architecture.md) for component boundaries and dataset isolation.
