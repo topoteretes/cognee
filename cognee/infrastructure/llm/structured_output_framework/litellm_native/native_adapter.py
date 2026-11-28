@@ -314,7 +314,7 @@ class NativeLiteLLMAdapter:
                 **merged_kwargs,
             )
             response = cast(litellm.ModelResponse, response)
-        raw_content = response.choices[0].message.content or "{}"
+        raw_content = response.choices[0].message.content or ""
         return _attach_raw_response(response_model.model_validate_json(raw_content), response)
 
     async def _acreate_json_fallback(
@@ -368,7 +368,7 @@ class NativeLiteLLMAdapter:
                 )
                 response = cast(litellm.ModelResponse, response)
 
-            raw_content = _strip_json_fence(response.choices[0].message.content or "{}")
+            raw_content = _strip_json_fence(response.choices[0].message.content or "")
             try:
                 return _attach_raw_response(
                     response_model.model_validate_json(raw_content), response

@@ -818,3 +818,49 @@ async def test_native_validation_error_routes_to_json_fallback(_clean_demotions)
     # fallback — NOT a tenacity re-send of the native request.
     assert mock_acompletion.call_count == 2
     assert mock_acompletion.call_args_list[1].kwargs["response_format"] == {"type": "json_object"}
+
+
+class _DefaultsOnlyGraph(BaseModel):
+    """Every field has a default, like KnowledgeGraph: ``{}`` validates as an empty instance."""
+
+    nodes: list[str] = []
+
+
+@pytest.mark.asyncio
+async def test_empty_native_reply_is_not_an_empty_result(_clean_demotions):
+    """No content (reasoning spent the whole output budget) is a failed call, not an empty graph."""
+    adapter = _schema_adapter()
+    mock_acompletion = AsyncMock(
+        side_effect=[_make_mock_response(None), _make_mock_response('{"nodes": ["Alice"]}')]
+    )
+    with patch("litellm.acompletion", mock_acompletion):
+        result = await adapter.acreate_structured_output(
+            text_input="Alice met Bob.",
+            system_prompt="Extract a graph.",
+            response_model=_DefaultsOnlyGraph,
+        )
+
+    assert result.nodes == ["Alice"]
+    assert mock_acompletion.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_empty_json_fallback_reply_is_retried_not_returned(_clean_demotions):
+    """An empty reply on the prompted-JSON path is retried like any invalid one, never ``{}``."""
+    adapter = _schema_adapter()
+    mock_acompletion = AsyncMock(
+        side_effect=[
+            _make_mock_response("not json"),
+            _make_mock_response(None),
+            _make_mock_response('{"nodes": ["Alice"]}'),
+        ]
+    )
+    with patch("litellm.acompletion", mock_acompletion):
+        result = await adapter.acreate_structured_output(
+            text_input="Alice met Bob.",
+            system_prompt="Extract a graph.",
+            response_model=_DefaultsOnlyGraph,
+        )
+
+    assert result.nodes == ["Alice"]
+    assert mock_acompletion.call_count == 3
