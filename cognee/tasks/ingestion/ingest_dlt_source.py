@@ -979,7 +979,10 @@ def _pipeline_dataset(state_path) -> str | None:
     (truncated, not UTF-8, unreadable) is not a pipeline of ours and is skipped.
     """
     try:
-        state = json.loads(state_path.read_text())
+        # dlt writes its state as UTF-8 on every host. A locale-dependent read
+        # (the Windows ANSI code page) misreads valid non-ASCII state as
+        # undecodable, and the pipeline directory then survives the drop.
+        state = json.loads(state_path.read_text(encoding="utf-8"))
     except (ValueError, OSError):
         return None
     return state.get("dataset_name") if isinstance(state, dict) else None

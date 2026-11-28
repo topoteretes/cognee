@@ -188,6 +188,35 @@ async def test_a_pipeline_cognee_did_not_write_is_left_alone(staging, tmp_path, 
 
 
 @pytest.mark.asyncio
+async def test_a_state_with_non_ascii_text_does_not_survive_the_drop(
+    staging, tmp_path, monkeypatch
+):
+    """dlt writes state.json as UTF-8 on every host. A connector's state holds the
+    user's own text (an Obsidian note path, a page title), which is valid UTF-8
+    whose bytes are undefined in the Windows ANSI code page — read with the
+    locale encoding it raises, the pipeline reads as not ours, and its directory
+    survives the drop with whatever row text a failed load kept."""
+    import json
+
+    from cognee.tasks.ingestion.ingest_dlt_source import drop_dlt_dataset
+
+    monkeypatch.setenv("DLT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv(DELETE_JOBS, "false")
+    pipeline_dir = tmp_path / "pipelines" / "ingest_dlt_mine"
+    pipeline_dir.mkdir(parents=True)
+    # The halant U+094D is the issue's repro: its UTF-8 bytes are undefined in cp1252.
+    state = {"dataset_name": "mine", "sources": {"obsidian": {"members": ["notes/हिन्दी.md"]}}}
+    (pipeline_dir / "state.json").write_text(
+        json.dumps(state, ensure_ascii=False), encoding="utf-8"
+    )
+    await _ingest_into("mine", [{"id": "1", "title": "Plan", "content": "Dropped text."}])
+
+    await drop_dlt_dataset("mine")
+
+    assert not pipeline_dir.exists()
+
+
+@pytest.mark.asyncio
 async def test_dropping_applies_the_defaults_before_dlt_starts(tmp_path, monkeypatch):
     """Reading dlt's pipelines directory starts dlt's runtime, which reads the telemetry
     setting once for the process."""
