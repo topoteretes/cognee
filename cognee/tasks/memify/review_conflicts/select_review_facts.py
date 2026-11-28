@@ -59,10 +59,10 @@ MIN_LIST_VALUES = 5
 
 
 def _group_values_by_shared_type(values: list[str], nodes: dict[str, dict]) -> list[set[str]]:
-    """Connected components under "share a type"; the untyped values group only with each other."""
+    """Shared types ignore case and whitespace; untyped values group only with each other."""
     merged: list[tuple[set[str], set[str]]] = []
     for value in values:
-        own = set(nodes.get(value, {}).get("types", []))
+        own = {"".join(kind.split()).lower() for kind in nodes.get(value, {}).get("types", [])}
         ids, kinds, kept = {value}, set(own), []
         for group_ids, group_types in merged:
             if own & group_types or not (own or group_types):
