@@ -8,6 +8,18 @@ first run loads every message in the label; re-running ``remember`` fetches
 only what changed since then via Gmail's ``historyId``, and messages you delete/trash in
 Gmail are forgotten from memory on the next sync.
 
+Message bodies prefer inline plain text, with readable inline HTML text when plain
+text is unavailable. Empty or unavailable bodies still use Gmail's short snippet;
+attachments, embedded assets, browser rendering, and OCR are not included.
+
+To refresh already indexed messages after a parser upgrade, use
+``gmail_source(..., full_refresh=True)`` in your existing ``remember`` call with
+the same dataset, resource name, credentials, and label selection. Leave
+``max_results`` unset for a complete refresh. This is opt-in and consumes quota
+for all selected mail; normal calls resume history sync after it succeeds.
+The clean-slate demo below is not the historical-refresh recipe; see
+``cognee/tasks/ingestion/connectors/gmail.md`` for that example.
+
 ────────────────────────────────────────────────────────────────────────────
 Privacy / opt-in
 ────────────────────────────────────────────────────────────────────────────
@@ -81,6 +93,8 @@ async def main():
     # Build the source. Scope it to INBOX and, for the demo, load only the 25
     # newest messages so the first run is quick. Drop ``max_results`` to load
     # the whole label; Gmail's quota allows roughly 250 messages a minute.
+    # Existing datasets can opt into an uncapped full_refresh=True to refetch
+    # old mail; this demo keeps its current capped first-sync behavior.
     source = gmail_source(
         credentials_path=credentials_path,
         token_path=token_path,

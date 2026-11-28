@@ -85,7 +85,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`multimedia_audio_image_processing_example.py`](guides/multimedia_audio_image_processing_example.py) | Audio + image ingestion (bundled assets) |
 | [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
 | [`code_graph_example.py`](guides/code_graph_example.py) | Code-graph pipeline + `SearchType.CODE` |
-| [`gmail.py`](guides/gmail.py) | Ingest Gmail with the bundled SDK connector, incremental sync and delete propagation (needs `cognee[gmail]`) |
+| [`gmail.py`](guides/gmail.py) | Ingest Gmail with the bundled SDK connector, plain or inline HTML bodies, incremental sync and delete propagation; documents opt-in historical refresh (needs `cognee[gmail]`) |
 | [`dropbox.py`](guides/dropbox.py) | Sync one Dropbox folder by its folder id with the bundled SDK connector (no extra) |
 | [`evernote.py`](guides/evernote.py) | Sync an Evernote account's notes with the bundled SDK connector, from a token you already hold; a note trashed or deleted at Evernote is forgotten on the next sync (needs `cognee[evernote]`) |
 | [`telegram.py`](guides/telegram.py) | Ingest the messages a Telegram bot sees with the bundled SDK connector, incremental sync and forget when the bot leaves a chat (needs a bot token) |
