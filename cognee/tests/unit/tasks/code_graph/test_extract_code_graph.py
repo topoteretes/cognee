@@ -69,6 +69,31 @@ def test_code_graph_tasks_default_to_graph_only_with_vector_opt_in():
     assert vector_tasks[0].default_params["kwargs"]["graph_only"] is False
 
 
+def test_code_graph_tasks_set_no_time_limit_by_default():
+    """No time limit on the enola run unless the caller sets one (SDK-1776)."""
+    tasks = get_code_graph_tasks("/tmp/shop")
+    assert tasks[0].default_params["kwargs"]["timeout"] is None
+
+
+@pytest.mark.asyncio
+async def test_load_code_graph_sets_no_time_limit_by_default(monkeypatch):
+    """cognify's CODE and CODE_REPO routes load a repository with no timeout,
+    so its enola run is not cut off (SDK-1776)."""
+    received = {}
+
+    async def fake_extract_code_graph(data=None, **kwargs):
+        received.update(kwargs)
+        return
+        yield  # an async generator that yields nothing
+
+    monkeypatch.setattr(extract_module, "_require_code_graph_lookups", AsyncMock())
+    monkeypatch.setattr(extract_module, "extract_code_graph", fake_extract_code_graph)
+
+    await extract_module.load_code_graph(repo_path="/tmp/shop")
+
+    assert received["timeout"] is None
+
+
 def test_symbol_kind_and_common_fields_are_mapped():
     data_points = map_facts_to_data_points(_fixture_facts(), repo_path="/tmp/shop")
     by_name = {data_point.name: data_point for data_point in data_points}
@@ -551,8 +576,9 @@ def test_multi_repo_snapshot_creates_one_repository_per_repo():
 async def test_extract_code_graph_accepts_repo_path_as_positional_payload(monkeypatch):
     received = {}
 
-    async def fake_run_enola_generate(repo_path, timeout=600.0):
+    async def fake_run_enola_generate(repo_path, timeout=None):
         received["repo_path"] = repo_path
+        received["timeout"] = timeout
         return FIXTURES_DIR
 
     monkeypatch.setattr(extract_module, "run_enola_generate", fake_run_enola_generate)
@@ -560,6 +586,8 @@ async def test_extract_code_graph_accepts_repo_path_as_positional_payload(monkey
     data_points = await extracted_points("/tmp/shop")
 
     assert received["repo_path"] == "/tmp/shop"
+    # No time limit on the enola run unless the caller sets one.
+    assert received["timeout"] is None
     assert len(data_points) == 17
 
 

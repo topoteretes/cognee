@@ -152,6 +152,94 @@ async def test_run_enola_generate_returns_snapshot_dir(monkeypatch, tmp_path):
     assert (snapshot_dir / "facts.jsonl").is_file()
 
 
+# --- time limit: none unless the caller sets one ---
+
+
+class _SlowProcess(_FakeProcess):
+    """A process whose output takes ``delay`` seconds, as enola's does on a large repository."""
+
+    def __init__(self, delay, on_exit):
+        super().__init__(returncode=0)
+        self._delay = delay
+        self._on_exit = on_exit
+        self.killed = False
+        self.waited = False
+
+    async def communicate(self, input=None):
+        await asyncio.sleep(self._delay)
+        self._on_exit()
+        return await super().communicate(input)
+
+    def kill(self):
+        self.killed = True
+
+    async def wait(self):
+        self.waited = True
+
+
+def _slow_generate_run(monkeypatch, tmp_path, delay=0.2):
+    """A repository whose enola run takes ``delay`` seconds, then writes its snapshot."""
+    fake_binary = _make_fake_binary(tmp_path)
+    monkeypatch.setenv("ENOLA_PATH", str(fake_binary))
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+
+    def write_snapshot():
+        snapshot_dir = repo_path / ".enola"
+        snapshot_dir.mkdir(exist_ok=True)
+        (snapshot_dir / "facts.jsonl").write_text('{"kind": "module", "name": "app"}\n')
+
+    process = _SlowProcess(delay, on_exit=write_snapshot)
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        return process
+
+    monkeypatch.setattr(enola_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    return repo_path, process
+
+
+def _record_deadlines(monkeypatch):
+    """The timeout of every asyncio.wait_for call, each still run as it would be."""
+    deadlines = []
+    wait_for = asyncio.wait_for
+
+    def recording_wait_for(awaitable, timeout):
+        deadlines.append(timeout)
+        return wait_for(awaitable, timeout)
+
+    monkeypatch.setattr(enola_module.asyncio, "wait_for", recording_wait_for)
+    return deadlines
+
+
+@pytest.mark.asyncio
+async def test_run_enola_generate_sets_no_time_limit_by_default(monkeypatch, tmp_path):
+    """No time limit unless the caller sets one (SDK-1776).
+
+    A fixed limit killed every enola run that outlasted it, and that
+    repository got no graph. A run slower than the explicit timeout below
+    finishes here, with no deadline put on it at all.
+    """
+    repo_path, process = _slow_generate_run(monkeypatch, tmp_path)
+    deadlines = _record_deadlines(monkeypatch)
+
+    snapshot_dir = await enola_module.run_enola_generate(repo_path)
+
+    assert snapshot_dir == repo_path / ".enola"
+    assert deadlines == []
+    assert not process.killed
+
+
+@pytest.mark.asyncio
+async def test_run_enola_generate_kills_a_run_past_an_explicit_timeout(monkeypatch, tmp_path):
+    repo_path, process = _slow_generate_run(monkeypatch, tmp_path)
+
+    with pytest.raises(enola_module.EnolaSnapshotError) as exc_info:
+        await enola_module.run_enola_generate(repo_path, timeout=0.05)
+
+    assert exc_info.value.message == f"enola timed out after 0.05 seconds on '{repo_path}'."
+    assert process.killed and process.waited
+
+
 # --- clusters: the config is rendered from the members and never persisted ---
 
 CLUSTER_OUTPUT_DIR = ".enola-7d4e1c2a-0000-4000-8000-000000000000"

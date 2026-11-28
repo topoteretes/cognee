@@ -124,11 +124,14 @@ def find_enola_binary() -> str:
 async def _run_enola(
     command: list[str],
     cwd: Path,
-    timeout: float,
+    timeout: float | None,
     subject: str,
     stdin_data: bytes | None = None,
 ) -> None:
     """Run one enola generate command to completion; raise EnolaSnapshotError on failure.
+
+    With ``timeout`` None the run has no time limit. Past a timeout that is
+    set, the process is killed and EnolaSnapshotError raised.
 
     ``stdin_data`` is fed to the process on its standard input (a cluster
     config passed as ``/dev/stdin``); without it stdin is left unconnected.
@@ -144,15 +147,20 @@ async def _run_enola(
         stderr=asyncio.subprocess.PIPE,
     )
 
-    try:
-        communicating = (
-            process.communicate(stdin_data) if stdin_data is not None else process.communicate()
-        )
-        _stdout, stderr = await asyncio.wait_for(communicating, timeout=timeout)
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
-        raise EnolaSnapshotError(message=f"enola timed out after {timeout} seconds on {subject}.")
+    communicating = (
+        process.communicate(stdin_data) if stdin_data is not None else process.communicate()
+    )
+    if timeout is None:
+        _stdout, stderr = await communicating
+    else:
+        try:
+            _stdout, stderr = await asyncio.wait_for(communicating, timeout=timeout)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            raise EnolaSnapshotError(
+                message=f"enola timed out after {timeout} seconds on {subject}."
+            )
 
     stderr_text = stderr.decode(errors="replace") if stderr else ""
     if process.returncode != 0:
@@ -176,9 +184,13 @@ async def _run_enola(
 
 async def run_enola_generate(
     repo_path: str | Path,
-    timeout: float = 600.0,
+    timeout: float | None = None,
 ) -> Path:
     """Run `enola --generate` in repo_path and return the snapshot directory.
+
+    There is no time limit by default: a large repository can take enola
+    longer than any fixed budget, and a killed run builds no graph. A
+    ``timeout`` in seconds kills the run once exceeded (EnolaSnapshotError).
 
     Raises EnolaNotInstalledError when no binary is found; nothing is
     downloaded at runtime (the binary ships with cognee's core dependencies).
@@ -244,7 +256,7 @@ async def run_enola_cluster(
     repo_paths: list[Path],
     output_dir: str,
     cluster_dir: Path,
-    timeout: float = 600.0,
+    timeout: float | None = None,
 ) -> Path:
     """Run `enola --generate` over a cluster of repositories; return its snapshot directory.
 
@@ -259,7 +271,8 @@ async def run_enola_cluster(
     no ``/dev/stdin``; there the config is a temporary file that is removed
     as soon as enola exits. The working directory is neutral (the system
     temporary directory), so no repository's own mcp-arch.yaml narrows a run
-    that covers all of them.
+    that covers all of them. ``timeout`` is as in :func:`run_enola_generate`:
+    no limit unless one is set.
     """
     binary = find_enola_binary()
 
