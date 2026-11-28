@@ -979,7 +979,7 @@ def _pipeline_dataset(state_path) -> str | None:
     (truncated, not UTF-8, unreadable) is not a pipeline of ours and is skipped.
     """
     try:
-        state = json.loads(state_path.read_text())
+        state = json.loads(state_path.read_text(encoding="utf-8"))
     except (ValueError, OSError):
         return None
     return state.get("dataset_name") if isinstance(state, dict) else None
