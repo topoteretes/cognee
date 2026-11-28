@@ -90,12 +90,17 @@ jobs:
               exit 1
             fi
           done
-          # Sign-out goes through the server too: it must end up at the login page.
-          redirect=$(curl -s -o /dev/null -w '%{redirect_url}' http://localhost:3000/api/local-signout)
-          case "$redirect" in */local-login) ;; *)
-            echo "::error::/api/local-signout redirected to '$redirect', expected the login page"
-            exit 1 ;;
-          esac
+          # Sign-out is a request from the browser to the backend: the refresh
+          # cookie is sent to the backend's auth routes only. So the page that
+          # makes the request has to be served, and has to carry the backend URL.
+          curl -fsS http://localhost:3000/local-signout -o /tmp/signout.html || {
+            echo "::error::the sign-out page was not served"
+            exit 1
+          }
+          grep -q '"backendUrl":"http://127.0.0.1:9100"' /tmp/signout.html || {
+            echo "::error::the sign-out page did not carry COGNEE_BACKEND_URL to the browser"
+            exit 1
+          }
 
       - name: Reject a misconfigured backend URL
         # The container must refuse to start and name the variable, instead of

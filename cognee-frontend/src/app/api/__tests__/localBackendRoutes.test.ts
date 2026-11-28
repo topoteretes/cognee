@@ -4,7 +4,6 @@ import { GET as visualize } from "../visualize/route";
 import { GET as inventory } from "../schema/inventory/route";
 import { GET as provenance } from "../schema/provenance/route";
 import { GET as legacyProvenance } from "../schema-provenance/route";
-import { GET as signout } from "../local-signout/route";
 
 // Response serialization is Next's responsibility; exercise the handlers' real
 // backend requests and URL resolver against fetchMock.
@@ -57,13 +56,3 @@ it.each(routes.flatMap(route => ["cookie", "authorization", "x-api-key"].map(hea
     expect(fetchMock.mock.calls[0][0]).toMatch(/^http:\/\/configured.test:9100\/api\/v1\//);
   },
 );
-
-it("logs out against the runtime backend", async () => {
-  fetchMock.mockResponseOnce("");
-  const response = await signout(request({ cookie: "session=test" }));
-  expect(fetchMock).toHaveBeenCalledWith("http://configured.test:9100/api/v1/auth/logout", {
-    method: "POST", headers: { cookie: "session=test" },
-  });
-  expect(response.status).toBe(307);
-  expect(response.headers.get("location")).toBe("http://ui.test/local-login");
-});

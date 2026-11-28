@@ -224,7 +224,7 @@ export default function TopBar() {
           // everyone else in the workspace already saw the new one.
           userName={cloud ? displayName(userMe?.profile ?? null, user?.name) : user?.name || ""}
           userEmail={user?.email || ""}
-          logoutHref={cloud ? "/api/signout" : "/api/local-signout"}
+          logoutHref={cloud ? "/api/signout" : "/local-signout"}
         />
       </div>
 

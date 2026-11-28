@@ -6,6 +6,7 @@ import { TenantContext, localInstance } from "./TenantContext";
 import { tokens } from "@/ui/theme/tokens";
 
 import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
+import refreshLocalSession from "@/modules/users/refreshLocalSession";
 
 export function LocalProvider({ children }: { children: React.ReactNode }) {
   const localApiUrl = getLocalApiUrl();
@@ -24,10 +25,15 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        // Check if we're authenticated with the local backend
-        const meResponse = await global.fetch(`${localApiUrl}/api/v1/users/me`, {
+        // Check if we're authenticated with the local backend. An expired login
+        // is renewed with the refresh cookie before asking the user to sign in.
+        const fetchMe = () => global.fetch(`${localApiUrl}/api/v1/users/me`, {
           credentials: "include",
         });
+        let meResponse = await fetchMe();
+        if (meResponse.status === 401 && await refreshLocalSession()) {
+          meResponse = await fetchMe();
+        }
 
         if (meResponse.status === 401 || meResponse.status === 403) {
           // Not authenticated — redirect to local login

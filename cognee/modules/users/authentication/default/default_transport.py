@@ -21,7 +21,8 @@ def _secure_cookie_from_env() -> bool:
 
 
 # Note: no cookie_max_age is set, so the cookie lasts for the browser session. JWT_LIFETIME_SECONDS
-# (get_client_auth_backend.py) only limits how long the token inside it is accepted.
+# (get_client_auth_backend.py) only limits how long the token inside it is accepted. The refresh
+# cookie the login route sets beside it (refresh_token.py) is what outlives both.
 
 default_transport = CookieTransport(
     cookie_name=os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token"),
