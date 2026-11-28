@@ -144,6 +144,15 @@ async def lifespan(app: FastAPI):
 
     # Warns at startup, not on the first login, when a token secret was generated.
     resolve_auth_secrets()
+    # Fail the boot, not every later login: a refresh token lifetime that is not
+    # a positive number of seconds raises here, naming the setting.
+    from cognee.modules.users.authentication.refresh_token import (
+        get_refresh_token_lifetime,
+        get_refresh_token_max_lifetime,
+    )
+
+    get_refresh_token_lifetime()
+    get_refresh_token_max_lifetime()
     # Fail the boot, not every later request: a bad IMPROVE_* value (an
     # IMPROVE_STAGES_DISABLED typo, an out-of-range alpha) raises here with the
     # full message instead of surfacing as a generic 409 per improve call.

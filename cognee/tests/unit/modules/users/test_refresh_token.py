@@ -23,6 +23,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import cognee
 from cognee.api.v1.users.routers.get_auth_router import get_auth_router
@@ -265,6 +266,29 @@ async def test_deleting_a_token_ends_that_login_and_no_other():
 
 
 @pytest.mark.asyncio
+async def test_a_sign_out_during_a_renewal_ends_the_login_without_an_error():
+    """Another tab signs out after this one's renewal has read the token and before it writes.
+
+    Extending the row that was read failed then (StaleDataError), and the route
+    answered 500: the UI showed a backend error instead of the login page.
+    """
+    token = await create_refresh_token(await _user())
+    execute = AsyncSession.execute
+
+    async def execute_then_sign_out(session, statement, *args, **kwargs):
+        result = await execute(session, statement, *args, **kwargs)
+        # A renewal reads the token, then its user, then writes.
+        if statement.is_select and statement.column_descriptions[0]["entity"] is User:
+            await delete_refresh_token(token)
+        return result
+
+    with patch.object(AsyncSession, "execute", execute_then_sign_out):
+        assert await redeem_refresh_token(token) is None
+
+    assert await _stored(token) is None
+
+
+@pytest.mark.asyncio
 async def test_a_login_removes_the_tokens_that_have_expired():
     """Nothing else deletes the token of a browser that never comes back."""
     abandoned = await create_refresh_token(await _user())
@@ -303,6 +327,28 @@ def test_the_maximum_lifetime_is_thirty_days_unless_the_environment_says_otherwi
     monkeypatch.setenv("REFRESH_TOKEN_MAX_LIFETIME_SECONDS", "a month")
     with pytest.raises(ValueError):
         get_refresh_token_max_lifetime()
+
+
+@pytest.mark.parametrize(
+    "read, name",
+    [
+        (get_refresh_token_lifetime, "REFRESH_TOKEN_LIFETIME_SECONDS"),
+        (get_refresh_token_max_lifetime, "REFRESH_TOKEN_MAX_LIFETIME_SECONDS"),
+    ],
+)
+@pytest.mark.parametrize("value", ["0", "-5", "1.5", "a week"])
+def test_a_lifetime_that_is_not_a_positive_number_of_seconds_is_an_error(
+    monkeypatch, read, name, value
+):
+    """Zero or less would issue tokens that have already expired.
+
+    Every browser would be logged out after one access token, with no error
+    anywhere. The message names the setting: the server reads both at start-up
+    and stops there.
+    """
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError, match=f"^{name} must be a positive whole number of seconds"):
+        read()
 
 
 def _client() -> TestClient:
