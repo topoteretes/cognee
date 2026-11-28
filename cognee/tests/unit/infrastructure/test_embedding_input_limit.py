@@ -101,9 +101,10 @@ async def test_fastembed_input_limit_reads_the_loaded_tokenizer_truncation_less_
     assert await _fastembed_engine_with(object()).input_limit() is None
 
 
-def _ollama_engine_with(endpoint, model) -> OllamaEmbeddingEngine:
+def _ollama_engine_with(endpoint, model, special_tokens: int = 0) -> OllamaEmbeddingEngine:
     engine = OllamaEmbeddingEngine.__new__(OllamaEmbeddingEngine)
     engine.endpoint, engine.model = endpoint, model
+    engine.tokenizer = SimpleNamespace(special_tokens=special_tokens)
     return engine
 
 
@@ -123,6 +124,20 @@ async def test_ollama_input_limit_reads_context_length_from_api_show(monkeypatch
     assert post.call_args.args[0] == "http://localhost:11434/api/show"
     assert post.call_args.kwargs["json"] == {"model": "qwen3-embedding"}
     assert post.call_args.kwargs["headers"] == {"Authorization": "Bearer key"}
+
+
+@pytest.mark.asyncio
+async def test_ollama_input_limit_leaves_room_for_the_models_special_tokens():
+    """Ollama's context length counts the [CLS] and [SEP] a BERT-style model adds;
+    the text limit is what is left (nomic-embed-text rejects 2048 tokens of text)."""
+    response = MagicMock()
+    response.json.return_value = {"model_info": {"nomic-bert.context_length": 2048}}
+    with patch.object(httpx.AsyncClient, "post", AsyncMock(return_value=response)):
+        limit = await _ollama_engine_with(
+            "http://localhost:11434/api/embed", "nomic-embed-text", special_tokens=2
+        ).input_limit()
+
+    assert limit == 2046
 
 
 @pytest.mark.asyncio

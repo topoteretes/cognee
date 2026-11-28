@@ -43,6 +43,13 @@ class TokenizerInterface(Protocol):
         tokenizer knows it (a HuggingFace tokenizer does); None otherwise."""
         return None
 
+    @property
+    def special_tokens(self) -> int:
+        """How many special tokens the model adds around one text, when the
+        tokenizer knows it (a HuggingFace tokenizer does); 0 otherwise. Text is
+        counted without them, while a provider's context length includes them."""
+        return 0
+
     @abstractmethod
     def decode_single_token(self, token: int) -> str:
         """

@@ -143,6 +143,11 @@ class HuggingFaceTokenizer(TokenizerInterface):
             return None
         return self._declared_limit - self._special_tokens
 
+    @property
+    def special_tokens(self) -> int:
+        """How many special tokens the model adds around one text."""
+        return self._special_tokens
+
     def decode_single_token(self, token: int) -> str:
         """
         Attempt to decode a single token from its encoding, which is not implemented in this

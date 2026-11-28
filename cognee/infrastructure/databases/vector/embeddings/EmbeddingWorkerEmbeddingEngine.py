@@ -48,6 +48,7 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingResult,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import init_input_limit
+from cognee.infrastructure.databases.vector.embeddings.token_windows import embed_in_windows
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     handle_embedding_response,
     sanitize_embedding_text_inputs,
@@ -187,6 +188,18 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
     @observe(as_type="embeddings")
     async def embed_text(self, text: list[str]) -> EmbeddingResult:
         """One vector per text, in order, with the tokens the worker counted.
+
+        A text longer than the worker's ``max_text_tokens`` is embedded as
+        consecutive token windows in the same requests, and its vector is their
+        token-weighted mean scaled to unit length (embeddings/token_windows.py). A
+        window the worker still lists as ``input_too_long`` is recovered by
+        :meth:`_embed_splitting`.
+        """
+        return await embed_in_windows(self, text, self._embed_request, unit_length=True)
+
+    async def _embed_request(self, text: list[str]) -> EmbeddingResult:
+        """One vector per text (already cut into windows by :meth:`embed_text`), in
+        order, with the tokens the worker counted.
 
         Blank texts are sent as a placeholder and get a zero vector, as in every
         engine (the worker rejects blank inputs). Texts are sent in requests of at

@@ -36,7 +36,13 @@ from cognee.infrastructure.databases.vector.embeddings.fastembed_models import (
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
+    resolve_input_limit,
     sane_limit,
+)
+from cognee.infrastructure.databases.vector.embeddings.token_windows import (
+    log_windows,
+    pool_windows,
+    windows_from_encoding,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     count_input_tokens,
@@ -250,11 +256,15 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 # fastembed cuts input past the model's limit without an error, so
                 # an over-length text is embedded as consecutive token windows whose
                 # vectors are pooled; every window of the batch goes to the model at once.
-                windows = self._windows(sanitized_text, await self.input_limit())
+                # The model's own truncation point, lowered to the configured cap;
+                # without it there is nothing to cut at.
+                model_limit = await self.input_limit()
+                limit = None if model_limit is None else await resolve_input_limit(self)
+                windows = self._windows(sanitized_text, limit)
                 window_texts = [window for text_windows in windows for window, _ in text_windows]
                 async with embedding_rate_limiter_context_manager():
                     vectors = await run_cpu_bound(self._run_model, window_texts)
-                embeddings = self._pool(windows, vectors)
+                embeddings = pool_windows(windows, vectors)
 
         except Exception as error:
             logger.error(f"Embedding error in FastembedEmbeddingEngine: {error!s}")
@@ -299,14 +309,14 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
     def _windows(self, texts: list[str], limit: int | None) -> list[list[tuple[str, int]]]:
         """Per text, the ``(window text, token count)`` pairs the model embeds for it.
 
-        A text within the model's limit is its own single window. An over-length
-        one is cut, from the model's own tokenizer output, into consecutive windows
-        of at most ``limit`` tokens (see :meth:`_pack`). The tokenizer keeps the
-        cut-off part as ``overflowing`` pieces, so the verdict is the model's own,
-        not an estimate. A tokenizer that cannot answer (an unexpected fastembed
-        internals layout, no readable limit, an encode failure) means the texts
-        are embedded as they are, which keeps the pre-fix behaviour rather than
-        raising.
+        A text within the limit is its own single window. An over-length one is
+        cut, from the model's own tokenizer output, into consecutive windows of at
+        most ``limit`` tokens (``windows_from_encoding``, embeddings/token_windows.py).
+        The tokenizer keeps the cut-off part as ``overflowing`` pieces, so the verdict
+        is the model's own, not an estimate. A tokenizer that cannot answer (an
+        unexpected fastembed internals layout, no readable limit, an encode failure)
+        means the texts are embedded as they are, which keeps the pre-fix behaviour
+        rather than raising.
         """
         tokenizer = getattr(getattr(self.embedding_model, "model", None), "tokenizer", None)
         if tokenizer is None or limit is None:
@@ -316,69 +326,11 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         except Exception:
             logger.debug("Could not check input length with the fastembed tokenizer", exc_info=True)
             return [[(text, 1)] for text in texts]
-        windows = [self._pack(text, encoding, limit) for text, encoding in zip(texts, encodings)]
-        for text, text_windows in zip(texts, windows):
-            if len(text_windows) > 1:
-                logger.debug(
-                    "Text of %s characters exceeds what %s embeds at once (%s tokens); "
-                    "embedding it as %s consecutive windows.",
-                    len(text),
-                    self.model,
-                    limit,
-                    len(text_windows),
-                )
-        return windows
-
-    @staticmethod
-    def _pack(text: str, encoding, limit: int) -> list[tuple[str, int]]:
-        """Cut ``text`` into consecutive windows of at most ``limit`` tokens.
-
-        ``encoding`` and its ``overflowing`` pieces together hold every token of
-        the text with its character offsets and word index. A cut lands at a word
-        start, so each window re-tokenizes to exactly the tokens it was cut from;
-        a single word longer than the limit is cut inside, at a token boundary.
-        Windows cover the text once, with no overlap, so pooling their vectors by
-        token count weighs every token the same.
-        """
-        if not encoding.overflowing:
-            return [(text, sum(word is not None for word in encoding.word_ids))]
-        tokens = [
-            (offsets, word)
-            for piece in (encoding, *encoding.overflowing)
-            for offsets, word in zip(piece.offsets, piece.word_ids)
-            if word is not None  # special and padding tokens: offsets (0, 0)
+        windows = [
+            windows_from_encoding(text, encoding, limit) for text, encoding in zip(texts, encodings)
         ]
-        windows: list[tuple[str, int]] = []
-        start = 0
-        while start < len(tokens):
-            end = min(start + limit, len(tokens))
-            if end < len(tokens) and tokens[end][1] == tokens[end - 1][1]:
-                word_start = end
-                while word_start > start and tokens[word_start - 1][1] == tokens[end][1]:
-                    word_start -= 1
-                if word_start > start:
-                    end = word_start
-            windows.append((text[tokens[start][0][0] : tokens[end - 1][0][1]], end - start))
-            start = end
+        log_windows(self, texts, windows, limit)
         return windows
-
-    @staticmethod
-    def _pool(
-        windows: list[list[tuple[str, int]]], vectors: list[list[float]]
-    ) -> list[list[float]]:
-        """One vector per text: the mean of its windows' vectors, weighted by the
-        tokens each window holds. ``vectors`` are in window order."""
-        embeddings = []
-        position = 0
-        for text_windows in windows:
-            text_vectors = vectors[position : position + len(text_windows)]
-            position += len(text_windows)
-            if len(text_windows) == 1:
-                embeddings.append(text_vectors[0])
-                continue
-            weights = [count for _, count in text_windows]
-            embeddings.append(np.average(np.array(text_vectors), axis=0, weights=weights).tolist())
-        return embeddings
 
     def get_vector_size(self) -> int:
         """

@@ -40,6 +40,7 @@ from cognee.infrastructure.databases.vector.embeddings.input_limit import (
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
+from cognee.infrastructure.databases.vector.embeddings.token_windows import embed_in_windows
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     count_input_tokens,
     handle_embedding_response,
@@ -252,8 +253,30 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         """
         Embed a list of text strings; returns their vectors and the input-token count.
 
-        If the input exceeds the model's context window, the method will recursively split the
-        input and combine the results. It handles both mock and live embedding scenarios,
+        A text longer than the model's input limit is embedded as consecutive token
+        windows in the same request, and its vector is their token-weighted mean
+        (embeddings/token_windows.py). A window the provider still rejects, when the
+        tokenizer counts fewer tokens than the provider does, is recovered by
+        :meth:`_embed_request`.
+
+        Parameters:
+        -----------
+
+            - text (List[str]): A list of strings to be embedded.
+
+        Returns:
+        --------
+
+            - EmbeddingResult: A vector per input text and the input tokens consumed.
+        """
+        return await embed_in_windows(self, text, self._embed_request)
+
+    async def _embed_request(self, text: list[str]) -> EmbeddingResult:
+        """
+        Send ``text`` (already cut into windows by :meth:`embed_text`) in one request.
+
+        If the provider still rejects the input as too long, the method will recursively split
+        the input and combine the results. It handles both mock and live embedding scenarios,
         logging errors for any encountered exceptions, and raising specific exceptions for
         context window issues and embedding failures.
 
