@@ -109,7 +109,9 @@ STATUS_TOOLS = {
     # through a status call.
     "cognify_status",
 }
-EXPECTED_TOOLS = MEMORY_API_TOOLS | CODE_SEARCH_TOOLS | STATUS_TOOLS
+# Unadvertised: writes a session into the graph, which in API mode no memory tool does.
+IMPROVE_TOOLS = {"improve"}
+EXPECTED_TOOLS = MEMORY_API_TOOLS | CODE_SEARCH_TOOLS | STATUS_TOOLS | IMPROVE_TOOLS
 
 
 @pytest.mark.asyncio

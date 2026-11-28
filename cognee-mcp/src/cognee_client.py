@@ -977,8 +977,11 @@ class CogneeClient:
         session_ids: list[str] | None = None,
         build_global_context_index: bool = False,
         build_truth_subspace: bool = False,
+        dataset_id: UUID | None = None,
     ) -> dict[str, Any]:
         """Run the improve loop and return the ImproveResult as a JSON-shaped dict.
+
+        ``dataset_id`` takes precedence over ``dataset_name``.
 
         Both modes return the same shape: ``status`` plus one ``stages`` entry
         per stage (name, status, reason, counts). An older server that still
@@ -987,6 +990,8 @@ class CogneeClient:
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/improve"
             payload: dict[str, Any] = {"dataset_name": dataset_name}
+            if dataset_id:
+                payload["dataset_id"] = str(dataset_id)
             if session_ids:
                 payload["session_ids"] = session_ids
             if build_global_context_index:
@@ -998,7 +1003,7 @@ class CogneeClient:
             return response.json()
         else:
             with redirect_stdout(sys.stderr):
-                kwargs: dict[str, Any] = {"dataset": dataset_name}
+                kwargs: dict[str, Any] = {"dataset": dataset_id or dataset_name}
                 if session_ids:
                     kwargs["session_ids"] = session_ids
                 if build_global_context_index:
