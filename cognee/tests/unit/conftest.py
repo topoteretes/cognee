@@ -72,3 +72,25 @@ def _keyless_gates_see_a_usable_llm():
         for target in KEYLESS_GATE_PATCH_TARGETS:
             stack.enter_context(patch(target, return_value=True))
         yield
+
+
+@pytest.fixture(autouse=True)
+def _no_background_task_outlives_its_test():
+    """Fail a test that leaves a registered background task unfinished.
+
+    The registry is process-wide and each test gets its own event loop, so a task the
+    test leaves behind can never finish once that loop closes: it stays counted by
+    ``pending_background_tasks()`` and breaks whichever test later counts it, on
+    whatever CI shard the split happens to put them together. Fail where it starts,
+    and drop the task so it does not reach the next test. Drain the task in the test
+    (``wait_for_background_tasks()``) or cancel it.
+    """
+    from cognee.infrastructure.background_tasks import _BACKGROUND_TASKS
+
+    before = {task for task in _BACKGROUND_TASKS if not task.done()}
+    yield
+    leaked = {task for task in _BACKGROUND_TASKS if not task.done()} - before
+    if leaked:
+        _BACKGROUND_TASKS.difference_update(leaked)
+        names = ", ".join(sorted(task.get_coro().__qualname__ for task in leaked))
+        pytest.fail(f"Test left registered background task(s) unfinished: {names}")

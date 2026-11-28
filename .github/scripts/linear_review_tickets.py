@@ -6,6 +6,13 @@ of them
 creates a ticket assigned to that reviewer in the review team, already in a
 completed state, so time spent on reviews shows up in Linear.
 
+An approval counts whether or not it still stood at the merge. The protected
+branches dismiss an approval when the pull request changes after it (a push, a
+changed merge base), so a reviewer who approved before the last change would
+otherwise get no ticket for a review they did.
+An approval dismissed by hand counts as well: the ``review_dismissed`` events
+don't separate it reliably from an automatic one.
+
 Reviewers are matched to Linear users by GitHub account: a Linear user who has
 connected GitHub carries the numeric GitHub user id (``gitHubUserId``), which is
 the id GitHub reports for the reviewer. Approvals by bots, and by people with no
@@ -158,7 +165,24 @@ def pull_approvals(repo: str, number: int) -> list[Approval]:
     pr = github_get(f"/repos/{repo}/pulls/{number}")
     if not pr.get("merged_at"):
         raise ValueError(f"Pull request #{number} of {repo} is not merged")
-    return approvals_of(pr, github_paged(f"/repos/{repo}/pulls/{number}/reviews"))
+    reviews = github_paged(f"/repos/{repo}/pulls/{number}/reviews")
+    dismissed_approvals = frozenset()
+    if any(review.get("state") == "DISMISSED" for review in reviews):
+        dismissed_approvals = dismissed_approval_ids(repo, number)
+    return approvals_of(pr, reviews, dismissed_approvals)
+
+
+def dismissed_approval_ids(repo: str, number: int) -> frozenset[int]:
+    """The ids of this pull request's reviews that were approvals when they were dismissed.
+
+    A dismissed review reports the state DISMISSED whatever it was before; what
+    it was is in the pull request's ``review_dismissed`` events.
+    """
+    return frozenset(
+        event["dismissed_review"]["review_id"]
+        for event in github_paged(f"/repos/{repo}/issues/{number}/events")
+        if event["event"] == "review_dismissed" and event["dismissed_review"]["state"] == "approved"
+    )
 
 
 def merged_pull_numbers(repo: str, since: datetime, until: datetime) -> list[int]:
@@ -176,16 +200,20 @@ def merged_pull_numbers(repo: str, since: datetime, until: datetime) -> list[int
         page += 1
 
 
-def approvals_of(pr: dict, reviews: list[dict]) -> list[Approval]:
-    """One Approval per human reviewer whose review of ``pr`` is APPROVED, at their first approval.
+def approvals_of(
+    pr: dict, reviews: list[dict], dismissed_approvals: frozenset[int] = frozenset()
+) -> list[Approval]:
+    """One Approval per human reviewer who approved ``pr``, at their first approval.
 
-    A dismissed approval has state DISMISSED and does not count. Bots and the
-    pull request's author are left out.
+    An approval counts while it stands (state APPROVED) and after it was
+    dismissed (its id is in ``dismissed_approvals``). Bots and the pull
+    request's author are left out.
     """
     first_approval: dict[int, dict] = {}
     for review in reviews:
         user = review.get("user") or {}
-        if review.get("state") != "APPROVED" or user.get("type") == "Bot":
+        approved = review.get("state") == "APPROVED" or review["id"] in dismissed_approvals
+        if not approved or user.get("type") == "Bot":
             continue
         if user.get("id") == pr["user"]["id"]:
             continue
