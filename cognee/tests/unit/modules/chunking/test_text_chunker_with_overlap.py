@@ -237,6 +237,42 @@ async def test_single_chunk_no_dangling_overlap(make_text_generator, make_contro
 
 
 @pytest.mark.asyncio
+async def test_oversized_item_does_not_retain_previous_overlap(make_text_generator):
+    """An oversized incoming item should not retain previous chunk overlap."""
+    document = Document(
+        id=uuid4(),
+        name="test_document",
+        raw_data_location="/test/path",
+        external_metadata=None,
+        mime_type="text/plain",
+    )
+
+    chunk_data = [
+        {"text": "first", "chunk_size": 10, "cut_type": "sentence", "chunk_id": uuid4()},
+        {"text": "second", "chunk_size": 10, "cut_type": "sentence", "chunk_id": uuid4()},
+        {"text": "oversized", "chunk_size": 25, "cut_type": "sentence", "chunk_id": uuid4()},
+        {"text": "final", "chunk_size": 5, "cut_type": "sentence", "chunk_id": uuid4()},
+    ]
+
+    def get_chunk_data(text):
+        return chunk_data
+
+    chunker = TextChunkerWithOverlap(
+        document,
+        make_text_generator("dummy"),
+        max_chunk_size=20,
+        chunk_overlap_ratio=0.7,
+        get_chunk_data=get_chunk_data,
+    )
+
+    chunks = [chunk async for chunk in chunker.read()]
+
+    assert [chunk.chunk_size for chunk in chunks] == [20, 25, 5]
+    assert "oversized" in chunks[1].text
+    assert "second" not in chunks[1].text
+
+
+@pytest.mark.asyncio
 async def test_paragraph_chunking_with_overlap(make_text_generator):
     """Test that chunk_by_paragraph integration produces 25% overlap between chunks."""
 
@@ -322,4 +358,50 @@ async def test_paragraph_chunking_with_overlap(make_text_generator):
         f"No overlap detected between chunks 1 and 2. "
         f"Chunk 1 ends with: {chunk_1_end_words}, "
         f"Chunk 2 starts with: {chunk_2_words[:6]}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_high_overlap_ratio_does_not_exceed_max_chunk_size(make_text_generator):
+    """Default paragraph splitting must not create oversized chunks with high overlap."""
+
+    def mock_get_embedding_engine():
+        class MockEngine:
+            tokenizer = None
+
+        return MockEngine()
+
+    chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
+
+    max_chunk_size = 20
+    overlap_ratio = 0.7
+
+    # Each short sentence counts as one unit with the mock engine.
+    text = " ".join(f"sentence{i}." for i in range(50))
+
+    document = Document(
+        id=uuid4(),
+        name="test_document",
+        raw_data_location="/test/path",
+        external_metadata=None,
+        mime_type="text/plain",
+    )
+
+    get_text = make_text_generator(text)
+
+    with patch.object(
+        chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
+    ):
+        chunker = TextChunkerWithOverlap(
+            document,
+            get_text,
+            max_chunk_size=max_chunk_size,
+            chunk_overlap_ratio=overlap_ratio,
+        )
+        chunks = [chunk async for chunk in chunker.read()]
+
+    assert chunks, "The chunker should produce chunks"
+    assert all(chunk.chunk_size <= max_chunk_size for chunk in chunks), (
+        f"Found oversized chunks: "
+        f"{[chunk.chunk_size for chunk in chunks if chunk.chunk_size > max_chunk_size]}"
     )
