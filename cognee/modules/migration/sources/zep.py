@@ -29,6 +29,7 @@ from typing import Any
 from cognee.modules.migration.cogx import (
     COGXEntity,
     COGXEpisode,
+    COGXEvidence,
     COGXFact,
     COGXRecord,
     COGXScope,
@@ -128,7 +129,12 @@ class ZepSource(MemorySource):
                 valid_at=parse_timestamp(edge.get("valid_at")),
                 invalid_at=parse_timestamp(edge.get("invalid_at") or edge.get("expired_at")),
                 created_at=parse_timestamp(edge.get("created_at")),
-                provenance=[str(episode) for episode in edge.get("episodes") or []],
+                # Zep extracts a fact from its episodes: they are what the fact
+                # rests on, inferred by a model (OMP 3.1.4).
+                evidence=[
+                    COGXEvidence(ref=str(episode), relation="inferred")
+                    for episode in edge.get("episodes") or []
+                ],
                 scope=COGXScope(session_id=edge.get("group_id") or edge.get("session_id")),
             )
 

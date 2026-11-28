@@ -99,10 +99,10 @@ def _assert_common_header(record) -> None:
     assert verify_checksum(record) is True, f"{key} checksum does not verify"
     body = record.body_text()
     assert record.content_hash == (content_hash_of(body) if body else None), key
-    assert record.content_type == ("text/plain" if body else None), key
+    assert record.media_type == ("text/plain" if body else None), key
     # Nothing in this dataset states a kind, validity, supersession or tags.
     assert record.semantic_kind is None, key
-    assert record.valid_from is None and record.valid_to is None, key
+    assert record.valid_from is None and record.valid_until is None, key
     assert record.invalidated_by is None, key
     assert record.tags == [], key
 
@@ -111,20 +111,20 @@ def _assert_entity_header(record, owner_email: str) -> None:
     from cognee.modules.migration.cogx import COGXContributor
 
     key = (record.kind, record.external_id)
-    assert isinstance(record.version, int), key
+    assert record.version is not None and record.version.comparator == "integer", key
     assert record.subject == [record.name], key
-    assert record.evidence and all(item.role == "derived" for item in record.evidence), key
+    assert record.evidence and all(item.relation == "derived" for item in record.evidence), key
     assert record.ai_involvement == "full", key  # extracted by cognify
-    *initiators, system = record.contributors
+    *instructors, system = record.provenance
     assert system == COGXContributor(
-        role="system", actor="cognee:cognify_pipeline", kind="agent"
-    ), f"{key}: {record.contributors!r}"
+        id="cognee:cognify_pipeline", kind="agent", contribution="authored", ai_usage="full"
+    ), f"{key}: {record.provenance!r}"
     # Extraction stamps entities without the user today; a user stamp, when
     # present, must name the owner as the accountable human.
-    if initiators:
-        assert initiators == [COGXContributor(role="initiator", actor=owner_email, kind="human")], (
-            f"{key}: {record.contributors!r}"
-        )
+    if instructors:
+        assert instructors == [
+            COGXContributor(id=owner_email, kind="human", contribution="instructed")
+        ], f"{key}: {record.provenance!r}"
         assert record.accountable == owner_email, key
     else:
         assert record.accountable is None, key
@@ -135,13 +135,15 @@ def _assert_document_header(record, owner_email: str) -> None:
     from cognee.modules.migration.cogx import COGXContributor
 
     key = (record.kind, record.external_id)
-    assert isinstance(record.version, int), key
+    assert record.version is not None and record.version.comparator == "integer", key
     assert record.subject, f"{key} names none of the entities it contains"
     assert record.evidence == [], key  # source text, not derived from anything
     assert record.ai_involvement == "none", key
-    initiator, system = record.contributors  # the indexing or the cognify pipeline
-    assert initiator == COGXContributor(role="initiator", actor=owner_email, kind="human"), key
-    assert system.role == "system" and system.actor.startswith("cognee:"), key
+    instructor, system = record.provenance  # the indexing or the cognify pipeline
+    assert instructor == COGXContributor(id=owner_email, kind="human", contribution="instructed"), (
+        key
+    )
+    assert system.contribution == "imported" and system.id.startswith("cognee:"), key
     assert record.accountable == owner_email, key
     assert record.confidence is None, key
 
@@ -149,18 +151,18 @@ def _assert_document_header(record, owner_email: str) -> None:
 def _assert_fact_header(record, owner_email: str) -> None:
     key = (record.kind, record.external_id)
     assert len(record.subject) == 2, key
-    roles = {item.role for item in record.evidence}
-    assert roles <= {"inferred", "observed"}, key
+    relations = {item.relation for item in record.evidence}
+    assert relations <= {"inferred", "observed"}, key
     expected_involvement = {
         frozenset(): None,
         frozenset({"inferred"}): "full",
         frozenset({"observed"}): "none",
         frozenset({"inferred", "observed"}): "mixed",
-    }[frozenset(roles)]
+    }[frozenset(relations)]
     assert record.ai_involvement == expected_involvement, key
     # Edges carry no version, user or pipeline stamps, and nothing reviewed them.
     assert record.version is None, key
-    assert record.contributors == [] and record.accountable is None, key
+    assert record.provenance == [] and record.accountable is None, key
     assert record.confidence is None, key
 
 
