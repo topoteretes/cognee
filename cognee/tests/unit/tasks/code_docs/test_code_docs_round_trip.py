@@ -12,6 +12,7 @@ import importlib
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -415,3 +416,66 @@ async def test_rerun_change_and_removal_touch_exactly_their_chunks(
     assert (str(invoice.id), str(fact_node_id(BILLING, "symbol", "invoices.issue"))) in _describes(
         edges_4
     )
+
+
+@pytest.mark.asyncio
+async def test_memify_code_docs_lose_shared_output_owner_evidence(engine, repos):
+    """A current memify seed cannot stamp exact extracted relationship owners.
+
+    Even on an already marked graph, neither native source refs nor the enabled
+    edge-evidence sidecar records this seed's contributions. Stored code-doc
+    metadata proves chunk/file identity, but not which chunk produced a shared
+    entity's relationships. This is a work-order-1 characterization, not a
+    supported refusal or a metadata-move implementation.
+    """
+    from cognee.infrastructure.databases.provenance import EdgeIdentity
+    from cognee.infrastructure.databases.provenance.markers import mark_graph_provenance_if_empty
+    from cognee.infrastructure.engine.models.Edge import Edge as ModelEdge
+    from cognee.modules.engine.models import Entity
+    from cognee.modules.provenance.edge_evidence.buffer import ProvenanceBuffer
+
+    assert await mark_graph_provenance_if_empty(engine)
+    await _sync_both_code_graphs(repos)
+    data_points = await extract_code_docs()
+    by_header = _chunks_by_header(data_points)
+    shop, billing = by_header["app.py:4"], by_header["invoices.py:1"]
+    destination = Entity(name="shared destination", description="Shared output")
+    source = Entity(
+        name="shared source",
+        description="Shared output",
+        relations=[(ModelEdge(relationship_type="uses"), destination)],
+    )
+    shop.contains = [source, destination]
+    billing.contains = [source, destination]
+    edge = EdgeIdentity(str(source.id), str(destination.id), "uses")
+    # The object graph has both entities under both chunks, but only shop's
+    # extraction produced the relationship. Traversal would assign it to both.
+    shop._produced_edge_identities = [(edge.source_id, edge.target_id, edge.relationship_name)]
+    shop._provenance_edges = [
+        (edge.source_id, edge.target_id, edge.relationship_name, {"edge_text": "uses"})
+    ]
+    ctx = SimpleNamespace(
+        user=SimpleNamespace(id=uuid4(), tenant_id=None),
+        dataset=SimpleNamespace(id=uuid4()),
+        data_item={},
+        pipeline_run_id=uuid4(),
+        extras={},
+        provenance_buffer=ProvenanceBuffer(),
+    )
+    await add_data_points(data_points, ctx=ctx, graph_only=True)
+    await add_code_doc_edges(data_points, ctx=ctx)
+
+    snapshots = await engine.get_node_delete_data([str(shop.id), str(billing.id), str(source.id)])
+    assert len(snapshots) == 3
+    assert all(snapshot.source_ref_keys == [] for snapshot in snapshots.values())
+    edge_snapshot = (await engine.get_edge_delete_data([edge]))[edge]
+    assert edge_snapshot.source_ref_keys == []
+    assert ctx.provenance_buffer.pending_record_count() == 0
+    # Private extraction evidence does not survive the graph storage boundary.
+    assert "_produced_edge_identities" not in snapshots[str(shop.id)].node_properties
+    nodes, edges = await _graph(engine)
+    assert (str(shop.id), str(fact_node_id(SHOP, "symbol", "app.main"))) in _describes(edges)
+    assert (str(billing.id), str(fact_node_id(BILLING, "symbol", "invoices.issue"))) in _describes(
+        edges
+    )
+    assert nodes[str(shop.id)]["external_metadata"] != nodes[str(billing.id)]["external_metadata"]

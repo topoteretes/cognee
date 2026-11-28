@@ -347,3 +347,119 @@ async def test_delete_keeps_files_another_row_still_references(add_env):
     await get_relational_engine().delete_data_entity(row_a.id, row_a.dataset_id)
 
     assert await _read_raw(row_b) == b"shared reclaim body"
+
+
+async def test_completed_readd_replaces_node_set_without_reextraction(add_env, monkeypatch):
+    """Snapshot real embedded memory and expose the completed-add regression.
+
+    Only the confirmed stale-alpha/empty-beta symptom is an expected failure;
+    identity, vector, ownership, processing, or unexpected scope failures raise.
+    Remove the targeted xfail after integrating reconciliation.
+    """
+    import copy
+    from dataclasses import replace
+
+    import cognee
+    from cognee.infrastructure.databases.graph import get_graph_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
+    from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
+    from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
+        create_embedding_engine,
+        get_embedding_engine,
+    )
+    from cognee.infrastructure.llm.config import get_llm_config
+    from cognee.infrastructure.llm.LLMGateway import LLMGateway
+    from cognee.modules.chunking.external_metadata import decode_external_metadata
+    from cognee.modules.engine.models.node_set import parse_node_set_names
+    from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+    from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
+    from cognee.tests.utils.run_mocked import _hashed_unit_vector
+
+    def content_fields(properties):
+        fields = dict(properties)
+        fields.pop("belongs_to_set", None)
+        fields.pop("source_node_set", None)
+        metadata = dict(decode_external_metadata(fields.pop("external_metadata", None)) or {})
+        metadata.pop("node_set", None)
+        return {**fields, "external_metadata": metadata}
+
+    monkeypatch.setenv("LLM_API_KEY", "mock-key")
+    monkeypatch.setenv("COGNEE_SKIP_CONNECTION_TEST", "true")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "openai")
+    monkeypatch.setenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", "1536")
+    get_llm_config.cache_clear()
+    get_embedding_config.cache_clear()
+    create_embedding_engine.cache_clear()
+
+    async def nonzero_embeddings(self, text):
+        return EmbeddingResult(
+            vectors=[_hashed_unit_vector(item, self.dimensions) for item in text], tokens=0
+        )
+
+    embedding_type = type(get_embedding_engine())
+    monkeypatch.setattr(embedding_type, "embed_text", nonzero_embeddings)
+
+    async def extracted(text_input, system_prompt, response_model, **kwargs):
+        if response_model is KnowledgeGraph:
+            return KnowledgeGraph(nodes=[], edges=[])
+        if response_model is SummarizedContent:
+            return SummarizedContent(summary="The project briefing.", description="")
+        raise AssertionError(f"Unexpected extraction model: {response_model}")
+
+    monkeypatch.setattr(LLMGateway, "acreate_structured_output", extracted)
+    text = "A project briefing that must move without rebuilding its memory."
+    await cognee.add(text, dataset_name="reg_node_set_move", node_set=["alpha"])
+    (before,) = await _rows("reg_node_set_move")
+    await cognee.cognify(datasets=[before.dataset_id], chunk_size=64)
+    (before,) = await _rows("reg_node_set_move")
+    stamps = copy.deepcopy(before.pipeline_status)
+    graph = await get_graph_engine()
+    vector = await get_vector_engine_async()
+    nodes, _ = await graph.get_graph_data()
+    chunks = {node_id: props for node_id, props in nodes if props["type"] == "DocumentChunk"}
+    assert len(chunks) == 1
+    ownership = await graph.get_node_delete_data(list(chunks))
+    assert all(snapshot.source_ref_keys for snapshot in ownership.values())
+    vectors = await vector.retrieve("DocumentChunk_text", list(chunks), include_vector=True)
+    assert len(vectors) == len(chunks)
+    saved_vectors = {str(point.id): point.payload["vector"] for point in vectors}
+    assert await ChunksRetriever(node_name=["alpha"]).get_retrieved_objects(text)
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Completed re-add/cognify must not repeat extraction")
+
+    monkeypatch.setattr(LLMGateway, "acreate_structured_output", forbidden)
+    monkeypatch.setattr(embedding_type, "embed_text", forbidden)
+    await cognee.add(text, dataset_name="reg_node_set_move", node_set=["beta"])
+    await cognee.cognify(datasets=[before.dataset_id], chunk_size=64)
+    (after,) = await _rows("reg_node_set_move")
+    after_nodes, _ = await graph.get_graph_data()
+    after_chunks = {
+        node_id: props for node_id, props in after_nodes if props["type"] == "DocumentChunk"
+    }
+    assert {key: content_fields(props) for key, props in after_chunks.items()} == {
+        key: content_fields(props) for key, props in chunks.items()
+    }
+    after_ownership = await graph.get_node_delete_data(list(chunks))
+    assert {
+        key: replace(snapshot, node_properties=content_fields(snapshot.node_properties))
+        for key, snapshot in after_ownership.items()
+    } == {
+        key: replace(snapshot, node_properties=content_fields(snapshot.node_properties))
+        for key, snapshot in ownership.items()
+    }
+    after_vectors = await vector.retrieve("DocumentChunk_text", list(chunks), include_vector=True)
+    assert {str(point.id): point.payload["vector"] for point in after_vectors} == saved_vectors
+    assert after.id == before.id
+    assert after.pipeline_status == stamps
+    # Query embedding is outside the metadata-stage sentinel.
+    monkeypatch.setattr(embedding_type, "embed_text", nonzero_embeddings)
+    old_hits = await ChunksRetriever(node_name=["alpha"]).get_retrieved_objects(text)
+    new_hits = await ChunksRetriever(node_name=["beta"]).get_retrieved_objects(text)
+    if parse_node_set_names(after.node_set) == ["alpha"] and old_hits and not new_hits:
+        pytest.xfail("Completed add skips node-set replacement before ingestion (issue 6628)")
+    assert parse_node_set_names(after.node_set) == ["beta"]
+    assert {str(point.id) for point in new_hits} == set(chunks)
+    assert old_hits == []
