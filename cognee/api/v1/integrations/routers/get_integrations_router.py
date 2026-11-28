@@ -640,7 +640,21 @@ def get_integrations_router():
     async def set_default_sync_policy(
         policy: SyncPolicy, user: User = Depends(get_authenticated_user)
     ) -> SyncPolicyDTO:
-        """Create or replace the caller's default sync policy. A pause is kept."""
+        """Create or replace the caller's default sync policy. A pause is kept.
+
+        ## Request Parameters
+        - **intervalMinutes** (int): How often the sync runs, in minutes; one of the presets
+          15, 30, 60, 120, 240, 360, 480, 1440 or 10080, or whole hours from 1 to 23 (60 to
+          1380), both listed in the response as intervalPresets and customHours; anything
+          else fails with 400. 1440 and 10080 run once, at 10:00 local, on each listed day.
+        - **timezone** (str): IANA timezone name (e.g. Europe/Belgrade) in which the
+          weekdays and the next due slot are interpreted; a name absent from the tz database
+          is rejected with 400. Defaults to 'UTC'.
+        - **weekdays** (Tuple[int, Ellipsis]): Local weekdays on which the sync may run, 0
+          (Monday) through 6 (Sunday); stored sorted and deduplicated. An empty list or a
+          day outside that range is rejected with 400, and a weekly interval takes exactly
+          one day. Defaults to (0, 1, 2, 3, 4, 5, 6).
+        """
         return _sync_policy_dto(await save_sync_policy(user, user.id, policy))
 
     @integrations_router.delete("/sync/policy", status_code=204)
@@ -1472,6 +1486,19 @@ def get_integrations_router():
 
         ## Query Parameters
         - **account_id** (str, optional): As for POST /{provider}/sync.
+
+        ## Request Parameters
+        - **intervalMinutes** (int): How often this connection syncs, in minutes; one of the
+          presets 15, 30, 60, 120, 240, 360, 480, 1440 or 10080, or whole hours from 1 to 23
+          (60 to 1380), both returned as intervalPresets and customHours; anything else
+          fails with 400. 1440 and 10080 run once, at 10:00 local, on each listed day.
+        - **timezone** (str): IANA timezone name (e.g. Europe/Belgrade) in which the
+          weekdays and the next due slot are interpreted; a name absent from the tz database
+          is rejected with 400. Defaults to 'UTC'.
+        - **weekdays** (Tuple[int, Ellipsis]): Local weekdays on which this connection may
+          sync, 0 (Monday) through 6 (Sunday); stored sorted and deduplicated. An empty list
+          or a day outside that range is rejected with 400, and a weekly interval takes
+          exactly one day. Defaults to (0, 1, 2, 3, 4, 5, 6).
         """
         credential = await _connected_credential_or_404(
             user, _integration_or_404(provider), account_id
