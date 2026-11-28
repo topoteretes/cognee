@@ -567,10 +567,11 @@ async def recall(
     datasets: str | None = None,
     session_id: str | None = None,
     system_prompt: str | None = None,
-    top_k: int = 15,
+    top_k: int | None = None,
     scope: str | None = None,
     code_query: dict | None = None,
     include_references: bool = False,
+    retriever_specific_config: dict | None = None,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -588,13 +589,18 @@ async def recall(
     search_type : str, optional
         Override auto-routing with one SearchType name. Completion types
         (answer written by an LLM): HYBRID_COMPLETION (the default when
-        routing is off), GRAPH_COMPLETION, GRAPH_COMPLETION_COT,
+        routing is off), HYBRID_COMPLETION_DECOMPOSITION (hybrid search, then
+        sub-questions planned from the first results and searched again; for
+        questions that ask several things or need several pages),
+        GRAPH_COMPLETION, GRAPH_COMPLETION_COT,
         GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_COMPLETION_DECOMPOSITION,
         GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TEMPORAL, BROAD,
         AGENTIC_COMPLETION. Retrieval-only types (no LLM):
         CHUNKS, CHUNKS_LEXICAL, SUMMARIES, SKILLS, CODE. Other: CYPHER,
         NATURAL_LANGUAGE, CODING_RULES, GRAPH_REPORT, FEELING_LUCKY.
-        An unknown name is rejected with a validation error.
+        An unknown name is rejected with a validation error. When omitted,
+        falls back to COGNEE_MCP_RECALL_SEARCH_TYPE if configured on the
+        server, else auto-routing.
     datasets : str, optional
         Comma-separated dataset names to search within.
     session_id : str, optional
@@ -603,8 +609,9 @@ async def recall(
         Override the synthesis prompt for completion searches. When omitted,
         falls back to COGNEE_MCP_RECALL_SYSTEM_PROMPT / _FILE if configured
         on the server.
-    top_k : int
-        Maximum results to return (default: 15).
+    top_k : int, optional
+        Maximum results to return. When omitted, falls back to
+        COGNEE_MCP_RECALL_TOP_K if configured on the server, else 15.
     scope : str, optional
         Comma-separated memory sources to include: 'graph', 'session',
         'session_first', 'trace', 'session_context', 'tools', 'code', 'all',
@@ -634,6 +641,15 @@ async def recall(
         are not stored data and get no refs. With backend
         access control off, ids are only shown when recall is scoped to a
         single dataset.
+    retriever_specific_config : dict, optional
+        Options for the retriever behind search_type, as a JSON object. For
+        HYBRID_COMPLETION and HYBRID_COMPLETION_DECOMPOSITION: chunks_top_k,
+        entities_top_k and facts_top_k (results per search lane); for
+        HYBRID_COMPLETION_DECOMPOSITION also max_subqueries and
+        decomposition_system_prompt (the prompt that plans the sub-questions).
+        Keys the chosen search type does not read are ignored. Merged over
+        COGNEE_MCP_RECALL_RETRIEVER_CONFIG / _FILE if configured on the server;
+        keys sent here win.
 
     Returns a one-line memory-hit or empty-state summary followed by the original
     result text. Status markers do not count as hits. Empty-state checks are
@@ -641,11 +657,15 @@ async def recall(
     """
     with redirect_stdout(sys.stderr):
         try:
-            normalized_top_k = validate_top_k(top_k)
+            normalized_top_k = validate_top_k(top_k) if top_k is not None else None
             dataset_list = parse_csv_list(datasets)
             scope_list = parse_csv_list(scope)
             if code_query is not None and not isinstance(code_query, dict):
                 raise ValueError("code_query must be a JSON object (dict).")
+            if retriever_specific_config is not None and not isinstance(
+                retriever_specific_config, dict
+            ):
+                raise ValueError("retriever_specific_config must be a JSON object (dict).")
             results = await cognee_client.recall(
                 query_text=query,
                 search_type=search_type,
@@ -656,6 +676,7 @@ async def recall(
                 scope=scope_list or None,
                 code_query=code_query,
                 include_references=include_references,
+                retriever_specific_config=retriever_specific_config,
             )
             empty_state = recall_marker_state(results)
             items = recall_items(results)
