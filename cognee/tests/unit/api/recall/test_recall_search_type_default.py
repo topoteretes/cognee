@@ -195,6 +195,24 @@ _GRAPH_HIT = [
 ]
 
 
+def _miss(search_type: SearchType, *, dataset_name: str = "science") -> SearchResultPayload:
+    """A payload shaped like the real per-dataset miss authorized_search returns.
+
+    The list a search returns is never empty: it carries one payload per dataset,
+    and a dataset that matched nothing still contributes one with an empty
+    retrieval context (``retrieved_nothing()`` True). A test that scripts ``[]``
+    for a miss never exercises that — the broken ``not graph_results`` guard reads
+    ``[]`` as empty and retries anyway, so the bug hides. These payloads reproduce
+    the production shape, so the retry has to read ``retrieved_nothing()`` to fire.
+    """
+    return SearchResultPayload(
+        search_type=search_type,
+        dataset_name=dataset_name,
+        completion="The provided context does not mention any coding rules.",
+        context=[],
+    )
+
+
 def test_routed_type_with_no_results_falls_back_to_the_default(retry_client):
     """CODING_RULES on a dataset with no rules nodeset must not be the answer."""
     retry_client.script[SearchType.HYBRID_COMPLETION] = _GRAPH_HIT
@@ -206,6 +224,59 @@ def test_routed_type_with_no_results_falls_back_to_the_default(retry_client):
     assert response.status_code == 200, response.text
     assert retry_client.calls == [SearchType.CODING_RULES, SearchType.HYBRID_COMPLETION]
     assert retry_client.logged == ["HYBRID_COMPLETION"]
+
+
+@pytest.mark.parametrize(
+    "query, routed_type",
+    [
+        ("what are our coding rules?", SearchType.CODING_RULES),
+        ('"polonium and radium"', SearchType.CHUNKS_LEXICAL),
+    ],
+)
+def test_routed_type_whose_datasets_all_missed_falls_back_to_the_default(
+    retry_client, query, routed_type
+):
+    """The #6853 bug: a routed search that reaches the retriever and comes back
+    with one per-dataset miss (not an empty list) must still fall back.
+
+    ``authorized_search`` never returns ``[]`` for a miss — it returns a payload
+    per dataset, each with an empty retrieval context. The old ``not graph_results``
+    guard saw that non-empty list and skipped the retry, so CODING_RULES /
+    CHUNKS_LEXICAL / BROAD answered with nothing instead of the default. Reading
+    ``retrieved_nothing()`` per payload fixes it. This test fails on the old guard.
+    """
+    retry_client.script[routed_type] = [_miss(routed_type)]
+    retry_client.script[SearchType.HYBRID_COMPLETION] = _GRAPH_HIT
+
+    response = retry_client.client.post("/api/v1/recall", json={"query": query, "scope": "graph"})
+
+    assert response.status_code == 200, response.text
+    assert retry_client.calls == [routed_type, SearchType.HYBRID_COMPLETION]
+    assert retry_client.logged == ["HYBRID_COMPLETION"]
+    assert [entry["source"] for entry in response.json()] == ["graph"]
+
+
+def test_routed_type_with_one_dataset_hit_is_not_retried(retry_client):
+    """A routed type that hit in at least one dataset keeps its answer.
+
+    The miss payloads of the other datasets ride along in the same list, so the
+    guard must not read the whole list as empty and widen to the default — only
+    an all-miss list does that.
+    """
+    hit = SearchResultPayload(
+        search_type=SearchType.CODING_RULES,
+        dataset_name="rules",
+        context=["Always validate inputs at the boundary."],
+    )
+    retry_client.script[SearchType.CODING_RULES] = [hit, _miss(SearchType.CODING_RULES)]
+
+    response = retry_client.client.post(
+        "/api/v1/recall", json={"query": "what are our coding rules?", "scope": "graph"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert retry_client.calls == [SearchType.CODING_RULES]
+    assert retry_client.logged == ["CODING_RULES"]
 
 
 def test_pinned_type_with_no_results_is_not_retried(retry_client):
