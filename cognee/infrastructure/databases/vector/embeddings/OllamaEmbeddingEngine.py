@@ -25,6 +25,8 @@ from cognee.infrastructure.databases.vector.embeddings.input_limit import (
 )
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
+    stop_when_retry_after_exceeds,
+    wait_for_retry_after,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     count_input_tokens,
@@ -41,6 +43,19 @@ from cognee.shared.utils import create_secure_ssl_context
 logger = get_logger("OllamaEmbeddingEngine")
 
 observe = get_observe()
+
+
+class OllamaEmbeddingAPIError(RuntimeError):
+    """An error body from the Ollama embedding endpoint, with its HTTP status kept.
+
+    ``status_code`` lets overload detection see a 429 or 503 (Ollama's queue-full
+    reply); ``retry_after`` is the response's raw Retry-After header, if any.
+    """
+
+    def __init__(self, message: str, status_code: int, retry_after: str | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after = retry_after
 
 
 class OllamaEmbeddingEngine(EmbeddingEngine):
@@ -197,22 +212,20 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             ) from error
 
     @retry(
-        stop=stop_after_delay(128),
-        wait=wait_exponential_jitter(8, 128),
+        stop=stop_after_delay(128) | stop_when_retry_after_exceeds(128),
+        wait=wait_for_retry_after(wait_exponential_jitter(8, 128)),
         # Budget exhaustion is terminal here too: EMBEDDING_ENDPOINT is not
         # validated for provider shape, and a proxy's OpenAI-shaped response
         # body is handled by the "data" branch below, so this engine can be
         # pointed at a LiteLLM proxy and reach its spend cap. The rejection
-        # arrives as a RuntimeError built from the error body, which no type
-        # tuple can match -- see embeddings/retry_config.py.
+        # arrives as an OllamaEmbeddingAPIError built from the error body, which
+        # no type tuple can match -- see embeddings/retry_config.py.
         #
-        # Not at parity with the other two engines: rebuilding the failure as a
-        # bare RuntimeError drops the status code and the response object, so
-        # only the message-text signal survives. A rejection whose body carries
+        # Not fully at parity with the other two engines: the error keeps the
+        # HTTP status (a 402 is classified) and the message, but not the parsed
+        # body, so a rejection with a non-402 status whose body carries
         # ``type: budget_exceeded`` but no budget sentence, or a reworded or
         # truncated sentence, is not classified here and runs the full ladder.
-        # Closing that means classifying inside ``_get_embedding``, while the
-        # status and the parsed body are still in hand.
         retry=embedding_retry_condition(
             litellm.exceptions.NotFoundError, ValueError, asyncio.CancelledError
         ),
@@ -270,7 +283,11 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                     )
                     raise ValueError(f"Text too long for embedding model: {error_msg}")
                 logger.error(f"Ollama embedding error: {error_msg}")
-                raise RuntimeError(f"Ollama embedding API error: {error_msg}")
+                raise OllamaEmbeddingAPIError(
+                    f"Ollama embedding API error: {error_msg}",
+                    status_code=response.status,
+                    retry_after=response.headers.get("Retry-After"),
+                )
 
             if "embeddings" in data:
                 vector = data["embeddings"][0]

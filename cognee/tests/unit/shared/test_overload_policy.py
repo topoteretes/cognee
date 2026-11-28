@@ -1,4 +1,4 @@
-"""Tests for the LLM overload policy: evidence taxonomy and cooldown episodes."""
+"""Tests for the shared overload policy: evidence taxonomy and throttling periods."""
 
 import asyncio
 import time
@@ -8,8 +8,8 @@ import httpx
 import openai
 import pytest
 
-import cognee.infrastructure.llm.overload_policy as overload_policy_module
-from cognee.infrastructure.llm.overload_policy import OverloadPolicy, overload_evidence
+import cognee.shared.overload_policy as overload_policy_module
+from cognee.shared.overload_policy import OverloadPolicy, PacingBudget, overload_evidence
 
 
 def _rate_limit_error() -> openai.RateLimitError:
@@ -24,6 +24,10 @@ def _timeout_error() -> openai.APITimeoutError:
 def _status_error(status: int) -> openai.APIStatusError:
     response = httpx.Response(status, request=httpx.Request("POST", "http://api.test"))
     return openai.APIStatusError("overloaded", response=response, body=None)
+
+
+def _budget() -> PacingBudget:
+    return PacingBudget(60, 60, "TEST_RATE_LIMIT_REQUESTS", "TEST_RATE_LIMIT_INTERVAL")
 
 
 # --------------------------------------------------------------------------- #
@@ -61,7 +65,7 @@ def test_ordinary_errors_are_not_evidence(error):
 
 
 # --------------------------------------------------------------------------- #
-# Policy episodes
+# Throttling periods
 # --------------------------------------------------------------------------- #
 
 
@@ -77,7 +81,7 @@ def warnings(monkeypatch):
 
 
 def test_unpaced_until_evidence(warnings):
-    policy = OverloadPolicy()
+    policy = OverloadPolicy(_budget)
     assert policy.is_paced() is False
 
     policy.on_error(ValueError("not overload"))
@@ -85,26 +89,27 @@ def test_unpaced_until_evidence(warnings):
     assert warnings == []
 
 
-def test_overload_error_starts_a_warned_episode(warnings):
-    policy = OverloadPolicy()
+def test_overload_error_starts_warned_throttling(warnings):
+    policy = OverloadPolicy(_budget)
     policy.on_error(_rate_limit_error())
     assert policy.is_paced() is True
     assert len(warnings) == 1 and "Potential RPM issues detected" in warnings[0]
+    assert "TEST_RATE_LIMIT_REQUESTS / TEST_RATE_LIMIT_INTERVAL" in warnings[0]
 
 
-def test_evidence_extends_episode_without_rewarning(warnings):
-    policy = OverloadPolicy(cooldown_seconds=5.0)
+def test_evidence_extends_throttling_without_rewarning(warnings):
+    policy = OverloadPolicy(_budget, cooldown_seconds=5.0)
     policy.on_error(_rate_limit_error())
     first_deadline = policy._paced_until
 
     time.sleep(0.01)
     policy.on_error(_timeout_error())
     assert policy._paced_until > first_deadline
-    assert len(warnings) == 1  # same episode: one warning
+    assert len(warnings) == 1  # same throttling period: one warning
 
 
-def test_episode_lapses_and_a_fresh_one_rewarns(warnings):
-    policy = OverloadPolicy(cooldown_seconds=0.05)
+def test_throttling_lapses_and_new_throttling_rewarns(warnings):
+    policy = OverloadPolicy(_budget, cooldown_seconds=0.05)
     policy.on_error(_rate_limit_error())
     assert policy.is_paced() is True
 
@@ -113,7 +118,46 @@ def test_episode_lapses_and_a_fresh_one_rewarns(warnings):
 
     policy.on_error(_rate_limit_error())
     assert policy.is_paced() is True
-    assert len(warnings) == 2  # fresh episode warns again
+    assert len(warnings) == 2  # new throttling period warns again
+
+
+def test_embedding_budget_warning_names_embedding_settings(warnings):
+    from cognee.infrastructure.databases.vector.embeddings.config import (
+        embedding_pacing_budget,
+    )
+
+    policy = OverloadPolicy(embedding_pacing_budget)
+    policy.on_error(_rate_limit_error())
+    assert len(warnings) == 1
+    assert "EMBEDDING_RATE_LIMIT_REQUESTS / EMBEDDING_RATE_LIMIT_INTERVAL" in warnings[0]
+
+
+@pytest.mark.parametrize("paced_side", ["llm", "embedding"])
+def test_evidence_on_one_side_leaves_the_other_unpaced(paced_side, warnings, monkeypatch):
+    from cognee.infrastructure.databases.vector.embeddings.config import (
+        embedding_overload_policy,
+    )
+    from cognee.infrastructure.llm.config import llm_overload_policy
+
+    policies = {"llm": llm_overload_policy, "embedding": embedding_overload_policy}
+    for policy in policies.values():
+        monkeypatch.setattr(policy, "_paced_until", 0.0)
+
+    policies[paced_side].on_error(_rate_limit_error())
+
+    other_side = "embedding" if paced_side == "llm" else "llm"
+    assert policies[paced_side].is_paced() is True
+    assert policies[other_side].is_paced() is False
+
+
+def test_embedding_throttling_lasts_60_seconds_and_llm_throttling_900():
+    from cognee.infrastructure.databases.vector.embeddings.config import (
+        embedding_overload_policy,
+    )
+    from cognee.infrastructure.llm.config import llm_overload_policy
+
+    assert embedding_overload_policy.cooldown_seconds == 60.0
+    assert llm_overload_policy.cooldown_seconds == 900.0
 
 
 # --------------------------------------------------------------------------- #

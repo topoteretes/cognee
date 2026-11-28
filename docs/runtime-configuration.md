@@ -186,6 +186,17 @@ LLM_MAX_CONCURRENT_REQUESTS=0  # Max requests in flight at once per model; 0 = u
 ```
 The RPM limiter bounds how many requests *start* per interval; `LLM_MAX_CONCURRENT_REQUESTS` bounds how many are *running* at once, which is what a serial backend (Ollama, llama.cpp, a small vLLM server) needs. It is off for every provider until set, applies per model (stages routed to the same model share its slots) and per process.
 
+`AUTO_RATE_LIMIT` (default `true`) throttles through the RPM limiter by itself when a provider shows overload (a rate-limit error, a timeout, or HTTP 429/503/529), with one warning each time throttling starts. Throttling lasts until no overload has been seen for 900 s for LLM calls, or 60 s for embedding calls, since an embedding server catches up within seconds. Each side throttles on its own, so overload on one side never slows the other. `AUTO_RATE_LIMIT=false` turns it off for both.
+
+#### Embedding Rate Limiting
+```bash
+EMBEDDING_MAX_CONCURRENT_REQUESTS=32  # Embedding requests in flight at once, per process (default 32 without EMBEDDING_ENDPOINT, 16 with it, 4 for Ollama / LM Studio, unless set; at least 1)
+EMBEDDING_RATE_LIMIT_ENABLED=false  # Throttle all the time instead of only after an overload
+EMBEDDING_RATE_LIMIT_REQUESTS=100  # Requests per interval while throttling (default 100; 1000 for Ollama / LM Studio unless set)
+EMBEDDING_RATE_LIMIT_INTERVAL=60  # Interval in seconds
+```
+`EMBEDDING_MAX_CONCURRENT_REQUESTS` is one cap for every embedding call in the process (indexing, vector migrations, query embeddings), and also caps how many indexing write batches are admitted at once, so a slow vector store holds back embedding. It replaces `EMBEDDING_MAX_CONCURRENT_DATA_POINTS`, which is removed: setting it fails at startup with an error naming the new setting. Retries of LiteLLM, OpenAI-compatible and Ollama embedding calls wait for the provider's `Retry-After` when it sends one. The defaults come from a benchmark (`cognee/tests/performance/embedding_concurrency_benchmark.py`). OpenAI (`text-embedding-3-small` and `-large`) served one process about 500 requests a minute however many were in flight; 32 in flight reached that in most runs, and more only made each call wait longer. With `EMBEDDING_ENDPOINT` set the default is 16, since an explicit endpoint is usually a self-hosted server: TEI on an NVIDIA L4 ran at full speed with 16 requests of 32 texts, exactly its default queue limit of 512 texts, and from 32 it answered 429, which throttled the run four to six times slower. Raise the cap if your server queues more, or if a hosted API sits behind your endpoint (Azure OpenAI always has one). Ollama with `nomic-embed-text` on a 14-core CPU embedded one text at a time, about 950 a minute at any cap from 1 to 64. The local cap of 4 covers Ollama's default of one request at a time (`OLLAMA_NUM_PARALLEL=1`) and LM Studio's default of 4 parallel requests (Max Concurrent Predictions); if you raise either, raise `EMBEDDING_MAX_CONCURRENT_REQUESTS` to match. A deeper queue only risks its 60 s request timeout when the server slows down. Set both values to what your provider or machine sustains. The throttled rate of 100 requests a minute fits the lowest paid tiers of OpenAI, Azure OpenAI and Gemini (1M tokens a minute, about 100 requests of 32 chunks); with a known, smaller quota set `EMBEDDING_RATE_LIMIT_REQUESTS` to it.
+
 #### Instructor Mode (Structured Output)
 ```bash
 # LLM_INSTRUCTOR_MODE controls how structured data is extracted
@@ -284,8 +295,9 @@ For production deployments, review and tighten these settings.
 - Docker users: Use `DB_HOST=host.docker.internal` for local databases
 
 **Rate Limiting Errors**
-- Enable client-side rate limiting: `LLM_RATE_LIMIT_ENABLED=true`
-- Adjust limits: `LLM_RATE_LIMIT_REQUESTS` and `LLM_RATE_LIMIT_INTERVAL`
+- With `AUTO_RATE_LIMIT=true` (default) cognee throttles itself after the first overload and logs one warning naming the setting to tune
+- Enable client-side rate limiting all the time: `LLM_RATE_LIMIT_ENABLED=true` / `EMBEDDING_RATE_LIMIT_ENABLED=true`
+- Adjust limits: `LLM_RATE_LIMIT_REQUESTS` and `LLM_RATE_LIMIT_INTERVAL`; for embeddings `EMBEDDING_RATE_LIMIT_REQUESTS`, `EMBEDDING_RATE_LIMIT_INTERVAL` and `EMBEDDING_MAX_CONCURRENT_REQUESTS`
 
 **Local LLM server times out during ingestion**
 - Issue: cognify sends one extraction call per chunk at once, so a serial server (Ollama, llama.cpp, a small vLLM deployment) queues them until callers time out and retry. The RPM limiter does not help: it limits how many calls start per interval, not how many are running

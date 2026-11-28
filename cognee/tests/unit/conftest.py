@@ -61,6 +61,23 @@ def _operation_origin_starts_as_the_sdk():
 
 
 @pytest.fixture(autouse=True)
+def _no_throttling_carries_over(monkeypatch):
+    """Each test starts with no LLM or embedding throttling.
+
+    The two overload policies are process-wide and throttling lasts 900 s (LLM) or
+    60 s (embeddings), so a test that sends a 429 through a real engine would
+    otherwise throttle the tests after it.
+    """
+    from cognee.infrastructure.databases.vector.embeddings.config import (
+        embedding_overload_policy,
+    )
+    from cognee.infrastructure.llm.config import llm_overload_policy
+
+    for policy in (llm_overload_policy, embedding_overload_policy):
+        monkeypatch.setattr(policy, "_paced_until", 0.0)
+
+
+@pytest.fixture(autouse=True)
 def _keyless_gates_see_a_usable_llm():
     """Unit tests mock the LLM call itself; the keyless gates must not skip it.
 

@@ -130,7 +130,7 @@ class BedrockAdapter(LLMInterface):
                 text_input, system_prompt, response_model, **kwargs
             )
             # Dispatch through the pacing seam so overload errors reach the
-            # OverloadPolicy and paced episodes throttle this adapter too.
+            # OverloadPolicy and its throttling periods throttle this adapter too.
             async with llm_rate_limiter_context_manager():
                 return await self.aclient.chat.completions.create(**request_params)
 

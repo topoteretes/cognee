@@ -3,9 +3,9 @@
 Rationale (COG-6475): a LiteLLM spend cap cannot clear inside a retry window,
 but the embedding engines classified terminal errors by exception class only, so
 a budget rejection ran the full ``stop_after_delay(128)`` ladder -- 7 attempts,
-~130s -- for every doomed batch. Embedding batches are gated by a semaphore of
-``embedding_max_concurrent_data_points // batch_size`` (4 by default), so each
-doomed batch also holds a slot for that whole time.
+~130s -- for every doomed batch. Each indexing batch holds one of the
+process-wide batch slots (``EMBEDDING_MAX_CONCURRENT_REQUESTS``) until its rows
+are stored, so each doomed batch also holds a slot for that whole time.
 
 Class-based exclusion cannot fix this, which is why these tests exercise the
 engines rather than a type tuple:
@@ -360,8 +360,10 @@ async def test_openai_compatible_transient_rate_limit_is_still_retried():
 class _FakeAiohttpResponse:
     """Minimal stand-in for the aiohttp response ``_get_embedding`` reads."""
 
-    def __init__(self, payload: dict):
+    def __init__(self, payload: dict, status: int = 400, headers: dict | None = None):
         self._payload = payload
+        self.status = status
+        self.headers = headers or {}
 
     async def json(self) -> dict:
         return self._payload
@@ -415,6 +417,37 @@ async def test_ollama_engine_budget_rejection_bypasses_retry(monkeypatch):
         await engine.embed_text(["hello world"])
 
     assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_ollama_queue_full_keeps_its_status_and_starts_embedding_throttling(monkeypatch):
+    """A 503 error body keeps its status, so it counts as overload evidence."""
+    from tenacity import stop_after_attempt
+
+    import cognee.infrastructure.databases.vector.embeddings.config as embedding_config_module
+    from cognee.infrastructure.databases.vector.embeddings.OllamaEmbeddingEngine import (
+        OllamaEmbeddingAPIError,
+        OllamaEmbeddingEngine,
+    )
+    from cognee.shared.overload_policy import OverloadPolicy
+
+    monkeypatch.setenv("MOCK_EMBEDDING", "false")
+    policy = OverloadPolicy(embedding_config_module.embedding_pacing_budget)
+    monkeypatch.setattr(embedding_config_module, "embedding_overload_policy", policy)
+    with patch.object(OllamaEmbeddingEngine, "get_tokenizer", return_value=Mock()):
+        engine = OllamaEmbeddingEngine(model="test-model", dimensions=4)
+
+    def _fake_post(self, *args, **kwargs):
+        return _FakeAiohttpResponse({"error": "server busy"}, status=503)
+
+    monkeypatch.setattr(aiohttp.ClientSession, "post", _fake_post)
+    single_attempt = OllamaEmbeddingEngine._get_embedding.retry_with(stop=stop_after_attempt(1))
+
+    with pytest.raises(OllamaEmbeddingAPIError) as raised:
+        await single_attempt(engine, "hello world")
+
+    assert raised.value.status_code == 503
+    assert policy.is_paced() is True
 
 
 @pytest.mark.asyncio

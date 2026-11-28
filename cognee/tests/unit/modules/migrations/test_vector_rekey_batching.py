@@ -2,21 +2,25 @@
 
 ``index_data_points_batched`` must mirror cognify's own write path
 (``cognee/tasks/storage/index_data_points.py``): embedding-engine-sized
-batches, concurrency bounded by ``embedding_max_concurrent_data_points``.
+batches, concurrency bounded by the process-wide batch slots
+(``EMBEDDING_MAX_CONCURRENT_REQUESTS``).
 One unbatched call over a whole collection is what providers reject
 (OpenAI caps an embeddings request at 300k tokens total).
 """
 
 import asyncio
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import cognee.infrastructure.databases.vector.embeddings.config as embedding_config_module
 from cognee.modules.migrations.versions._vector_rekey import (
     RekeyedPoint,
     index_data_points_batched,
 )
+from cognee.shared import rate_limiting
 
 
 def _make_points(count: int) -> list:
@@ -29,15 +33,15 @@ def _make_engine(batch_size: int) -> AsyncMock:
     return engine
 
 
-def _config_patch(max_concurrent_data_points: int):
-    return patch.dict(
-        index_data_points_batched.__globals__,
-        {
-            "get_embedding_context_config": lambda: SimpleNamespace(
-                embedding_max_concurrent_data_points=max_concurrent_data_points
-            )
-        },
-    )
+@contextmanager
+def _config_patch(max_concurrent_requests: int):
+    """Set EMBEDDING_MAX_CONCURRENT_REQUESTS, with fresh process-wide slots."""
+    config = SimpleNamespace(embedding_max_concurrent_requests=max_concurrent_requests)
+    with (
+        patch.object(embedding_config_module, "get_embedding_config", lambda: config),
+        patch.object(rate_limiting, "_concurrency_state", {}),
+    ):
+        yield
 
 
 @pytest.mark.asyncio
@@ -83,8 +87,8 @@ async def test_first_batch_settles_before_others_start():
 
 
 @pytest.mark.asyncio
-async def test_concurrency_derived_from_max_concurrent_data_points():
-    """Concurrent batches = max_concurrent_data_points // batch_size (6 // 2 = 3)."""
+async def test_concurrent_batches_bounded_by_max_concurrent_requests():
+    """Concurrent batches = EMBEDDING_MAX_CONCURRENT_REQUESTS."""
     in_flight = 0
     peak = 0
 
@@ -98,15 +102,15 @@ async def test_concurrency_derived_from_max_concurrent_data_points():
     engine = _make_engine(batch_size=2)
     engine.index_data_points = AsyncMock(side_effect=_index)
 
-    with _config_patch(6):
+    with _config_patch(3):
         await index_data_points_batched(engine, "EdgeType", "relationship_name", _make_points(20))
 
     assert peak == 3
 
 
 @pytest.mark.asyncio
-async def test_concurrency_floors_at_one_when_batch_size_exceeds_limit():
-    """batch_size > max_concurrent_data_points must still run one batch, not deadlock."""
+async def test_batch_size_above_the_cap_still_runs():
+    """A batch larger than EMBEDDING_MAX_CONCURRENT_REQUESTS still runs, not deadlocks."""
     engine = _make_engine(batch_size=100)
 
     with _config_patch(10):

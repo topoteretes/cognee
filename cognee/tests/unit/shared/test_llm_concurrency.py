@@ -34,7 +34,7 @@ def _clean_seam_state():
     rl._llm_rate_limiter = None
     rl._embedding_rate_limiter = None
     rl._concurrency_state.clear()
-    from cognee.infrastructure.llm.overload_policy import llm_overload_policy
+    from cognee.infrastructure.llm.config import llm_overload_policy
 
     llm_overload_policy._paced_until = 0.0
     yield

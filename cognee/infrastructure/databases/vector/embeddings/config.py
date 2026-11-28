@@ -1,11 +1,13 @@
+import os
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.exceptions import CogneeConfigurationError
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.overload_policy import OverloadPolicy, PacingBudget
 
 logger = get_logger("embedding_config")
 
@@ -35,6 +37,76 @@ DEFAULT_LOCAL_EMBEDDING_MODEL = "perplexity-ai/pplx-embed-v1-0.6b"
 # DEFAULT_EMBEDDING_INPUT_CAP (4096), which a CPU embeds in about 14 s and 4 GB of
 # memory each (512 tokens: about 1 s). 512 is the budget the previous default had.
 DEFAULT_LOCAL_EMBEDDING_INPUT_CAP = 512
+
+# Local embedding servers serve requests (near-)serially, so their RPM default is
+# lower when EMBEDDING_RATE_LIMIT_REQUESTS is not set: by provider, or by litellm
+# model routing prefix. fastembed runs in-process, not on a server, so it is not
+# one of them.
+LOCAL_EMBEDDING_PROVIDERS = frozenset({"ollama"})
+LOCAL_EMBEDDING_MODEL_PREFIXES = ("ollama/", "lm_studio/")
+LOCAL_DEFAULT_EMBEDDING_RATE_LIMIT_REQUESTS = 1000
+# A local server works through its queue one or a few requests at a time: Ollama
+# reached full throughput at any cap from 1 to 64 in the same benchmark. A short
+# queue keeps every request far from the 60 s timeout, even if the server slows down.
+LOCAL_DEFAULT_EMBEDDING_MAX_CONCURRENT_REQUESTS = 4
+# With an explicit endpoint, typically a self-hosted server such as TEI, whose default
+# queue holds 512 texts: 16 requests of 32. A provider's public API serves more at once.
+DEFAULT_EMBEDDING_MAX_CONCURRENT_REQUESTS = 16
+HOSTED_DEFAULT_EMBEDDING_MAX_CONCURRENT_REQUESTS = 32
+
+# How long embedding throttling lasts after the last overload error. An embedding
+# server catches up within seconds (Ollama drained a queue of 128 in about 8 s in the
+# embedding concurrency benchmark), and the Ollama engine's request timeout is 60 s, so requests
+# already queued when throttling starts have finished or failed by the time it ends.
+# The LLM side keeps its own, longer cooldown.
+EMBEDDING_THROTTLE_COOLDOWN_SECONDS = 60.0
+
+
+def is_local_embedding_server(provider: str | None, model: str | None) -> bool:
+    """True when the embedding provider or model points at a local inference server."""
+    if (provider or "").lower() in LOCAL_EMBEDDING_PROVIDERS:
+        return True
+    return (model or "").lower().startswith(LOCAL_EMBEDDING_MODEL_PREFIXES)
+
+
+def default_max_concurrent_requests(
+    provider: str | None, model: str | None, endpoint: str | None
+) -> int:
+    """The embedding request cap for where requests go, when none is set.
+
+    Without an endpoint, requests go to the provider's public API; with one, to a
+    server someone chose, most likely their own.
+    """
+    if is_local_embedding_server(provider, model):
+        return LOCAL_DEFAULT_EMBEDDING_MAX_CONCURRENT_REQUESTS
+    if not endpoint:
+        return HOSTED_DEFAULT_EMBEDDING_MAX_CONCURRENT_REQUESTS
+    return DEFAULT_EMBEDDING_MAX_CONCURRENT_REQUESTS
+
+
+# Embedding settings that no longer exist, each with the setting that replaced it.
+REMOVED_EMBEDDING_SETTINGS = {
+    "EMBEDDING_MAX_CONCURRENT_DATA_POINTS": "EMBEDDING_MAX_CONCURRENT_REQUESTS",
+}
+
+
+def refuse_removed_embedding_settings(values) -> None:
+    """Raise when a removed embedding setting is supplied, naming its replacement.
+
+    Checks the given keys (constructor input, .env extras, the config API) and the
+    process environment, where pydantic-settings never routes undeclared names.
+    """
+    given = {str(key).upper() for key in values} if isinstance(values, dict) else set()
+    for removed, replacement in REMOVED_EMBEDDING_SETTINGS.items():
+        if removed in given or removed in os.environ:
+            raise CogneeConfigurationError(
+                f"{removed} was removed; use {replacement} instead.",
+                remediation=(
+                    f"Remove {removed}. {replacement} counts embedding requests in "
+                    "flight for the whole process, not data points, so do not copy the "
+                    "old value; the default (64) suits most deployments."
+                ),
+            )
 
 
 class KeylessEmbedderNotInstalledError(CogneeConfigurationError):
@@ -132,9 +204,13 @@ class EmbeddingConfig(BaseSettings):
     # embeddings/input_limit.py).
     embedding_max_completion_tokens: int | None = Field(default=None, gt=0)
     embedding_batch_size: int | None = None
-    # Total data points allowed in flight to the embedding engine during indexing.
-    # Concurrent embedding requests = max(1, this // embedding_batch_size).
-    embedding_max_concurrent_data_points: int = 150
+    # Embedding provider requests in flight at once, per process and event loop,
+    # shared by every caller; also the number of indexing write batches admitted
+    # at once. At least 1: it bounds memory too, so there is no "unlimited".
+    # Unless set, default_max_concurrent_requests picks it by where requests go.
+    embedding_max_concurrent_requests: int = Field(
+        default=DEFAULT_EMBEDDING_MAX_CONCURRENT_REQUESTS, ge=1
+    )
     huggingface_tokenizer: str | None = None
     # Some providers (e.g. NVIDIA NIM's nv-embed family) require an
     # "input_type" field in the embedding request body (typically "query" or
@@ -150,10 +226,21 @@ class EmbeddingConfig(BaseSettings):
     # Rate-limiting for embedding requests. Lives here (not in LLMConfig) so the
     # knobs sit with the embedding settings they govern.
     embedding_rate_limit_enabled: bool = False
-    embedding_rate_limit_requests: int = 60
-    embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
+    # Throttling rate: the lowest paid tiers of OpenAI, Azure OpenAI and Gemini allow
+    # 1M embedding tokens a minute, about 100 requests of 32 chunks of ~300 tokens.
+    # Throttling lapses 60 s after the last overload, so a low rate costs little.
+    # A local server gets LOCAL_DEFAULT_EMBEDDING_RATE_LIMIT_REQUESTS.
+    embedding_rate_limit_requests: int = 100
+    embedding_rate_limit_interval: int = 60  # in seconds
     embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
     model_config = SettingsConfigDict(extra="allow", populate_by_name=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def refuse_removed_settings(cls, values):
+        # extra="allow" would otherwise keep a removed setting silently.
+        refuse_removed_embedding_settings(values)
+        return values
 
     def model_post_init(self, context, /) -> None:
         # The embedding worker reports its own vector size; left unset, the engine
@@ -182,6 +269,16 @@ class EmbeddingConfig(BaseSettings):
         if not self.embedding_batch_size:
             self.embedding_batch_size = 32
 
+        # The rate and cap defaults depend on where requests go; an explicit value always wins.
+        if "embedding_rate_limit_requests" not in self.model_fields_set and (
+            is_local_embedding_server(self.embedding_provider, self.embedding_model)
+        ):
+            self.embedding_rate_limit_requests = LOCAL_DEFAULT_EMBEDDING_RATE_LIMIT_REQUESTS
+        if "embedding_max_concurrent_requests" not in self.model_fields_set:
+            self.embedding_max_concurrent_requests = default_max_concurrent_requests(
+                self.embedding_provider, self.embedding_model, self.embedding_endpoint
+            )
+
     def to_dict(self) -> dict:
         """
         Serialize all embedding configuration settings to a dictionary.
@@ -203,7 +300,7 @@ class EmbeddingConfig(BaseSettings):
             "embedding_input_type": self.embedding_input_type,
             "embedding_encoding_format": self.embedding_encoding_format,
             "embedding_batch_size": self.embedding_batch_size,
-            "embedding_max_concurrent_data_points": self.embedding_max_concurrent_data_points,
+            "embedding_max_concurrent_requests": self.embedding_max_concurrent_requests,
             "embedding_rate_limit_enabled": self.embedding_rate_limit_enabled,
             "embedding_rate_limit_requests": self.embedding_rate_limit_requests,
             "embedding_rate_limit_interval": self.embedding_rate_limit_interval,
@@ -287,6 +384,24 @@ def get_embedding_config():
           configuration settings.
     """
     return EmbeddingConfig()
+
+
+def embedding_pacing_budget() -> PacingBudget:
+    """The embedding RPM budget an overload warning names."""
+    config = get_embedding_config()
+    return PacingBudget(
+        config.embedding_rate_limit_requests,
+        config.embedding_rate_limit_interval,
+        "EMBEDDING_RATE_LIMIT_REQUESTS",
+        "EMBEDDING_RATE_LIMIT_INTERVAL",
+    )
+
+
+# Process-wide overload policy consulted by embedding dispatch; separate from the
+# LLM one, so overload on one side never paces the other.
+embedding_overload_policy = OverloadPolicy(
+    embedding_pacing_budget, cooldown_seconds=EMBEDDING_THROTTLE_COOLDOWN_SECONDS
+)
 
 
 def get_embedding_context_config() -> EmbeddingConfig:

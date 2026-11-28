@@ -9,19 +9,21 @@ from .EmbeddingEngine import EmbeddingEngine, EmbeddingResult, Vector
 logger = get_logger("EmbeddingGateway")
 
 
-_request_semaphore: ContextVar[asyncio.Semaphore | None] = ContextVar(
-    "embedding_request_semaphore", default=None
-)
+_split_requests: ContextVar[bool] = ContextVar("embedding_split_requests", default=False)
 
 
 @contextmanager
-def embedding_request_scope(semaphore: asyncio.Semaphore):
-    """Share a storage step's request budget without holding it during database writes."""
-    token = _request_semaphore.set(semaphore)
+def embedding_request_scope():
+    """Split embedding calls made in this scope into concurrent provider-sized requests.
+
+    How many run at once is bounded by the process-wide embedding request cap
+    (``EMBEDDING_MAX_CONCURRENT_REQUESTS``), held per request attempt by the engine.
+    """
+    token = _split_requests.set(True)
     try:
         yield
     finally:
-        _request_semaphore.reset(token)
+        _split_requests.reset(token)
 
 
 class EmbeddingGateway:
@@ -29,28 +31,23 @@ class EmbeddingGateway:
     each call's token usage, the way LLMGateway does for completions.
 
     Inside a storage step (``embedding_request_scope``) a call larger than one provider
-    request is split into provider-sized requests that run concurrently under the
-    step's shared request semaphore. Outside that scope a call reaches the engine as
-    it was given, in one request.
+    request is split into provider-sized requests that run concurrently, bounded by
+    the process-wide embedding request cap. Outside that scope a call reaches the
+    engine as it was given, in one request.
     """
 
     def __init__(self, engine: EmbeddingEngine):
         self._engine = engine
 
     async def embed_text(self, text: list[str]) -> list[Vector]:
-        semaphore = _request_semaphore.get()
-        if semaphore is None:
+        if not _split_requests.get():
             vectors = await self._engine.embed_text(text)
             await self._record_usage(vectors.tokens)
             return vectors
 
-        async def request(texts):
-            async with semaphore:
-                return await self._engine.embed_text(texts)
-
         request_size = self._request_size()
         if request_size is None or len(text) <= request_size:
-            vectors = await request(text)
+            vectors = await self._engine.embed_text(text)
             await self._record_usage(vectors.tokens)
             return vectors
 
@@ -58,7 +55,7 @@ class EmbeddingGateway:
         # failure so no provider request outlives the storage call.
         parts = await asyncio.gather(
             *(
-                request(text[start : start + request_size])
+                self._engine.embed_text(text[start : start + request_size])
                 for start in range(0, len(text), request_size)
             ),
             return_exceptions=True,

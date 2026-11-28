@@ -8,7 +8,10 @@ from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.relational import get_migration_config, get_relational_config
 from cognee.infrastructure.databases.vector import get_vectordb_config
-from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
+from cognee.infrastructure.databases.vector.embeddings.config import (
+    get_embedding_config,
+    refuse_removed_embedding_settings,
+)
 from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
@@ -532,8 +535,11 @@ class config:
             Valid keys include: embedding_provider, embedding_model,
             embedding_dimensions, embedding_endpoint, embedding_api_key,
             embedding_api_version, embedding_max_completion_tokens,
-            embedding_batch_size, embedding_max_concurrent_data_points,
-            embedding_encoding_format, huggingface_tokenizer.
+            embedding_batch_size, embedding_max_concurrent_requests,
+            embedding_rate_limit_enabled, embedding_rate_limit_requests,
+            embedding_rate_limit_interval, embedding_encoding_format,
+            huggingface_tokenizer. The removed embedding_max_concurrent_data_points
+            raises a CogneeConfigurationError naming its replacement.
 
         Example
         -------
@@ -545,6 +551,7 @@ class config:
             })
             ```
         """
+        refuse_removed_embedding_settings(config_dict)
         normalized_config = dict(config_dict)
         if "embedding_dimensions" in normalized_config:
             config.set_embedding_dimensions(normalized_config.pop("embedding_dimensions"))

@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
+from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.vector.embeddings.config import (
     EmbeddingConfig,
     _resolve_embedding_dimensions,
@@ -377,3 +378,76 @@ def test_batch_size_default_does_not_require_a_provider(provider, batch_size, ex
         embedding_batch_size=batch_size,
     )
     assert config.embedding_batch_size == expected
+
+
+def test_max_concurrent_requests_defaults_to_32(monkeypatch):
+    for var in ("EMBEDDING_MAX_CONCURRENT_REQUESTS", "EMBEDDING_ENDPOINT", "EMBEDDING_API_BASE"):
+        monkeypatch.delenv(var, raising=False)
+    config = EmbeddingConfig(_env_file=None, embedding_dimensions=3)
+    assert config.embedding_max_concurrent_requests == 32
+    assert config.to_dict()["embedding_max_concurrent_requests"] == 32
+
+
+def test_max_concurrent_requests_reads_the_environment(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_MAX_CONCURRENT_REQUESTS", "7")
+    config = EmbeddingConfig(_env_file=None, embedding_dimensions=3)
+    assert config.embedding_max_concurrent_requests == 7
+
+
+@pytest.mark.parametrize(
+    "provider, model, endpoint, rate, cap",
+    [
+        ("openai", "openai/text-embedding-3-large", None, 100, 32),
+        ("ollama", "nomic-embed-text:latest", None, 1000, 4),
+        ("custom", "lm_studio/nomic-embed-text", None, 1000, 4),
+        ("fastembed", "BAAI/bge-small-en-v1.5", None, 100, 32),
+        ("openai", "openai/nomic-ai/nomic-embed-text-v1.5", "http://tei:80/v1", 100, 16),
+        ("openai_compatible", "nomic-ai/nomic-embed-text-v1.5", "http://tei:80/v1", 100, 16),
+    ],
+)
+def test_rate_and_cap_defaults_by_provider_kind(monkeypatch, provider, model, endpoint, rate, cap):
+    for var in (
+        "EMBEDDING_RATE_LIMIT_REQUESTS",
+        "EMBEDDING_MAX_CONCURRENT_REQUESTS",
+        "EMBEDDING_ENDPOINT",
+        "EMBEDDING_API_BASE",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    config = EmbeddingConfig(
+        _env_file=None,
+        embedding_provider=provider,
+        embedding_model=model,
+        embedding_endpoint=endpoint,
+        embedding_dimensions=3,
+    )
+    assert config.embedding_rate_limit_requests == rate
+    assert config.embedding_max_concurrent_requests == cap
+
+
+def test_explicit_rate_and_cap_win_on_a_local_server(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_RATE_LIMIT_REQUESTS", "500")
+    monkeypatch.setenv("EMBEDDING_MAX_CONCURRENT_REQUESTS", "16")
+    config = EmbeddingConfig(_env_file=None, embedding_provider="ollama", embedding_dimensions=3)
+    assert config.embedding_rate_limit_requests == 500
+    assert config.embedding_max_concurrent_requests == 16
+
+
+def test_removed_data_points_setting_in_the_environment_is_refused(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_MAX_CONCURRENT_DATA_POINTS", "150")
+    with pytest.raises(CogneeConfigurationError, match="EMBEDDING_MAX_CONCURRENT_REQUESTS"):
+        EmbeddingConfig(_env_file=None, embedding_dimensions=3)
+
+
+def test_removed_data_points_setting_as_input_is_refused(monkeypatch):
+    monkeypatch.delenv("EMBEDDING_MAX_CONCURRENT_DATA_POINTS", raising=False)
+    with pytest.raises(CogneeConfigurationError, match="EMBEDDING_MAX_CONCURRENT_REQUESTS"):
+        EmbeddingConfig(
+            _env_file=None, embedding_dimensions=3, embedding_max_concurrent_data_points=150
+        )
+
+
+def test_config_api_refuses_the_removed_data_points_setting():
+    from cognee.api.v1.config.config import config
+
+    with pytest.raises(CogneeConfigurationError, match="EMBEDDING_MAX_CONCURRENT_REQUESTS"):
+        config.set_embedding_config({"embedding_max_concurrent_data_points": 150})

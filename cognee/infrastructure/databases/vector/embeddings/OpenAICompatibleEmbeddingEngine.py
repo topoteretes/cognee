@@ -51,6 +51,8 @@ from cognee.infrastructure.databases.vector.embeddings.input_limit import (
 )
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
+    stop_when_retry_after_exceeds,
+    wait_for_retry_after,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     count_input_tokens,
@@ -137,8 +139,8 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
 
     @observe(as_type="embeddings")
     @retry(
-        stop=stop_after_delay(128),
-        wait=wait_exponential_jitter(2, 128),
+        stop=stop_after_delay(128) | stop_when_retry_after_exceeds(128),
+        wait=wait_for_retry_after(wait_exponential_jitter(2, 128)),
         # Budget exhaustion is terminal too: this engine talks to any
         # OpenAI-compatible base URL, a LiteLLM proxy included. It is classified
         # by predicate rather than by class -- see embeddings/retry_config.py.

@@ -16,8 +16,8 @@ import asyncio
 import logging
 import uuid as uuid_module
 
-from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_context_config
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
+from cognee.shared.rate_limiting import embedding_batch_slot
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +29,9 @@ async def index_data_points_batched(
 
     Mirrors cognify's own write path (``cognee/tasks/storage/index_data_points.py``):
     batches of ``embedding_engine.get_batch_size()`` so no single embedding request
-    exceeds the provider's per-request token cap, with a semaphore bounding in-flight
-    data points to ``embedding_max_concurrent_data_points``. Migrations must call
+    exceeds the provider's per-request token cap, each batch holding one of the
+    process-wide batch slots (``EMBEDDING_MAX_CONCURRENT_REQUESTS``) shared with
+    cognify's indexing. Migrations must call
     this instead of ``vector_engine.index_data_points`` directly — one unbatched
     call over a whole collection is exactly what providers reject (OpenAI caps an
     embeddings request at 300k tokens total).
@@ -39,11 +40,9 @@ async def index_data_points_batched(
         return
 
     batch_size = vector_engine.embedding_engine.get_batch_size()
-    max_concurrent_data_points = get_embedding_context_config().embedding_max_concurrent_data_points
-    semaphore = asyncio.Semaphore(max(1, max_concurrent_data_points // batch_size))
 
     async def _index_batch(batch):
-        async with semaphore:
+        async with embedding_batch_slot():
             await vector_engine.index_data_points(index_name, index_property_name, batch)
 
     batches = [data_points[i : i + batch_size] for i in range(0, len(data_points), batch_size)]
