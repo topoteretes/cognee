@@ -11,7 +11,7 @@ it("shows local account information and uses local sign-out", () => {
   render(<SettingsPage />);
   expect(screen.getByRole("heading", { name: "Account" })).toBeInTheDocument();
   expect(screen.queryByText("Editable profile")).not.toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Log out" })).toHaveAttribute("href", "/api/local-signout");
+  expect(screen.getByRole("link", { name: "Log out" })).toHaveAttribute("href", "/local-signout");
 });
 
 it("preserves the Cloud profile and sign-out route", () => {

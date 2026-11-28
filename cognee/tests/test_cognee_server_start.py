@@ -108,7 +108,9 @@ class TestCogneeServerStart(unittest.TestCase):
         ontology_key = f"test_ontology_{uuid.uuid4().hex[:8]}"
         payload = {"datasets": [dataset_name], "ontology_key": [ontology_key]}
 
-        add_response = requests.post(url, headers=headers, data=form_data, files=file, timeout=50)
+        # The upload waits for a vision model to describe the image: about 12 seconds in CI,
+        # now and then far longer. 50 seconds failed runs that had nothing wrong with them.
+        add_response = requests.post(url, headers=headers, data=form_data, files=file, timeout=120)
         if add_response.status_code not in [200, 201]:
             add_response.raise_for_status()
 

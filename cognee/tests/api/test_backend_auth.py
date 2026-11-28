@@ -124,6 +124,45 @@ class TestAuthFlow:
             "Bearer token should still work after logging out and deleting API key"
         )
 
+    def test_a_browser_stays_logged_in_through_the_refresh_cookie(self, client):
+        """The refresh cookie replaces a lost access token, until sign-out or a password change.
+
+        Dropping the access cookie stands for what a browser has after
+        JWT_LIFETIME_SECONDS or a restart: the refresh cookie and nothing else.
+        """
+        email = f"refresh_{uuid.uuid4().hex[:8]}@example.com"
+        credentials = {"username": email, "password": TEST_USER_PASSWORD}
+        register_response = client.post(
+            "/api/v1/auth/register", json={"email": email, "password": TEST_USER_PASSWORD}
+        )
+        assert register_response.status_code == 201, register_response.text
+
+        assert client.post("/api/v1/auth/login", data=credentials).status_code == 200
+        client.cookies.delete("auth_token")
+        assert client.get("/api/v1/auth/me").status_code == 401
+
+        assert client.post("/api/v1/auth/refresh").status_code == 200
+        assert client.get("/api/v1/auth/me").json() == {"email": email}
+
+        # Signing out ends the login, also once the access token is gone, and
+        # a copy of the refresh token kept elsewhere stops working with it.
+        client.cookies.delete("auth_token")
+        refresh_token = client.cookies.get("auth_token_refresh")
+        assert client.post("/api/v1/auth/logout").status_code == 200
+        assert client.cookies.get("auth_token_refresh") is None
+        client.cookies.set("auth_token_refresh", refresh_token)
+        assert client.post("/api/v1/auth/refresh").status_code == 401
+
+        # A password change ends the logins opened under the old password.
+        client.cookies.clear()
+        assert client.post("/api/v1/auth/login", data=credentials).status_code == 200
+        change_response = client.patch(
+            "/api/v1/users/me", json={"password": "another-secure-password-456!"}
+        )
+        assert change_response.status_code == 200, change_response.text
+        client.cookies.delete("auth_token")
+        assert client.post("/api/v1/auth/refresh").status_code == 401
+
 
 class TestHashApiKey:
     """

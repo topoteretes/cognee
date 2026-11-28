@@ -8,13 +8,27 @@ supports robots.txt handling, rate limiting, and custom extraction rules.
 from dataclasses import dataclass
 from typing import Any
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, UnicodeDammit
 
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
+
+
+def _html_parser_input(html: bytes) -> str | bytes:
+    """Decode ``html`` and turn ``\\r\\n`` and a lone ``\\r`` into ``\\n``.
+
+    HTML5 parsers (and the Rust SDK) translate literal line breaks before
+    parsing and keep ``&#13;``; ``html.parser`` translates neither. The bytes
+    are decoded first, as BeautifulSoup would, because in UTF-16 the byte
+    0x0D is also part of other characters. Undecodable input is returned as is.
+    """
+    text = UnicodeDammit(html, is_html=True).unicode_markup
+    if text is None:
+        return html
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 @dataclass
@@ -193,11 +207,12 @@ class BeautifulSoupLoader(LoaderInterface):
                 r.all = True
             normalized_rules.append(r)
 
-        soup = BeautifulSoup(html, "html.parser")
+        markup = _html_parser_input(html)
+        soup = BeautifulSoup(markup, "html.parser")
         pieces = []
         extracted_elements: set[int] = set()
         for rule in normalized_rules:
-            text, new_elements = self._extract_from_html(soup, rule, extracted_elements, html)
+            text, new_elements = self._extract_from_html(soup, rule, extracted_elements, markup)
             if text:
                 pieces.append(text)
                 extracted_elements.update(id(el) for el in new_elements if el is not None)
@@ -260,7 +275,7 @@ class BeautifulSoupLoader(LoaderInterface):
         soup: BeautifulSoup,
         rule: ExtractionRule,
         extracted_elements: set[int] | None = None,
-        html: bytes | None = None,
+        html: str | bytes | None = None,
     ) -> tuple[str, list[Any]]:
         """Extract content from a BeautifulSoup parsed document.
 
@@ -269,7 +284,8 @@ class BeautifulSoupLoader(LoaderInterface):
             rule: The extraction rule to apply.
             extracted_elements: Set of element ids already extracted by broader rules.
                 Elements that are descendants of these will be skipped.
-            html: Raw bytes needed for XPath extraction (lxml parses from bytes).
+            html: Markup for XPath extraction, as returned by ``_html_parser_input``:
+                decoded text with LF line breaks, or the raw bytes if undecodable.
 
         Returns:
             tuple[str, list[Any]]: The extracted content and the list of elements extracted.
@@ -288,7 +304,13 @@ class BeautifulSoupLoader(LoaderInterface):
                 )
             if html is None:
                 return "", []
-            doc = lxml_html.fromstring(html)
+            if isinstance(html, str):
+                # Already decoded; forcing UTF-8 keeps a <meta> or XML declaration
+                # from re-decoding it, and lxml rejects a str with such a declaration.
+                parser = lxml_html.HTMLParser(encoding="utf-8")
+                doc = lxml_html.fromstring(html.encode("utf-8"), parser=parser)
+            else:
+                doc = lxml_html.fromstring(html)
             nodes = doc.xpath(rule.xpath)
             texts = []
             for n in nodes:

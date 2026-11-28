@@ -23,7 +23,7 @@ export default function SecurityWidget() {
         <h3 className={styles.label}>Session</h3>
         <p className={styles.subtitle}>Sign out of your account on this device.</p>
         <a
-          href={cloud ? "/api/signout" : "/api/local-signout"}
+          href={cloud ? "/api/signout" : "/local-signout"}
           className={styles.logout}
           onClick={() => trackPageEvent({ pageName: "Settings", eventName: "sign_out" })}
         >
