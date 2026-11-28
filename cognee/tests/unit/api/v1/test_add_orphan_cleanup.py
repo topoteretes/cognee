@@ -87,6 +87,23 @@ async def test_foreground_cleanup_only_after_success(ingestion, monkeypatch, kin
 
 
 @pytest.mark.asyncio
+async def test_add_with_nothing_new_hands_the_pipeline_no_data(ingestion, monkeypatch):
+    """A document sync with nothing new resolves to no items; the pipeline must run over none,
+    not over the whole dataset, which is what ``data=None`` would mean."""
+    monkeypatch.setattr(
+        add_module,
+        "resolve_dlt_sources",
+        AsyncMock(return_value=([], ingestion.cleanup)),
+    )
+    executor = AsyncMock(return_value=ingestion.run_info(PipelineRunCompleted))
+    monkeypatch.setattr(add_module, "get_pipeline_executor", lambda **kwargs: executor)
+
+    await add_module.add("source", dataset_name="documents")
+
+    assert executor.await_args.kwargs["data"] == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("kind", [PipelineRunErrored, PipelineRunStarted, PipelineRunYield, None])
 @pytest.mark.parametrize("wrapped", [False, True])
 async def test_foreground_without_success_preserves_previous_data(

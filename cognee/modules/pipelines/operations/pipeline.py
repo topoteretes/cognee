@@ -215,8 +215,9 @@ async def run_pipeline_per_dataset(
     holds instead of deadlocking on it.
 
     ``Data`` rows in ``data`` are read again once the lock is held, so tasks see each row
-    as it is now and rows deleted meanwhile are dropped; without ``data`` the run covers
-    every row of the dataset. The remaining arguments pass through to ``run_tasks``.
+    as it is now and rows deleted meanwhile are dropped; with ``data`` None the run covers
+    every row of the dataset, and an empty list runs over none (an add whose sources had
+    nothing new). The remaining arguments pass through to ``run_tasks``.
     Callers normally use ``run_pipeline``, which authorizes the user and datasets first.
     """
 
@@ -226,7 +227,7 @@ async def run_pipeline_per_dataset(
         # Read under the dataset lock, so the run sees each selected row as it is now.
         body_data = (
             await get_selected_dataset_data(dataset.id, data)
-            if data
+            if data is not None
             else await get_dataset_data(dataset_id=dataset.id)
         )
 

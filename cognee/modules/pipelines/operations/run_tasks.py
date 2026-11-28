@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
@@ -46,7 +46,7 @@ from cognee.shared.utils import send_telemetry, telemetry_exception_properties, 
 from cognee.tasks.ingestion import resolve_data_directories
 
 from ..tasks.task import Task
-from .run_tasks_data_item import _source_fields, run_tasks_data_item
+from .run_tasks_data_item import _source_fields, find_pinned_data, run_tasks_data_item
 from .run_tasks_with_telemetry import (
     PIPELINE_RUN_COMPLETED,
     PIPELINE_RUN_ERRORED,
@@ -128,6 +128,10 @@ class DataItemRunner:
     progress_state: dict[str, Any] | None = None
     # Awaited when an item ends, however it ended.
     on_item_done: Callable[[], Awaitable[None]] | None = None
+    # The row each pinned DataItem of the run names, read once by ``run_tasks``
+    # (``find_pinned_data``). A shard's items are rows it read itself, judged as
+    # given, or values with no pin, so it has none.
+    pinned_data: dict[UUID, Data] = field(default_factory=dict)
 
     def __post_init__(self):
         self._semaphore = asyncio.Semaphore(self.settings.data_per_batch)
@@ -156,6 +160,7 @@ class DataItemRunner:
                     self.user,
                     run.incremental_loading,
                     run.data_cache,
+                    self.pinned_data,
                     self.progress_state,
                 )
         finally:
@@ -195,6 +200,14 @@ async def run_tasks(
     domain-blind). A constant list is just the degenerate resolver; items
     resolved to different lists still share this run's lifecycle — one run
     record, one database context, one rollback, one terminal status.
+
+    With ``incremental_loading`` or ``data_cache`` an item this pipeline already
+    completed is skipped. A ``Data`` row or a pinned ``DataItem`` is judged by its
+    state when the run starts: the row as given (``run_pipeline_per_dataset``
+    reads them under the dataset lock), a pin as ``find_pinned_data`` read it
+    with all the run's pins. So such an item listed twice is processed once per
+    copy, as copies running at the same time always were, and a change another
+    process makes during the run is not seen.
 
     ``after_run_completed`` is awaited once the run is recorded and reported
     complete, still inside this dataset's database context (cognify uses it
@@ -282,6 +295,7 @@ async def run_tasks(
                 if not isinstance(data, list):
                     data = [data]
 
+                pinned_data = {}
                 if data_cache or incremental_loading:
                     data = await resolve_data_directories(
                         data,
@@ -289,6 +303,7 @@ async def run_tasks(
                         dataset_id=dataset.id,
                         branch=(extras or {}).get("repo_branch"),
                     )
+                    pinned_data = await find_pinned_data(data, dataset.id)
 
                 # Build (item, item_tasks) work pairs: a resolver picks each
                 # item's task list; a plain list applies uniformly. Validate each
@@ -379,6 +394,7 @@ async def run_tasks(
                     user,
                     progress_state=progress_state,
                     on_item_done=_record_item_progress,
+                    pinned_data=pinned_data,
                 )
 
                 # A data item executor may run the items in other processes,

@@ -9,9 +9,11 @@ from collections import Counter
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
-from sqlalchemy import URL, text
+from sqlalchemy import URL, bindparam, inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from cognee.infrastructure.databases.postgres.admin import (
@@ -204,7 +206,51 @@ async def ingest_dlt_source(
     Returns:
         List[DltRowData]: Per-row data objects for downstream processing.
     """
+    staged = await stage_dlt_source(dlt_source, dataset_name, primary_key, write_disposition)
 
+    from cognee.tasks.ingestion.config import get_ingestion_config
+
+    default_max_rows = get_ingestion_config().dlt_max_rows_per_table
+    effective_max_rows = max_rows_per_table if max_rows_per_table is not None else default_max_rows
+    try:
+        row_data_list = await _read_rows_from_tables(
+            dlt_db_name=staged.dlt_db_name,
+            dataset_name=staged.dataset_name,
+            schema=staged.schema,
+            primary_key=primary_key,
+            relational_config=staged.relational_config,
+            max_rows_per_table=effective_max_rows,
+        )
+    except Exception as e:
+        raise DLTIngestionError(
+            message=f"Failed to read rows from DLT database '{staged.dlt_db_name}': {e}"
+        ) from e
+
+    return DltRows(row_data_list, loaded_tables=staged.schema)
+
+
+@dataclass(frozen=True)
+class StagedSource:
+    """Where a dlt run staged a source, and the tables it scoped the source to."""
+
+    dlt_db_name: str
+    dataset_name: str
+    pipeline_name: str
+    schema: dict
+    relational_config: Any
+
+
+async def stage_dlt_source(
+    dlt_source,
+    dataset_name: str,
+    primary_key: str | None,
+    write_disposition: str | None,
+) -> StagedSource:
+    """Run the dlt pipeline on a (re)source into the dataset's staging database.
+
+    ``schema`` holds the tables the source loaded this run, plus, for a document source,
+    the tables of its current resources (``ingest_dlt_source`` describes the arguments).
+    """
     apply_dlt_runtime_defaults()
 
     if write_disposition is not None:
@@ -341,26 +387,13 @@ async def ingest_dlt_source(
         ) from e
     _apply_key_hints(filtered_schema, key_hints)
 
-    # Read rows from each table and produce DltRowData objects
-    from cognee.tasks.ingestion.config import get_ingestion_config
-
-    default_max_rows = get_ingestion_config().dlt_max_rows_per_table
-    effective_max_rows = max_rows_per_table if max_rows_per_table is not None else default_max_rows
-    try:
-        row_data_list = await _read_rows_from_tables(
-            dlt_db_name=dlt_db_name,
-            dataset_name=dataset_name,
-            schema=filtered_schema,
-            primary_key=primary_key,
-            relational_config=relational_config,
-            max_rows_per_table=effective_max_rows,
-        )
-    except Exception as e:
-        raise DLTIngestionError(
-            message=f"Failed to read rows from DLT database '{dlt_db_name}': {e}"
-        ) from e
-
-    return DltRows(row_data_list, loaded_tables=filtered_schema)
+    return StagedSource(
+        dlt_db_name=dlt_db_name,
+        dataset_name=dataset_name,
+        pipeline_name=pipeline_name,
+        schema=filtered_schema,
+        relational_config=relational_config,
+    )
 
 
 def _purge_forgotten_table(pipeline, owner_name: str, destination, scope: str) -> None:
@@ -695,6 +728,214 @@ def _compute_schema_hash(schema_info) -> str:
     return hashlib.md5(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
 
 
+def _staging_url(relational_config, dlt_db_name: str, dataset_name: str):
+    """The URL of the database a staging dataset's tables live in."""
+    if relational_config.db_provider == "sqlite":
+        # DLT creates a separate SQLite file: {db_name}__{dataset_name}
+        dlt_sqlite_db_name = f"{dlt_db_name}__{dataset_name}"
+        return f"sqlite+aiosqlite:///{os.path.join(relational_config.db_path, dlt_sqlite_db_name)}"
+    return URL.create(
+        "postgresql+asyncpg",
+        username=relational_config.db_username,
+        password=relational_config.db_password,
+        host=relational_config.db_host,
+        port=int(relational_config.db_port),
+        database=dlt_db_name,
+    )
+
+
+def _qualified_table(relational_config, table_name: str) -> str:
+    """A staged table's name for SQL: schema-qualified on PostgreSQL, bare on SQLite."""
+    if relational_config.db_provider == "sqlite":
+        return _quote_identifier(table_name)
+    schema_name, table_name_only = table_name.split(".", 1)
+    return f"{_quote_identifier(schema_name)}.{_quote_identifier(table_name_only)}"
+
+
+@asynccontextmanager
+async def _staging_connection(staged: StagedSource) -> AsyncIterator[Any]:
+    engine = create_async_engine(
+        _staging_url(staged.relational_config, staged.dlt_db_name, staged.dataset_name)
+    )
+    try:
+        async with engine.begin() as conn:
+            yield conn
+    finally:
+        await engine.dispose()
+
+
+# A document's id in its source: ``external_id`` on its Data row, the key a document
+# sync matches staged rows and stored documents by.
+DOCUMENT_ID_COLUMN = "id"
+# cognee's own table in a staging dataset: per pipeline and cognee dataset, the dlt loads
+# whose rows cognee committed. It lives with the staging copy it describes, like dlt's
+# _dlt_pipeline_state, and goes when that copy is dropped; dlt never reads it. Not on the
+# Data rows, which would need a write for every re-sent unchanged row, and not on the
+# add's operation row, which does not know the pipeline. A dataset-keyed state table
+# (the one cognee/modules/improve/watermarks.py asks for) would be its lasting home.
+# It is a cache: dropped or unreadable, the next sync reads every staged row once. Change
+# its shape by dropping it; there is no migration to write.
+_DOCUMENT_LOADS_TABLE = "_cognee_document_loads"
+_DLT_LOAD_ID_COLUMN = "_dlt_load_id"
+
+
+async def staged_document_keys(staged: StagedSource) -> dict[str, dict[str, tuple] | None]:
+    """Each staged row's id and ``_dlt_load_id``, by table, without the row's content.
+
+    ``{table: {str(id): (id, load_id)}}``. ``None`` for a table whose rows can only be told
+    apart by reading them: no id column, no load id (a nested table), an id a document
+    stores no ``external_id`` for (NULL, 0, ""), or an id two rows share (a merge key other
+    than the id). Read under the staging locks, so no load of the pipeline is half visible.
+    """
+    keys: dict[str, dict[str, tuple] | None] = {}
+    columns_read = f"{_quote_identifier(DOCUMENT_ID_COLUMN)}, {_DLT_LOAD_ID_COLUMN}"
+    async with (
+        _staging(staged.pipeline_name, staged.dataset_name),
+        _staging_connection(staged) as conn,
+    ):
+        for table_name, table_info in staged.schema.items():
+            columns = table_info.get("columns", [])
+            names = [c["name"] for c in columns] if isinstance(columns, list) else columns
+            if DOCUMENT_ID_COLUMN not in names or _DLT_LOAD_ID_COLUMN not in names:
+                keys[table_name] = None
+                continue
+            table = _qualified_table(staged.relational_config, table_name)
+            rows = (await conn.execute(text(f"SELECT {columns_read} FROM {table}"))).all()
+            table_keys = {str(row[0]): (row[0], row[1]) for row in rows}
+            unkeyed = len(table_keys) != len(rows) or any(not row[0] for row in rows)
+            keys[table_name] = None if unkeyed else table_keys
+    return keys
+
+
+@dataclass(frozen=True)
+class DocumentRead:
+    """The staged rows of one table to read: those of ``loads``, and those with ``ids``.
+
+    By load, one scan of the table per batch of loads; by id, one per batch of ids, since
+    dlt indexes neither column. The two must not overlap: ``ids`` only of committed loads.
+    """
+
+    loads: list[str]
+    ids: list[Any]
+
+
+async def read_staged_documents(
+    staged: StagedSource, reads: dict[str, DocumentRead | None], primary_key: str
+) -> DltRows:
+    """The staged rows each table's ``DocumentRead`` names; ``None`` reads the whole table.
+
+    A batch of values per query (``id_batches``). Each row's ``primary_key_value``
+    comes from ``primary_key``, the caller's key its Data id derives from.
+    """
+    from cognee.modules.data.methods.get_existing_data_ids import id_batches
+
+    rows: list[DltRowData] = []
+    async with _staging_connection(staged) as conn:
+        for table_name, read in reads.items():
+            filters = (
+                [None]
+                if read is None
+                else [
+                    (column, batch)
+                    for column, values in (
+                        (_DLT_LOAD_ID_COLUMN, read.loads),
+                        (DOCUMENT_ID_COLUMN, read.ids),
+                    )
+                    for batch in id_batches(values)
+                ]
+            )
+            for column_in in filters:
+                rows.extend(
+                    await _read_single_table(
+                        conn=conn,
+                        table_name=table_name,
+                        table_info=staged.schema[table_name],
+                        primary_key=primary_key,
+                        dataset_name=staged.dataset_name,
+                        dlt_db_name=staged.dlt_db_name,
+                        relational_config=staged.relational_config,
+                        column_in=column_in,
+                    )
+                )
+    return DltRows(rows, loaded_tables=staged.schema)
+
+
+def _document_loads_schema(staged: StagedSource) -> str | None:
+    """The schema dlt staged the source's tables in (PostgreSQL); None on SQLite.
+
+    Read from a staged table's name: dlt normalizes the dataset name its own way, which
+    ``_to_safe_ident`` does not reproduce (``a__b`` becomes ``a_b``).
+    """
+    if staged.relational_config.db_provider == "sqlite":
+        return None
+    return next(iter(staged.schema)).split(".", 1)[0]
+
+
+def _document_loads_table(staged: StagedSource) -> str:
+    schema_name = _document_loads_schema(staged)
+    table = _quote_identifier(_DOCUMENT_LOADS_TABLE)
+    return table if schema_name is None else f"{_quote_identifier(schema_name)}.{table}"
+
+
+async def committed_document_loads(staged: StagedSource, dataset_id: UUID) -> set[tuple[str, str]]:
+    """The (table, dlt load) pairs of this pipeline whose rows cognee committed into the dataset."""
+    schema_name = _document_loads_schema(staged)
+    async with _staging_connection(staged) as conn:
+        exists = await conn.run_sync(
+            lambda sync_conn: inspect(sync_conn).has_table(
+                _DOCUMENT_LOADS_TABLE, schema=schema_name
+            )
+        )
+        if not exists:
+            return set()
+        result = await conn.execute(
+            text(
+                f"SELECT table_name, load_id FROM {_document_loads_table(staged)} "
+                "WHERE pipeline_name = :name AND dataset_id = :dataset"
+            ),
+            {"name": staged.pipeline_name, "dataset": str(dataset_id)},
+        )
+        return {(row[0], row[1]) for row in result}
+
+
+async def record_committed_document_loads(
+    staged: StagedSource, dataset_id: UUID, loads: frozenset[tuple[str, str]]
+) -> None:
+    """Record the (table, dlt load) pairs the staged rows of this sync's tables carry.
+
+    They replace the previous pairs of those tables only: one dlt load writes several
+    tables, and a sync reads just the tables of its selected resources. Every pair was
+    read and committed by this sync or an earlier one; a load that lands after this sync
+    read the keys is not among them, so the next sync reads it, whatever its id's order.
+    """
+    table = _document_loads_table(staged)
+    params = {"name": staged.pipeline_name, "dataset": str(dataset_id)}
+    async with _staging_connection(staged) as conn:
+        await conn.execute(
+            text(
+                f"CREATE TABLE IF NOT EXISTS {table} (pipeline_name VARCHAR NOT NULL, "
+                "dataset_id VARCHAR NOT NULL, table_name VARCHAR NOT NULL, "
+                "load_id VARCHAR NOT NULL, "
+                "PRIMARY KEY (pipeline_name, dataset_id, table_name, load_id))"
+            )
+        )
+        await conn.execute(
+            text(
+                f"DELETE FROM {table} WHERE pipeline_name = :name AND dataset_id = :dataset "
+                "AND table_name IN :tables"
+            ).bindparams(bindparam("tables", value=list(staged.schema), expanding=True)),
+            params,
+        )
+        if loads:
+            await conn.execute(
+                text(f"INSERT INTO {table} VALUES (:name, :dataset, :table_name, :load_id)"),
+                [
+                    {**params, "table_name": table_name, "load_id": load_id}
+                    for table_name, load_id in sorted(loads)
+                ],
+            )
+
+
 async def _read_rows_from_tables(
     dlt_db_name: str,
     dataset_name: str,
@@ -704,22 +945,7 @@ async def _read_rows_from_tables(
     max_rows_per_table: int = 0,
 ) -> list[DltRowData]:
     """Read rows from the dlt database tables and return DltRowData objects."""
-    if relational_config.db_provider == "sqlite":
-        # DLT creates a separate SQLite file: {db_name}__{dataset_name}
-        dlt_sqlite_db_name = f"{dlt_db_name}__{dataset_name}"
-        db_path = os.path.join(relational_config.db_path, dlt_sqlite_db_name)
-        async_url = f"sqlite+aiosqlite:///{db_path}"
-    else:
-        async_url = URL.create(
-            "postgresql+asyncpg",
-            username=relational_config.db_username,
-            password=relational_config.db_password,
-            host=relational_config.db_host,
-            port=int(relational_config.db_port),
-            database=dlt_db_name,
-        )
-
-    async_engine = create_async_engine(async_url)
+    async_engine = create_async_engine(_staging_url(relational_config, dlt_db_name, dataset_name))
     row_data_list = []
 
     try:
@@ -760,11 +986,13 @@ async def _read_single_table(
     dlt_db_name: str,
     relational_config,
     max_rows: int = 0,
+    column_in: tuple[str, list] | None = None,
 ) -> list[DltRowData]:
     """Read rows from a single table and return DltRowData objects.
 
     At most ``max_rows`` rows are read.  Pass 0 or a negative value to
-    read all rows (no limit).
+    read all rows (no limit). With ``column_in`` (column, values), only the
+    rows whose column holds one of the values.
     """
     foreign_keys = table_info.get("foreign_keys", [])
 
@@ -787,19 +1015,18 @@ async def _read_single_table(
 
     # For PostgreSQL, dlt uses dataset_name as schema prefix;
     # for SQLite, dlt uses a separate database file and tables have no prefix.
-    if relational_config.db_provider == "sqlite":
-        quoted_table = _quote_identifier(table_name)
-        query = f"SELECT * FROM {quoted_table}"
-    else:
-        schema_name, table_name_only = table_name.split(".", 1)
-        quoted_schema = _quote_identifier(schema_name)
-        quoted_tbl = _quote_identifier(table_name_only)
-        query = f"SELECT * FROM {quoted_schema}.{quoted_tbl}"
-
+    query = f"SELECT * FROM {_qualified_table(relational_config, table_name)}"
+    if column_in is not None:
+        query += f" WHERE {_quote_identifier(column_in[0])} IN :values"
     if max_rows > 0:
         query += f" LIMIT {int(max_rows)}"
+    statement = text(query)
+    if column_in is not None:
+        statement = statement.bindparams(
+            bindparam("values", value=list(column_in[1]), expanding=True)
+        )
 
-    result = await conn.execute(text(query))
+    result = await conn.execute(statement)
     rows = result.mappings().all()
 
     # Validate PK uniqueness

@@ -13,16 +13,15 @@ import json
 import os
 import shutil
 import tempfile
+from collections import defaultdict
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, NoReturn
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import UUID
 
-from cognee.modules.data.methods.get_existing_data_ids import (
-    DATA_ID_BATCH_SIZE,
-    get_existing_data_ids,
-)
+from cognee.modules.data.methods.get_existing_data_ids import get_existing_data_ids, id_batches
 from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id, get_unique_data_ids
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
@@ -46,7 +45,17 @@ from .dlt_utils import (
     document_source_tag,
     document_write_disposition,
 )
-from .ingest_dlt_source import ingest_dlt_source, require_valid_write_disposition
+from .ingest_dlt_source import (
+    DocumentRead,
+    StagedSource,
+    committed_document_loads,
+    ingest_dlt_source,
+    read_staged_documents,
+    record_committed_document_loads,
+    require_valid_write_disposition,
+    stage_dlt_source,
+    staged_document_keys,
+)
 
 logger = get_logger("resolve_dlt_sources")
 
@@ -123,9 +132,12 @@ async def resolve_dlt_sources(
 
     Returns a ``(data, orphan_cleanup)`` tuple. ``data`` is the (possibly
     expanded) data — a single item, a list, or unchanged if nothing was DLT.
-    ``orphan_cleanup`` is an async callable that deletes dlt rows no longer in
-    the source, or ``None`` when there is nothing to clean up; the caller must
-    await it *after* the fresh rows are committed.
+    ``orphan_cleanup`` is an async callable the caller must await *after* the
+    fresh rows are committed: it deletes dlt rows no longer in the source and
+    records the dlt loads each document source committed, so its next sync reads
+    only what changed. ``None`` when there is no manifest to clean and no
+    document source. Skipping it (as a background add does) loses neither data:
+    the next sync deletes those rows and reads every staged row again.
     """
     # Lazy-import DLT types so the dlt package is not a hard dependency
     try:
@@ -220,39 +232,25 @@ async def resolve_dlt_sources(
     # whose resources declare "merge" keeps it, and any other is replaced: an
     # incremental run stages only the changed rows, so replacing them would make
     # orphan cleanup forget every document the run did not touch.
-    # Either way the whole set is read back (max_rows_per_table=0) so orphan
-    # cleanup can forget rows that dropped out of the current corpus.
     # primary_key defaults to "id".
     # Checked here, before any staging run: ingest_dlt_source takes None as
     # "the resources' own", which a caller's value must never reach it as.
     require_valid_write_disposition(write_disposition)
     document_data_items: list[DataItem] = []
-    document_fresh_ids: set[UUID] = set()
-    document_scopes: set[tuple[str, str]] = set()
+    document_syncs: list[_DocumentSync] = []
     for dlt_item in document_items:
-        source_tag = document_source_tag(dlt_item)
-        rows = await ingest_dlt_source(
+        sync = await _sync_document_source(
             dlt_item,
             dataset_name,
+            user,
+            dataset_id,
             primary_key=primary_key or "id",
             write_disposition=write_disposition
             if write_disposition_passed
             else document_write_disposition(dlt_item),
-            max_rows_per_table=0,
         )
-        loaded_tables = getattr(rows, "loaded_tables", {row.table_name for row in rows})
-        document_scopes.update((source_tag, table) for table in loaded_tables)
-        # Dataset-scoped ids with the pre-scoping adoption probe: rows are
-        # dataset-scoped with id as primary key, so a dataset-free
-        # derivation would pin the same id when one source loads into two
-        # datasets — a hard collision on the foreign-pin guard.
-        row_ids = await _stable_row_ids(rows, user, dataset_id)
-        source_items = []
-        for row, data_id in zip(rows, row_ids):
-            document_fresh_ids.add(data_id)
-            source_items.append(_build_document_data_item(row, data_id, source_tag))
-        await _refresh_row_structure(source_items, dataset_id)
-        document_data_items.extend(source_items)
+        document_syncs.append(sync)
+        document_data_items.extend(sync.items)
 
     # --- Relational sources: one manifest DataItem per source -----------
     expanded_items: list[DataItem] = []
@@ -300,30 +298,29 @@ async def resolve_dlt_sources(
         len(document_data_items),
     )
 
-    # --- Prepare deferred orphan cleanup ------------------------------------
+    # --- Prepare the deferred post-commit step (orphan cleanup) --------------
     # Deletion of orphaned dlt rows is deferred to *after* the fresh rows are
     # committed by the add pipeline, to avoid a data-loss window: if ingestion
     # failed between deletion and commit, the orphans would be gone and the
-    # replacements never stored. We return a cleanup coroutine for the caller
-    # to await post-commit instead of deleting here.
+    # replacements never stored. We return a coroutine for the caller to await
+    # post-commit instead of deleting here.
     #
     # Relational sources skip cleanup for "append" (each run intentionally adds
-    # new rows). Document sources reconcile the full current snapshot, so rows
-    # missing from it (deleted/unshared) must be forgotten. The two paths are
-    # cleaned separately so an append relational run never treats document rows
-    # as orphans, or vice versa.
+    # new rows). Document sources forget the stored documents their sync found
+    # stale: a row gone from staging (a tombstone, a replace that dropped it) or a
+    # version replaced this run. The two paths are cleaned separately so an append
+    # relational run never treats document rows as orphans, or vice versa.
     #
-    # Document cleanup is scoped to successfully loaded/read tables. A table
-    # emptied by tombstones must forget its final document; an incremental run
-    # with no load jobs has no such evidence and must not delete anything.
-    # Relational manifests retain their conservative empty-read behavior.
+    # Each document source's loads are recorded last, once its rows are committed and
+    # its stale documents handled: a failed add leaves them to be read again
+    # (_settle_document_syncs).
     do_manifest_cleanup = write_disposition != "append" and bool(manifest_data_ids)
-    do_document_cleanup = bool(document_scopes)
+    do_document_cleanup = bool(document_syncs)
 
     orphan_cleanup: Callable[[], Any] | None = None
     if do_manifest_cleanup or do_document_cleanup:
 
-        async def _cleanup() -> None:
+        async def _after_commit() -> None:
             if do_manifest_cleanup:
                 await _delete_dlt_orphans(
                     dataset_name,
@@ -333,16 +330,9 @@ async def resolve_dlt_sources(
                     dataset_id=dataset_id,
                 )
             if do_document_cleanup:
-                await _delete_dlt_orphans(
-                    dataset_name,
-                    user,
-                    document_fresh_ids,
-                    sources=tuple({source for source, _ in document_scopes}),
-                    document_scopes=document_scopes,
-                    dataset_id=dataset_id,
-                )
+                await _settle_document_syncs(document_syncs, dataset_name, user, dataset_id)
 
-        orphan_cleanup = _cleanup
+        orphan_cleanup = _after_commit
 
     result = non_dlt_items + expanded_items
     return result, orphan_cleanup
@@ -639,8 +629,212 @@ def _dlt_row_identifier(row: DltRowData) -> str:
 
     Includes ``content_hash`` so that unchanged rows keep the same data_id
     across runs (no re-ingest/re-cognify) while edited rows get a fresh one.
+
+    The source is not part of it: rows that agree on table, key value and content share one
+    Data id, whether they are two rows of a table under a caller key that repeats or one row
+    of two sources staging the same table name. The Data row keeps the first source's tag,
+    so the other source reads that row by id on every sync (a cost, not a loss).
     """
     return f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
+
+
+@dataclass(frozen=True)
+class _DocumentSync:
+    """One document source's part of an add: what to store, and what it replaced or lost.
+
+    ``loads`` are the (table, dlt load) pairs its staged rows carry, recorded once the add
+    committed; None when the source staged no table, so there is nothing to record.
+    ``seen`` are the ids of the source's stored documents when the sync resolved.
+    """
+
+    items: list[DataItem]
+    fresh_ids: set[UUID]
+    stale_ids: set[UUID]
+    scopes: set[tuple[str, str]]
+    staged: StagedSource
+    loads: frozenset[tuple[str, str]] | None
+    seen: frozenset[UUID] = frozenset()
+
+
+async def _sync_document_source(
+    dlt_item,
+    dataset_name: str,
+    user: User,
+    dataset_id: UUID,
+    *,
+    primary_key: str,
+    write_disposition: str | None,
+) -> _DocumentSync:
+    """Stage a document source and resolve the staged rows the dataset may not hold.
+
+    Those carry a dlt load cognee has not committed into the dataset, or their key has
+    no stored document (forgotten here, an add that failed) or two. The rest were read
+    and committed by an earlier sync. Stale: stored documents whose row left staging or
+    was read again. A table holding a document with no external id is compared whole.
+    """
+    source_tag = document_source_tag(dlt_item)
+    staged = await stage_dlt_source(dlt_item, dataset_name, primary_key, write_disposition)
+    if not staged.schema:
+        return _DocumentSync([], set(), set(), set(), staged, loads=None)
+    committed = await committed_document_loads(staged, dataset_id)
+    stored = await _stored_documents(dataset_id, source_tag, set(staged.schema))
+    snapshot = await staged_document_keys(staged)
+    unkeyed = {table for table, key in stored if key is None}
+    keys = {
+        table: None if table in unkeyed else table_keys for table, table_keys in snapshot.items()
+    }
+
+    to_read = {
+        table: None if table_keys is None else _document_read(table, table_keys, committed, stored)
+        for table, table_keys in keys.items()
+    }
+    rows = await read_staged_documents(staged, to_read, primary_key)
+    # Dataset-scoped ids with the pre-scoping adoption probe: rows are
+    # dataset-scoped with id as primary key, so a dataset-free
+    # derivation would pin the same id when one source loads into two
+    # datasets — a hard collision on the foreign-pin guard.
+    row_ids = await _stable_row_ids(rows, user, dataset_id)
+    items = [
+        _build_document_data_item(row, data_id, source_tag) for row, data_id in zip(rows, row_ids)
+    ]
+    await _refresh_row_structure(items, dataset_id)
+
+    fresh_ids = set(row_ids)
+    # Keyed as stored documents are (external id), not by the caller's primary key.
+    read_keys = {
+        (item.system_metadata["table_name"], item.system_metadata.get("external_id"))
+        for item in items
+    }
+    stale_ids = {
+        data_id
+        for (table, key), data_ids in stored.items()
+        if _replaced_or_gone(keys[table], table, key, read_keys)
+        for data_id in data_ids
+        if data_id not in fresh_ids
+    }
+    return _DocumentSync(
+        items=items,
+        fresh_ids=fresh_ids,
+        stale_ids=stale_ids,
+        scopes={(source_tag, table) for table in staged.schema},
+        staged=staged,
+        loads=frozenset(
+            (table, load)
+            for table, table_keys in snapshot.items()
+            if table_keys
+            for _, load in table_keys.values()
+        ),
+        seen=frozenset(data_id for data_ids in stored.values() for data_id in data_ids),
+    )
+
+
+def _document_read(
+    table: str, table_keys: dict, committed: set[tuple[str, str]], stored: dict
+) -> DocumentRead:
+    """A keyed table's rows to read: every row of a load cognee has not committed, by load,
+    and by id the rows of committed loads whose key has no stored document or two."""
+    uncommitted = {load for _, load in table_keys.values() if (table, load) not in committed}
+    return DocumentRead(
+        loads=sorted(uncommitted),
+        ids=[
+            raw_id
+            for key, (raw_id, load) in table_keys.items()
+            if load not in uncommitted and len(stored.get((table, key), ())) != 1
+        ],
+    )
+
+
+async def _settle_document_syncs(
+    syncs: list[_DocumentSync], dataset_name: str, user: User, dataset_id: UUID
+) -> None:
+    """Forget the stale documents of committed syncs, then record their loads.
+
+    A sync's loads are recorded only while every document it saw is still stored, less the
+    stale ones it forgot; otherwise another sync's sweep took one, and recording would hide
+    its key from later syncs, so the pairs of the sync's tables are cleared instead. A fresh
+    document that is gone needs no check: the next sync reads its key by id. Under the
+    dataset lock, so no other sweep runs between the check and the record.
+    """
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.infrastructure.locks import dataset_lock
+
+    async with dataset_lock(dataset_id):
+        stale_ids = {data_id for sync in syncs for data_id in sync.stale_ids}
+        fresh_ids = {data_id for sync in syncs for data_id in sync.fresh_ids}
+        if stale_ids:
+            scopes = {scope for sync in syncs for scope in sync.scopes}
+            await _delete_dlt_orphans(
+                dataset_name,
+                user,
+                fresh_ids,
+                sources=tuple({source for source, _ in scopes}),
+                document_scopes=scopes,
+                dataset_id=dataset_id,
+                candidate_ids=stale_ids,
+            )
+        for sync in syncs:
+            if sync.loads is None:
+                continue
+            relied_on = sync.seen - stale_ids
+            async with get_relational_engine().get_async_session() as session:
+                stored = await get_existing_data_ids(session, list(relied_on), dataset_id)
+            if relied_on <= stored:
+                await record_committed_document_loads(sync.staged, dataset_id, sync.loads)
+                continue
+            (source_tag,) = {source for source, _ in sync.scopes}
+            logger.warning(
+                "Not recording the dlt loads of '%s': %d document(s) its sync relied on are "
+                "gone, so the next sync reads the source's tables again.",
+                source_tag,
+                len(relied_on - stored),
+            )
+            await record_committed_document_loads(sync.staged, dataset_id, frozenset())
+
+
+def _replaced_or_gone(table_keys: dict | None, table: str, key: str | None, read_keys: set) -> bool:
+    """Whether a stored document's staged row is gone or was read again this run.
+
+    A whole-read table compares every document against the rows read.
+    """
+    return table_keys is None or key not in table_keys or (table, key) in read_keys
+
+
+async def _stored_documents(
+    dataset_id: UUID | None, source_tag: str, tables: set[str]
+) -> dict[tuple[str, str | None], list[UUID]]:
+    """The dataset's documents of one source and its tables, by (table, external id).
+
+    Two columns per Data row, filtered here on ``system_metadata``: the keys the orphan
+    sweep decides by. Parsed here rather than with ``->>``, which makes PostgreSQL decode
+    the whole JSON text and fails on a non-ASCII title in a SQL_ASCII database.
+    """
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Data
+
+    stored: dict[tuple[str, str | None], list[UUID]] = defaultdict(list)
+    if dataset_id is None:
+        return stored
+    scopes = {(source_tag, table) for table in tables}
+    statement = select(Data.id, Data.system_metadata).where(Data.dataset_id == dataset_id)
+    async with get_relational_engine().get_async_session() as session:
+        for data_id, meta in await session.execute(statement):
+            if _metadata_scope(meta) in scopes:
+                stored[(meta["table_name"], meta.get("external_id"))].append(data_id)
+    return stored
+
+
+def _metadata_scope(meta: Any) -> tuple[Any, Any] | None:
+    """The (source, table_name) a Data row's ``system_metadata`` names; None if it is not a dict.
+
+    The document sync and the orphan sweep decide which stored rows belong to a source by
+    this alone: ``external_metadata`` is user-writable and must never make a row stale or
+    deletable.
+    """
+    if not isinstance(meta, dict):
+        return None
+    return meta.get("source"), meta.get("table_name")
 
 
 async def _stable_row_ids(rows: list[DltRowData], user: User, dataset_id: UUID) -> list[UUID]:
@@ -689,12 +883,9 @@ async def _refresh_row_structure(items: list[DataItem], dataset_id: UUID) -> Non
 
     ids = list(wanted)
     async with get_relational_engine().get_async_session() as session:
-        for start in range(0, len(ids), DATA_ID_BATCH_SIZE):
+        for batch in id_batches(ids):
             rows = await session.execute(
-                select(Data).filter(
-                    Data.id.in_(ids[start : start + DATA_ID_BATCH_SIZE]),
-                    Data.dataset_id == dataset_id,
-                )
+                select(Data).filter(Data.id.in_(batch), Data.dataset_id == dataset_id)
             )
             for data in rows.scalars():
                 if data.system_metadata.get("structure") != wanted[data.id]:
@@ -1127,9 +1318,14 @@ async def _delete_dlt_orphans(
     manifest_source_names: set[str] | None = None,
     document_scopes: set[tuple[str, str]] | None = None,
     dataset_id: UUID | None = None,
+    candidate_ids: set[UUID] | None = None,
 ) -> None:
     """Delete dlt-sourced Data records (and their graph/vector artifacts) that
     are no longer present in the freshly-ingested dlt sources.
+
+    ``candidate_ids`` limits the records considered to these, read by id, instead of
+    every record of the dataset: a document sync already knows which stored documents
+    it replaced or lost, and the rules below still decide each one.
 
     This handles the case where rows are deleted from the upstream database
     and the user re-ingests.  dlt cleans its own staging DB, but cognee's
@@ -1160,6 +1356,7 @@ async def _delete_dlt_orphans(
     from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.data.methods.delete_data import delete_data
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+    from cognee.modules.data.methods.get_dataset_data_by_ids import get_dataset_data_by_ids
     from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
         delete_data_nodes_and_edges,
     )
@@ -1188,22 +1385,22 @@ async def _delete_dlt_orphans(
         return
 
     dataset = existing_datasets[0]
-    all_data: list = await get_dataset_data(dataset.id)
+    all_data: list = (
+        await get_dataset_data(dataset.id)
+        if candidate_ids is None
+        else await get_dataset_data_by_ids(dataset.id, list(candidate_ids))
+    )
 
     orphans = []
     for data_item in all_data:
-        # Deletion decisions key on system_metadata ONLY — external_metadata
-        # is user-writable and must never make a record deletable.
         meta = data_item.system_metadata
-        if not isinstance(meta, dict):
+        scope = _metadata_scope(meta)
+        if scope is None or scope[0] not in sources:
             continue
-        source = meta.get("source")
-        if source not in sources:
-            continue
-        if document_scopes is not None and (source, meta.get("table_name")) not in document_scopes:
+        if document_scopes is not None and scope not in document_scopes:
             continue
         if (
-            source == "dlt_source"
+            scope[0] == "dlt_source"
             and manifest_source_names is not None
             and meta.get("source_name") not in manifest_source_names
         ):

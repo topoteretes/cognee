@@ -108,6 +108,7 @@ def _wire(monkeypatch, *, existing_row, identify_data_calls):
             pipeline_run_id=uuid4(),
             ctx=None,
             user=user,
+            pinned_data={},
         ):
             events.append(event)
         return [e["run_info"] for e in events if isinstance(e, dict) and "run_info" in e]
