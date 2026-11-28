@@ -298,8 +298,9 @@ people rarely open threads becomes a few documents a day, not one per message:
 
 ## How sync and forget-on-delete work
 
-**Incremental model: a fingerprint re-walk, with no time window.** Every run reads
-`conversations.history` newest first, paged with `latest`. Each root keeps a fingerprint in the
+**Incremental model: a fingerprint re-walk.** Every run reads
+`conversations.history` newest first, paged with `latest`, back to the start of the channel, or to
+the day `history_since` names (below). Each root keeps a fingerprint in the
 dlt state: `(reply_count, latest_reply, edited.ts, subtype)`. A root whose fingerprint is
 unchanged costs nothing beyond its share of the history page; for a changed or new root the
 thread is read with `conversations.replies` and rendered again. A new, changed or gone message
@@ -338,9 +339,16 @@ dlt state.
   deleting the oldest messages, a retention policy and a free plan hiding history past 90 days
   (and deleting it past one year) look the same to the API. The Slack Marketplace guidelines ask
   that an app give no access to a free workspace's messages past those 90 days. A complete walk
-  that gets nothing back forgets the whole channel. This is not a time cutoff: the boundary is
-  whatever Slack shows on that walk, and a message Slack shows again (a free workspace that
-  upgrades) is read and remembered again, at the cost of its extraction.
+  that gets nothing back forgets the whole channel. The boundary is whatever Slack shows on that
+  walk, and a message Slack shows again (a free workspace that upgrades) is read and remembered
+  again, at the cost of its extraction.
+- **`history_since`** (`slack_source(history_since="2026-09-01")`) moves that boundary to the start
+  of a UTC day the owner chose, `YYYY-MM-DD` and not later than today. Nothing older is read, so
+  a complete walk forgets every document older than it, and an earlier day reads the older part
+  back. A thread belongs to the period by its first message: a reply today does not keep a thread
+  whose first message is older. A walk cut short forgets nothing, as for any deletion. The
+  bound is the keyword of each run, not part of the state; a host that wants it kept stores it
+  with the connection.
 - A message without replies that is gone marks its day, which is rendered again from what
   Slack shows; a day with nothing left is a tombstone.
 - A thread that Slack reports as gone while the walk reads it (`thread_not_found`) is a

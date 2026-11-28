@@ -5,9 +5,11 @@ hard delete, state kept across runs, state rolled back on a raise) goes through 
 real ``dlt.pipeline`` on SQLite in ``tmp_path``.
 """
 
+import copy
 import json
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 
@@ -806,6 +808,323 @@ def test_a_complete_walk_that_shows_nothing_forgets_everything():
     assert stats["deleted"] == 6 and state["roots"] == {}
 
 
+# --- a lower bound on the history ---
+
+
+def _floor(day: int) -> int:
+    """The first second of the UTC day ``_at(day, ...)`` falls in."""
+    return MIDNIGHT + day * DAY
+
+
+def _since(day: int) -> str:
+    return datetime.fromtimestamp(_floor(day), timezone.utc).strftime("%Y-%m-%d")
+
+
+def _history_calls(fake) -> list[dict]:
+    return [params for method, params in fake.calls if method == "conversations.history"]
+
+
+def test_without_a_bound_no_history_request_carries_oldest():
+    fake = _six_messages()
+    _walk(fake, {})
+
+    assert _history_calls(fake) and all("oldest" not in params for params in _history_calls(fake))
+
+
+def test_a_bound_reads_nothing_older_than_its_day():
+    fake = _six_messages()
+    floor = _floor(4)
+
+    assert set(_ids(_walk(fake, {}, floor=floor))) == {_day_id(_at(day, 0)) for day in (4, 5, 6)}
+    assert {params["oldest"] for params in _history_calls(fake)} == {f"{floor - 1}.999999"}
+
+
+def test_narrowing_the_bound_forgets_what_is_older_in_the_walk_that_completes_it():
+    fake = _six_messages()
+    state: dict = {}
+    _walk(fake, state)
+    unbounded = _stats()
+    _walk(fake, copy.deepcopy(state), unbounded)
+
+    narrowed = _stats()
+    rows = _walk(fake, state, narrowed, floor=_floor(4))
+
+    assert {row["id"] for row in rows} == {_day_id(_at(day, 0)) for day in (1, 2, 3)}
+    assert all(row["_deleted"] for row in rows) and narrowed["deleted"] == 3
+    assert set(state["roots"]) == {_at(day, 0) for day in (4, 5, 6)}
+    assert narrowed["requests"] < unbounded["requests"], "a narrower walk reads less, never more"
+
+
+def test_a_walk_cut_before_it_reaches_the_bound_forgets_nothing():
+    fake = _six_messages()
+    state: dict = {}
+    _walk(fake, state)
+
+    cut = _stats()
+    assert _walk(fake, state, cut, floor=_floor(4), max_requests=2) == []
+    assert cut["failed_budget"] == 1 and set(state["roots"]) == {_at(day, 0) for day in range(1, 7)}
+
+    assert {row["id"] for row in _walk(fake, state, floor=_floor(4))} == {
+        _day_id(_at(day, 0)) for day in (1, 2, 3)
+    }, "the walk that completes forgets them"
+
+
+def test_widening_the_bound_reads_the_older_days_and_renders_only_those():
+    fake = _six_messages()
+    state: dict = {}
+    _walk(fake, state, floor=_floor(4))
+
+    widened = _stats()
+    rows = _walk(fake, state, widened, floor=_floor(2))
+
+    assert {row["id"] for row in rows} == {_day_id(_at(2, 0)), _day_id(_at(3, 0))}
+    assert widened["emitted"] == 2 and widened["skipped"] == 3, "the held days are not rendered"
+    assert set(state["roots"]) == {_at(day, 0) for day in range(2, 7)}
+
+
+def test_a_thread_whose_root_is_older_than_the_bound_is_forgotten_and_not_read():
+    """A thread belongs to the period by its first message, so a reply today does not keep
+    it: its root is not in the window and nothing reads its replies."""
+    fake = _six_messages()
+    fake.reply(_at(2, 0), _at(6, 5), "U1", "a reply today")
+    state: dict = {}
+    _walk(fake, state)
+    assert _at(2, 0) in state["roots"]
+
+    fake.calls.clear()
+    rows = _walk(fake, state, floor=_floor(4))
+
+    assert {"id": f"{CHANNEL}:{_at(2, 0)}", "_deleted": True} in rows
+    assert _at(2, 0) not in state["roots"]
+    assert "conversations.replies" not in fake.methods()
+
+
+def test_a_walk_resumed_from_a_stored_newer_read_does_not_start_below_the_bound():
+    fake = _six_messages()
+    state: dict = {}
+    _walk(fake, state, max_requests=4)
+    for day in range(7, 15):
+        fake.post(_at(day, 0), "U1", f"message {day}")
+    _walk(fake, state, max_requests=3)
+    assert "newer" in state, "a cut read of what is newer keeps where it started"
+
+    floor = _floor(20)
+    fake.calls.clear()
+    _walk(fake, state, floor=floor)
+
+    assert {params["oldest"] for params in _history_calls(fake)} == {f"{floor - 1}.999999"}
+    assert "newer" not in state, "a read that was reset must not be resumed by a later walk"
+
+
+def test_a_bound_that_moves_past_where_an_unfinished_walk_stood_forgets_what_it_had_read():
+    fake = _six_messages()
+    state: dict = {}
+    _walk(fake, state, max_requests=5)
+    assert "position" in state and {_at(4, 0), _at(5, 0)} <= set(state["roots"])
+
+    floor = _floor(6)
+    fake.calls.clear()
+    rows = _walk(fake, state, floor=floor)
+
+    assert {row["id"] for row in rows} >= {_day_id(_at(4, 0)), _day_id(_at(5, 0))}
+    assert set(state["roots"]) == {_at(6, 0)} and "position" not in state
+    assert all(
+        Decimal(params["oldest"]) >= Decimal(f"{floor - 1}.999999")
+        for params in _history_calls(fake)
+    ), "no request reads below the bound, the read of what is newer included"
+
+
+def test_a_first_walk_under_a_bound_starts_from_the_newest_message():
+    """With ``oldest`` alone Slack answers the messages just after it and pages forward, so
+    a bound without an upper edge would read the wrong end of the window first."""
+    fake = _six_messages()
+    state: dict = {}
+
+    rows = _walk(fake, state, floor=_floor(2))
+
+    assert {row["id"] for row in rows} == {_day_id(_at(day, 0)) for day in range(2, 7)}
+    assert set(state["roots"]) == {_at(day, 0) for day in range(2, 7)}
+
+
+def test_every_history_request_that_has_a_lower_edge_has_an_upper_one():
+    fake = _six_messages()
+    state: dict = {}
+    _walk(fake, state, max_requests=4)
+    for day in range(7, 12):
+        fake.post(_at(day, 0), "U1", f"message {day}")
+    _walk(fake, state, max_requests=3)
+    assert "newer" in state, "a cut read of what is newer, the request that resumes it"
+    _walk(fake, state)
+    _walk(fake, state, floor=_floor(3))
+
+    bounded = [params for params in _history_calls(fake) if "oldest" in params]
+    assert bounded and all("latest" in params for params in bounded)
+
+
+def test_a_read_of_what_is_newer_starts_from_the_newest_message():
+    fake = _six_messages()
+    state: dict = {}
+    _walk(fake, state, max_requests=4)
+    for day in range(7, 12):
+        fake.post(_at(day, 0), "U1", f"message {day}")
+
+    rows = _walk(fake, state, max_requests=3)
+
+    assert _day_id(_at(11, 0)) in {row["id"] for row in rows}, "the newest day is read first"
+
+
+def test_a_bound_that_moves_past_a_stored_position_ends_in_one_empty_read():
+    """Everything above the position was checked by the walk that stopped there, so the
+    resumed walk reads only what is newer and the empty window under the bound."""
+    fake = FakeSlack(page_limit=2)
+    fake.add_user("U1", "ana")
+    for day in range(1, 13):
+        fake.post(_at(day, 0), "U1", f"message {day}")
+    state: dict = {}
+    _walk(fake, state, max_requests=8)
+    assert Decimal(state["position"]) < _floor(6)
+    held = {f"{CHANNEL}:day:{day}" for day in state["days"] if day < _since(6)}
+    assert held, "the walk had rendered days under the new bound"
+
+    fake.calls.clear()
+    rows = _walk(fake, state, floor=_floor(6))
+
+    assert len(_history_calls(fake)) <= 2
+    assert {row["id"] for row in rows} == held
+    assert set(state["roots"]) == {_at(day, 0) for day in range(6, 13)}
+
+
+class _RecordingState(dict):
+    """Keeps every value written to ``dirty_days``."""
+
+    def __init__(self):
+        super().__init__()
+        self.dirty_days_writes: list[list[str]] = []
+
+    def __setitem__(self, key, value):
+        if key == "dirty_days":
+            self.dirty_days_writes.append(list(value))
+        super().__setitem__(key, value)
+
+
+def test_forgetting_many_days_writes_the_marked_days_once_not_once_per_message():
+    fake = FakeSlack(page_limit=20)
+    fake.add_user("U1", "ana")
+    for day in range(1, 41):
+        fake.post(_at(day, 0), "U1", f"message {day}")
+    state = _RecordingState()
+    _walk(fake, state)
+
+    state.dirty_days_writes.clear()
+    rows = _walk(fake, state, floor=_floor(40))
+
+    assert len(rows) == 39 and all(row["_deleted"] for row in rows)
+    assert len(state.dirty_days_writes[0]) == 39, "all the days are marked by the first write"
+
+
+@pytest.mark.parametrize("bound_day", [7, 10, 15])
+def test_a_bound_that_moves_past_a_cut_read_of_what_is_newer_still_reads_what_it_left(bound_day):
+    fake = _six_messages()
+    state: dict = {}
+    _walk(fake, state, max_requests=4)
+    for day in range(7, 15):
+        fake.post(_at(day, 0), "U1", f"message {day}")
+    _walk(fake, state, max_requests=3)
+    assert "newer" in state and "position" in state
+
+    fake.calls.clear()
+    _walk(fake, state, floor=_floor(bound_day))
+    bounded = [p for p in _history_calls(fake) if "oldest" in p and "latest" in p]
+    fresh: dict = {}
+    _walk(fake, fresh, floor=_floor(bound_day))
+
+    assert "position" not in state
+    assert set(state["roots"]) == set(fresh["roots"])
+    assert set(state.get("days", {})) == set(fresh.get("days", {}))
+    assert all(Decimal(p["oldest"]) < Decimal(p["latest"]) for p in bounded), "no empty window"
+
+
+@pytest.mark.parametrize("budget", [2, 3])
+def test_a_root_read_again_after_a_cut_that_left_it_missing_is_kept(budget):
+    """A cut after the last page keeps the roots that page lacked as missing; a later walk
+    under a wider bound reads one of them again, and it must not be forgotten."""
+    fake = FakeSlack(page_limit=10)
+    fake.add_user("U1", "ana")
+    fake.post(_at(1, 0), "U1", "thread on day 1")
+    fake.reply(_at(1, 0), _at(1, 1), "U1", "a reply")
+    for day in (2, 4, 5, 6):
+        fake.post(_at(day, 0), "U1", f"message {day}")
+    state: dict = {}
+    _walk(fake, state, floor=_floor(1))
+    fake.post(_at(7, 0), "U1", "a new message")
+    cut = _stats()
+    _walk(fake, state, cut, floor=_floor(3), max_requests=budget)
+    assert cut["failed"] and _at(1, 0) in state["missing"], "the run was cut after the last page"
+
+    rows = _walk(fake, state, floor=_floor(1))
+
+    assert {"id": f"{CHANNEL}:{_at(1, 0)}", "_deleted": True} not in rows
+    assert _at(1, 0) in state["roots"]
+
+
+def test_the_first_second_of_the_bound_day_is_read_and_the_second_before_it_is_not():
+    floor = _floor(4)
+    fake = FakeSlack()
+    fake.add_user("U1", "ana")
+    fake.post(f"{floor - 1}.999999", "U1", "last second of the day before")
+    fake.post(f"{floor}.000000", "U1", "first second of the bound day")
+    fake.post(f"{floor + 5}.000100", "U1", "later that day")
+
+    rows = _walk(fake, {}, floor=floor)
+
+    assert [row["id"] for row in rows] == [_day_id(f"{floor}.000000")]
+    assert "first second of the bound day" in rows[0]["content"]
+    assert "last second" not in rows[0]["content"]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "2026-13-01",
+        "20261105",
+        "2026-11-5",
+        "yesterday",
+        "",
+        20261105,
+        datetime(2026, 11, 5, tzinfo=timezone.utc),
+    ],
+)
+def test_a_bound_that_is_not_a_utc_day_is_refused_without_a_request(bad):
+    fake = _six_messages()
+    with pytest.raises(ValueError, match="history_since"):
+        _source(fake, history_since=bad)
+    assert fake.calls == []
+
+
+def test_a_bound_on_todays_day_is_accepted():
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    fake = _six_messages()
+    _source(fake, history_since=today)
+    assert fake.calls == []
+
+
+def test_a_bound_later_than_today_is_refused_because_it_would_forget_the_channel():
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+    with pytest.raises(ValueError, match="history_since"):
+        _source(_six_messages(), history_since=tomorrow)
+
+
+def test_the_bound_reaches_the_destination_through_a_real_pipeline(tmp_path):
+    fake = _six_messages()
+    assert len(_run(tmp_path, _source(fake))) == 6
+
+    narrowed = _source(fake, history_since=_since(4))
+    staged = _run(tmp_path, narrowed)
+
+    assert set(staged) == {_day_id(_at(day, 0)) for day in (4, 5, 6)}
+    assert narrowed.cognee_sync_stats["deleted"] == 3
+
+
 def test_the_wall_clock_budget_cuts_the_run_and_the_next_run_resumes():
     fake = _six_messages()
     now = [0.0]
@@ -984,6 +1303,34 @@ def test_first_sync_resync_new_reply_and_delete_through_a_real_pipeline(tmp_path
     forget = _source(fake)
     assert list(_run(tmp_path, forget)) == [f"{CHANNEL}:{ts(1)}"]
     assert forget.cognee_sync_stats["deleted"] == 1
+
+
+@pytest.mark.parametrize(
+    ("first", "cut", "second"),
+    [(None, 3, 5), (None, 3, 6), (None, 3, 2), (2, 3, 6), (2, 3, 4), (3, 2, 1), (3, 2, 6)],
+)
+def test_moving_the_bound_between_runs_ends_where_a_fresh_walk_at_that_bound_ends(
+    tmp_path, first, cut, second
+):
+    """The way a host runs it: a new source each run, the state kept by dlt between them. A
+    run is cut under one bound, the bound moves, and the runs that follow end with the
+    documents a first walk at the last bound would have, with no second run to heal it."""
+
+    def since(day):
+        return None if day is None else _since(day)
+
+    fake = _six_messages()
+    moving, fresh = tmp_path / "moving", tmp_path / "fresh"
+    moving.mkdir()
+    fresh.mkdir()
+    assert len(_run(moving, _source(fake))) == 6
+    cut_run = _source(fake, history_since=since(first), max_requests=cut)
+    _run(moving, cut_run)
+    assert cut_run.cognee_sync_stats.get("failed_budget") == 1, "the run is cut, not finished"
+
+    ended = _run(moving, _source(fake, history_since=since(second)))
+
+    assert set(ended) == set(_run(fresh, _source(fake, history_since=since(second))))
 
 
 def test_an_unchanged_resync_writes_no_new_dlt_state(tmp_path):
