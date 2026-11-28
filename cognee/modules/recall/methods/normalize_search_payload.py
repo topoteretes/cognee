@@ -143,9 +143,14 @@ def _build_item(
     )
 
 
+def search_result_kind(search_type: SearchType) -> SearchResultKind:
+    """The result kind items of ``search_type`` are normalized as."""
+    return _KIND_BY_SEARCH_TYPE.get(search_type, SearchResultKind.UNKNOWN)
+
+
 def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultItem]:
     """Normalize one dataset's retriever payload into SearchResultItems."""
-    kind = _KIND_BY_SEARCH_TYPE.get(payload.search_type, SearchResultKind.UNKNOWN)
+    kind = search_result_kind(payload.search_type)
 
     if payload.only_context and payload.user_prompt:
         # One item, not one per context entry: the LLM input is a single artifact. Its

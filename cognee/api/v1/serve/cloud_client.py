@@ -360,6 +360,18 @@ class CloudClient:
             payload["tools_trigger"] = kwargs["tools_trigger"]
         if kwargs.get("code_query") is not None:
             payload["code_query"] = kwargs["code_query"]
+        if kwargs.get("result_mode", "full") != "full" or kwargs.get("expand_items"):
+            supported = await self.supports_recall_cited()
+            if supported is None:
+                raise RuntimeError(self._RECALL_CITED_UNKNOWN)
+            if not supported:
+                raise RuntimeError(self._RECALL_CITED_UNSUPPORTED)
+        if kwargs.get("result_mode", "full") != "full":
+            payload["result_mode"] = kwargs["result_mode"]
+        if kwargs.get("expand_items"):
+            payload["expand_items"] = [
+                item.model_dump(mode="json") for item in kwargs["expand_items"]
+            ]
 
         async with session.post(
             f"{self.service_url}/api/v1/recall",
@@ -535,6 +547,7 @@ class CloudClient:
     # fetched once per client; each probe caches its own answer. Class defaults so
     # instances built without ``__init__`` (tests) start unknown too.
     _openapi: dict | None = None
+    _capabilities: list[str] | None = None
     _content_hash_lookup_supported: bool | None = None
     _node_type_supported: bool | None = None
 
@@ -564,6 +577,65 @@ class CloudClient:
         "Make /openapi.json reachable from this client; node_name alone (node-set tags) "
         "still works."
     )
+
+    _RECALL_CITED_UNSUPPORTED = (
+        "Remote server does not list recall_cited_v1 on GET /health: it predates "
+        "result_mode='cited' and expand_items, ignores them as unknown body fields and "
+        "would answer an ordinary recall instead. Upgrade the server to use them over serve()."
+    )
+
+    _RECALL_CITED_UNKNOWN = (
+        "Could not read the remote server's capabilities (GET /health), so whether it "
+        "answers result_mode='cited' and expand_items is unknown. A server that predates "
+        "them would answer an ordinary recall instead, so they are not sent. Make /health "
+        "reachable from this client."
+    )
+
+    async def _server_capabilities(self) -> list[str] | None:
+        """The ``capabilities`` the server's ``/health`` lists, fetched once per client.
+
+        Read from a 503 too: a degraded server still says what it supports. ``None``
+        means unknown and is not cached: no JSON, a failed read, or an error body without
+        the list (a failing health check, a proxy error page). Only a 2xx body without the
+        list is a server that predates it, so ``[]``.
+        """
+        if self._capabilities is not None:
+            return self._capabilities
+        try:
+            session = await self._get_session()
+            async with session.get(
+                f"{self.service_url}/health", timeout=self.SCHEMA_PROBE_TIMEOUT
+            ) as resp:
+                body = await resp.json()
+                status = resp.status
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError):
+            logger.warning("could not read the server capabilities from /health")
+            return None
+        if not isinstance(body, dict):
+            return None
+        capabilities = body.get("capabilities")
+        if not isinstance(capabilities, list) and not 200 <= status < 300:
+            return None
+        self._capabilities = (
+            [name for name in capabilities if isinstance(name, str)]
+            if isinstance(capabilities, list)
+            else []
+        )
+        return self._capabilities
+
+    async def supports_recall_cited(self) -> bool | None:
+        """Whether the server answers ``result_mode="cited"`` and ``expand_items``.
+
+        Request bodies ignore unknown fields, so an older server answers a cited or
+        expand call with an ordinary recall: no error, and results the caller did not
+        ask for. ``None`` means unknown (``/health`` unreadable).
+        """
+        from cognee.modules.recall.methods.recall_cited import RECALL_CITED_CAPABILITY
+
+        capabilities = await self._server_capabilities()
+        if capabilities is None:
+            return None
+        return RECALL_CITED_CAPABILITY in capabilities
 
     async def _server_openapi(self) -> dict | None:
         """The server's OpenAPI document, fetched once per client.

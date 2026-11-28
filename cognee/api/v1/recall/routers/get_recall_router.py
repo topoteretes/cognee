@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
@@ -12,6 +13,7 @@ from cognee.api.sse import SSE_MEDIA_TYPE, sse_headers, wants_event_stream
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.api.v1.recall.recall_stream import begin_recall_stream
 from cognee.exceptions import CogneeApiError
+from cognee.modules.recall.types.RecallCited import ExpandItem
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
@@ -161,6 +163,32 @@ class RecallPayloadDTO(InDTO):
             "stable 'code' and 'param'."
         ),
     )
+    result_mode: Literal["full", "cited"] = Field(
+        default="full",
+        description=(
+            "'full' returns results as before. 'cited' returns the only_context "
+            "HYBRID_COMPLETION prompt with a tag line, "
+            "[mem:<kind>/<dataset_id>/<record_id>@<version>], before every passage, entity "
+            "and fact, and the tagged records (rank, score, distance, chars, version, "
+            "conflicts, passage sources) in metadata.records. Requires only_context=true and "
+            "graph-only sources. A dataset without passages (a code graph) is left out. With "
+            "access control off and several datasets the tags leave the dataset out: "
+            "[mem:<kind>/<record_id>@<version>]."
+        ),
+    )
+    expand_items: list[ExpandItem | str] | None = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Records to read by id later (1 to 20), each a tag as the cited prompt shows it "
+            "or {dataset_id, record_kind, record_id}. Read by id alone: the query, top_k, "
+            "node_name and datasets are ignored, so send an empty query. An entity comes "
+            "back with every one-hop edge and its sources. A passage's version matches the "
+            "cited one when retriever_specific_config is the cited call's. One result per "
+            "item, in request order; each result's metadata.status is 'available', "
+            "'missing' or 'forbidden'."
+        ),
+    )
     record_context_usage: bool = Field(
         default=False,
         description="Opt in to stamping returned guidance as used; default recall is read-only.",
@@ -297,6 +325,25 @@ def get_recall_router() -> APIRouter:
         - **toolsTrigger** (str): When the 'tools' scope runs: 'always', or 'on_empty' to query the
           external database only when every other requested source returned nothing. Defaults to
           'always'.
+        - **resultMode** (str): 'full' (default) or 'cited'. 'cited' needs onlyContext=true and
+          graph-only sources, runs HYBRID_COMPLETION and returns the regular prompt with a tag
+          line, [mem:<kind>/<dataset_id>/<record_id>@<version>], before every passage, entity
+          and fact, and the tagged records (rank, score, distance, chars, version, conflicts,
+          and passage sources) in metadata.records. An ontology concept the query names is
+          shown without a tag. A request hybrid would hand to GRAPH_COMPLETION (a typed
+          nodeType, or a server started with DEFAULT_FEEDBACK_INFLUENCE > 0) answers 422
+          CitedRequiresHybridError; a dataset without passages is left out, and the 422 comes
+          only when no searched dataset has any. With access control off and several datasets
+          the tags leave the dataset out. Servers that support it list
+          "recall_cited_v1" in GET /health capabilities.
+        - **expandItems** (Optional[List[str | dict]]): 1 to 20 records to read by id later,
+          each a tag as the cited prompt shows it or {datasetId, recordKind, recordId}
+          (snake_case too). Records are read by id alone; the query, topK, nodeName and
+          datasets are ignored (send an empty query), and an entity comes back with every
+          one-hop edge and its sources. A passage's version matches the cited one when
+          retrieverSpecificConfig is the cited call's. One result per item, in request
+          order; each result's metadata.status is 'available', 'missing' or 'forbidden'.
+          Not combined with resultMode='cited'.
 
         ## Error Codes
         - **402/403/404/409/422**: Cognee errors (payment required, permission
@@ -351,6 +398,8 @@ def get_recall_router() -> APIRouter:
                 tool_connections=payload.tool_connections,
                 tools_trigger=payload.tools_trigger,
                 code_query=payload.code_query,
+                result_mode=payload.result_mode,
+                expand_items=payload.expand_items,
                 retriever_specific_config=payload.retriever_specific_config,
             )
 

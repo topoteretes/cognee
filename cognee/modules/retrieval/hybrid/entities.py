@@ -3,6 +3,7 @@ from typing import Any, NamedTuple
 from uuid import UUID
 
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+from cognee.modules.data.content_hash import compute_content_hash
 from cognee.modules.engine.models.DltColumn import DltColumn
 from cognee.modules.engine.models.Entity import Entity
 from cognee.modules.graph.utils.fact_conflicts import (
@@ -23,6 +24,7 @@ from cognee.modules.retrieval.hybrid.results import payload_matches_node_filter
 from cognee.modules.retrieval.utils.results import (
     display_value,
     first_display_value,
+    hit_score,
     payload,
     result_id,
 )
@@ -156,8 +158,9 @@ async def build_entities(
         )
         return [entity for entity in entities if entity["id"] not in pinned_ids], set()
 
+    all_connections = _partition_neighborhood(entity_ids, nodes, edges)
     connections_by_entity_id = _keep_scoped_connections(
-        _partition_neighborhood(entity_ids, nodes, edges),
+        all_connections,
         node_name,
         node_name_filter_operator,
         pinned_ids,
@@ -176,7 +179,42 @@ async def build_entities(
             edge_ranks or {},
             entity["id"] if entity["id"] in pinned_class_ids else None,
         )
+        # Every edge the read returned, in or out of scope: the body cited recall
+        # versions and expand returns (``render_full_entity``). The caller replaces
+        # the list with its hash (``stamp_full_version``) once resolutions are applied.
+        entity["all_edges"] = all_edge_bullets(all_connections.get(entity["id"], []))
     return entities, _reachable_edge_type_ids(connections_by_entity_id)
+
+
+async def read_entities_in_full(graph_engine: Any, entity_hits: list[Any]) -> list[dict]:
+    """Entities by id with every one-hop edge in ``all_edges``, for expand.
+
+    Unlike ``build_entities``, a failed graph read raises: an entity read without its
+    edges would come back with a new version, as if it had changed.
+    """
+    entities = [_entity_from_result(hit) for hit in entity_hits]
+    entity_ids = [entity["id"] for entity in entities if entity["id"]]
+    if not entity_ids:
+        return []
+    nodes, edges = await graph_engine.get_neighborhood(entity_ids, depth=1)
+    connections_by_entity_id = _partition_neighborhood(entity_ids, nodes, edges)
+    for entity in entities:
+        connections = connections_by_entity_id.get(entity["id"], [])
+        _hydrate_entity(entity, connections, scoped=False)
+        entity["all_edges"] = all_edge_bullets(connections)
+    return entities
+
+
+def all_edge_bullets(connections: list[tuple[dict, dict, dict]]) -> list[dict]:
+    """One bullet per distinct edge, unranked and sorted by text so the same edges always
+    render, and hash, the same."""
+    return sorted(
+        (edge_bullet.bullet for edge_bullet in _deduplicated_bullets(connections)),
+        key=lambda bullet: (
+            display_value(bullet.get("text")) or "",
+            display_value(bullet.get("edge_object_id")) or "",
+        ),
+    )
 
 
 def _hydrate_entity(
@@ -193,14 +231,43 @@ def _hydrate_entity(
         entity["conflicts"] = conflicts
 
 
+def render_full_entity(entity: dict) -> str:
+    """An entity with every one-hop edge (``all_edges``): the body expand returns and
+    cited recall versions, the same whatever the query ranked."""
+    return render_entity({**entity, "edges": entity.get("all_edges", [])})
+
+
+def stamp_full_version(entity: dict, *, citable: bool) -> None:
+    """Replace ``all_edges`` with what cited recall needs of it: ``full_version``, the
+    content hash of the full body expand returns, and ``full_chars``, its length.
+
+    The edge list itself never leaves the retriever, so a search result does not grow
+    with an entity's neighborhood. An entity expand cannot rebuild gets neither field
+    and is shown without a tag: one that is not ``citable`` (an ontology-pinned concept,
+    whose heading and edge read are the grounding's own) and one whose neighborhood read
+    failed (no ``all_edges``).
+    """
+    all_edges = entity.pop("all_edges", None)
+    if not citable or all_edges is None:
+        return
+    full_body = render_entity({**entity, "edges": all_edges})
+    entity["full_version"] = compute_content_hash(full_body)
+    entity["full_chars"] = len(full_body)
+
+
 def _type_from_connections(
     entity_id: str, current_type: Any, connections: list[tuple[dict, dict, dict]]
 ) -> Any:
-    """The last ``is_a`` target that names a type; an unnamed one keeps what we had."""
-    for source, edge, target in connections:
-        if _is_type_relationship(edge["relationship_name"]) and str(source.get("id")) == entity_id:
-            current_type = display_value(target.get("name")) or current_type
-    return current_type
+    """The first ``is_a`` target by name, so the heading (and the version cited recall
+    hashes it into) does not depend on the order the graph returns edges in. With no
+    named target the entity keeps what it had."""
+    type_names = sorted(
+        type_name
+        for source, edge, target in connections
+        if _is_type_relationship(edge["relationship_name"]) and str(source.get("id")) == entity_id
+        if (type_name := display_value(target.get("name")))
+    )
+    return type_names[0] if type_names else current_type
 
 
 def _conflict_explanations(connections: list[tuple[dict, dict, dict]]) -> list[str]:
@@ -302,7 +369,7 @@ def _reachable_edge_type_ids(
 def format_entities(entities: list[dict]) -> str:
     blocks = []
     for entity in entities or []:
-        block = _format_entity(entity)
+        block = render_entity(entity)
         if block:
             blocks.append(block)
     if not blocks:
@@ -315,7 +382,7 @@ def _entity_from_result(result: Any) -> dict:
     entity_id = result_id(result) or ""
     # No description: each chunk that names the entity overwrites it, and each
     # chunk's own description of the entity is on its "contains" edge.
-    return {
+    entity = {
         "id": entity_id,
         "name": first_display_value(
             result_payload.get("name"), result_payload.get("text"), entity_id
@@ -324,9 +391,19 @@ def _entity_from_result(result: Any) -> dict:
         "type": _entity_type(result_payload),
         "edges": [],
     }
+    score = hit_score(result)
+    if score is not None:
+        # The hit's vector distance (lower is closer), for cited recall; a
+        # pinned ontology concept carries 0.0.
+        entity["score"] = score
+    return entity
 
 
-def _format_entity(entity: dict) -> str:
+def render_entity(entity: dict) -> str:
+    """One entity as ``## Relevant entities`` shows it: its heading and edge bullets.
+
+    Cited recall and expand render entity bodies here too.
+    """
     name = display_value(entity.get("name"))
     if not name:
         return ""

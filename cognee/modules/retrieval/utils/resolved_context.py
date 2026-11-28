@@ -196,11 +196,11 @@ def apply_entity_resolutions(entities: list[dict], resolutions: list[dict]) -> N
             (set(entity.get("conflicts", [])) - existing_decisions) | accepted
         )
         rejected = {fid for item in relevant for fid in item["rejected_fact_ids"]}
-        entity["edges"] = [
-            edge
-            for edge in entity.get("edges", [])
-            if str(edge.get("edge_object_id")) not in rejected
-        ]
+        for key in ("edges", "all_edges"):
+            if key in entity:
+                entity[key] = [
+                    edge for edge in entity[key] if str(edge.get("edge_object_id")) not in rejected
+                ]
 
 
 def user_resolution_text(selected_fact: str) -> str:

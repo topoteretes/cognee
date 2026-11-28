@@ -23,6 +23,8 @@ class HybridCandidates:
 
     chunks: list = field(default_factory=list)
     chunk_summaries: dict = field(default_factory=dict)
+    # Per chunk id: the fused score and raw query distance (``chunk_scores_by_id``).
+    chunk_scores: dict = field(default_factory=dict)
     entities: list = field(default_factory=list)
     fact_candidates: FactCandidates = field(default_factory=FactCandidates)
 
@@ -76,6 +78,7 @@ class HybridCandidates:
         return {
             "chunks": chunks,
             "chunk_summaries": self._summaries_for(self.chunk_summaries, chunks),
+            "chunk_scores": self._summaries_for(self.chunk_scores, chunks),
             "entities": entities,
             "facts": select_facts_from_candidates(fact_candidates, entities),
         }

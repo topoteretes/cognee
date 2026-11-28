@@ -315,7 +315,13 @@ async def with_grounding_block(query: str | None, context: str) -> str:
     facts about them, and an empty context must stay empty so "nothing found" remains
     detectable.
     """
-    if not context:
-        return context
-    block = grounding_block(await ground(query))
+    block = await grounding_block_for(query, context)
     return f"{block}\n\n{context}" if block else context
+
+
+async def grounding_block_for(query: str | None, context: str) -> str:
+    """The ``## Ontology grounding`` block ``with_grounding_block`` puts in front of
+    ``context``, or "" when there is none (no grounding, or an empty context)."""
+    if not context:
+        return ""
+    return grounding_block(await ground(query))

@@ -158,6 +158,15 @@ class Session:
         return json.dumps(body, default=str).lower()
 
 
+def _final_frame(stream_text: str):
+    """The results in the ``final`` frame of a recall SSE response."""
+    for frame in stream_text.split("\n\n"):
+        lines = frame.strip().split("\n")
+        if lines[0] == "event: final":
+            return json.loads(lines[1].removeprefix("data: "))["results"]
+    raise AssertionError(f"no final frame in {stream_text[:300]!r}")
+
+
 # ---------------------------------------------------------------------------
 # tests
 # ---------------------------------------------------------------------------
@@ -222,6 +231,41 @@ def test_http_api_user_journey(api):
 
     rows = alice.get(f"/api/v1/datasets/{dataset_id}/data").json()
     assert len(rows) == 3, f"remember did not add a data row: {len(rows)}"
+
+    # --- cited recall and expand over HTTP ------------------------------------------
+    cited_request = {
+        "query": "Who runs the Greywater Kayak Club?",
+        "datasets": [DATASET],
+        "searchType": "HYBRID_COMPLETION",
+        "onlyContext": True,
+        "resultMode": "cited",
+    }
+    cited = alice.post("/api/v1/recall", json=cited_request)
+    assert cited.status_code == 200, f"cited recall: {cited.status_code} {cited.text}"
+    (cited_item,) = cited.json()
+    tags = [record["tag"] for record in cited_item["metadata"]["records"]]
+    assert tags and all(f"{tag}\n" in cited_item["text"] for tag in tags), cited.text[:300]
+
+    # Expand reads by id alone: an empty query, the tags as the prompt showed them.
+    expand_request = {"query": "", "expandItems": tags[:3]}
+    expanded = alice.post("/api/v1/recall", json=expand_request)
+    assert expanded.status_code == 200, f"expand: {expanded.status_code} {expanded.text}"
+    assert [row["metadata"]["status"] for row in expanded.json()] == ["available"] * len(tags[:3])
+    assert [row["metadata"]["tag"] for row in expanded.json()] == tags[:3]
+
+    # The streamed variant answers with the same rows in its final frame.
+    streamed = alice.post("/api/v1/recall", json={**expand_request, "stream": True})
+    assert streamed.status_code == 200, f"streamed expand: {streamed.status_code} {streamed.text}"
+    assert _final_frame(streamed.text) == expanded.json()
+
+    # A refusal recall names is a 422; a body the model cannot parse is a 400.
+    refused = alice.post("/api/v1/recall", json={**cited_request, "onlyContext": False})
+    assert refused.status_code == 422, f"refused cited: {refused.status_code} {refused.text}"
+    assert "CitedRequiresOnlyContextError" in refused.text, refused.text
+    malformed = alice.post(
+        "/api/v1/recall", json={"query": "", "expandItems": [{"recordKind": "passage"}]}
+    )
+    assert malformed.status_code == 400, f"malformed: {malformed.status_code} {malformed.text}"
 
     history = alice.get("/api/v1/search")
     assert history.status_code == 200, history.text

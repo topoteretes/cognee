@@ -56,7 +56,14 @@ def test_merge_preserves_caps_summaries_and_unowned_primary_keys():
     assert merged["entities"] == [primary["entities"][0]]
     assert merged["facts"] == secondary["facts"]
     assert merged["global_context"] == "built once from the raw query"
-    assert set(merged) == {"chunks", "chunk_summaries", "entities", "facts", "global_context"}
+    assert set(merged) == {
+        "chunks",
+        "chunk_summaries",
+        "chunk_scores",
+        "entities",
+        "facts",
+        "global_context",
+    }
 
 
 def test_merge_of_the_real_shape_adds_no_extra_keys():
@@ -68,7 +75,7 @@ def test_merge_of_the_real_shape_adds_no_extra_keys():
         facts_limit=5,
     )
 
-    assert set(merged) == {"chunks", "chunk_summaries", "entities", "facts"}
+    assert set(merged) == {"chunks", "chunk_summaries", "chunk_scores", "entities", "facts"}
 
 
 @pytest.mark.parametrize(

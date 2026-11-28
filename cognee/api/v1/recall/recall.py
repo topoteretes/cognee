@@ -1,6 +1,7 @@
 import asyncio
 import re
 from contextlib import nullcontext
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -30,6 +31,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.operations import get_current_operation, record_operation
 from cognee.modules.recall.methods.graph_warmup import STATE_BUILD_FAILED, STATE_PARTIAL
+from cognee.modules.recall.types.RecallCited import ExpandItem
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -458,6 +460,123 @@ async def _session_usage_scope(session_id: str | None, user):
     return track_session_usage(session_id, user.id)
 
 
+async def _recall_user(user):
+    """The caller, or the default user; refuses a recall before cognee is initialized."""
+    if user is not None:
+        return user
+    try:
+        return await get_default_user()
+    except (DatabaseNotCreatedError, UserNotFoundError) as error:
+        raise CogneeValidationError(
+            message=(
+                "Recall prerequisites not met: no database/default user found. "
+                "Initialize Cognee before recalling by:\n"
+                "- running `await cognee.add(...)` followed by `await cognee.cognify()`."
+            ),
+            name="RecallPreconditionError",
+        ) from error
+
+
+def _validate_cited_request(
+    *,
+    result_mode: str,
+    expand_items: list | None,
+    only_context: bool,
+    query_type: SearchType | None,
+    sources: list[str],
+    node_type: type | None,
+    neighborhood_depth: int | None,
+    feedback_influence: float,
+) -> None:
+    """Refuse cited and expand requests recall cannot answer, before any lane runs."""
+    from cognee.api.v1.recall.query_router import CITED_SEARCH_TYPES
+    from cognee.modules.recall.methods.recall_cited import MAX_EXPAND_ITEMS
+    from cognee.modules.search.methods.hybrid_deferral import request_deferral_reason
+
+    if result_mode not in ("full", "cited"):
+        raise CogneeValidationError(
+            message=f"Invalid result_mode '{result_mode}'. Valid values: 'full', 'cited'.",
+            name="InvalidResultModeError",
+        )
+    if expand_items is not None:
+        if result_mode == "cited":
+            raise CogneeValidationError(
+                message="expand_items reads cited records by id; it cannot be combined with "
+                "result_mode='cited'. Send the cited call and the expand call separately.",
+                name="InvalidExpandRequestError",
+            )
+        if not 1 <= len(expand_items) <= MAX_EXPAND_ITEMS:
+            raise CogneeValidationError(
+                message=f"expand_items takes 1 to {MAX_EXPAND_ITEMS} items, got {len(expand_items)}.",
+                name="InvalidExpandItemsError",
+            )
+        return
+    if result_mode != "cited":
+        return
+    if not only_context:
+        raise CogneeValidationError(
+            message="result_mode='cited' requires only_context=True.",
+            name="CitedRequiresOnlyContextError",
+        )
+    if query_type is not None and query_type not in CITED_SEARCH_TYPES:
+        raise CogneeValidationError(
+            message=f"result_mode='cited' supports {sorted(t.value for t in CITED_SEARCH_TYPES)}, "
+            f"not {query_type.value}. Omit query_type to let recall pick one.",
+            name="CitedUnsupportedSearchTypeError",
+        )
+    if sources != ["graph"]:
+        raise CogneeValidationError(
+            message="result_mode='cited' searches the graph only: pass scope=['graph'], "
+            "query_type=HYBRID_COMPLETION, or omit session_id with the default scope "
+            f"(resolved sources: {sources}).",
+            name="CitedRequiresGraphScopeError",
+        )
+    # The cited prompt is the hybrid prompt with its records tagged, so a request hybrid
+    # would hand to GRAPH_COMPLETION is refused here; a dataset without chunks is left out
+    # by build_cited_items, which refuses only when no searched dataset has any.
+    deferral_reason = request_deferral_reason(
+        {
+            "node_type": node_type,
+            "neighborhood_depth": neighborhood_depth,
+            "feedback_influence": feedback_influence,
+        }
+    )
+    if deferral_reason:
+        raise CogneeValidationError(
+            message=f"result_mode='cited' needs hybrid retrieval, but {deferral_reason}. "
+            "If you did not pass that option, this deployment sets "
+            "DEFAULT_FEEDBACK_INFLUENCE: SDK callers can pass feedback_influence=0; over "
+            "HTTP use result_mode='full'.",
+            name="CitedRequiresHybridError",
+        )
+
+
+def _expand_items_as_models(expand_items: list | None) -> list[ExpandItem] | None:
+    """``expand_items`` as ``ExpandItem`` models.
+
+    An item is a record's tag as the cited prompt shows it, or its fields as an
+    ``ExpandItem`` or a dict (over ``serve()`` the cited records are dicts), so each is
+    validated here, as the HTTP route validates its body.
+    """
+    from cognee.modules.recall.methods.recall_cited import parse_record_tag
+
+    if expand_items is None:
+        return None
+    items = []
+    for position, item in enumerate(expand_items):
+        try:
+            if isinstance(item, str):
+                items.append(parse_record_tag(item))
+            else:
+                items.append(ExpandItem.model_validate(item))
+        except ValueError as error:
+            raise CogneeValidationError(
+                message=f"expand_items[{position}] is not a valid item: {error}",
+                name="InvalidExpandItemsError",
+            ) from error
+    return items
+
+
 @telemetry_on_error("cognee.recall ERRORED")
 async def recall(
     query_text: str,
@@ -492,6 +611,8 @@ async def recall(
     tool_connections: list[str] | None = None,
     tools_trigger: str = "always",
     code_query: dict | None = None,
+    result_mode: Literal["full", "cited"] = "full",
+    expand_items: list[ExpandItem | dict | str] | None = None,
     user: object | None = None,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
@@ -558,6 +679,40 @@ async def recall(
             tagged ``source="code"``. A seed the code graph cannot resolve, a
             dataset without a code graph, or flows on a graph without them
             contribute nothing rather than failing the recall.
+        result_mode: ``"full"`` (default) returns the results as they always were.
+            ``"cited"`` returns the ``only_context`` HYBRID_COMPLETION prompt with a tag
+            line, ``[mem:<kind>/<dataset_id>/<record_id>@<version>]``, before every
+            passage, entity and fact, and the tagged records (rank, score, version,
+            length, conflicts, passage sources) in ``metadata["records"]``, so the model
+            can name the memory it used. An ontology concept the query names is shown
+            without a tag. Requires ``only_context=True`` and graph-only sources; an
+            explicit ``query_type`` other than HYBRID_COMPLETION is refused, a routed one
+            falls back to it. A request hybrid would hand to GRAPH_COMPLETION (a typed
+            ``node_type``, ``neighborhood_depth``, ``feedback_influence > 0``) raises
+            ``CitedRequiresHybridError``. A searched dataset hybrid hands to
+            GRAPH_COMPLETION (no chunk collection, a code graph for example) is left out;
+            the error is raised only when no searched dataset can be cited. With access
+            control off and several datasets, the search reads one shared store and its
+            tags leave the dataset out: ``[mem:<kind>/<record_id>@<version>]``. Record
+            fields are documented in ``RecallCited``.
+        expand_items: Records to read by id later (re-reading a cited memory), at most
+            20, each a tag string as the cited prompt shows it, an ``ExpandItem``, or a
+            dict ``{dataset_id, record_kind, record_id}`` (camelCase keys too); an
+            invalid item raises ``InvalidExpandItemsError``. Records are read by id
+            alone: expand uses the items, the caller, ``include_references``,
+            ``retriever_specific_config`` (passage rendering) and the LLM/embedding
+            configs, and ignores ``query_text``, ``top_k``, ``node_name``,
+            ``node_type``, ``datasets``, ``scope``, ``only_context``,
+            ``neighborhood_depth`` and ``feedback_influence``; pass an empty
+            ``query_text``. A passage or fact comes back as the prompt showed it (a
+            passage's version matches when ``retriever_specific_config`` is the cited
+            call's); an entity with every one-hop edge, a superset of the bullets the
+            prompt showed, and the documents those edges came from in ``sources``. One
+            result per item, in request order. Each
+            result's ``metadata["status"]`` is ``available``, ``missing`` (no longer
+            stored) or ``forbidden`` (dataset not readable); a changed body has a new
+            ``version``.
+            Not combined with ``result_mode="cited"``.
 
     Returns:
         Search results. When searching session-only, returns a list of
@@ -644,6 +799,17 @@ async def recall(
     # context — so tools must observe every other source's results first.
     if tools_trigger == "on_empty" and "tools" in sources:
         sources = [source for source in sources if source != "tools"] + ["tools"]
+    _validate_cited_request(
+        result_mode=result_mode,
+        expand_items=expand_items,
+        only_context=only_context,
+        query_type=query_type,
+        sources=sources,
+        node_type=node_type,
+        neighborhood_depth=neighborhood_depth,
+        feedback_influence=feedback_influence,
+    )
+    expand_items = _expand_items_as_models(expand_items)
 
     span_scope = ",".join(sources)
 
@@ -707,10 +873,31 @@ async def recall(
                 tool_connections=tool_connections,
                 tools_trigger=tools_trigger,
                 code_query=code_query,
+                result_mode=result_mode,
+                expand_items=expand_items,
             )
             span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
             return results
+
+        if expand_items is not None:
+            user = await _recall_user(user)
+            await set_session_user_context_variable(user)
+            from cognee.modules.recall.methods.recall_cited import expand_records
+
+            expanded = await expand_records(
+                expand_items,
+                user=user,
+                # The settings that shape a passage's body; nothing about the query.
+                retriever_kwargs={
+                    "retriever_specific_config": retriever_specific_config,
+                    "include_references": include_references,
+                },
+                llm_config=llm_config,
+                embedding_config=embedding_config,
+            )
+            span.set_attribute(COGNEE_RESULT_COUNT, len(expanded))
+            return [ResponseGraphEntry(**item.model_dump(), source="graph") for item in expanded]
 
         usage_scope = await _session_usage_scope(session_id, user)
         async with usage_scope, record_operation("recall", user=user, session_ids=[session_id]):
@@ -762,18 +949,7 @@ async def recall(
                 from cognee.modules.search.methods.search import authorized_search
                 from cognee.modules.search.operations import log_search_history
 
-                if user is None:
-                    try:
-                        user = await get_default_user()
-                    except (DatabaseNotCreatedError, UserNotFoundError) as error:
-                        raise CogneeValidationError(
-                            message=(
-                                "Recall prerequisites not met: no database/default user found. "
-                                "Initialize Cognee before recalling by:\n"
-                                "- running `await cognee.add(...)` followed by `await cognee.cognify()`."
-                            ),
-                            name="RecallPreconditionError",
-                        ) from error
+                user = await _recall_user(user)
 
                 current_operation = get_current_operation()
                 if current_operation is not None:
@@ -797,7 +973,7 @@ async def recall(
                 # A node_name filter also limits routing to the types that apply it,
                 # as node_type reads it: node-set tags, or a typed graph scope.
                 constraints = RoutingConstraints.from_config(
-                    llm_config, node_type=node_type, node_name=node_name
+                    llm_config, node_type=node_type, node_name=node_name, result_mode=result_mode
                 )
                 fallback_decision = default_route(constraints)
 
@@ -1047,12 +1223,13 @@ async def recall(
                 # endpoint, so their questions were absent from history entirely.
                 await log_search_history(query_text, local_query_type.value, user.id, graph_results)
 
-                tagged = []
-                for r in graph_results:
-                    items: list[SearchResultItem] = normalize_search_payload(r)
-                    tagged.extend(
-                        [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
-                    )
+                if result_mode == "cited":
+                    from cognee.modules.recall.methods.recall_cited import build_cited_items
+
+                    items: list[SearchResultItem] = await build_cited_items(graph_results)
+                else:
+                    items = [item for r in graph_results for item in normalize_search_payload(r)]
+                tagged = [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
                 # Graph-only recalls always learn the memory's state; a
                 # multi-source recall only when this lane answered, so the
                 # tools "on_empty" fallback (which fires on an empty merge)
