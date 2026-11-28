@@ -178,6 +178,23 @@ class CloudClient:
 
     # ----- V2 Operations -----
 
+    @staticmethod
+    def _add_per_file_metadata_fields(form: aiohttp.FormData, kwargs: dict) -> None:
+        """Forward node_set, labels and external_metadata in the server's wire format.
+
+        node_set is a repeated form field; labels and external_metadata are each one
+        JSON array string paired positionally with the uploaded files, the same
+        encoding parse_labels/parse_external_metadata read on the server. Without
+        these the remote call silently drops what the SDK-level call would carry.
+        """
+        if kwargs.get("node_set") is not None:
+            for tag in kwargs["node_set"]:
+                form.add_field("node_set", str(tag))
+        if kwargs.get("labels") is not None:
+            form.add_field("labels", json.dumps(kwargs["labels"]))
+        if kwargs.get("external_metadata") is not None:
+            form.add_field("external_metadata", json.dumps(kwargs["external_metadata"]))
+
     async def remember(self, data: Any, dataset_name: str = "main_dataset", **kwargs) -> dict:
         """POST /api/v1/remember — ingest data and build knowledge graph."""
         # Resolved first: a model the route cannot carry raises before any upload.
@@ -208,6 +225,7 @@ class CloudClient:
             form.add_field("content_type", str(content_type_kw))
         if kwargs.get("import_mode") is not None:
             form.add_field("import_mode", str(kwargs["import_mode"]))
+        self._add_per_file_metadata_fields(form, kwargs)
 
         # Code repos travel as spec strings in the 'raw_data' form field —
         # the server clones git URLs itself and reads local paths from its own
@@ -360,6 +378,8 @@ class CloudClient:
             payload["tools_trigger"] = kwargs["tools_trigger"]
         if kwargs.get("code_query") is not None:
             payload["code_query"] = kwargs["code_query"]
+        if kwargs.get("retriever_specific_config") is not None:
+            payload["retriever_specific_config"] = kwargs["retriever_specific_config"]
 
         async with session.post(
             f"{self.service_url}/api/v1/recall",
@@ -431,6 +451,7 @@ class CloudClient:
 
         form = aiohttp.FormData()
         form.add_field("datasetName", dataset_name)
+        self._add_per_file_metadata_fields(form, kwargs)
 
         if isinstance(data, str):
             form.add_field(
@@ -851,6 +872,8 @@ class CloudClient:
             payload["includeReferences"] = kwargs["include_references"]
         if kwargs.get("code_query") is not None:
             payload["codeQuery"] = kwargs["code_query"]
+        if kwargs.get("retriever_specific_config") is not None:
+            payload["retriever_specific_config"] = kwargs["retriever_specific_config"]
 
         async with session.post(
             f"{self.service_url}/api/v1/search",
