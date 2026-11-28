@@ -531,7 +531,7 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 The MCP server exposes four tools (three memory tools pinned in `tools/list`, plus `cognify_status`):
 
 - **remember**: Store data in memory. Pass `data` for text, or `filename` + `content_base64` to ingest an uploaded file (up to 10 MB). With `session_id`: fast session cache (text only). Without `session_id`: permanent graph memory
-- **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
+- **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph. `retriever_specific_config` passes retriever options such as `max_subqueries` for `HYBRID_COMPLETION_DECOMPOSITION`; see [Recall defaults](#recall-defaults) for server-side defaults
 - **forget**: Delete memory by dataset name or id, a single data item by `data_id` (paired with its `dataset_id`, both shown by `recall` with `include_references=True`), or delete all owned memory with `everything=True`
 - **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Unadvertised by default; discoverable via `search_tools` and callable by name
 
@@ -573,6 +573,43 @@ can read `content[0]._meta["cognee/memory"]`, containing `count` and `state`.
 
 `indexing` additionally carries `completed`/`total` when the pipeline reports
 them. Tool errors retain their existing `Error:` response.
+
+### Recall defaults
+
+In chat apps the model writes the `recall` call itself and rarely sets more than the
+query. These server-side settings fill in what a call leaves out; anything the call
+sends wins. All are optional, and with none set `recall` behaves as before.
+
+| Variable | Used when the call sends no |
+| --- | --- |
+| `COGNEE_MCP_RECALL_SEARCH_TYPE` | `search_type` (otherwise auto-routing) |
+| `COGNEE_MCP_RECALL_TOP_K` | `top_k` (otherwise 15) |
+| `COGNEE_MCP_RECALL_SYSTEM_PROMPT` / `_FILE` | `system_prompt` |
+| `COGNEE_MCP_RECALL_RETRIEVER_CONFIG` / `_FILE` | `retriever_specific_config` keys (merged; keys the call sends win) |
+
+For example, to answer every question with decomposition search and a planning prompt
+of your own:
+
+```bash
+COGNEE_MCP_RECALL_SEARCH_TYPE=HYBRID_COMPLETION_DECOMPOSITION
+COGNEE_MCP_RECALL_TOP_K=20
+COGNEE_MCP_RECALL_RETRIEVER_CONFIG_FILE=/path/to/recall.json
+```
+
+```json
+{
+  "max_subqueries": 4,
+  "chunks_top_k": 20,
+  "entities_top_k": 20,
+  "facts_top_k": 20,
+  "decomposition_system_prompt_file": "decomposition_prompt.txt"
+}
+```
+
+`decomposition_system_prompt_file` is read relative to the JSON file and sent as
+`decomposition_system_prompt`. Keys the chosen search type does not read are ignored,
+so the defaults do not affect calls that ask for another search type. A setting that
+cannot be read is logged and skipped.
 
 ### Tool surface (`COGNEE_MCP_TOOL_MODE`)
 

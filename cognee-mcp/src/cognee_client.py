@@ -25,9 +25,19 @@ from starlette.datastructures import UploadFile
 from cognee.shared.logging_utils import get_logger
 
 try:
-    from .server_utils import RecallState, classify_recall_state, normalize_delete_mode
+    from .server_utils import (
+        RecallState,
+        classify_recall_state,
+        normalize_delete_mode,
+        validate_top_k,
+    )
 except ImportError:
-    from server_utils import RecallState, classify_recall_state, normalize_delete_mode
+    from server_utils import (
+        RecallState,
+        classify_recall_state,
+        normalize_delete_mode,
+        validate_top_k,
+    )
 
 try:
     from .retrieval_utils import get_chunk_neighbors_from_graph, get_document_from_graph
@@ -68,6 +78,78 @@ def _default_recall_system_prompt() -> str | None:
         if text:
             return text
     return None
+
+
+def _default_recall_search_type() -> str | None:
+    """Return the server-side default search type for recall, if configured.
+
+    Opt-in via COGNEE_MCP_RECALL_SEARCH_TYPE, for example
+    HYBRID_COMPLETION_DECOMPOSITION. Used only when the caller names no
+    search type, so clients that cannot be told which search type to use
+    (chat apps where the model writes the tool call) still get it.
+    Returns None when unset, leaving auto-routing in place.
+    """
+    value = (os.environ.get("COGNEE_MCP_RECALL_SEARCH_TYPE") or "").strip()
+    return value.upper() or None
+
+
+def _default_recall_top_k() -> int:
+    """Return the default top_k for recall: COGNEE_MCP_RECALL_TOP_K, else 15.
+
+    An unusable value is logged and ignored rather than failing every recall.
+    """
+    raw = (os.environ.get("COGNEE_MCP_RECALL_TOP_K") or "").strip()
+    if raw:
+        try:
+            return validate_top_k(raw)
+        except ValueError as error:
+            logger.warning("Ignoring COGNEE_MCP_RECALL_TOP_K=%r: %s", raw, error)
+    return 15
+
+
+def _default_recall_retriever_config() -> dict | None:
+    """Return the server-side default retriever_specific_config for recall, if configured.
+
+    Opt-in via environment:
+      COGNEE_MCP_RECALL_RETRIEVER_CONFIG       inline JSON object
+      COGNEE_MCP_RECALL_RETRIEVER_CONFIG_FILE  path to a JSON file holding the object
+
+    The object is the retriever_specific_config that /api/v1/recall and
+    cognee.recall() take, for example {"max_subqueries": 4, "chunks_top_k": 20}.
+    A "decomposition_system_prompt_file" key is read (relative to the JSON file
+    when given in the file form) and sent as "decomposition_system_prompt", so a
+    long planning prompt can live in its own text file. Keys the chosen search
+    type does not read are ignored by cognee.
+
+    Returns None when neither is set or the configuration cannot be read.
+    """
+    inline = (os.environ.get("COGNEE_MCP_RECALL_RETRIEVER_CONFIG") or "").strip()
+    path = (os.environ.get("COGNEE_MCP_RECALL_RETRIEVER_CONFIG_FILE") or "").strip()
+    if not inline and not path:
+        return None
+    source = (
+        "COGNEE_MCP_RECALL_RETRIEVER_CONFIG"
+        if inline
+        else "COGNEE_MCP_RECALL_RETRIEVER_CONFIG_FILE"
+    )
+    try:
+        if inline:
+            config, base = json.loads(inline), None
+        else:
+            file = Path(path).expanduser()
+            config, base = json.loads(file.read_text(encoding="utf-8")), file.parent
+        if not isinstance(config, dict):
+            raise ValueError("expected a JSON object")
+        prompt_file = config.pop("decomposition_system_prompt_file", None)
+        if prompt_file:
+            prompt_path = Path(str(prompt_file)).expanduser()
+            if not prompt_path.is_absolute() and base is not None:
+                prompt_path = base / prompt_path
+            config["decomposition_system_prompt"] = prompt_path.read_text(encoding="utf-8").strip()
+    except (OSError, ValueError) as error:  # json.JSONDecodeError is a ValueError
+        logger.warning("Ignoring %s: %s", source, error)
+        return None
+    return config or None
 
 
 class CogneeClient:
@@ -874,14 +956,30 @@ class CogneeClient:
         datasets: list[str] | None = None,
         session_id: str | None = None,
         system_prompt: str | None = None,
-        top_k: int = 15,
+        top_k: int | None = None,
         scope: list[str] | str | None = None,
         code_query: dict | None = None,
         include_references: bool = False,
+        retriever_specific_config: dict | None = None,
     ) -> Any:
-        """Search memory via recall() with auto-routing and session awareness."""
+        """Search memory via recall() with auto-routing and session awareness.
+
+        Server-side defaults (COGNEE_MCP_RECALL_*) fill in what the caller leaves
+        out; retriever_specific_config keys sent by the caller override the
+        configured ones.
+        """
         if not system_prompt:
             system_prompt = _default_recall_system_prompt()
+        if not search_type:
+            search_type = _default_recall_search_type()
+        if top_k is None:
+            top_k = _default_recall_top_k()
+        default_config = _default_recall_retriever_config()
+        if default_config or retriever_specific_config:
+            retriever_specific_config = {
+                **(default_config or {}),
+                **(retriever_specific_config or {}),
+            }
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/recall"
             payload = {"query": query_text, "top_k": top_k, "search_type": None}
@@ -908,6 +1006,8 @@ class CogneeClient:
                 payload["code_query"] = code_query
             if include_references:
                 payload["include_references"] = True
+            if retriever_specific_config:
+                payload["retriever_specific_config"] = retriever_specific_config
             response = await self.client.post(endpoint, json=payload, headers=self._get_headers())
             response.raise_for_status()
             return response.json()
@@ -930,6 +1030,8 @@ class CogneeClient:
                     kwargs["code_query"] = code_query
                 if include_references:
                     kwargs["include_references"] = True
+                if retriever_specific_config:
+                    kwargs["retriever_specific_config"] = retriever_specific_config
                 return await self.cognee.recall(query_text=query_text, **kwargs)
 
     async def forget(
