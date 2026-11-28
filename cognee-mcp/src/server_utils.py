@@ -350,6 +350,17 @@ def classify_recall_state(progress: dict) -> RecallState:
     return RecallState("none")
 
 
+# Cognee's hybrid context template (hybrid_context_for_question.txt) tells its own
+# answering model to keep the answer brief. With only_context the caller writes the
+# answer under its own instructions, so that clause is taken out of what it receives.
+_BRIEF_ANSWER_CLAUSE = "Keep the answer brief and do not use"
+
+
+def drop_answer_length_instruction(text: str) -> str:
+    """Remove the template's "keep the answer brief" clause from a returned context."""
+    return text.replace(_BRIEF_ANSWER_CLAUSE, "Do not use")
+
+
 def format_recall_results(
     results: Any,
     *,

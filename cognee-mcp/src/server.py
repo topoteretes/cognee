@@ -49,6 +49,7 @@ except ImportError:
 try:
     from .server_utils import (
         RecallState,
+        drop_answer_length_instruction,
         format_recall_results,
         parse_csv_list,
         recall_items,
@@ -58,6 +59,7 @@ try:
 except ImportError:
     from server_utils import (
         RecallState,
+        drop_answer_length_instruction,
         format_recall_results,
         parse_csv_list,
         recall_items,
@@ -571,6 +573,7 @@ async def recall(
     scope: str | None = None,
     code_query: dict | None = None,
     include_references: bool = False,
+    only_context: bool = False,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -634,6 +637,12 @@ async def recall(
         are not stored data and get no refs. With backend
         access control off, ids are only shown when recall is scoped to a
         single dataset.
+    only_context : bool
+        Return the context a completion search type retrieved instead of the
+        answer written from it. Set search_type with it, since auto-routing
+        may pick a type with a different context. The context template's
+        instruction to keep the answer brief is left out, so the caller's own
+        instructions decide how long the answer is.
 
     Returns a one-line memory-hit or empty-state summary followed by the original
     result text. Status markers do not count as hits. Empty-state checks are
@@ -656,6 +665,7 @@ async def recall(
                 scope=scope_list or None,
                 code_query=code_query,
                 include_references=include_references,
+                only_context=only_context,
             )
             empty_state = recall_marker_state(results)
             items = recall_items(results)
@@ -675,16 +685,19 @@ async def recall(
                 except Exception:
                     logger.debug("Recall empty-state diagnostics unavailable", exc_info=True)
                     empty_state = RecallState("none")
+            text = format_recall_results(
+                results,
+                json_encoder=JSONEncoder,
+                items=items,
+                empty_state=empty_state,
+                include_references=include_references,
+            )
+            if only_context:
+                text = drop_answer_length_instruction(text)
             return [
                 types.TextContent(
                     type="text",
-                    text=format_recall_results(
-                        results,
-                        json_encoder=JSONEncoder,
-                        items=items,
-                        empty_state=empty_state,
-                        include_references=include_references,
-                    ),
+                    text=text,
                     _meta={
                         "cognee/memory": {
                             "count": len(items),
